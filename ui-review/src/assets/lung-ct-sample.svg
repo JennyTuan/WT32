@@ -1,0 +1,57 @@
+<svg width="900" height="900" viewBox="0 0 900 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1b232d"/>
+      <stop offset="100%" stop-color="#0f141b"/>
+    </linearGradient>
+    <radialGradient id="torso" cx="50%" cy="47%" r="50%">
+      <stop offset="0%" stop-color="#c5ccd3"/>
+      <stop offset="72%" stop-color="#8d96a1"/>
+      <stop offset="100%" stop-color="#55606c"/>
+    </radialGradient>
+    <radialGradient id="lung" cx="50%" cy="45%" r="58%">
+      <stop offset="0%" stop-color="#222a33"/>
+      <stop offset="65%" stop-color="#2b3440"/>
+      <stop offset="100%" stop-color="#3b4552"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2.4"/>
+    </filter>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.55" numOctaves="2" seed="17"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="table" tableValues="0 0.08"/>
+      </feComponentTransfer>
+    </filter>
+  </defs>
+
+  <rect width="900" height="900" fill="url(#bg)"/>
+
+  <ellipse cx="450" cy="455" rx="325" ry="352" fill="url(#torso)"/>
+  <ellipse cx="450" cy="455" rx="305" ry="332" fill="#adb6bf" opacity="0.2"/>
+
+  <ellipse cx="305" cy="465" rx="168" ry="242" fill="url(#lung)"/>
+  <ellipse cx="595" cy="465" rx="168" ry="242" fill="url(#lung)"/>
+
+  <ellipse cx="450" cy="420" rx="58" ry="175" fill="#6d7783"/>
+  <ellipse cx="450" cy="420" rx="36" ry="160" fill="#58636f"/>
+
+  <g filter="url(#soft)" opacity="0.54" stroke="#d7dce2" fill="none" stroke-linecap="round">
+    <path d="M202 374c58 18 102 55 126 113" stroke-width="7"/>
+    <path d="M212 429c64 20 106 62 126 122" stroke-width="6"/>
+    <path d="M228 491c58 20 95 61 110 117" stroke-width="5"/>
+
+    <path d="M698 374c-58 18-102 55-126 113" stroke-width="7"/>
+    <path d="M688 429c-64 20-106 62-126 122" stroke-width="6"/>
+    <path d="M672 491c-58 20-95 61-110 117" stroke-width="5"/>
+  </g>
+
+  <g opacity="0.36" filter="url(#soft)">
+    <ellipse cx="450" cy="258" rx="144" ry="68" fill="#dce1e6"/>
+    <ellipse cx="450" cy="662" rx="132" ry="92" fill="#7c8591"/>
+  </g>
+
+  <ellipse cx="450" cy="450" rx="330" ry="340" fill="#000" opacity="0.13"/>
+  <rect width="900" height="900" filter="url(#grain)"/>
+</svg>
