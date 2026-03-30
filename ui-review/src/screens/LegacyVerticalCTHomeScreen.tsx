@@ -79,8 +79,8 @@ export default function LegacyVerticalCTHomeScreen() {
                         className="absolute left-[4px] top-[8px] h-[29.818px] w-[31.552px] object-contain select-none"
                     />
                     <div className="absolute left-[38px] top-[4px] w-[56px] text-center text-[14px] font-medium leading-[1.15] text-[#717579] whitespace-nowrap">
-                        <div>欧阳祖华</div>
-                        <div>000001</div>
+                        <div>未选择患者</div>
+                        <div>--</div>
                     </div>
                 </div>
 
@@ -123,4 +123,3 @@ export default function LegacyVerticalCTHomeScreen() {
         </div>
     );
 }
-
