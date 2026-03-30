@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useRef } from "react";
 import * as dicomParser from "dicom-parser";
+import { useMemo } from "react";
 import {
     User,
     Settings,
@@ -24,6 +25,7 @@ import {
     Siren
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
 
 interface Sequence {
     id: string;
@@ -584,6 +586,7 @@ const ScoutScanScreen = ({
     viewportBgClassName = "bg-[#1A222B]",
     breathingWorkflowVariant = "training",
 }: ScoutScanScreenProps) => {
+    const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const navigate = useNavigate();
     const isBreathingTraining = bottomPanelMode === "breathing" && breathingWorkflowVariant === "training";
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
@@ -816,8 +819,8 @@ const ScoutScanScreen = ({
                             <User size={24} />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[16px] font-bold text-[#37474F]">Roky Zhang</span>
-                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: 67890</span>
+                            <span className="text-[16px] font-bold text-[#37474F]">{selectedPatient?.name ?? "未选择患者"}</span>
+                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">{formatPatientCardSubtitle(selectedPatient)}</span>
                         </div>
                     </div>
                     <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">

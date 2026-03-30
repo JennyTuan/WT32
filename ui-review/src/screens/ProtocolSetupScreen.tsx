@@ -24,6 +24,7 @@ import {
     Siren,
     AlertTriangle,
 } from "lucide-react";
+import { loadSelectedPatient, formatPatientCardSubtitle } from "../lib/patientSession";
 
 type RawProtocol = {
     id: string;
@@ -566,6 +567,7 @@ const buildApiUrl = (path: string) => {
 
 const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps) => {
     const navigate = useNavigate();
+    const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const [fetchedProtocols, setFetchedProtocols] = useState<ApiProtocolDetail[]>([]);
     const [isLoadingProtocols, setIsLoadingProtocols] = useState(true);
     const [protocolsError, setProtocolsError] = useState("");
@@ -937,9 +939,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             <User size={24} />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[16px] font-bold tracking-tight">Roky Zhang</span>
+                            <span className="text-[16px] font-bold tracking-tight">{selectedPatient?.name ?? "未选择患者"}</span>
                             <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5 opacity-80">
-                                ID: 12345678
+                                {formatPatientCardSubtitle(selectedPatient)}
                             </span>
                         </div>
                     </div>

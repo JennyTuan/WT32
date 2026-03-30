@@ -23,6 +23,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 
 import AddPatientScreen from './AddPatientScreen';
+import { saveSelectedPatient } from '../lib/patientSession';
 
 type CheckStatus = '待进行' | '已完成' | '已终止';
 
@@ -382,6 +383,17 @@ const PatientListScreen = () => {
                         <button
                             onClick={() => {
                                 if (canProceed) {
+                                    if (selectedPatient) {
+                                        saveSelectedPatient({
+                                            id: selectedPatient.id,
+                                            serial: selectedPatient.serial,
+                                            patientId: selectedPatient.patientId,
+                                            name: selectedPatient.name,
+                                            gender: selectedPatient.gender,
+                                            age: selectedPatient.age,
+                                            checkType: selectedPatient.type,
+                                        });
+                                    }
                                     navigate('/protocol-select');
                                 }
                             }}

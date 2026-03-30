@@ -323,3 +323,259 @@ class ProtocolDetail(ProtocolBase, ORMModel):
     created_at: datetime
     contrast_config: Optional[ContrastConfig] = None
     series: List[SeriesDetail] = Field(default_factory=list)
+
+
+class ScanSessionStatusUpdate(BaseModel):
+    status: Literal["draft", "in_progress", "completed", "cancelled"]
+
+
+class ScanSessionBase(BaseModel):
+    patient_id: int
+    protocol_id: int
+    session_name: Optional[str] = None
+
+
+class ScanSessionCreate(ScanSessionBase):
+    pass
+
+
+class ScanSessionUpdate(BaseModel):
+    status: Optional[Literal["draft", "in_progress", "completed", "cancelled"]] = None
+    session_name: Optional[str] = None
+    patient_position: Optional[str] = None
+    table_direction: Optional[str] = None
+    description: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class ScanSessionContrastConfigBase(BaseModel):
+    contrast_agent: str
+    concentration: float
+    total_volume: float
+    injection_rate: float
+    saline_volume: float
+    saline_rate: float
+
+
+class ScanSessionContrastConfigUpdate(BaseModel):
+    contrast_agent: Optional[str] = None
+    concentration: Optional[float] = None
+    total_volume: Optional[float] = None
+    injection_rate: Optional[float] = None
+    saline_volume: Optional[float] = None
+    saline_rate: Optional[float] = None
+
+
+class ScanSessionContrastConfig(ScanSessionContrastConfigBase, ORMModel):
+    id: int
+    scan_session_id: int
+    template_contrast_config_id: Optional[int] = None
+
+
+class ScanSessionSeriesUpdate(BaseModel):
+    series_label: Optional[str] = None
+    contrast_delay: Optional[float] = None
+    trigger_mode: Optional[Literal["manual", "auto_timing", "bolus_tracking"]] = None
+    tracking_threshold: Optional[float] = None
+
+
+class ScanSessionTopogramParamUpdate(BaseModel):
+    kv: Optional[int] = None
+    ma: Optional[int] = None
+    scan_length: Optional[float] = None
+    tube_angle: Optional[float] = None
+    fov: Optional[float] = None
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
+
+
+class ScanSessionTopogramParam(ORMModel):
+    id: int
+    scan_session_series_id: int
+    template_param_id: Optional[int] = None
+    kv: int
+    ma: int
+    scan_length: float
+    tube_angle: float
+    fov: float
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
+
+
+class ScanSessionHelicalParamUpdate(BaseModel):
+    kv: Optional[int] = None
+    ma: Optional[int] = None
+    slice_thickness: Optional[float] = None
+    pitch: Optional[float] = None
+    rotation_time: Optional[float] = None
+    scan_length: Optional[float] = None
+    fov: Optional[float] = None
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
+    auto_ma: Optional[bool] = None
+    ma_min: Optional[float] = None
+    ma_max: Optional[float] = None
+
+
+class ScanSessionHelicalParam(ORMModel):
+    id: int
+    scan_session_series_id: int
+    template_param_id: Optional[int] = None
+    kv: int
+    ma: int
+    slice_thickness: float
+    pitch: float
+    rotation_time: float
+    scan_length: float
+    fov: float
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
+    auto_ma: bool
+    ma_min: Optional[float] = None
+    ma_max: Optional[float] = None
+
+
+class ScanSessionAxialParamUpdate(BaseModel):
+    kv: Optional[int] = None
+    ma: Optional[int] = None
+    slice_thickness: Optional[float] = None
+    slice_interval: Optional[float] = None
+    rotation_time: Optional[float] = None
+    scan_length: Optional[float] = None
+    fov: Optional[float] = None
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
+    auto_ma: Optional[bool] = None
+    ma_min: Optional[float] = None
+    ma_max: Optional[float] = None
+    step_count: Optional[int] = None
+
+
+class ScanSessionAxialParam(ORMModel):
+    id: int
+    scan_session_series_id: int
+    template_param_id: Optional[int] = None
+    kv: int
+    ma: int
+    slice_thickness: float
+    slice_interval: float
+    rotation_time: float
+    scan_length: float
+    fov: float
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
+    auto_ma: bool
+    ma_min: Optional[float] = None
+    ma_max: Optional[float] = None
+    step_count: Optional[int] = None
+
+
+class ScanSessionReconSeriesUpdate(BaseModel):
+    recon_name: Optional[str] = None
+    recon_type: Optional[Literal["soft", "bone", "lung", "vascular"]] = None
+    kernel: Optional[str] = None
+    matrix: Optional[int] = None
+    window_width: Optional[int] = None
+    window_level: Optional[int] = None
+    slice_thickness: Optional[float] = None
+    increment: Optional[float] = None
+
+
+class ScanSessionReconSeries(ORMModel):
+    id: int
+    scan_session_series_id: int
+    template_recon_series_id: Optional[int] = None
+    recon_name: str
+    recon_type: Literal["soft", "bone", "lung", "vascular"]
+    kernel: str
+    matrix: int
+    window_width: int
+    window_level: int
+    slice_thickness: float
+    increment: Optional[float] = None
+
+
+class ScanSessionBreathingTrainingParamUpdate(BaseModel):
+    training_duration: Optional[float] = None
+    target_amplitude: Optional[float] = None
+    tolerance_range: Optional[float] = None
+
+
+class ScanSessionBreathingTrainingParam(ORMModel):
+    id: int
+    scan_session_fourd_config_id: int
+    template_param_id: Optional[int] = None
+    training_duration: float
+    target_amplitude: float
+    tolerance_range: float
+
+
+class ScanSessionFourDConfigUpdate(BaseModel):
+    breathing_mode: Optional[Literal["free_breathing", "gating", "trigger"]] = None
+    phase_count: Optional[int] = None
+    acquisition_time: Optional[float] = None
+    trigger_threshold: Optional[float] = None
+
+
+class ScanSessionFourDConfig(ORMModel):
+    id: int
+    scan_session_series_id: int
+    template_config_id: Optional[int] = None
+    breathing_mode: Literal["free_breathing", "gating", "trigger"]
+    phase_count: int
+    acquisition_time: float
+    trigger_threshold: Optional[float] = None
+    breathing_training_param: Optional[ScanSessionBreathingTrainingParam] = None
+
+
+class ScanSessionSeries(ORMModel):
+    id: int
+    scan_session_id: int
+    template_series_id: Optional[int] = None
+    series_order: int
+    series_type: Literal["topogram", "helical", "axial", "4d"]
+    series_label: str
+    contrast_delay: Optional[float] = None
+    trigger_mode: Optional[Literal["manual", "auto_timing", "bolus_tracking"]] = None
+    tracking_threshold: Optional[float] = None
+    topogram_param: Optional[ScanSessionTopogramParam] = None
+    helical_param: Optional[ScanSessionHelicalParam] = None
+    axial_param: Optional[ScanSessionAxialParam] = None
+    recon_series: List[ScanSessionReconSeries] = Field(default_factory=list)
+    fourd_config: Optional[ScanSessionFourDConfig] = None
+
+
+class ScanSessionDetail(ORMModel):
+    id: int
+    patient_id: int
+    protocol_id: int
+    status: Literal["draft", "in_progress", "completed", "cancelled"]
+    session_name: Optional[str] = None
+    name: str
+    body_part: str
+    age_group: Literal["adult", "child", "infant"]
+    patient_weight: str
+    patient_position: str
+    table_direction: str
+    scan_mode: Literal["plain", "contrast", "4d"]
+    description: Optional[str] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    contrast_config: Optional[ScanSessionContrastConfig] = None
+    series: List[ScanSessionSeries] = Field(default_factory=list)
+
+
+class ScanSessionSummary(ORMModel):
+    id: int
+    patient_id: int
+    protocol_id: int
+    status: Literal["draft", "in_progress", "completed", "cancelled"]
+    session_name: Optional[str] = None
+    name: str
+    body_part: str
+    scan_mode: Literal["plain", "contrast", "4d"]
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None

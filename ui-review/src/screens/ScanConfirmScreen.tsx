@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
 import {
@@ -25,6 +25,7 @@ import {
     Siren
 } from "lucide-react";
 import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb, type RawProtocolCase } from "../lib/protocolDb";
+import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
 
 interface Sequence {
     id: string;
@@ -244,6 +245,7 @@ const ScanConfirmScreen = ({
     nextRoute = "/scout-execute",
 }: ScanConfirmScreenProps) => {
     const navigate = useNavigate();
+    const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [bedMode, setBedMode] = useState<"in" | "out">("in");
     const [patientPosition, setPatientPosition] = useState("HFS");
@@ -396,8 +398,8 @@ const ScanConfirmScreen = ({
                             <User size={24} />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[16px] font-bold text-[#37474F]">Roky Zhang</span>
-                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: 67890</span>
+                            <span className="text-[16px] font-bold text-[#37474F]">{selectedPatient?.name ?? "未选择患者"}</span>
+                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">{formatPatientCardSubtitle(selectedPatient)}</span>
                         </div>
                     </div>
                     <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
@@ -1045,6 +1047,14 @@ const ScanConfirmScreen = ({
                     setShowPatientConfirm(false);
                     navigate(nextRoute);
                 }}
+                patientData={selectedPatient ? {
+                    name: selectedPatient.name,
+                    age: selectedPatient.age,
+                    gender: selectedPatient.gender,
+                    idNumber: "--",
+                    patientId: selectedPatient.patientId,
+                    checkType: selectedPatient.checkType ?? "CT Routine",
+                } : undefined}
             />
         </div>
     );
