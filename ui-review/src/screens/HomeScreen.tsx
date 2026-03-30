@@ -58,8 +58,8 @@ export default function HomeScreen() {
                             <User size={24} />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[16px] font-bold">Roky Zhang</span>
-                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: 67890</span>
+                            <span className="text-[16px] font-bold">未选择患者</span>
+                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: --</span>
                         </div>
                     </div>
                     <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
