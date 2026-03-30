@@ -32,14 +32,6 @@ import DiskManagementScreen from "./screens/DiskManagementScreen";
 import PerformanceEvaluationScreen from "./screens/PerformanceEvaluationScreen";
 import ManualScanScreen from "./screens/ManualScanScreen";
 import ComponentLibraryScreen from "./screens/ComponentLibraryScreen";
-import CTSimulatorUIRefactor from "./screens/CTSimulatorUIRefactor";
-import CTSimulatorUIRefactorLight from "./screens/CTSimulatorUIRefactorLight";
-import CTSimulatorUIRefactorLight2 from "./screens/CTSimulatorUIRefactorLight2";
-import LegacyVerticalCTHomeScreen from "./screens/LegacyVerticalCTHomeScreen";
-import LegacyVerticalCTModeConfirmScreen from "./screens/LegacyVerticalCTModeConfirmScreen";
-import LegacyVerticalCTPatientPositioningScreen from "./screens/LegacyVerticalCTPatientPositioningScreen";
-import LegacyVerticalCTPatientPositioningVerticalScreen from "./screens/LegacyVerticalCTPatientPositioningVerticalScreen";
-import LegacyVerticalCTScoutConfirmScreen from "./screens/LegacyVerticalCTScoutConfirmScreen";
 
 type ScreenItem = {
     key: string;
@@ -101,26 +93,6 @@ export default function Gallery() {
                     { key: "performance-evaluation", name: "性能评估", component: <PerformanceEvaluationScreen /> },
                     { key: "manual-scan", name: "手动扫描", component: <ManualScanScreen /> },
                     { key: "component-library", name: "组件库", component: <ComponentLibraryScreen /> },
-                ],
-            },
-            {
-                id: "vertical-ct",
-                name: "垂直 CT 平台",
-                screens: [
-                    { key: "ct-simulator-ui-refactor-dark", name: "CTSimulatorUIRefactor-dark", component: <CTSimulatorUIRefactor /> },
-                    { key: "CTSimulatorUIRefactor-light", name: "CTSimulatorUIRefactor-light", component: <CTSimulatorUIRefactorLight /> },
-                    { key: "CTSimulatorUIRefactor-light2", name: "CTSimulatorUIRefactor-light2", component: <CTSimulatorUIRefactorLight2 /> },
-                ],
-            },
-            {
-                id: "legacy-vertical-ct",
-                name: "旧版垂直CT平台",
-                screens: [
-                    { key: "legacy-vertical-ct-home", name: "首页", component: <LegacyVerticalCTHomeScreen /> },
-                    { key: "legacy-vertical-ct-mode-confirm", name: "模式确认", component: <LegacyVerticalCTModeConfirmScreen /> },
-                    { key: "legacy-vertical-ct-patient-positioning", name: "患者摆位-水平", component: <LegacyVerticalCTPatientPositioningScreen /> },
-                    { key: "legacy-vertical-ct-patient-positioning-vertical", name: "患者摆位-垂直", component: <LegacyVerticalCTPatientPositioningVerticalScreen /> },
-                    { key: "legacy-vertical-ct-scout-confirm", name: "定位像确认", component: <LegacyVerticalCTScoutConfirmScreen /> },
                 ],
             },
         ],
