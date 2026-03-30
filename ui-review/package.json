@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5174",
+    "dev:all": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"cd .. && uvicorn backend.main:app --reload --port 8000\" \"vite --host 0.0.0.0 --port 5174\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview --port 4174"
@@ -26,6 +27,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.27",
+    "concurrently": "^9.2.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",

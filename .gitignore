@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Database
+backend/app.db
+
+# Node
+ui-review/node_modules/
+ui-review/dist/
+
+# Environment
+.env.local
+.env.*.local
+
+# Claude Code worktrees (session-specific, not project files)
+.claude/worktrees/
+
+# Editor
+.vscode/settings.json
+.idea/
+*.suo
+*.swp
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
