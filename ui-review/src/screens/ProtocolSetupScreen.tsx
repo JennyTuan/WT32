@@ -641,8 +641,12 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 const hasSpiral = supportedModes.some((mode) => mode.includes("Helical")) || sequenceModes.some((mode) => mode.includes("Helical"));
                 const hasAxial = supportedModes.some((mode) => mode.includes("Axial")) || sequenceModes.some((mode) => mode.includes("Axial"));
 
+                const normalizedRegion = normalizeRegion(entry.protocol.region);
+                const regionMatch = normalizedRegion === selectedBodyRegion || entry.protocol.region === selectedBodyRegion;
+
                 return normalizedPatientType === patientType
-                    && (libraryTab === "spiral" ? hasSpiral : hasAxial);
+                    && (libraryTab === "spiral" ? hasSpiral : hasAxial)
+                    && regionMatch;
             })
             .sort((left, right) => {
                 const leftRegion = normalizeRegion(left.entry.protocol.region) || left.entry.protocol.region;
