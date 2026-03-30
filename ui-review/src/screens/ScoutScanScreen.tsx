@@ -716,6 +716,7 @@ const ScoutScanScreen = ({
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
+    const [laserActive, setLaserActive] = useState(false);
     const [selectedPosition, setSelectedPosition] = useState<"start" | "end" | null>(null);
     const [activeStepIdx, setActiveStepIdx] = useState(0); // Add state for active step tracking
     const [expandedSeqId, setExpandedSeqId] = useState<string | null>(
@@ -840,9 +841,19 @@ const ScoutScanScreen = ({
                         <Network size={24} />
                         <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">5</span>
                     </div>
-                    <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
+                    <button
+                        type="button"
+                        aria-label="激光灯"
+                        aria-pressed={laserActive}
+                        onClick={() => setLaserActive((prev) => !prev)}
+                        className={`relative p-1 transition-all ${
+                            laserActive
+                                ? "text-[#F59E0B]"
+                                : "text-[#546E7A] hover:opacity-70"
+                        }`}
+                    >
                         <Sun size={24} />
-                    </div>
+                    </button>
                     <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
                         <Settings size={24} />
                         <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">10</span>
@@ -1523,7 +1534,10 @@ const ScoutScanScreen = ({
                                 继续检查
                             </button>
                             <button
-                                onClick={() => setShowAbortConfirm(false)}
+                                onClick={() => {
+                                    setShowAbortConfirm(false);
+                                    navigate('/patients');
+                                }}
                                 className="flex-1 h-[40px] bg-[#F57C00] text-white font-bold rounded-lg text-[13px] hover:bg-orange-600 shadow-md transition-all active:scale-95"
                             >
                                 确认中止

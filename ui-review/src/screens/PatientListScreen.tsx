@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import {
     User,
     Settings,
@@ -26,34 +26,36 @@ import AddPatientScreen from './AddPatientScreen';
 
 type CheckStatus = '待进行' | '已完成' | '已终止';
 
+type PatientRecord = {
+    id: number;
+    serial: number;
+    patientId: string;
+    name: string;
+    gender: string;
+    age: number;
+    type: string;
+    checkStatus: CheckStatus;
+};
+
+const INITIAL_PATIENT_DATA: PatientRecord[] = [
+    { id: 1, serial: 6, patientId: 'P001', name: '张三', gender: '男', age: 45, type: 'CT胸部扫描', checkStatus: '待进行' },
+    { id: 2, serial: 6, patientId: 'P002', name: '李四', gender: '女', age: 32, type: 'MRI头部', checkStatus: '已完成' },
+    { id: 3, serial: 5, patientId: 'P003', name: '王五', gender: '男', age: 28, type: 'CT腹部', checkStatus: '待进行' },
+    { id: 4, serial: 5, patientId: 'P004', name: '赵六', gender: '女', age: 55, type: '螺旋扫描', checkStatus: '已终止' },
+    { id: 5, serial: 4, patientId: 'P005', name: '孙七', gender: '男', age: 19, type: '定位像', checkStatus: '待进行' },
+    { id: 6, serial: 4, patientId: 'P006', name: '周八', gender: '女', age: 64, type: 'CT增强', checkStatus: '已完成' },
+    { id: 7, serial: 3, patientId: 'P007', name: '吴九', gender: '男', age: 41, type: '骨盆扫描', checkStatus: '已终止' },
+    { id: 8, serial: 3, patientId: 'P008', name: '郑十', gender: '女', age: 37, type: '颈椎平扫', checkStatus: '待进行' },
+];
+
 const PatientListScreen = () => {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'completed'
+    const [patients, setPatients] = useState<PatientRecord[]>(INITIAL_PATIENT_DATA);
     const [selectedRows, setSelectedRows] = useState<number[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [showAddModal, setShowAddModal] = useState(false);
     const [isNameMasked, setIsNameMasked] = useState(false);
-
-    // 模拟患者列表数据
-    const patientData: Array<{
-        id: number;
-        serial: number;
-        patientId: string;
-        name: string;
-        gender: string;
-        age: number;
-        type: string;
-        checkStatus: CheckStatus;
-    }> = [
-        { id: 1, serial: 6, patientId: 'P001', name: '张三', gender: '男', age: 45, type: 'CT胸部扫描', checkStatus: '待进行' },
-        { id: 2, serial: 6, patientId: 'P002', name: '李四', gender: '女', age: 32, type: 'MRI头部', checkStatus: '已完成' },
-        { id: 3, serial: 5, patientId: 'P003', name: '王五', gender: '男', age: 28, type: 'CT腹部', checkStatus: '待进行' },
-        { id: 4, serial: 5, patientId: 'P004', name: '赵六', gender: '女', age: 55, type: '螺旋扫描', checkStatus: '已终止' },
-        { id: 5, serial: 4, patientId: 'P005', name: '孙七', gender: '男', age: 19, type: '定位像', checkStatus: '待进行' },
-        { id: 6, serial: 4, patientId: 'P006', name: '周八', gender: '女', age: 64, type: 'CT增强', checkStatus: '已完成' },
-        { id: 7, serial: 3, patientId: 'P007', name: '吴九', gender: '男', age: 41, type: '骨盆扫描', checkStatus: '已终止' },
-        { id: 8, serial: 3, patientId: 'P008', name: '郑十', gender: '女', age: 37, type: '颈椎平扫', checkStatus: '待进行' },
-    ];
 
     const checkStatusClass: Record<CheckStatus, string> = {
         待进行: 'bg-[#FFF3E0] text-[#FA8C16] border border-[#FFD591]',
@@ -67,10 +69,23 @@ const PatientListScreen = () => {
         );
     };
 
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const filteredPatients = patients.filter((patient) => {
+        const matchesTab = activeTab === 'completed'
+            ? patient.checkStatus === '已完成'
+            : patient.checkStatus !== '已完成';
+        const matchesQuery = normalizedQuery.length === 0
+            || patient.name.toLowerCase().includes(normalizedQuery)
+            || patient.patientId.toLowerCase().includes(normalizedQuery)
+            || patient.type.toLowerCase().includes(normalizedQuery);
+
+        return matchesTab && matchesQuery;
+    });
+
     const selectedPatient = selectedRows.length === 1
-        ? patientData.find((patient) => patient.id === selectedRows[0]) ?? null
+        ? patients.find((patient) => patient.id === selectedRows[0]) ?? null
         : null;
-    const selectedPatients = patientData.filter((patient) => selectedRows.includes(patient.id));
+    const selectedPatients = patients.filter((patient) => selectedRows.includes(patient.id));
     const canProceed = selectedRows.length === 1;
     const canDeleteSelected = activeTab !== 'completed'
         && selectedPatients.length > 0
@@ -85,12 +100,33 @@ const PatientListScreen = () => {
     };
 
     const toggleSelectAll = () => {
-        if (selectedRows.length === patientData.length) {
-            setSelectedRows([]);
+        const visibleIds = filteredPatients.map((patient) => patient.id);
+        const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedRows.includes(id));
+
+        if (allVisibleSelected) {
+            setSelectedRows((current) => current.filter((id) => !visibleIds.includes(id)));
         } else {
-            setSelectedRows(patientData.map(p => p.id));
+            setSelectedRows((current) => Array.from(new Set([...current, ...visibleIds])));
         }
     };
+
+    const handleDeleteSelected = () => {
+        if (!canDeleteSelected) return;
+
+        setPatients((current) => current.filter((patient) => !selectedRows.includes(patient.id)));
+        setSelectedRows([]);
+    };
+
+    const allVisibleSelected = filteredPatients.length > 0
+        && filteredPatients.every((patient) => selectedRows.includes(patient.id));
+
+    const visibleSelectedCount = filteredPatients.filter((patient) => selectedRows.includes(patient.id)).length;
+
+    useEffect(() => {
+        if (selectedRows.length > 0 && selectedPatients.length === 0) {
+            setSelectedRows([]);
+        }
+    }, [selectedPatients.length, selectedRows.length]);
 
     return (
         <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl relative">
@@ -225,6 +261,7 @@ const PatientListScreen = () => {
                                     <button
                                         title={canDeleteSelected ? '删除' : '请选择非已完成患者'}
                                         disabled={!canDeleteSelected}
+                                        onClick={handleDeleteSelected}
                                         className={`w-[36px] h-[36px] rounded-md flex items-center justify-center transition-all ${canDeleteSelected
                                             ? 'bg-[#FFEBEE] border border-[#FFCDD2] text-[#D32F2F] hover:bg-[#FFE3E6] hover:border-[#EF9A9A] active:scale-95'
                                             : 'bg-[#F8FAFC] border border-[#E2E8F0] text-[#B0BEC5] cursor-not-allowed'
@@ -246,7 +283,7 @@ const PatientListScreen = () => {
                                                 <input
                                                     type="checkbox"
                                                     className="w-4 h-4 rounded-sm accent-[#4D94FF]"
-                                                    checked={selectedRows.length === patientData.length}
+                                                    checked={allVisibleSelected}
                                                     onChange={toggleSelectAll}
                                                 />
                                             </th>
@@ -260,7 +297,7 @@ const PatientListScreen = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100 bg-white">
-                                        {patientData.map((patient) => (
+                                        {filteredPatients.map((patient) => (
                                             <tr
                                                 key={patient.id}
                                                 onClick={() => toggleSelectRow(patient.id)}
@@ -317,7 +354,7 @@ const PatientListScreen = () => {
                                 </div>
 
                                 <div className="text-[12px] text-[#546E7A]">
-                                    显示 <span className="font-bold">1-8</span> / 共 <span className="font-bold">12</span> 条记录
+                                    已选择 <span className="font-bold">{visibleSelectedCount}</span> / 当前列表 <span className="font-bold">{filteredPatients.length}</span> 条
                                 </div>
 
                                 <div className="flex items-center gap-1 border-l border-gray-200 pl-4 ml-2">
