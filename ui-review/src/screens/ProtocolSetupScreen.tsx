@@ -167,13 +167,13 @@ type BodyRegion = typeof bodyRegions[number];
 
 const normalizeRegion = (value: string | undefined): BodyRegion | "" => {
     if (!value) return "";
-    const region = value.trim();
-    if (region.includes("头")) return "头部";
-    if (region.includes("颈")) return "颈部";
-    if (region.includes("胸")) return "胸腔";
-    if (region.includes("脊")) return "脊柱";
-    if (region.includes("腹")) return "腹部";
-    if (region.includes("肢")) return "四肢";
+    const region = value.trim().toLowerCase();
+    if (region.includes("头") || region === "head") return "头部";
+    if (region.includes("颈") || region === "neck") return "颈部";
+    if (region.includes("胸") || region === "chest") return "胸腔";
+    if (region.includes("脊") || region === "spine") return "脊柱";
+    if (region.includes("腹") || region === "abdomen") return "腹部";
+    if (region.includes("肢") || region === "extremity") return "四肢";
     return "";
 };
 
