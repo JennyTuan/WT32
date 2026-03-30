@@ -25,7 +25,7 @@ import {
     Siren,
     AlertTriangle,
 } from "lucide-react";
-import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb } from "../lib/protocolDb";
+import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb, seedProtocolCasesIfEmpty } from "../lib/protocolDb";
 
 type RawProtocol = {
     id: string;
@@ -407,12 +407,15 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         const importSnapshot = async () => {
             try {
                 const response = await fetch("/db_business_4tables_for_ai.json");
-                if (!response.ok) return;
+                if (!response.ok) {
+                    await seedProtocolCasesIfEmpty(protocolCaseData);
+                    return;
+                }
                 const snapshot = await response.json();
                 if (cancelled) return;
                 await ensureBusinessSnapshotImported(snapshot);
             } catch {
-                // Leave the screen empty if the snapshot import fails; UI reads only from DB.
+                await seedProtocolCasesIfEmpty(protocolCaseData);
             }
         };
 
