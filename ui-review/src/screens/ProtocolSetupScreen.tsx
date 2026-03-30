@@ -1,6 +1,7 @@
 ﻿import { useState, useMemo, useEffect, useCallback } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useNavigate } from "react-router-dom";
 import {
     User,
     Settings,
@@ -380,6 +381,7 @@ type ProtocolSetupScreenProps = {
 };
 
 const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps) => {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<"scan" | "recon">("scan");
     const [libraryTab, setLibraryTab] = useState<"spiral" | "axial">("spiral");
     const [selectedBodyRegion, setSelectedBodyRegion] = useState<BodyRegion>(bodyRegions[0]);
@@ -672,6 +674,18 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         ? planHeaderHeight + scanPlans.length * planTitleRowHeight + visibleSequenceCount * seqRowHeight
         : planHeaderHeight;
     const planPanelHeight = Math.min(Math.max(desiredPlanPanelHeight, planHeaderHeight), 420);
+    const handleOpenProtocolDetail = () => {
+        if (onOpenProtocolDetail) {
+            onOpenProtocolDetail();
+            return;
+        }
+
+        navigate("/protocol-detail");
+    };
+
+    const handleStartScanFlow = () => {
+        navigate("/scout-scan");
+    };
 
     return (
         <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl text-[#37474F] font-sans select-none">
@@ -922,7 +936,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                         </div>
 
                         <button
-                            onClick={onOpenProtocolDetail}
+                            onClick={handleOpenProtocolDetail}
                             className="shrink-0 mt-3 h-[32px] w-full bg-white border border-[#B0C4DE] rounded-md text-[10px] font-bold text-[#4D94FF] flex items-center justify-center gap-1 hover:bg-blue-50 transition-all shadow-sm"
                         >
                             <Info size={14} /> 参数详情
@@ -1205,12 +1219,18 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             {/* Footer */}
             < footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8" >
                 <div className="flex-1">
-                    <button className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 transition-all uppercase text-[13px] shadow-sm active:scale-95">
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 transition-all uppercase text-[13px] shadow-sm active:scale-95"
+                    >
                         <ChevronLeft size={20} /> 上一步
                     </button>
                 </div>
                 <div className="flex-1 flex justify-end">
-                    <button className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95">
+                    <button
+                        onClick={handleStartScanFlow}
+                        className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
+                    >
                         下一步 <ChevronRight size={20} />
                     </button>
                 </div>

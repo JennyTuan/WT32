@@ -1,0 +1,207 @@
+﻿from __future__ import annotations
+
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from .database import Base
+
+
+class Patient(Base):
+    __tablename__ = "patients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    patient_id = Column(String(50), nullable=False, unique=True, index=True)
+    gender = Column(String(20), nullable=False)
+    birth_date = Column(Date, nullable=False)
+    height = Column(Float, nullable=True)
+    weight = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Protocol(Base):
+    __tablename__ = "protocols"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False, index=True)
+    body_part = Column(String(100), nullable=False)
+    scan_mode = Column(String(20), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    contrast_config = relationship(
+        "ContrastConfig",
+        back_populates="protocol",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    series = relationship(
+        "Series",
+        back_populates="protocol",
+        cascade="all, delete-orphan",
+        order_by="Series.series_order",
+    )
+
+
+class ContrastConfig(Base):
+    __tablename__ = "contrast_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    protocol_id = Column(Integer, ForeignKey("protocols.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    contrast_agent = Column(String(100), nullable=False)
+    concentration = Column(Float, nullable=False)
+    total_volume = Column(Float, nullable=False)
+    injection_rate = Column(Float, nullable=False)
+    saline_volume = Column(Float, nullable=False)
+    saline_rate = Column(Float, nullable=False)
+
+    protocol = relationship("Protocol", back_populates="contrast_config")
+
+
+class Series(Base):
+    __tablename__ = "series"
+    __table_args__ = (UniqueConstraint("protocol_id", "series_order", name="uq_protocol_series_order"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    protocol_id = Column(Integer, ForeignKey("protocols.id", ondelete="CASCADE"), nullable=False, index=True)
+    series_order = Column(Integer, nullable=False)
+    series_type = Column(String(20), nullable=False)
+    series_label = Column(String(100), nullable=False)
+    contrast_delay = Column(Float, nullable=True)
+    trigger_mode = Column(String(30), nullable=True)
+    tracking_threshold = Column(Float, nullable=True)
+
+    protocol = relationship("Protocol", back_populates="series")
+    topogram_param = relationship(
+        "TopogramParam",
+        back_populates="series",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    helical_param = relationship(
+        "HelicalParam",
+        back_populates="series",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    axial_param = relationship(
+        "AxialParam",
+        back_populates="series",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    recon_series = relationship(
+        "ReconSeries",
+        back_populates="series",
+        cascade="all, delete-orphan",
+        order_by="ReconSeries.id",
+    )
+    fourd_config = relationship(
+        "FourDConfig",
+        back_populates="series",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class TopogramParam(Base):
+    __tablename__ = "topogram_params"
+
+    id = Column(Integer, primary_key=True, index=True)
+    series_id = Column(Integer, ForeignKey("series.id", ondelete="CASCADE"), nullable=False, unique=True)
+    kv = Column(Integer, nullable=False)
+    ma = Column(Integer, nullable=False)
+    scan_length = Column(Float, nullable=False)
+    scan_direction = Column(String(30), nullable=False)
+    fov = Column(Float, nullable=False)
+
+    series = relationship("Series", back_populates="topogram_param")
+
+
+class HelicalParam(Base):
+    __tablename__ = "helical_params"
+
+    id = Column(Integer, primary_key=True, index=True)
+    series_id = Column(Integer, ForeignKey("series.id", ondelete="CASCADE"), nullable=False, unique=True)
+    kv = Column(Integer, nullable=False)
+    ma = Column(Integer, nullable=False)
+    slice_thickness = Column(Float, nullable=False)
+    pitch = Column(Float, nullable=False)
+    rotation_time = Column(Float, nullable=False)
+    scan_length = Column(Float, nullable=False)
+    fov = Column(Float, nullable=False)
+    ctdi_vol = Column(Float, nullable=True)
+    auto_ma = Column(Boolean, nullable=False, default=False)
+    ma_min = Column(Float, nullable=True)
+    ma_max = Column(Float, nullable=True)
+
+    series = relationship("Series", back_populates="helical_param")
+
+
+class AxialParam(Base):
+    __tablename__ = "axial_params"
+
+    id = Column(Integer, primary_key=True, index=True)
+    series_id = Column(Integer, ForeignKey("series.id", ondelete="CASCADE"), nullable=False, unique=True)
+    kv = Column(Integer, nullable=False)
+    ma = Column(Integer, nullable=False)
+    slice_thickness = Column(Float, nullable=False)
+    slice_interval = Column(Float, nullable=False)
+    rotation_time = Column(Float, nullable=False)
+    scan_length = Column(Float, nullable=False)
+    fov = Column(Float, nullable=False)
+    ctdi_vol = Column(Float, nullable=True)
+    auto_ma = Column(Boolean, nullable=False, default=False)
+    ma_min = Column(Float, nullable=True)
+    ma_max = Column(Float, nullable=True)
+
+    series = relationship("Series", back_populates="axial_param")
+
+
+class ReconSeries(Base):
+    __tablename__ = "recon_series"
+
+    id = Column(Integer, primary_key=True, index=True)
+    series_id = Column(Integer, ForeignKey("series.id", ondelete="CASCADE"), nullable=False, index=True)
+    recon_name = Column(String(100), nullable=False)
+    recon_type = Column(String(20), nullable=False)
+    kernel = Column(String(50), nullable=False)
+    matrix = Column(Integer, nullable=False)
+    window_width = Column(Integer, nullable=False)
+    window_level = Column(Integer, nullable=False)
+    slice_thickness = Column(Float, nullable=False)
+    increment = Column(Float, nullable=False)
+
+    series = relationship("Series", back_populates="recon_series")
+
+
+class FourDConfig(Base):
+    __tablename__ = "fourd_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    series_id = Column(Integer, ForeignKey("series.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    breathing_mode = Column(String(30), nullable=False)
+    phase_count = Column(Integer, nullable=False)
+    acquisition_time = Column(Float, nullable=False)
+    trigger_threshold = Column(Float, nullable=True)
+
+    series = relationship("Series", back_populates="fourd_config")
+    breathing_training_param = relationship(
+        "BreathingTrainingParam",
+        back_populates="fourd_config",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class BreathingTrainingParam(Base):
+    __tablename__ = "breathing_training_params"
+
+    id = Column(Integer, primary_key=True, index=True)
+    fourd_config_id = Column(Integer, ForeignKey("fourd_configs.id", ondelete="CASCADE"), nullable=False, unique=True)
+    training_duration = Column(Float, nullable=False)
+    target_amplitude = Column(Float, nullable=False)
+    tolerance_range = Column(Float, nullable=False)
+
+    fourd_config = relationship("FourDConfig", back_populates="breathing_training_param")

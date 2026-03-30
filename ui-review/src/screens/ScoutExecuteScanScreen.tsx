@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
 import { CircleDot, Zap } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
 const HOLD_DURATION_MS = 3000;
@@ -334,6 +335,7 @@ function ScoutProjectionViewport({
 }
 
 export default function ScoutExecuteScanScreen() {
+    const navigate = useNavigate();
     const [stage, setStage] = useState<ScanStage>("idle");
     const [holdProgress, setHoldProgress] = useState(0);
     const [guideVisible, setGuideVisible] = useState(true);
@@ -397,6 +399,11 @@ export default function ScoutExecuteScanScreen() {
     };
 
     const handleExecuteScanClick = () => {
+        if (stage === "completed") {
+            navigate("/helical-confirm");
+            return;
+        }
+
         if (stage === "idle" || stage === "arming") {
             triggerScanSequence();
         }
@@ -462,7 +469,23 @@ export default function ScoutExecuteScanScreen() {
 
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
-            <ScanConfirmScreen activeScoutStepIndex={2} readOnlyMode onExecuteScan={handleExecuteScanClick} />
+            <ScanConfirmScreen
+                activeScoutStepIndex={stage === "completed" ? 3 : 2}
+                readOnlyMode
+                onExecuteScan={handleExecuteScanClick}
+            />
+
+            {stage === "completed" && (
+                <div className="absolute bottom-[14px] right-8 z-50">
+                    <button
+                        type="button"
+                        onClick={() => navigate("/helical-confirm")}
+                        className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
+                    >
+                        螺旋/断层扫描
+                    </button>
+                </div>
+            )}
 
             <div className="pointer-events-none absolute bottom-[80px] left-[246px] right-0 top-[82px] z-20 overflow-hidden rounded-lg">
                 <div className="flex h-full flex-col border border-white/5 bg-[#1A222B]">

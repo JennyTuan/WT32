@@ -23,6 +23,7 @@ import {
     Network,
     Siren
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 interface Sequence {
     id: string;
@@ -583,6 +584,7 @@ const ScoutScanScreen = ({
     viewportBgClassName = "bg-[#1A222B]",
     breathingWorkflowVariant = "training",
 }: ScoutScanScreenProps) => {
+    const navigate = useNavigate();
     const isBreathingTraining = bottomPanelMode === "breathing" && breathingWorkflowVariant === "training";
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
     const [startPos, setStartPos] = useState("472.95");
@@ -1424,7 +1426,10 @@ const ScoutScanScreen = ({
             {/* 3. Footer (Nav Buttons) */}
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
                 <div className="flex-1">
-                    <button className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95">
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95"
+                    >
                         <ChevronLeft size={20} /> 上一步
                     </button>
                 </div>
@@ -1446,6 +1451,11 @@ const ScoutScanScreen = ({
                 <div className="flex-1 flex justify-end">
                     <button
                         disabled={bottomPanelMode === 'breathing' && breathingPhase !== 'stable'}
+                        onClick={() => {
+                            if (bottomPanelMode !== 'breathing') {
+                                navigate('/scan-confirm');
+                            }
+                        }}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md shadow-lg transition-all uppercase text-[13px] active:scale-95 ${(bottomPanelMode === 'breathing' && breathingPhase !== 'stable')
                             ? 'bg-gray-300 text-white cursor-not-allowed shadow-none active:scale-100'
                             : (bottomPanelMode === 'breathing' ? 'bg-[#7EAAFF] text-white hover:bg-[#6FA0FF]' : 'bg-[#4D94FF] text-white hover:bg-blue-600')

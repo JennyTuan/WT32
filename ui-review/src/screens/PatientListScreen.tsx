@@ -20,16 +20,19 @@ import {
     ChevronsLeft,
     ChevronsRight
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 import AddPatientScreen from './AddPatientScreen';
 
 type CheckStatus = '待进行' | '已完成' | '已终止';
 
 const PatientListScreen = () => {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'completed'
     const [selectedRows, setSelectedRows] = useState<number[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [showAddModal, setShowAddModal] = useState(false);
+    const [isNameMasked, setIsNameMasked] = useState(false);
 
     // 模拟患者列表数据
     const patientData: Array<{
@@ -59,11 +62,26 @@ const PatientListScreen = () => {
     };
 
     const toggleSelectRow = (id: number) => {
-        if (selectedRows.includes(id)) {
-            setSelectedRows(selectedRows.filter(item => item !== id));
-        } else {
-            setSelectedRows([...selectedRows, id]);
-        }
+        setSelectedRows((current) =>
+            current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+        );
+    };
+
+    const selectedPatient = selectedRows.length === 1
+        ? patientData.find((patient) => patient.id === selectedRows[0]) ?? null
+        : null;
+    const selectedPatients = patientData.filter((patient) => selectedRows.includes(patient.id));
+    const canProceed = selectedRows.length === 1;
+    const canDeleteSelected = activeTab !== 'completed'
+        && selectedPatients.length > 0
+        && selectedPatients.every((patient) => patient.checkStatus !== '已完成');
+    const canExportSelected = selectedPatients.length > 0;
+
+    const maskName = (name: string) => {
+        if (!isNameMasked) return name;
+        if (name.length <= 1) return '*';
+        if (name.length === 2) return `${name[0]}*`;
+        return `${name[0]}${'*'.repeat(name.length - 2)}${name[name.length - 1]}`;
     };
 
     const toggleSelectAll = () => {
@@ -83,14 +101,18 @@ const PatientListScreen = () => {
                 <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
                     <div className="flex items-center gap-3">
                         <div className="flex items-center gap-3 py-1.5 px-4 bg-[#DCE6F2] border border-[#B0C4DE] rounded-sm min-w-[210px]">
-                            <div className="w-10 h-10 rounded-sm bg-[#4A6982] flex items-center justify-center text-white opacity-90">
-                                <User size={24} />
-                            </div>
-                            <div className="flex flex-col">
-                                <span className="text-[16px] font-bold">Roky Zhang</span>
-                                <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: 67890</span>
-                            </div>
+                        <div className="w-10 h-10 rounded-sm bg-[#4A6982] flex items-center justify-center text-white opacity-90">
+                            <User size={24} />
                         </div>
+                        <div className="flex flex-col">
+                            <span className="text-[16px] font-bold">{selectedPatient ? maskName(selectedPatient.name) : '未选择患者'}</span>
+                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">
+                                {selectedPatient
+                                    ? `ID: ${selectedPatient.patientId} | ${selectedPatient.gender} | ${selectedPatient.age}岁`
+                                    : 'ID: --'}
+                            </span>
+                        </div>
+                    </div>
                         <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
                             <div className="text-[9px] font-bold italic">⊥ 0</div>
                             <div className="text-[9px] font-bold">∠ 0</div>
@@ -152,8 +174,21 @@ const PatientListScreen = () => {
                                 {/* 快速操作图标 - 已移动至此处 */}
                                 <div className="flex items-center gap-4 text-[#90A4AE]">
                                     <RefreshCw size={18} className="cursor-pointer hover:text-blue-500 transition-colors" />
-                                    <Eye size={18} className="cursor-pointer hover:text-blue-500 transition-colors" />
-                                    <Download size={18} className="cursor-pointer hover:text-blue-500 transition-colors" />
+                                    <button
+                                        type="button"
+                                        title={isNameMasked ? '关闭脱敏' : '开启脱敏'}
+                                        onClick={() => setIsNameMasked((current) => !current)}
+                                        className={`transition-colors ${isNameMasked ? 'text-[#4D94FF]' : 'text-[#90A4AE] hover:text-blue-500'}`}
+                                    >
+                                        <Eye size={18} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="导入"
+                                        className="text-[#90A4AE] hover:text-blue-500 transition-colors"
+                                    >
+                                        <Download size={18} />
+                                    </button>
                                 </div>
 
                                 {/* 搜索框 */}
@@ -177,10 +212,24 @@ const PatientListScreen = () => {
                                     >
                                         <Plus size={18} />
                                     </button>
-                                    <button title="导入" className="w-[36px] h-[36px] bg-white border border-[#B0C4DE] text-[#546E7A] rounded-md flex items-center justify-center hover:bg-gray-50 active:scale-95 transition-all">
+                                    <button
+                                        title={canExportSelected ? '导出' : '请选择患者后导出'}
+                                        disabled={!canExportSelected}
+                                        className={`w-[36px] h-[36px] rounded-md flex items-center justify-center transition-all ${canExportSelected
+                                            ? 'bg-white border border-[#B0C4DE] text-[#546E7A] hover:bg-gray-50 active:scale-95'
+                                            : 'bg-[#F8FAFC] border border-[#E2E8F0] text-[#B0BEC5] cursor-not-allowed'
+                                            }`}
+                                    >
                                         <Upload size={18} />
                                     </button>
-                                    <button title="删除" className="w-[36px] h-[36px] bg-white border border-[#B0C4DE] text-[#546E7A] rounded-md flex items-center justify-center hover:text-red-500 hover:border-red-200 active:scale-95 transition-all">
+                                    <button
+                                        title={canDeleteSelected ? '删除' : '请选择非已完成患者'}
+                                        disabled={!canDeleteSelected}
+                                        className={`w-[36px] h-[36px] rounded-md flex items-center justify-center transition-all ${canDeleteSelected
+                                            ? 'bg-[#FFEBEE] border border-[#FFCDD2] text-[#D32F2F] hover:bg-[#FFE3E6] hover:border-[#EF9A9A] active:scale-95'
+                                            : 'bg-[#F8FAFC] border border-[#E2E8F0] text-[#B0BEC5] cursor-not-allowed'
+                                            }`}
+                                    >
                                         <Trash2 size={18} />
                                     </button>
                                 </div>
@@ -222,21 +271,29 @@ const PatientListScreen = () => {
                                                         type="checkbox"
                                                         className="w-4 h-4 rounded-sm accent-[#4D94FF]"
                                                         checked={selectedRows.includes(patient.id)}
-                                                        readOnly
+                                                        onChange={() => toggleSelectRow(patient.id)}
+                                                        onClick={(event) => event.stopPropagation()}
                                                     />
                                                 </td>
                                                 <td className="px-4 font-mono text-[#546E7A]">{patient.serial}</td>
                                                 <td className="px-4 text-[#546E7A]">{patient.patientId}</td>
-                                                <td className="px-4 font-bold text-[#37474F]">{patient.name}</td>
+                                                <td className="px-4 font-bold text-[#37474F]">{maskName(patient.name)}</td>
                                                 <td className="px-4">{patient.gender}</td>
                                                 <td className="px-4">{patient.age}</td>
                                                 <td className="px-4 text-[#78909C]">{patient.type}</td>
                                                 <td className="text-center">
                                                     {activeTab === 'completed' ? (
-                                                        <span className="inline-flex h-[24px] px-2 rounded-full items-center justify-center gap-1 text-[11px] font-bold bg-[#E3F2FD] text-[#1E88E5] border border-[#BBDEFB]">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                navigate('/image-viewer');
+                                                            }}
+                                                            className="inline-flex h-[24px] px-2 rounded-full items-center justify-center gap-1 text-[11px] font-bold bg-[#E3F2FD] text-[#1E88E5] border border-[#BBDEFB]"
+                                                        >
                                                             <ImageIcon size={12} />
                                                             可查看图像
-                                                        </span>
+                                                        </button>
                                                     ) : (
                                                         <span className={`inline-flex min-w-[62px] h-[24px] px-2 rounded-full items-center justify-center text-[11px] font-bold ${checkStatusClass[patient.checkStatus]}`}>
                                                             {patient.checkStatus}
@@ -277,12 +334,26 @@ const PatientListScreen = () => {
                 {/* 3. Global Footer (底部操作) */}
                 <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8">
                     <div className="flex-1">
-                        <button className="flex items-center gap-2 px-12 h-[56px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 transition-all uppercase text-[14px] shadow-sm active:scale-95">
+                        <button
+                            onClick={() => navigate(-1)}
+                            className="flex items-center gap-2 px-12 h-[56px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 transition-all uppercase text-[14px] shadow-sm active:scale-95"
+                        >
                             <ChevronLeft size={22} /> 上一步
                         </button>
                     </div>
                     <div className="flex-1 flex justify-end">
-                        <button className="flex items-center gap-2 px-12 h-[56px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[14px] active:scale-95">
+                        <button
+                            onClick={() => {
+                                if (canProceed) {
+                                    navigate('/protocol-select');
+                                }
+                            }}
+                            disabled={!canProceed}
+                            className={`flex items-center gap-2 px-12 h-[56px] font-bold rounded-md uppercase text-[14px] transition-all ${canProceed
+                                ? 'bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95'
+                                : 'bg-[#CBD5E1] text-white cursor-not-allowed shadow-none'
+                                }`}
+                        >
                             下一步 <ChevronRight size={22} />
                         </button>
                     </div>

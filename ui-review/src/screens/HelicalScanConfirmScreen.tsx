@@ -12,6 +12,7 @@ const HelicalScanConfirmScreen = () => {
             parameterPanelMode="helicalScan"
             helicalParamOverrides={measurements}
             rightViewportContent={<TomographicScoutViewport onMeasurementChange={setMeasurements} />}
+            nextRoute="/helical-execute"
         />
     );
 };

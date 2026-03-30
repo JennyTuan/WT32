@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useNavigate } from "react-router-dom";
 import {
     User,
     Settings,
@@ -47,6 +48,7 @@ type ScanConfirmScreenProps = {
     rightViewportContent?: React.ReactNode;
     readOnlyMode?: boolean;
     onExecuteScan?: () => void;
+    nextRoute?: string;
 };
 
 type ScoutDisplayParams = {
@@ -239,7 +241,9 @@ const ScanConfirmScreen = ({
     rightViewportContent,
     readOnlyMode = false,
     onExecuteScan,
+    nextRoute = "/scout-execute",
 }: ScanConfirmScreenProps) => {
+    const navigate = useNavigate();
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [bedMode, setBedMode] = useState<"in" | "out">("in");
     const [patientPosition, setPatientPosition] = useState("HFS");
@@ -911,7 +915,7 @@ const ScanConfirmScreen = ({
             {/* 3. Footer (Nav Buttons) */}
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
                 <div className="flex-1">
-                    <button disabled={readOnlyMode} className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 shadow-sm transition-all uppercase text-[13px] ${readOnlyMode ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#4D94FF] border-[#4D94FF] hover:bg-solid active:scale-95"}`}>
+                    <button onClick={() => navigate(-1)} disabled={readOnlyMode} className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 shadow-sm transition-all uppercase text-[13px] ${readOnlyMode ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#4D94FF] border-[#4D94FF] hover:bg-solid active:scale-95"}`}>
                         <ChevronLeft size={20} /> 上一步
                     </button>
                 </div>
@@ -1020,7 +1024,14 @@ const ScanConfirmScreen = ({
                 </div>
             )}
 
-            <PatientConfirmationModal isOpen={showPatientConfirm} onClose={() => setShowPatientConfirm(false)} />
+            <PatientConfirmationModal
+                isOpen={showPatientConfirm}
+                onClose={() => setShowPatientConfirm(false)}
+                onConfirm={() => {
+                    setShowPatientConfirm(false);
+                    navigate(nextRoute);
+                }}
+            />
         </div>
     );
 };
@@ -1046,6 +1057,7 @@ interface ScanData {
 interface PatientConfirmationModalProps {
     isOpen: boolean;
     onClose: () => void;
+    onConfirm: () => void;
     patientData?: PatientData;
     scanData?: ScanData;
 }
@@ -1066,6 +1078,7 @@ const InfoItem = ({ label, value, icon: Icon }: { label: string; value: string |
 const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> = ({
     isOpen,
     onClose,
+    onConfirm,
     patientData = {
         name: "张三",
         age: 45,
@@ -1169,7 +1182,7 @@ const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> = ({
                         </div>
 
                         <button
-                            onClick={onClose}
+                            onClick={onConfirm}
                             className="h-[60px] px-12 bg-[#4D94FF] text-white font-black rounded-2xl shadow-[0_15px_30px_-8px_rgba(77,148,255,0.4)] hover:bg-[#3B82F6] hover:translate-y-[-1px] active:translate-y-[1px] transition-all text-[18px]"
                         >
                             开始扫描

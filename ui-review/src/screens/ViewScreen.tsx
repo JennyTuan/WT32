@@ -22,6 +22,7 @@ import {
     Network,
     Siren,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 
 type ImageItem = { id: string; name: string };
@@ -247,6 +248,7 @@ const REAL_LUNG_SERIES = {
 };
 
 const ViewScreen = () => {
+    const navigate = useNavigate();
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
     const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
@@ -1815,7 +1817,10 @@ const ViewScreen = () => {
                     </button>
                 </div>
                 <div className="flex-1 flex justify-end">
-                    <button className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95">
+                    <button
+                        onClick={() => navigate("/patients")}
+                        className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
+                    >
                         结束检查 <ChevronRight size={20} />
                     </button>
                 </div>

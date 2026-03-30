@@ -1,41 +1,42 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import { ChevronDown, ChevronRight } from "lucide-react";
+
+import ProtocolEditorModal from "./components/ProtocolEditorModal";
+import HomeScreen from "./screens/HomeScreen";
 import PatientListScreen from "./screens/PatientListScreen";
-import ScoutScanScreen from "./screens/ScoutScanScreen";
-import BreathingAcquisitionScreen from "./screens/BreathingAcquisitionScreen";
-import BreathingTrainingScreen from "./screens/BreathingTrainingScreen";
-import FourDBreathingPreparationScreen from "./screens/FourDBreathingPreparationScreen";
-import FreeBreathingModeConfirmScreen from "./screens/FreeBreathingModeConfirmScreen";
 import ProtocolSetupScreen from "./screens/ProtocolSetupScreen";
 import WT32ProtocolDetailScreen from "./screens/WT32ProtocolDetailScreen";
 import WT32ProtocolScoutDetailScreen from "./screens/WT32NewProtocolScoutDetailScreen";
 import WT32ProtocolHelicalDetailScreen from "./screens/WT32NewProtocolHelicalDetailScreen";
 import WT32ProtocolReconDetailScreen from "./screens/WT32NewProtocolReconDetailScreen";
 import WT32ProtocolDoseDetailScreen from "./screens/WT32NewProtocolDoseDetailScreen";
-import ProtocolEditorModal from "./components/ProtocolEditorModal";
+import ScoutScanScreen from "./screens/ScoutScanScreen";
 import ScanConfirmScreen from "./screens/ScanConfirmScreen";
+import ScoutExecuteScanScreen from "./screens/ScoutExecuteScanScreen";
 import SequenceScanConfirmScreen from "./screens/SequenceScanConfirmScreen";
 import HelicalScanConfirmScreen from "./screens/HelicalScanConfirmScreen";
-import ScoutExecuteScanScreen from "./screens/ScoutExecuteScanScreen";
-import MockScanScreen from "./screens/MockScanScreen";
+import BreathingAcquisitionScreen from "./screens/BreathingAcquisitionScreen";
+import BreathingTrainingScreen from "./screens/BreathingTrainingScreen";
+import FourDBreathingPreparationScreen from "./screens/FourDBreathingPreparationScreen";
+import FreeBreathingModeConfirmScreen from "./screens/FreeBreathingModeConfirmScreen";
 import ViewScreen from "./screens/ViewScreen";
+import FourDViewScreen from "./screens/FourDViewScreen";
+import MockScanScreen from "./screens/MockScanScreen";
 import TubeWarmupScreen from "./screens/TubeWarmupScreen";
 import AirCalibrationScreen from "./screens/AirCalibrationScreen";
 import DailyQAScreen from "./screens/DailyQAScreen";
 import HardwareTestScreen from "./screens/HardwareTestScreen";
 import BatteryManagementScreen from "./screens/BatteryManagementScreen";
-import ComponentLibraryScreen from "./screens/ComponentLibraryScreen";
 import DiskManagementScreen from "./screens/DiskManagementScreen";
 import PerformanceEvaluationScreen from "./screens/PerformanceEvaluationScreen";
 import ManualScanScreen from "./screens/ManualScanScreen";
-import FourDViewScreen from "./screens/FourDViewScreen";
+import ComponentLibraryScreen from "./screens/ComponentLibraryScreen";
 import CTSimulatorUIRefactor from "./screens/CTSimulatorUIRefactor";
 import CTSimulatorUIRefactorLight from "./screens/CTSimulatorUIRefactorLight";
 import CTSimulatorUIRefactorLight2 from "./screens/CTSimulatorUIRefactorLight2";
 import LegacyVerticalCTHomeScreen from "./screens/LegacyVerticalCTHomeScreen";
 import LegacyVerticalCTModeConfirmScreen from "./screens/LegacyVerticalCTModeConfirmScreen";
-//import LegacyVerticalCTModeConfirmCorrectScreen from "./screens/LegacyVerticalCTModeConfirmCorrectScreen";
 import LegacyVerticalCTPatientPositioningScreen from "./screens/LegacyVerticalCTPatientPositioningScreen";
 import LegacyVerticalCTPatientPositioningVerticalScreen from "./screens/LegacyVerticalCTPatientPositioningVerticalScreen";
 import LegacyVerticalCTScoutConfirmScreen from "./screens/LegacyVerticalCTScoutConfirmScreen";
@@ -53,7 +54,8 @@ type Category = {
 };
 
 export default function Gallery() {
-    const [activeKey, setActiveKey] = useState("patient_list");
+    const previewRef = useRef<HTMLDivElement | null>(null);
+    const [activeKey, setActiveKey] = useState("home");
     const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
         wt32: true,
         "vertical-ct": true,
@@ -69,6 +71,7 @@ export default function Gallery() {
                 id: "wt32",
                 name: "WT32 平台",
                 screens: [
+                    { key: "home", name: "首页", component: <HomeScreen /> },
                     { key: "patient_list", name: "患者列表", component: <PatientListScreen /> },
                     { key: "protocol_setup", name: "协议选择", component: <ProtocolSetupScreen onOpenProtocolDetail={openProtocolDetail} /> },
                     { key: "protocol_detail", name: "协议详情", component: <ProtocolEditorModal onCancel={backToProtocolSetup}><WT32ProtocolDetailScreen /></ProtocolEditorModal> },
@@ -115,7 +118,6 @@ export default function Gallery() {
                 screens: [
                     { key: "legacy-vertical-ct-home", name: "首页", component: <LegacyVerticalCTHomeScreen /> },
                     { key: "legacy-vertical-ct-mode-confirm", name: "模式确认", component: <LegacyVerticalCTModeConfirmScreen /> },
-                //    { key: "legacy-vertical-ct-mode-confirm-correct", name: "模式确认-模式正确", component: <LegacyVerticalCTModeConfirmCorrectScreen /> },
                     { key: "legacy-vertical-ct-patient-positioning", name: "患者摆位-水平", component: <LegacyVerticalCTPatientPositioningScreen /> },
                     { key: "legacy-vertical-ct-patient-positioning-vertical", name: "患者摆位-垂直", component: <LegacyVerticalCTPatientPositioningVerticalScreen /> },
                     { key: "legacy-vertical-ct-scout-confirm", name: "定位像确认", component: <LegacyVerticalCTScoutConfirmScreen /> },
@@ -126,91 +128,41 @@ export default function Gallery() {
     );
 
     const allScreens = useMemo(() => categories.flatMap((category) => category.screens), [categories]);
-    const screenCategoryMap = useMemo(
-        () =>
-            categories.reduce<Record<string, string>>((acc, category) => {
-                category.screens.forEach((screen) => {
-                    acc[screen.key] = category.id;
-                });
-                return acc;
-            }, {}),
-        [categories]
-    );
     const active = allScreens.find((screen) => screen.key === activeKey) ?? allScreens[0];
-    const useWt32Preview = false;
-    const useWt32Stage = false;
-
-    const previewRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        const categoryId = screenCategoryMap[activeKey];
-
-        if (!categoryId) return;
-
-        setExpandedCategories((current) => {
-            if (current[categoryId]) return current;
-
-            return {
-                ...current,
-                [categoryId]: true,
-            };
-        });
-    }, [activeKey, screenCategoryMap]);
+        const matchedCategory = categories.find((category) => category.screens.some((screen) => screen.key === activeKey));
+        if (matchedCategory) {
+            setExpandedCategories((prev) => ({ ...prev, [matchedCategory.id]: true }));
+        }
+    }, [activeKey, categories]);
 
     const toggleCategory = (categoryId: string) => {
-        setExpandedCategories((current) => ({
-            ...current,
-            [categoryId]: !current[categoryId],
-        }));
-    };
-
-    const handleScreenSelect = (screenKey: string) => {
-        const categoryId = screenCategoryMap[screenKey];
-
-        if (categoryId) {
-            setExpandedCategories((current) => ({
-                ...current,
-                [categoryId]: true,
-            }));
-        }
-
-        setActiveKey(screenKey);
+        setExpandedCategories((prev) => ({ ...prev, [categoryId]: !prev[categoryId] }));
     };
 
     const handleExport = async () => {
         if (!previewRef.current) return;
-
-        const targetElement = (previewRef.current.firstElementChild as HTMLElement) || previewRef.current;
-
-        try {
-            const canvas = await html2canvas(targetElement, {
-                scale: 3,
-                useCORS: true,
-                backgroundColor: null,
-                width: 1366,
-                height: 768,
-                windowWidth: 1366,
-                windowHeight: 768,
-            });
-
-            const link = document.createElement("a");
-            link.download = `${active?.name || "export"}_${Date.now()}.png`;
-            link.href = canvas.toDataURL("image/png");
-            link.click();
-        } catch (error) {
-            console.error("Export failed:", error);
-        }
+        const canvas = await html2canvas(previewRef.current, {
+            backgroundColor: null,
+            useCORS: true,
+            scale: 1,
+        });
+        const link = document.createElement("a");
+        link.download = `${active?.key ?? "preview"}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
     };
 
     return (
         <div className="h-screen w-screen flex bg-[#F8FAFC]">
-            <aside className="w-[260px] shrink-0 border-r border-[#E2E8F0] bg-white flex flex-col shadow-sm">
-                <div className="p-6 border-b border-[#F1F5F9]">
-                    <div className="font-black text-[15px] text-[#0F172A] tracking-tight uppercase">UI Review Gallery</div>
-                    <div className="text-[11px] text-[#64748B] font-medium mt-1">Design Validation System</div>
+            <aside className="w-[290px] bg-white border-r border-[#E2E8F0] flex flex-col">
+                <div className="px-5 py-5 border-b border-[#F1F5F9]">
+                    <div className="text-[18px] font-black text-[#0F172A] tracking-tight">Screen Gallery</div>
+                    <div className="text-[11px] text-[#94A3B8] font-bold uppercase tracking-[0.18em] mt-1">UI Review</div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
+                <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
                     {categories.map((category) => (
                         <div key={category.id} className="mb-4 last:mb-2">
                             <button
@@ -223,9 +175,7 @@ export default function Gallery() {
                                     <span className="text-[11px] font-black text-[#94A3B8] uppercase tracking-[0.15em] truncate">
                                         {category.name}
                                     </span>
-                                    <span className="text-[10px] text-[#94A3B8] font-semibold shrink-0">
-                                        {category.screens.length}
-                                    </span>
+                                    <span className="text-[10px] text-[#94A3B8] font-semibold shrink-0">{category.screens.length}</span>
                                 </div>
                                 {expandedCategories[category.id] ? (
                                     <ChevronDown size={16} className="text-[#94A3B8] shrink-0" />
@@ -238,22 +188,17 @@ export default function Gallery() {
                                 <div className="space-y-0.5 pl-2 ml-3 border-l border-[#E2E8F0]">
                                     {category.screens.map((screen) => {
                                         const isActive = screen.key === activeKey;
-
                                         return (
                                             <button
                                                 key={screen.key}
-                                                onClick={() => handleScreenSelect(screen.key)}
-                                                className={`
-                                                    w-full text-left px-4 py-2 rounded-lg transition-all duration-200 group relative
-                                                    ${isActive
+                                                onClick={() => setActiveKey(screen.key)}
+                                                className={`w-full text-left px-4 py-2 rounded-lg transition-all duration-200 relative ${
+                                                    isActive
                                                         ? "bg-[#F1F5F9] text-[#2563EB] font-bold shadow-sm"
                                                         : "text-[#475569] hover:bg-[#F8FAFC] hover:text-[#0F172A]"
-                                                    }
-                                                `}
+                                                }`}
                                             >
-                                                {isActive && (
-                                                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-[#2563EB] rounded-r-full" />
-                                                )}
+                                                {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-[#2563EB] rounded-r-full" />}
                                                 <div className="text-[13px] tracking-tight">{screen.name}</div>
                                             </button>
                                         );
@@ -265,9 +210,7 @@ export default function Gallery() {
                 </div>
 
                 <div className="p-4 border-t border-[#F1F5F9] bg-[#F8FAFC]">
-                    <div className="text-[10px] text-[#94A3B8] font-bold text-center uppercase tracking-widest">
-                        v4.2.0 • Build 2026.03
-                    </div>
+                    <div className="text-[10px] text-[#94A3B8] font-bold text-center uppercase tracking-widest">v4.2.0 Build 2026.03</div>
                 </div>
             </aside>
 
@@ -286,11 +229,8 @@ export default function Gallery() {
                 </header>
 
                 <div className="flex-1 overflow-auto p-8 flex justify-center items-start">
-                    <div
-                        ref={previewRef}
-                        className={`rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-[#E2E8F0] overflow-hidden ${useWt32Preview ? "wt32-preview" : ""}`}
-                    >
-                        {useWt32Stage ? <div className="wt32-stage">{active?.component}</div> : active?.component}
+                    <div ref={previewRef} className="rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-[#E2E8F0] overflow-hidden">
+                        {active?.component}
                     </div>
                 </div>
             </main>
@@ -308,22 +248,6 @@ export default function Gallery() {
                 }
                 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
                     background: #CBD5E1;
-                }
-                .wt32-preview {
-                    width: 1366px !important;
-                    height: 768px !important;
-                    position: relative;
-                }
-                .wt32-stage {
-                    width: 100%;
-                    height: 100%;
-                    display: flex;
-                    justify-content: center;
-                    align-items: stretch;
-                    background: #eef2f9;
-                }
-                .wt32-preview button {
-                    border-radius: 8px !important;
                 }
             `}</style>
         </div>

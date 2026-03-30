@@ -480,6 +480,7 @@ const SequenceScanConfirmScreen = () => {
             parameterPanelMode="tomographicScan"
             tomographicParamOverrides={measurements}
             rightViewportContent={<TomographicScoutViewport onMeasurementChange={setMeasurements} />}
+            nextRoute="/image-viewer"
         />
     );
 };
