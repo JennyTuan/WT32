@@ -68,6 +68,10 @@ class ContrastConfig(ContrastConfigBase, ORMModel):
 class ProtocolBase(BaseModel):
     name: str
     body_part: str
+    age_group: Literal["adult", "child", "infant"]
+    patient_weight: str
+    patient_position: Literal["HFS", "FFS", "HFP", "FFP"]
+    table_direction: Literal["in", "out"]
     scan_mode: Literal["plain", "contrast", "4d"]
     description: Optional[str] = None
 
@@ -79,6 +83,10 @@ class ProtocolCreate(ProtocolBase):
 class ProtocolUpdate(BaseModel):
     name: Optional[str] = None
     body_part: Optional[str] = None
+    age_group: Optional[Literal["adult", "child", "infant"]] = None
+    patient_weight: Optional[str] = None
+    patient_position: Optional[Literal["HFS", "FFS", "HFP", "FFP"]] = None
+    table_direction: Optional[Literal["in", "out"]] = None
     scan_mode: Optional[Literal["plain", "contrast", "4d"]] = None
     description: Optional[str] = None
 
@@ -109,11 +117,13 @@ class SeriesUpdate(BaseModel):
 
 class TopogramParamBase(BaseModel):
     series_id: int
-    kv: int
-    ma: int
-    scan_length: float
-    scan_direction: Literal["cranio-caudal", "caudo-cranial"]
-    fov: float
+    kv: int = 120
+    ma: int = 30
+    scan_length: float = 80.0
+    tube_angle: float = 270.0
+    fov: float = 500.0
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
 
 
 class TopogramParamCreate(TopogramParamBase):
@@ -125,8 +135,10 @@ class TopogramParamUpdate(BaseModel):
     kv: Optional[int] = None
     ma: Optional[int] = None
     scan_length: Optional[float] = None
-    scan_direction: Optional[Literal["cranio-caudal", "caudo-cranial"]] = None
+    tube_angle: Optional[float] = None
     fov: Optional[float] = None
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
 
 
 class TopogramParam(TopogramParamBase, ORMModel):
@@ -143,6 +155,7 @@ class HelicalParamBase(BaseModel):
     scan_length: float
     fov: float
     ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
     auto_ma: bool = False
     ma_min: Optional[float] = None
     ma_max: Optional[float] = None
@@ -162,6 +175,7 @@ class HelicalParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = None
     ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
     auto_ma: Optional[bool] = None
     ma_min: Optional[float] = None
     ma_max: Optional[float] = None
@@ -181,9 +195,11 @@ class AxialParamBase(BaseModel):
     scan_length: float
     fov: float
     ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
     auto_ma: bool = False
     ma_min: Optional[float] = None
     ma_max: Optional[float] = None
+    step_count: Optional[int] = None
 
 
 class AxialParamCreate(AxialParamBase):
@@ -200,9 +216,11 @@ class AxialParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = None
     ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
     auto_ma: Optional[bool] = None
     ma_min: Optional[float] = None
     ma_max: Optional[float] = None
+    step_count: Optional[int] = None
 
 
 class AxialParam(AxialParamBase, ORMModel):
@@ -218,7 +236,7 @@ class ReconSeriesBase(BaseModel):
     window_width: int
     window_level: int
     slice_thickness: float
-    increment: float
+    increment: Optional[float] = None
 
 
 class ReconSeriesCreate(ReconSeriesBase):

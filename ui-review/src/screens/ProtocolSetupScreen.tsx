@@ -1,6 +1,5 @@
 ﻿import { useState, useMemo, useEffect, useCallback } from "react";
 import type { MouseEvent, ReactElement } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
 import {
     User,
@@ -25,7 +24,6 @@ import {
     Siren,
     AlertTriangle,
 } from "lucide-react";
-import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb } from "../lib/protocolDb";
 
 type RawProtocol = {
     id: string;
@@ -55,6 +53,84 @@ type RawSequence = {
 type RawProtocolCase = {
     protocol: RawProtocol;
     sequences: RawSequence[];
+};
+
+type ApiTopogramParam = {
+    kv: number;
+    ma: number;
+    scan_length: number;
+    tube_angle: number;
+    fov: number;
+    ctdi_vol?: number | null;
+    dlp?: number | null;
+};
+
+type ApiHelicalParam = {
+    kv: number;
+    ma: number;
+    slice_thickness: number;
+    pitch: number;
+    rotation_time: number;
+    scan_length: number;
+    fov: number;
+    ctdi_vol?: number | null;
+    dlp?: number | null;
+    auto_ma?: boolean;
+};
+
+type ApiAxialParam = {
+    kv: number;
+    ma: number;
+    slice_thickness: number;
+    slice_interval: number;
+    rotation_time: number;
+    scan_length: number;
+    fov: number;
+    ctdi_vol?: number | null;
+    dlp?: number | null;
+    step_count?: number | null;
+};
+
+type ApiReconSeries = {
+    id: number;
+    recon_name: string;
+    kernel: string;
+    matrix: number;
+    window_width: number;
+    window_level: number;
+    slice_thickness: number;
+    increment?: number | null;
+};
+
+type ApiFourDConfig = {
+    breathing_mode: string;
+    phase_count: number;
+    acquisition_time: number;
+    trigger_threshold?: number | null;
+};
+
+type ApiSeriesDetail = {
+    id: number;
+    series_type: "topogram" | "helical" | "axial" | "4d";
+    series_label: string;
+    topogram_param?: ApiTopogramParam | null;
+    helical_param?: ApiHelicalParam | null;
+    axial_param?: ApiAxialParam | null;
+    recon_series: ApiReconSeries[];
+    fourd_config?: ApiFourDConfig | null;
+};
+
+type ApiProtocolDetail = {
+    id: number;
+    name: string;
+    body_part: string;
+    age_group: "adult" | "child" | "infant";
+    patient_weight: string;
+    patient_position: "HFS" | "FFS" | "HFP" | "FFP";
+    table_direction: "in" | "out";
+    scan_mode: "plain" | "contrast" | "4d";
+    description?: string | null;
+    series: ApiSeriesDetail[];
 };
 
 type UiParam = {
@@ -110,6 +186,107 @@ const normalizeModeTags = (modes: string[] | undefined): string[] => {
     if (!modes) return [];
     return modes.map((mode) => mode.trim());
 };
+
+const mapAgeGroupToPatientType = (ageGroup: ApiProtocolDetail["age_group"]): "adult" | "child" =>
+    ageGroup === "adult" ? "adult" : "child";
+
+const getModeLabel = (seriesType: ApiSeriesDetail["series_type"]): string => {
+    switch (seriesType) {
+        case "topogram":
+            return "Topogram";
+        case "helical":
+            return "Helical";
+        case "axial":
+            return "Axial";
+        case "4d":
+            return "4D";
+        default:
+            return seriesType;
+    }
+};
+
+const mapApiSeriesToRawSequence = (
+    protocol: ApiProtocolDetail,
+    series: ApiSeriesDetail
+): RawSequence => {
+    const baseScanParams: Record<string, string | number | boolean> = {
+        scanningDirection: protocol.table_direction.toUpperCase(),
+    };
+
+    if (series.topogram_param) {
+        Object.assign(baseScanParams, {
+            scanLength: series.topogram_param.scan_length,
+            mA: series.topogram_param.ma,
+            kV: series.topogram_param.kv,
+            angle: series.topogram_param.tube_angle,
+            scoutFOV: series.topogram_param.fov,
+        });
+    }
+
+    if (series.helical_param) {
+        Object.assign(baseScanParams, {
+            scanLength: series.helical_param.scan_length,
+            mA: series.helical_param.ma,
+            kV: series.helical_param.kv,
+            rotationTime: series.helical_param.rotation_time,
+            scoutFOV: series.helical_param.fov,
+            pitch: series.helical_param.pitch,
+        });
+    }
+
+    if (series.axial_param) {
+        Object.assign(baseScanParams, {
+            scanLength: series.axial_param.scan_length,
+            mA: series.axial_param.ma,
+            kV: series.axial_param.kv,
+            rotationTime: series.axial_param.rotation_time,
+            scoutFOV: series.axial_param.fov,
+            scanIncrement: series.axial_param.slice_interval,
+            cycleCount: series.axial_param.step_count ?? undefined,
+        });
+    }
+
+    if (series.fourd_config) {
+        Object.assign(baseScanParams, {
+            acquisitionTime: series.fourd_config.acquisition_time,
+            phaseCount: series.fourd_config.phase_count,
+            triggerThreshold: series.fourd_config.trigger_threshold ?? undefined,
+        });
+    }
+
+    return {
+        id: String(series.id),
+        name: series.series_label,
+        sequenceType: series.series_type === "topogram" ? "localizer" : "scan",
+        mode: getModeLabel(series.series_type),
+        scanParams: baseScanParams,
+        reconstructionParams: (series.recon_series || []).map((recon) => ({
+            id: String(recon.id),
+            name: recon.recon_name,
+            params: {
+                sliceThickness: recon.slice_thickness,
+                kernel: recon.kernel,
+                windowCenter: recon.window_level,
+                windowWidth: recon.window_width,
+                matrix: recon.matrix,
+                ...(recon.increment !== null && recon.increment !== undefined ? { interval: recon.increment } : {}),
+            },
+        })),
+    };
+};
+
+const mapApiProtocolToRawCase = (protocol: ApiProtocolDetail): RawProtocolCase => ({
+    protocol: {
+        id: String(protocol.id),
+        name: protocol.name,
+        region: protocol.body_part,
+        patientType: mapAgeGroupToPatientType(protocol.age_group),
+        scanLocationLabel: protocol.body_part,
+        supportedPositions: [protocol.patient_position],
+        supportedModes: protocol.series.map((series) => getModeLabel(series.series_type)),
+    },
+    sequences: protocol.series.map((series) => mapApiSeriesToRawSequence(protocol, series)),
+});
 
 export const protocolCaseData: RawProtocolCase[] = [
     {
@@ -382,6 +559,9 @@ type ProtocolSetupScreenProps = {
 
 const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps) => {
     const navigate = useNavigate();
+    const [fetchedProtocols, setFetchedProtocols] = useState<ApiProtocolDetail[]>([]);
+    const [isLoadingProtocols, setIsLoadingProtocols] = useState(true);
+    const [protocolsError, setProtocolsError] = useState("");
     const [activeTab, setActiveTab] = useState<"scan" | "recon">("scan");
     const [libraryTab, setLibraryTab] = useState<"spiral" | "axial">("spiral");
     const [selectedBodyRegion, setSelectedBodyRegion] = useState<BodyRegion>(bodyRegions[0]);
@@ -404,58 +584,93 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     useEffect(() => {
         let cancelled = false;
 
-        const importSnapshot = async () => {
+        const loadProtocols = async () => {
+            setIsLoadingProtocols(true);
+            setProtocolsError("");
+
             try {
-                const response = await fetch("/db_business_4tables_for_ai.json");
-                if (!response.ok) return;
-                const snapshot = await response.json();
+                const response = await fetch("http://localhost:8000/api/protocols/");
+                if (!response.ok) {
+                    throw new Error(`Request failed with status ${response.status}`);
+                }
+
+                const data = (await response.json()) as ApiProtocolDetail[];
                 if (cancelled) return;
-                await ensureBusinessSnapshotImported(snapshot);
+
+                setFetchedProtocols(data);
             } catch {
-                // Leave the screen empty if the snapshot import fails; UI reads only from DB.
+                if (cancelled) return;
+                setFetchedProtocols([]);
+                setProtocolsError("Failed to load protocols. Please check the backend service and try again.");
+            } finally {
+                if (!cancelled) {
+                    setIsLoadingProtocols(false);
+                }
             }
         };
 
-        void importSnapshot();
+        void loadProtocols();
 
         return () => {
             cancelled = true;
         };
     }, []);
 
-    const dbProtocolCases = useLiveQuery(
-        () => loadProtocolCasesFromDb(),
-        [],
-        [] as RawProtocolCase[]
-    );
-
     const protocolCatalog = useMemo(
-        () => dbProtocolCases.map((entry, idx) => ({ id: idx + 1, entry })),
-        [dbProtocolCases]
+        () => fetchedProtocols.map((protocol) => ({
+            id: protocol.id,
+            protocol,
+            entry: mapApiProtocolToRawCase(protocol),
+        })),
+        [fetchedProtocols]
     );
 
     const libraryData = useMemo(
         () => protocolCatalog
             .filter(({ entry }) => {
-                const normalizedRegion = normalizeRegion(entry.protocol.region);
                 const normalizedPatientType = normalizePatientType(entry.protocol.patientType);
                 const supportedModes = normalizeModeTags(entry.protocol.supportedModes);
                 const sequenceModes = entry.sequences.map((sequence) => sequence.mode.trim());
-                const hasSpiral = supportedModes.some((mode) => mode.includes("螺旋")) || sequenceModes.some((mode) => mode.includes("螺旋"));
-                const hasAxial = supportedModes.some((mode) => mode.includes("断层")) || sequenceModes.some((mode) => mode.includes("断层"));
+                const hasSpiral = supportedModes.some((mode) => mode.includes("Helical")) || sequenceModes.some((mode) => mode.includes("Helical"));
+                const hasAxial = supportedModes.some((mode) => mode.includes("Axial")) || sequenceModes.some((mode) => mode.includes("Axial"));
 
-                return normalizedRegion === selectedBodyRegion
-                    && normalizedPatientType === patientType
+                return normalizedPatientType === patientType
                     && (libraryTab === "spiral" ? hasSpiral : hasAxial);
             })
-            .sort((left, right) => left.entry.protocol.name.localeCompare(right.entry.protocol.name, "zh-CN"))
+            .sort((left, right) => {
+                const leftRegion = normalizeRegion(left.entry.protocol.region) || left.entry.protocol.region;
+                const rightRegion = normalizeRegion(right.entry.protocol.region) || right.entry.protocol.region;
+                const leftRank = leftRegion === selectedBodyRegion ? -1 : bodyRegions.indexOf(leftRegion as BodyRegion);
+                const rightRank = rightRegion === selectedBodyRegion ? -1 : bodyRegions.indexOf(rightRegion as BodyRegion);
+
+                if (leftRank !== rightRank) {
+                    return leftRank - rightRank;
+                }
+
+                return left.entry.protocol.name.localeCompare(right.entry.protocol.name, "zh-CN");
+            })
             .map(({ id, entry }) => ({
                 id,
                 name: entry.protocol.name,
                 region: normalizeRegion(entry.protocol.region) || entry.protocol.region,
+                protocol: protocolCatalog.find((item) => item.id === id)?.protocol,
             })),
         [protocolCatalog, libraryTab, selectedBodyRegion, patientType]
     );
+
+    const groupedLibraryData = useMemo(() => {
+        const groups = new Map<string, typeof libraryData>();
+
+        libraryData.forEach((item) => {
+            const existingItems = groups.get(item.region) || [];
+            groups.set(item.region, [...existingItems, item]);
+        });
+
+        return Array.from(groups.entries()).map(([region, items]) => ({
+            region,
+            items,
+        }));
+    }, [libraryData]);
 
     const buildPlansFromIds = useCallback(
         (ids: number[]): UiPlan[] =>
@@ -537,11 +752,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         }
     }, [libraryData, selectedProtocolIds, buildPlansFromIds]);
 
-    const toggleProtocolSelection = (protocolId: number) => {
-        const nextIds = selectedProtocolIds.includes(protocolId)
-            ? selectedProtocolIds.filter((id) => id !== protocolId)
-            : [...selectedProtocolIds, protocolId];
+    const handleProtocolSelect = (protocolId: number) => {
+        const selectedItem = protocolCatalog.find((item) => item.id === protocolId);
+        if (!selectedItem) return;
 
+        const nextIds = [protocolId];
         setSelectedProtocolIds(nextIds);
         setCollapsedPlanIds([]);
         setCheckedPlanIds([]);
@@ -552,6 +767,15 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         const nextPlans = buildPlansFromIds(nextIds);
         setScanPlans(nextPlans);
         setSelectedSeqId(nextPlans.flatMap((p) => p.sequences)[0]?.id || "");
+
+        localStorage.setItem("selectedProtocol", JSON.stringify(selectedItem.protocol));
+
+        if (onOpenProtocolDetail) {
+            onOpenProtocolDetail();
+            return;
+        }
+
+        navigate("/protocol-detail");
     };
 
     const handleLibraryTabChange = (tab: "spiral" | "axial") => {
@@ -675,6 +899,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         : planHeaderHeight;
     const planPanelHeight = Math.min(Math.max(desiredPlanPanelHeight, planHeaderHeight), 420);
     const handleOpenProtocolDetail = () => {
+        const selectedProtocol = protocolCatalog.find((item) => item.id === selectedProtocolIds[0])?.protocol;
+        if (selectedProtocol) {
+            localStorage.setItem("selectedProtocol", JSON.stringify(selectedProtocol));
+        }
+
         if (onOpenProtocolDetail) {
             onOpenProtocolDetail();
             return;
@@ -1130,52 +1359,77 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
                         {/* 协议列表 */}
                         <div className="flex-1 overflow-y-auto">
-                            {libraryData.length === 0 ? (
+                            {isLoadingProtocols ? (
+                                <div className="h-full flex items-center justify-center px-8 text-center bg-[#FCFDFE]">
+                                    <div className="flex flex-col items-center gap-3">
+                                        <RefreshCw size={20} className="text-[#4D94FF] animate-spin" />
+                                        <div className="text-[12px] font-black text-[#546E7A]">Loading protocols...</div>
+                                    </div>
+                                </div>
+                            ) : protocolsError ? (
+                                <div className="h-full flex items-center justify-center px-8 text-center bg-[#FCFDFE]">
+                                    <div>
+                                        <div className="text-[12px] font-black text-[#D32F2F]">
+                                            Failed to load protocols
+                                        </div>
+                                        <div className="mt-2 text-[10px] leading-5 text-[#90A4AE]">
+                                            {protocolsError}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : libraryData.length === 0 ? (
                                 <div className="h-full flex items-center justify-center px-8 text-center bg-[#FCFDFE]">
                                     <div>
                                         <div className="text-[12px] font-black text-[#546E7A]">
-                                            当前筛选下没有协议
+                                            No protocols match the current filters
                                         </div>
                                         <div className="mt-2 text-[10px] leading-5 text-[#90A4AE]">
-                                            可以切换年龄、部位或螺旋/断层，查看其他协议组合。
+                                            Try switching the patient type, body region, or scan mode.
                                         </div>
                                     </div>
                                 </div>
                             ) : (
-                            <table className="w-full text-left border-collapse">
-                                <thead className="bg-[#4D94FF] text-white sticky top-0 h-[32px] text-[11px] uppercase font-bold tracking-wider">
-                                    <tr>
-                                        <th className="w-[50px] text-center border-r border-white/10">多选</th>
-                                        <th className="px-4 border-r border-white/10">协议名称</th>
-                                        <th className="w-[80px] text-center px-2">区域</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50">
-                                    {libraryData.map((item) => (
-                                        <tr
-                                            key={item.id}
-                                            onClick={() => toggleProtocolSelection(item.id)}
-                                            className={`h-[40px] cursor-pointer transition-colors ${selectedProtocolIds.includes(item.id) ? "bg-[#E3F2FD]" : "hover:bg-[#F9FBFC]"
-                                                }`}
-                                        >
-                                            <td className="text-center">
-                                                <div
-                                                    className={`w-5 h-5 rounded-md border-2 mx-auto flex items-center justify-center transition-all ${selectedProtocolIds.includes(item.id)
-                                                        ? "bg-[#4D94FF] border-[#4D94FF]"
-                                                        : "bg-white border-[#B0C4DE]/50"
+                                <table className="w-full text-left border-collapse">
+                                    <thead className="bg-[#4D94FF] text-white sticky top-0 h-[32px] text-[11px] uppercase font-bold tracking-wider">
+                                        <tr>
+                                            <th className="w-[50px] text-center border-r border-white/10">Select</th>
+                                            <th className="px-4 border-r border-white/10">Protocol Name</th>
+                                            <th className="w-[80px] text-center px-2">Region</th>
+                                        </tr>
+                                    </thead>
+                                    {groupedLibraryData.map((group) => (
+                                        <tbody key={group.region} className="divide-y divide-gray-50">
+                                            <tr className="h-[28px] bg-[#F8FAFC]">
+                                                <td colSpan={3} className="px-4 text-[10px] font-black uppercase tracking-wider text-[#546E7A]">
+                                                    {group.region}
+                                                </td>
+                                            </tr>
+                                            {group.items.map((item) => (
+                                                <tr
+                                                    key={item.id}
+                                                    onClick={() => handleProtocolSelect(item.id)}
+                                                    className={`h-[40px] cursor-pointer transition-colors ${selectedProtocolIds.includes(item.id) ? "bg-[#E3F2FD]" : "hover:bg-[#F9FBFC]"
                                                         }`}
                                                 >
-                                                    {selectedProtocolIds.includes(item.id) && (
-                                                        <Check size={14} className="text-white stroke-[4px]" />
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-4 text-[12px] font-bold text-[#546E7A]">{item.name}</td>
-                                            <td className="text-[10px] text-center text-[#90A4AE] font-mono">{item.region}</td>
-                                        </tr>
+                                                    <td className="text-center">
+                                                        <div
+                                                            className={`w-5 h-5 rounded-md border-2 mx-auto flex items-center justify-center transition-all ${selectedProtocolIds.includes(item.id)
+                                                                ? "bg-[#4D94FF] border-[#4D94FF]"
+                                                                : "bg-white border-[#B0C4DE]/50"
+                                                                }`}
+                                                        >
+                                                            {selectedProtocolIds.includes(item.id) && (
+                                                                <Check size={14} className="text-white stroke-[4px]" />
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 text-[12px] font-bold text-[#546E7A]">{item.name}</td>
+                                                    <td className="text-[10px] text-center text-[#90A4AE] font-mono">{item.region}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
                                     ))}
-                                </tbody>
-                            </table>
+                                </table>
                             )}
                         </div>
 

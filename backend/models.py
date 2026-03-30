@@ -26,6 +26,10 @@ class Protocol(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False, index=True)
     body_part = Column(String(100), nullable=False)
+    age_group = Column(String(20), nullable=False, index=True)
+    patient_weight = Column(String(50), nullable=False)
+    patient_position = Column(String(10), nullable=False)
+    table_direction = Column(String(10), nullable=False)
     scan_mode = Column(String(20), nullable=False, index=True)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -110,11 +114,13 @@ class TopogramParam(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     series_id = Column(Integer, ForeignKey("series.id", ondelete="CASCADE"), nullable=False, unique=True)
-    kv = Column(Integer, nullable=False)
-    ma = Column(Integer, nullable=False)
-    scan_length = Column(Float, nullable=False)
-    scan_direction = Column(String(30), nullable=False)
-    fov = Column(Float, nullable=False)
+    kv = Column(Integer, nullable=False, default=120)
+    ma = Column(Integer, nullable=False, default=30)
+    scan_length = Column(Float, nullable=False, default=80.0)
+    tube_angle = Column(Float, nullable=False, default=270.0)
+    fov = Column(Float, nullable=False, default=500.0)
+    ctdi_vol = Column(Float, nullable=True)
+    dlp = Column(Float, nullable=True)
 
     series = relationship("Series", back_populates="topogram_param")
 
@@ -132,6 +138,7 @@ class HelicalParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     ctdi_vol = Column(Float, nullable=True)
+    dlp = Column(Float, nullable=True)
     auto_ma = Column(Boolean, nullable=False, default=False)
     ma_min = Column(Float, nullable=True)
     ma_max = Column(Float, nullable=True)
@@ -152,9 +159,11 @@ class AxialParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     ctdi_vol = Column(Float, nullable=True)
+    dlp = Column(Float, nullable=True)
     auto_ma = Column(Boolean, nullable=False, default=False)
     ma_min = Column(Float, nullable=True)
     ma_max = Column(Float, nullable=True)
+    step_count = Column(Integer, nullable=True)
 
     series = relationship("Series", back_populates="axial_param")
 
@@ -171,7 +180,7 @@ class ReconSeries(Base):
     window_width = Column(Integer, nullable=False)
     window_level = Column(Integer, nullable=False)
     slice_thickness = Column(Float, nullable=False)
-    increment = Column(Float, nullable=False)
+    increment = Column(Float, nullable=True)
 
     series = relationship("Series", back_populates="recon_series")
 
