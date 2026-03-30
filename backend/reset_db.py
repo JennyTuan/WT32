@@ -8,6 +8,8 @@ from backend.database import Base, engine, init_db
 def reset_db() -> None:
     db_path = Path(__file__).resolve().parent / "app.db"
 
+    engine.dispose()
+
     if db_path.exists():
         db_path.unlink()
 
