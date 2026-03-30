@@ -557,6 +557,13 @@ type ProtocolSetupScreenProps = {
     onOpenProtocolDetail?: () => void;
 };
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+
+const buildApiUrl = (path: string) => {
+    if (!API_BASE_URL) return path;
+    return `${API_BASE_URL}${path}`;
+};
+
 const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps) => {
     const navigate = useNavigate();
     const [fetchedProtocols, setFetchedProtocols] = useState<ApiProtocolDetail[]>([]);
@@ -589,7 +596,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             setProtocolsError("");
 
             try {
-                const response = await fetch("http://localhost:8000/api/protocols/");
+                const response = await fetch(buildApiUrl("/api/protocols/"));
                 if (!response.ok) {
                     throw new Error(`Request failed with status ${response.status}`);
                 }
@@ -1612,4 +1619,3 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
 
 
 export default ProtocolSetupScreen;
-
