@@ -25,6 +25,21 @@ import {
     AlertTriangle,
 } from "lucide-react";
 import { loadSelectedPatient, formatPatientCardSubtitle } from "../lib/patientSession";
+import { saveSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
+import {
+    createScanSessionForSelectedPatient,
+    deleteSelectedScanSessionSeries,
+    duplicateSelectedScanSessionSeries,
+    fetchScanSessionById,
+    fetchSelectedScanSession,
+    saveSelectedScanSessionId,
+    updateSelectedScanSessionAxialParam,
+    updateSelectedScanSessionHelicalParam,
+    updateSelectedScanSessionReconSeries,
+    updateScanSessionById,
+    updateSelectedScanSessionTopogramParam,
+} from "../lib/scanSession";
+import type { ApiScanSessionDetail } from "../lib/scanSession";
 
 type RawProtocol = {
     id: string;
@@ -142,14 +157,17 @@ type UiParam = {
 };
 
 type UiReconPlan = {
+    sourceReconId?: number;
     name: string;
     params: UiParam[];
 };
 
 type UiSequence = {
     id: string;
+    sourceSeriesId?: number;
     name: string;
     mode: string;
+    seriesType?: string;
     status: string;
     type: string;
     icon: ReactElement;
@@ -160,6 +178,8 @@ type UiSequence = {
 type UiPlan = {
     id: string;
     title: string;
+    patientPosition: string;
+    sourceSessionId?: number;
     sequences: UiSequence[];
 };
 
@@ -287,6 +307,44 @@ const mapApiProtocolToRawCase = (protocol: ApiProtocolDetail): RawProtocolCase =
         supportedModes: protocol.series.map((series) => getModeLabel(series.series_type)),
     },
     sequences: protocol.series.map((series) => mapApiSeriesToRawSequence(protocol, series)),
+});
+
+const mapScanSessionToRawCase = (scanSession: ApiScanSessionDetail): RawProtocolCase => ({
+    protocol: {
+        id: String(scanSession.protocol_id),
+        name: scanSession.name,
+        region: scanSession.body_part,
+        patientType: mapAgeGroupToPatientType(scanSession.age_group),
+        scanLocationLabel: scanSession.body_part,
+        supportedPositions: [scanSession.patient_position],
+        supportedModes: scanSession.series.map((series) => getModeLabel(series.series_type)),
+    },
+    sequences: scanSession.series.map((series) =>
+        mapApiSeriesToRawSequence(
+            {
+                id: scanSession.protocol_id,
+                name: scanSession.name,
+                body_part: scanSession.body_part,
+                age_group: scanSession.age_group,
+                patient_weight: scanSession.patient_weight,
+                patient_position: scanSession.patient_position as ApiProtocolDetail["patient_position"],
+                table_direction: scanSession.table_direction as ApiProtocolDetail["table_direction"],
+                scan_mode: scanSession.scan_mode,
+                description: scanSession.description,
+                series: [],
+            },
+            {
+                id: series.id,
+                series_type: series.series_type,
+                series_label: series.series_label,
+                topogram_param: series.topogram_param ?? null,
+                helical_param: series.helical_param ?? null,
+                axial_param: series.axial_param ?? null,
+                recon_series: series.recon_series,
+                fourd_config: series.fourd_config ?? null,
+            }
+        )
+    ),
 });
 
 export const protocolCaseData: RawProtocolCase[] = [
@@ -505,13 +563,17 @@ const formatValue = (key: string, value: string | number | boolean | undefined):
     }
 };
 
-const toUiPlan = (entry: RawProtocolCase): UiPlan => ({
+const toUiPlan = (entry: RawProtocolCase, options?: { sourceSessionId?: number }): UiPlan => ({
     id: entry.protocol.id,
     title: entry.protocol.name,
+    patientPosition: entry.protocol.supportedPositions[0] ?? "HFS",
+    sourceSessionId: options?.sourceSessionId,
     sequences: entry.sequences.map((seq: RawSequence, index: number) => ({
         id: `${entry.protocol.id}-${seq.id}`,
+        sourceSeriesId: Number.isFinite(Number(seq.id)) ? Number(seq.id) : undefined,
         name: seq.name,
         mode: seq.mode,
+        seriesType: seq.sequenceType,
         status: index === 0 ? "DONE" : "ACTIVE",
         type: seq.sequenceType,
         icon: seq.sequenceType === "localizer" ? <Target size={14} /> : <RefreshCw size={14} />,
@@ -523,6 +585,7 @@ const toUiPlan = (entry: RawProtocolCase): UiPlan => ({
                 options: k === "mA" ? ["50", "100", "150", "200", "215"] : k === "kV" ? ["80", "100", "120", "140"] : undefined,
             })),
         reconPlans: (seq.reconstructionParams || []).map((rp: RawRecon) => ({
+            sourceReconId: Number.isFinite(Number(rp.id)) ? Number(rp.id) : undefined,
             name: rp.name,
             params: reconParamOrder
                 .filter((k) => rp.params && rp.params[k] !== undefined)
@@ -534,35 +597,44 @@ const toUiPlan = (entry: RawProtocolCase): UiPlan => ({
     })),
 });
 
-const cloneReconPlan = (recon: UiReconPlan): UiReconPlan => ({
-    ...recon,
-    params: recon.params.map((param) => ({ ...param })),
-});
-
-const cloneSequence = (sequence: UiSequence, idSuffix: string): UiSequence => ({
-    ...sequence,
-    id: `${sequence.id}__copy__${idSuffix}`,
-    name: `${sequence.name} Copy`,
-    scanParams: sequence.scanParams.map((param) => ({ ...param })),
-    reconPlans: sequence.reconPlans.map(cloneReconPlan),
-});
-
-const clonePlan = (plan: UiPlan, idSuffix: string): UiPlan => ({
-    ...plan,
-    id: `${plan.id}__copy__${idSuffix}`,
-    title: `${plan.title} Copy`,
-    sequences: plan.sequences.map((sequence, index) => cloneSequence(sequence, `${idSuffix}-${index}`)),
-});
-
 type ProtocolSetupScreenProps = {
     onOpenProtocolDetail?: () => void;
 };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+const API_BASE_URL = (
+    (import.meta.env.VITE_API_BASE_URL as string | undefined)
+    ?? (import.meta.env.DEV ? "http://127.0.0.1:8001" : "")
+).replace(/\/$/, "");
 
 const buildApiUrl = (path: string) => {
     if (!API_BASE_URL) return path;
     return `${API_BASE_URL}${path}`;
+};
+
+const isSupportedPosition = (value: string): value is "HFS" | "FFS" | "HFP" | "FFP" | "HFDR" | "FFDR" | "HFDL" | "FFDL" =>
+    ["HFS", "FFS", "HFP", "FFP", "HFDR", "FFDR", "HFDL", "FFDL"].includes(value);
+
+const fetchProtocolsWithFallback = async () => {
+    const candidates = API_BASE_URL
+        ? [buildApiUrl("/api/protocols/"), "/api/protocols/"]
+        : ["/api/protocols/", "http://127.0.0.1:8001/api/protocols/", "http://127.0.0.1:8000/api/protocols/"];
+
+    let lastError: Error | null = null;
+
+    for (const url of candidates) {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                lastError = new Error(`Request failed with status ${response.status}`);
+                continue;
+            }
+            return (await response.json()) as ApiProtocolDetail[];
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error("Unknown request error");
+        }
+    }
+
+    throw lastError ?? new Error("Failed to load protocols");
 };
 
 const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps) => {
@@ -575,7 +647,6 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const [libraryTab, setLibraryTab] = useState<"spiral" | "axial">("spiral");
     const [selectedBodyRegion, setSelectedBodyRegion] = useState<BodyRegion>(bodyRegions[0]);
     const [selectedProtocolIds, setSelectedProtocolIds] = useState<number[]>([1]);
-    const [positioning, setPositioning] = useState<"HFS" | "FFS" | "HFP" | "FFP" | "HFDR" | "FFDR" | "HFDL" | "FFDL">("HFS");
     const [positionGroupIndex, setPositionGroupIndex] = useState<0 | 1>(0);
     const [planListOpen, setPlanListOpen] = useState(true);
     const [collapsedPlanIds, setCollapsedPlanIds] = useState<string[]>([]);
@@ -589,6 +660,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const [checkedPlanIds, setCheckedPlanIds] = useState<string[]>([]);
     const [checkedSeqIds, setCheckedSeqIds] = useState<string[]>([]);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [isCreatingSession, setIsCreatingSession] = useState(false);
+    const [sessionActionError, setSessionActionError] = useState("");
+    const [scanSessionsByProtocolId, setScanSessionsByProtocolId] = useState<Record<number, ApiScanSessionDetail>>({});
 
     useEffect(() => {
         let cancelled = false;
@@ -598,12 +672,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             setProtocolsError("");
 
             try {
-                const response = await fetch(buildApiUrl("/api/protocols/"));
-                if (!response.ok) {
-                    throw new Error(`Request failed with status ${response.status}`);
-                }
-
-                const data = (await response.json()) as ApiProtocolDetail[];
+                const data = await fetchProtocolsWithFallback();
                 if (cancelled) return;
 
                 setFetchedProtocols(data);
@@ -689,9 +758,62 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         (ids: number[]): UiPlan[] =>
             protocolCatalog
                 .filter((item) => ids.includes(item.id))
-                .map((item) => toUiPlan(item.entry)),
-        [protocolCatalog]
+                .map((item) => {
+                    const scanSession = scanSessionsByProtocolId[item.id];
+                    return scanSession
+                        ? toUiPlan(mapScanSessionToRawCase(scanSession), { sourceSessionId: scanSession.id })
+                        : toUiPlan(item.entry);
+                }),
+        [protocolCatalog, scanSessionsByProtocolId]
     );
+
+    const applySessionToScreen = useCallback((scanSession: ApiScanSessionDetail) => {
+        setScanSessionsByProtocolId((prev) => ({
+            ...prev,
+            [scanSession.protocol_id]: scanSession,
+        }));
+
+        setPatientType(mapAgeGroupToPatientType(scanSession.age_group));
+
+        const region = normalizeRegion(scanSession.body_part);
+        if (region) {
+            setSelectedBodyRegion(region);
+        }
+
+        if (protocolCatalog.some((item) => item.id === scanSession.protocol_id)) {
+            setSelectedProtocolIds((prev) =>
+                prev.includes(scanSession.protocol_id) ? prev : [...prev, scanSession.protocol_id]
+            );
+        }
+    }, [protocolCatalog]);
+
+    useEffect(() => {
+        if (protocolCatalog.length === 0) return;
+
+        let cancelled = false;
+
+        const syncSelectedSessionState = async () => {
+            try {
+                const scanSession = await fetchSelectedScanSession();
+                if (!scanSession || cancelled) return;
+                applySessionToScreen(scanSession);
+            } catch (error) {
+                console.error(error);
+            }
+        };
+
+        void syncSelectedSessionState();
+
+        const handleFocus = () => {
+            void syncSelectedSessionState();
+        };
+
+        window.addEventListener("focus", handleFocus);
+        return () => {
+            cancelled = true;
+            window.removeEventListener("focus", handleFocus);
+        };
+    }, [protocolCatalog, applySessionToScreen]);
 
     const [scanPlans, setScanPlans] = useState<UiPlan[]>(() => buildPlansFromIds(selectedProtocolIds));
 
@@ -705,8 +827,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             return () => clearTimeout(timer);
         }
 
-        const validSelectedIds = selectedProtocolIds.filter((id) => protocolCatalog.some((item) => item.id === id));
-        const nextSelectedIds = validSelectedIds.length > 0 ? validSelectedIds : [protocolCatalog[0].id];
+        const nextSelectedIds = selectedProtocolIds.filter((id) => protocolCatalog.some((item) => item.id === id));
         const nextPlans = buildPlansFromIds(nextSelectedIds);
         const nextSelectedSeqId = nextPlans.flatMap((plan) => plan.sequences)[0]?.id || "";
 
@@ -730,46 +851,42 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         }
     }, [protocolCatalog, selectedProtocolIds, buildPlansFromIds]);
 
-    useEffect(() => {
-        if (libraryData.length === 0) {
-            const timer = setTimeout(() => {
-                setSelectedProtocolIds([]);
-                setScanPlans([]);
-                setSelectedSeqId("");
-                setCheckedPlanIds([]);
-                setCheckedSeqIds([]);
-            }, 0);
-            return () => clearTimeout(timer);
-        }
-
-        const visibleIds = new Set(libraryData.map((item) => item.id));
-        const nextSelectedIds = selectedProtocolIds.filter((id) => visibleIds.has(id));
-        const resolvedSelectedIds = nextSelectedIds.length > 0 ? nextSelectedIds : [libraryData[0].id];
-
-        if (
-            resolvedSelectedIds.length !== selectedProtocolIds.length ||
-            resolvedSelectedIds.some((id, index) => id !== selectedProtocolIds[index])
-        ) {
-            const timer = setTimeout(() => {
-                setSelectedProtocolIds(resolvedSelectedIds);
-                const nextPlans = buildPlansFromIds(resolvedSelectedIds);
-                setScanPlans(nextPlans);
-                setSelectedSeqId(nextPlans.flatMap((plan: UiPlan) => plan.sequences)[0]?.id || "");
-                setSelectedReconIndex(0);
-                setCollapsedPlanIds([]);
-                setCheckedPlanIds([]);
-                setCheckedSeqIds([]);
-                setPlanListOpen(true);
-            }, 0);
-            return () => clearTimeout(timer);
-        }
-    }, [libraryData, selectedProtocolIds, buildPlansFromIds]);
-
-    const handleProtocolSelect = (protocolId: number) => {
+    const openScanSession = useCallback(async (protocolId: number, route: "/protocol-detail" | "/scout-scan") => {
         const selectedItem = protocolCatalog.find((item) => item.id === protocolId);
         if (!selectedItem) return;
 
-        const nextIds = [protocolId];
+        setSessionActionError("");
+        setIsCreatingSession(true);
+
+        try {
+            localStorage.setItem("selectedProtocol", JSON.stringify(selectedItem.protocol));
+            const existingSession = scanSessionsByProtocolId[protocolId];
+            const scanSession = existingSession
+                ?? await createScanSessionForSelectedPatient(protocolId, selectedItem.protocol.name);
+            saveSelectedScanSessionId(scanSession.id);
+            applySessionToScreen(scanSession);
+
+            if (onOpenProtocolDetail && route === "/protocol-detail") {
+                onOpenProtocolDetail();
+                return;
+            }
+
+            navigate(route);
+        } catch (error) {
+            console.error(error);
+            setSessionActionError("无法创建本次扫描会话，请检查患者和后端服务。");
+        } finally {
+            setIsCreatingSession(false);
+        }
+    }, [applySessionToScreen, navigate, onOpenProtocolDetail, protocolCatalog, scanSessionsByProtocolId]);
+
+    const handleProtocolSelect = async (protocolId: number) => {
+        const selectedItem = protocolCatalog.find((item) => item.id === protocolId);
+        if (!selectedItem) return;
+
+        const nextIds = selectedProtocolIds.includes(protocolId)
+            ? selectedProtocolIds.filter((id) => id !== protocolId)
+            : [...selectedProtocolIds, protocolId];
         setSelectedProtocolIds(nextIds);
         setCollapsedPlanIds([]);
         setCheckedPlanIds([]);
@@ -780,15 +897,6 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         const nextPlans = buildPlansFromIds(nextIds);
         setScanPlans(nextPlans);
         setSelectedSeqId(nextPlans.flatMap((p) => p.sequences)[0]?.id || "");
-
-        localStorage.setItem("selectedProtocol", JSON.stringify(selectedItem.protocol));
-
-        if (onOpenProtocolDetail) {
-            onOpenProtocolDetail();
-            return;
-        }
-
-        navigate("/protocol-detail");
     };
 
     const handleLibraryTabChange = (tab: "spiral" | "axial") => {
@@ -818,44 +926,37 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const handleCopyClick = () => {
         if (checkedSeqIds.length === 0 && checkedPlanIds.length === 0) return;
 
-        const checkedPlanSet = new Set(checkedPlanIds);
-        const checkedSeqSet = new Set(checkedSeqIds);
-        const copySeed = Date.now().toString(36);
-        const nextPlans: UiPlan[] = [];
-        let firstCopiedSeqId = "";
-
-        scanPlans.forEach((plan, planIndex) => {
-            const isWholePlanSelected = checkedPlanSet.has(plan.id);
-            const updatedSequences = isWholePlanSelected
-                ? plan.sequences
-                : plan.sequences.flatMap((sequence, seqIndex) => {
-                    if (!checkedSeqSet.has(sequence.id)) return [sequence];
-                    const copiedSequence = cloneSequence(sequence, `${copySeed}-${planIndex}-${seqIndex}`);
-                    if (!firstCopiedSeqId) firstCopiedSeqId = copiedSequence.id;
-                    return [sequence, copiedSequence];
+        const duplicateIds = new Set<number>();
+        scanPlans.forEach((plan) => {
+            if (!plan.sourceSessionId) return;
+            if (checkedPlanIds.includes(plan.id)) {
+                plan.sequences.forEach((sequence) => {
+                    if (sequence.sourceSeriesId) duplicateIds.add(sequence.sourceSeriesId);
                 });
-
-            const updatedPlan = updatedSequences === plan.sequences
-                ? plan
-                : { ...plan, sequences: updatedSequences };
-
-            nextPlans.push(updatedPlan);
-
-            if (isWholePlanSelected) {
-                const copiedPlan = clonePlan(plan, `${copySeed}-${planIndex}`);
-                nextPlans.push(copiedPlan);
-                if (!firstCopiedSeqId) {
-                    firstCopiedSeqId = copiedPlan.sequences[0]?.id ?? "";
-                }
+            }
+        });
+        scanPlans.flatMap((plan) => plan.sequences).forEach((sequence) => {
+            if (checkedSeqIds.includes(sequence.id) && sequence.sourceSeriesId) {
+                duplicateIds.add(sequence.sourceSeriesId);
             }
         });
 
-        setScanPlans(nextPlans);
-        setSelectedSeqId(firstCopiedSeqId || nextPlans.flatMap((plan) => plan.sequences)[0]?.id || "");
-        setCheckedPlanIds([]);
-        setCheckedSeqIds([]);
-        setSelectedReconIndex(0);
-        setPlanListOpen(true);
+        if (duplicateIds.size === 0) return;
+
+        void (async () => {
+            try {
+                for (const id of duplicateIds) {
+                    const updated = await duplicateSelectedScanSessionSeries(id);
+                    applySessionToScreen(updated);
+                }
+                setCheckedPlanIds([]);
+                setCheckedSeqIds([]);
+                setSelectedReconIndex(0);
+                setPlanListOpen(true);
+            } catch (error) {
+                console.error(error);
+            }
+        })();
     };
 
     const togglePlanCollapse = (planId: string) => {
@@ -865,29 +966,45 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     };
 
     const handleConfirmDelete = () => {
-        const deletedPlanIds = new Set(checkedPlanIds);
-        const nextSelectedProtocolIds = selectedProtocolIds.filter((id) => {
-            const item = protocolCatalog.find((p) => p.id === id);
-            if (!item) return true;
-            return !deletedPlanIds.has(item.entry.protocol.id);
+        const deleteIds = new Set<number>();
+        scanPlans.forEach((plan) => {
+            if (!plan.sourceSessionId) return;
+            if (checkedPlanIds.includes(plan.id)) {
+                plan.sequences.forEach((sequence) => {
+                    if (sequence.sourceSeriesId) deleteIds.add(sequence.sourceSeriesId);
+                });
+            }
+        });
+        scanPlans.flatMap((plan) => plan.sequences).forEach((sequence) => {
+            if (checkedSeqIds.includes(sequence.id) && sequence.sourceSeriesId) {
+                deleteIds.add(sequence.sourceSeriesId);
+            }
         });
 
-        setSelectedProtocolIds(nextSelectedProtocolIds);
+        if (deleteIds.size === 0) {
+            setShowDeleteConfirm(false);
+            return;
+        }
 
-        const updatedPlans = scanPlans
-            .filter((plan) => !deletedPlanIds.has(plan.id))
-            .map((plan) => ({
-                ...plan,
-                sequences: plan.sequences.filter((s) => !checkedSeqIds.includes(s.id)),
-            }))
-            .filter((plan) => plan.sequences.length > 0);
-
-        setScanPlans(updatedPlans);
-        setSelectedSeqId(updatedPlans.flatMap((p) => p.sequences)[0]?.id || "");
-        setCheckedPlanIds([]);
-        setCheckedSeqIds([]);
-        setShowDeleteConfirm(false);
-        setSelectedReconIndex(0);
+        void (async () => {
+            try {
+                let updatedSession: ApiScanSessionDetail | null = null;
+                for (const id of deleteIds) {
+                    updatedSession = await deleteSelectedScanSessionSeries(id);
+                }
+                if (updatedSession) {
+                    applySessionToScreen(updatedSession);
+                } else {
+                    await refreshCurrentSession();
+                }
+                setCheckedPlanIds([]);
+                setCheckedSeqIds([]);
+                setShowDeleteConfirm(false);
+                setSelectedReconIndex(0);
+            } catch (error) {
+                console.error(error);
+            }
+        })();
     };
 
     // 获取当前选中序列对象
@@ -897,6 +1014,145 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         mode: "",
         scanParams: [],
         reconPlans: [],
+    };
+    const activePlan = scanPlans.find((plan) => plan.sequences.some((sequence) => sequence.id === activeSeq.id)) ?? scanPlans[0];
+    const activePlanId = activePlan?.id;
+    const activeProtocolId = activePlanId ? Number(activePlanId) : selectedProtocolIds[0];
+    const activeScanSession = activeProtocolId ? scanSessionsByProtocolId[activeProtocolId] ?? null : null;
+    const activePositioning = isSupportedPosition(activePlan?.patientPosition ?? "") ? activePlan.patientPosition : "HFS";
+    const activeSessionSeries = activeScanSession?.series.find((series) => series.id === activeSeq.sourceSeriesId) ?? null;
+    const activeSessionRecon = activeSessionSeries?.recon_series.find(
+        (recon) => recon.id === activeSeq.reconPlans?.[selectedReconIndex]?.sourceReconId
+    ) ?? null;
+
+    const refreshCurrentSession = async (sessionId?: number) => {
+        const targetSessionId = sessionId ?? activeScanSession?.id;
+        if (!targetSessionId) return;
+        const scanSession = await fetchScanSessionById(targetSessionId);
+        if (scanSession) {
+            applySessionToScreen(scanSession);
+        }
+    };
+
+    const parseEditableNumber = (value: string) => {
+        const parsed = Number(value.replace(/[^\d.-]/g, ""));
+        return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const handleScanParamChange = async (label: string, rawValue: string) => {
+        if (!activeSessionSeries || !activeScanSession) return;
+
+        setScanPlans((plans) =>
+            plans.map((plan) => ({
+                ...plan,
+                sequences: plan.sequences.map((sequence) =>
+                    sequence.id === activeSeq.id
+                        ? {
+                            ...sequence,
+                            scanParams: sequence.scanParams.map((param) =>
+                                param.label === label ? { ...param, value: rawValue } : param
+                            ),
+                        }
+                        : sequence
+                ),
+            }))
+        );
+
+        try {
+            if (label === "DIR") {
+                const updatedSession = await updateScanSessionById(activeScanSession.id, { table_direction: rawValue.toLowerCase() });
+                applySessionToScreen(updatedSession);
+                return;
+            }
+
+            if (activeSessionSeries.topogram_param) {
+                const patch: Record<string, number> = {};
+                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.ma;
+                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.kv;
+                if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.scan_length;
+                if (label === "ANG") patch.tube_angle = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.tube_angle;
+                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.fov;
+                if (Object.keys(patch).length > 0) {
+                    await updateSelectedScanSessionTopogramParam(activeSessionSeries.topogram_param.id, patch);
+                    await refreshCurrentSession(activeScanSession.id);
+                }
+                return;
+            }
+
+            if (activeSessionSeries.helical_param) {
+                const patch: Record<string, number> = {};
+                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.ma;
+                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.kv;
+                if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.scan_length;
+                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.fov;
+                if (Object.keys(patch).length > 0) {
+                    await updateSelectedScanSessionHelicalParam(activeSessionSeries.helical_param.id, patch);
+                    await refreshCurrentSession(activeScanSession.id);
+                }
+                return;
+            }
+
+            if (activeSessionSeries.axial_param) {
+                const patch: Record<string, number> = {};
+                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.ma;
+                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.kv;
+                if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.scan_length;
+                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.fov;
+                if (Object.keys(patch).length > 0) {
+                    await updateSelectedScanSessionAxialParam(activeSessionSeries.axial_param.id, patch);
+                    await refreshCurrentSession(activeScanSession.id);
+                }
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const handleReconParamChange = async (label: string, rawValue: string) => {
+        if (!activeSessionRecon) return;
+
+        setScanPlans((plans) =>
+            plans.map((plan) => ({
+                ...plan,
+                sequences: plan.sequences.map((sequence) =>
+                    sequence.id === activeSeq.id
+                        ? {
+                            ...sequence,
+                            reconPlans: sequence.reconPlans.map((reconPlan, index) =>
+                                index === selectedReconIndex
+                                    ? {
+                                        ...reconPlan,
+                                        params: reconPlan.params.map((param) =>
+                                            param.label === label ? { ...param, value: rawValue } : param
+                                        ),
+                                    }
+                                    : reconPlan
+                            ),
+                        }
+                        : sequence
+                ),
+            }))
+        );
+
+        try {
+            const patch: Record<string, string | number> = {};
+            if (label === "THICK") patch.slice_thickness = parseEditableNumber(rawValue) ?? activeSessionRecon.slice_thickness;
+            if (label === "INT") patch.increment = parseEditableNumber(rawValue) ?? activeSessionRecon.increment ?? activeSessionRecon.slice_thickness;
+            if (label === "KER") patch.kernel = rawValue;
+            if (label === "WC") patch.window_level = parseEditableNumber(rawValue) ?? activeSessionRecon.window_level;
+            if (label === "WW") patch.window_width = parseEditableNumber(rawValue) ?? activeSessionRecon.window_width;
+            if (label === "MAT") patch.matrix = parseEditableNumber(rawValue) ?? activeSessionRecon.matrix;
+            if (label === "FOV") {
+                return;
+            }
+
+            if (Object.keys(patch).length > 0) {
+                await updateSelectedScanSessionReconSeries(activeSessionRecon.id, patch);
+                await refreshCurrentSession(activeScanSession?.id);
+            }
+        } catch (error) {
+            console.error(error);
+        }
     };
 
     const visibleSequenceCount = scanPlans.reduce((count, plan) => {
@@ -911,22 +1167,59 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         ? planHeaderHeight + scanPlans.length * planTitleRowHeight + visibleSequenceCount * seqRowHeight
         : planHeaderHeight;
     const planPanelHeight = Math.min(Math.max(desiredPlanPanelHeight, planHeaderHeight), 420);
-    const handleOpenProtocolDetail = () => {
-        const selectedProtocol = protocolCatalog.find((item) => item.id === selectedProtocolIds[0])?.protocol;
-        if (selectedProtocol) {
-            localStorage.setItem("selectedProtocol", JSON.stringify(selectedProtocol));
-        }
-
-        if (onOpenProtocolDetail) {
-            onOpenProtocolDetail();
-            return;
-        }
-
-        navigate("/protocol-detail");
+    const handleOpenProtocolDetail = async () => {
+        if (!activeProtocolId) return;
+        await openScanSession(activeProtocolId, "/protocol-detail");
     };
 
-    const handleStartScanFlow = () => {
-        navigate("/scout-scan");
+    const handleStartScanFlow = async () => {
+        if (!activeProtocolId) return;
+        saveSelectedScanWorkflowPlans(
+            scanPlans.map((plan) => ({
+                id: plan.id,
+                title: plan.title,
+                sourceSessionId: plan.sourceSessionId,
+                sequences: plan.sequences.map((sequence) => ({
+                    id: sequence.id,
+                    name: sequence.name,
+                    type:
+                        sequence.seriesType === "localizer"
+                            ? "scout"
+                            : sequence.mode === "Helical"
+                                ? "helical"
+                                : sequence.mode === "Axial"
+                                    ? "axial"
+                                    : sequence.mode === "4D"
+                                        ? "4d"
+                                        : "other",
+                })),
+            }))
+        );
+        await openScanSession(activeProtocolId, "/scout-scan");
+    };
+
+    useEffect(() => {
+        setPositionGroupIndex(["HFS", "FFS", "HFP", "FFP"].includes(activePositioning) ? 0 : 1);
+    }, [activePositioning]);
+
+    const handlePositioningChange = async (pos: "HFS" | "FFS" | "HFP" | "FFP" | "HFDR" | "FFDR" | "HFDL" | "FFDL") => {
+        if (!activeScanSession || !activePlanId) return;
+
+        setScanPlans((plans) =>
+            plans.map((plan) =>
+                plan.id === activePlanId
+                    ? { ...plan, patientPosition: pos }
+                    : plan
+            )
+        );
+        setPositionGroupIndex(["HFS", "FFS", "HFP", "FFP"].includes(pos) ? 0 : 1);
+
+        try {
+            const updatedSession = await updateScanSessionById(activeScanSession.id, { patient_position: pos });
+            applySessionToScreen(updatedSession);
+        } catch (error) {
+            console.error(error);
+        }
     };
 
     return (
@@ -1169,17 +1462,42 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             <div className="grid grid-cols-2 gap-2">
                                 {activeTab === "scan"
                                     ? activeSeq.scanParams?.map((p, i) => (
-                                        <ParamBox key={i} label={p.label} value={p.value} highlight={p.highlight} options={p.options} />
+                                        <ParamBox
+                                            key={i}
+                                            label={p.label}
+                                            value={p.value}
+                                            highlight={p.highlight}
+                                            options={
+                                                p.label === "DIR"
+                                                    ? ["IN", "OUT"]
+                                                    : p.options
+                                            }
+                                            onChange={
+                                                ["MA", "KV", "LEN", "DIR", "ANG", "FOV"].includes(p.label)
+                                                    ? (value) => void handleScanParamChange(p.label, value)
+                                                    : undefined
+                                            }
+                                        />
                                     ))
                                     : activeSeq.reconPlans?.[selectedReconIndex]?.params?.map((p, i) => (
-                                        <ParamBox key={i} label={p.label} value={p.value} />
+                                        <ParamBox
+                                            key={i}
+                                            label={p.label}
+                                            value={p.value}
+                                            onChange={
+                                                ["THICK", "INT", "KER", "WC", "WW", "MAT"].includes(p.label)
+                                                    ? (value) => void handleReconParamChange(p.label, value)
+                                                    : undefined
+                                            }
+                                        />
                                     ))}
                             </div>
                         </div>
 
                         <button
                             onClick={handleOpenProtocolDetail}
-                            className="shrink-0 mt-3 h-[32px] w-full bg-white border border-[#B0C4DE] rounded-md text-[10px] font-bold text-[#4D94FF] flex items-center justify-center gap-1 hover:bg-blue-50 transition-all shadow-sm"
+                            disabled={isCreatingSession}
+                            className={`shrink-0 mt-3 h-[32px] w-full border rounded-md text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-sm ${isCreatingSession ? "bg-[#F8FAFC] border-[#E2E8F0] text-[#B0BEC5] cursor-not-allowed" : "bg-white border-[#B0C4DE] text-[#4D94FF] hover:bg-blue-50"}`}
                         >
                             <Info size={14} /> 参数详情
                         </button>
@@ -1468,8 +1786,8 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 ).map((pos) => (
                                     <button
                                         key={pos}
-                                        onClick={() => setPositioning(pos)}
-                                        className={`h-full rounded-md border-2 font-black text-[13px] shadow-sm transition-all flex items-center justify-center ${positioning === pos
+                                        onClick={() => void handlePositioningChange(pos)}
+                                        className={`h-full rounded-md border-2 font-black text-[13px] shadow-sm transition-all flex items-center justify-center ${activePositioning === pos
                                             ? "bg-white border-[#4D94FF] text-[#4D94FF] ring-2 ring-[#4D94FF]/10"
                                             : "bg-white border-[#B0C4DE]/40 text-[#B0C4DE] hover:border-[#B0C4DE]"
                                             }`}
@@ -1486,6 +1804,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             {/* Footer */}
             < footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8" >
                 <div className="flex-1">
+                    {sessionActionError && (
+                        <div className="mb-2 text-[12px] font-bold text-[#D32F2F]">{sessionActionError}</div>
+                    )}
                     <button
                         onClick={() => navigate(-1)}
                         className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 transition-all uppercase text-[13px] shadow-sm active:scale-95"
@@ -1496,9 +1817,10 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 <div className="flex-1 flex justify-end">
                     <button
                         onClick={handleStartScanFlow}
-                        className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
+                        disabled={isCreatingSession}
+                        className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md uppercase text-[13px] transition-all ${isCreatingSession ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
                     >
-                        下一步 <ChevronRight size={20} />
+                        {isCreatingSession ? "创建中..." : "下一步"} <ChevronRight size={20} />
                     </button>
                 </div>
             </footer >
@@ -1611,6 +1933,13 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
                 </select>
                 <ChevronDown size={10} className="absolute right-0 pointer-events-none text-[#90A4AE] group-hover:text-[#4D94FF] transition-colors" />
             </div>
+        ) : onChange ? (
+            <input
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className={`mt-1 w-full bg-transparent text-center text-[14px] font-black font-mono focus:outline-none ${highlight ? "text-[#1E88E5]" : "text-[#37474F]"
+                    }`}
+            />
         ) : (
             <span
                 className={`text-[14px] font-black font-mono mt-1 ${highlight ? "text-[#1E88E5]" : "text-[#37474F]"

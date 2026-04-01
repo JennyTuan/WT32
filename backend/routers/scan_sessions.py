@@ -196,6 +196,106 @@ def _apply_updates(entity, updates: dict):
         setattr(entity, field, value)
 
 
+def _normalize_series_order(scan_session: models.ScanSession):
+    ordered_series = sorted(scan_session.series, key=lambda item: (item.series_order, item.id))
+    for index, series in enumerate(ordered_series, start=1):
+        series.series_order = index
+
+
+def _clone_session_series(source: models.ScanSessionSeries) -> models.ScanSessionSeries:
+    cloned = models.ScanSessionSeries(
+        scan_session_id=source.scan_session_id,
+        template_series_id=source.template_series_id,
+        series_order=source.series_order,
+        series_type=source.series_type,
+        series_label=f"{source.series_label} Copy",
+        contrast_delay=source.contrast_delay,
+        trigger_mode=source.trigger_mode,
+        tracking_threshold=source.tracking_threshold,
+    )
+
+    if source.topogram_param:
+        cloned.topogram_param = models.ScanSessionTopogramParam(
+            template_param_id=source.topogram_param.template_param_id,
+            kv=source.topogram_param.kv,
+            ma=source.topogram_param.ma,
+            scan_length=source.topogram_param.scan_length,
+            tube_angle=source.topogram_param.tube_angle,
+            fov=source.topogram_param.fov,
+            ctdi_vol=source.topogram_param.ctdi_vol,
+            dlp=source.topogram_param.dlp,
+        )
+
+    if source.helical_param:
+        cloned.helical_param = models.ScanSessionHelicalParam(
+            template_param_id=source.helical_param.template_param_id,
+            kv=source.helical_param.kv,
+            ma=source.helical_param.ma,
+            slice_thickness=source.helical_param.slice_thickness,
+            pitch=source.helical_param.pitch,
+            rotation_time=source.helical_param.rotation_time,
+            scan_length=source.helical_param.scan_length,
+            fov=source.helical_param.fov,
+            ctdi_vol=source.helical_param.ctdi_vol,
+            dlp=source.helical_param.dlp,
+            auto_ma=source.helical_param.auto_ma,
+            ma_min=source.helical_param.ma_min,
+            ma_max=source.helical_param.ma_max,
+        )
+
+    if source.axial_param:
+        cloned.axial_param = models.ScanSessionAxialParam(
+            template_param_id=source.axial_param.template_param_id,
+            kv=source.axial_param.kv,
+            ma=source.axial_param.ma,
+            slice_thickness=source.axial_param.slice_thickness,
+            slice_interval=source.axial_param.slice_interval,
+            rotation_time=source.axial_param.rotation_time,
+            scan_length=source.axial_param.scan_length,
+            fov=source.axial_param.fov,
+            ctdi_vol=source.axial_param.ctdi_vol,
+            dlp=source.axial_param.dlp,
+            auto_ma=source.axial_param.auto_ma,
+            ma_min=source.axial_param.ma_min,
+            ma_max=source.axial_param.ma_max,
+            step_count=source.axial_param.step_count,
+        )
+
+    for recon in source.recon_series:
+        cloned.recon_series.append(
+            models.ScanSessionReconSeries(
+                template_recon_series_id=recon.template_recon_series_id,
+                recon_name=recon.recon_name,
+                recon_type=recon.recon_type,
+                kernel=recon.kernel,
+                matrix=recon.matrix,
+                window_width=recon.window_width,
+                window_level=recon.window_level,
+                slice_thickness=recon.slice_thickness,
+                increment=recon.increment,
+            )
+        )
+
+    if source.fourd_config:
+        cloned_fourd = models.ScanSessionFourDConfig(
+            template_config_id=source.fourd_config.template_config_id,
+            breathing_mode=source.fourd_config.breathing_mode,
+            phase_count=source.fourd_config.phase_count,
+            acquisition_time=source.fourd_config.acquisition_time,
+            trigger_threshold=source.fourd_config.trigger_threshold,
+        )
+        if source.fourd_config.breathing_training_param:
+            cloned_fourd.breathing_training_param = models.ScanSessionBreathingTrainingParam(
+                template_param_id=source.fourd_config.breathing_training_param.template_param_id,
+                training_duration=source.fourd_config.breathing_training_param.training_duration,
+                target_amplitude=source.fourd_config.breathing_training_param.target_amplitude,
+                tolerance_range=source.fourd_config.breathing_training_param.tolerance_range,
+            )
+        cloned.fourd_config = cloned_fourd
+
+    return cloned
+
+
 @router.get("/", response_model=list[schemas.ScanSessionSummary])
 def list_scan_sessions(db: Session = Depends(get_db)):
     return _scan_session_query(db).order_by(models.ScanSession.created_at.desc(), models.ScanSession.id.desc()).all()
@@ -274,6 +374,38 @@ def update_scan_session_series(session_series_id: int, payload: schemas.ScanSess
     db.commit()
     db.refresh(entity)
     return entity
+
+
+@router.post("/series/{session_series_id}/duplicate", response_model=schemas.ScanSessionDetail)
+def duplicate_scan_session_series(session_series_id: int, db: Session = Depends(get_db)):
+    entity = _get_entity_or_404(models.ScanSessionSeries, session_series_id, "Scan session series not found", db)
+    scan_session = _get_scan_session_or_404(entity.scan_session_id, db)
+
+    cloned = _clone_session_series(entity)
+    cloned.series_order = entity.series_order + 1
+    db.add(cloned)
+    db.flush()
+
+    affected_series = sorted(scan_session.series + [cloned], key=lambda item: (item.series_order, item.id))
+    for index, series in enumerate(affected_series, start=1):
+        series.series_order = index
+
+    db.commit()
+    db.refresh(cloned)
+    return _get_scan_session_or_404(entity.scan_session_id, db)
+
+
+@router.delete("/series/{session_series_id}", response_model=schemas.ScanSessionDetail)
+def delete_scan_session_series(session_series_id: int, db: Session = Depends(get_db)):
+    entity = _get_entity_or_404(models.ScanSessionSeries, session_series_id, "Scan session series not found", db)
+    scan_session_id = entity.scan_session_id
+    scan_session = _get_scan_session_or_404(scan_session_id, db)
+
+    db.delete(entity)
+    db.flush()
+    _normalize_series_order(scan_session)
+    db.commit()
+    return _get_scan_session_or_404(scan_session_id, db)
 
 
 @router.put("/topogram/{param_id}", response_model=schemas.ScanSessionTopogramParam)

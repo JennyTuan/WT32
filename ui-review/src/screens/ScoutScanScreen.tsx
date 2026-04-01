@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useRef } from "react";
 import * as dicomParser from "dicom-parser";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
     User,
     Settings,
@@ -26,10 +26,13 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
+import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
+import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 
 interface Sequence {
     id: string;
     name: string;
+    type: WorkflowSequenceType;
     steps?: string[];
 }
 
@@ -60,6 +63,8 @@ const BREATHING_HELICAL_PARAM_PREVIEW = {
 };
 
 const BREATHING_BED_POSITION_COUNT = 10;
+const BED_POSITION_MIN = 320;
+const BED_POSITION_MAX = 780;
 
 type BreathingProjectionMeta = {
     width: number;
@@ -99,6 +104,10 @@ function clamp(value: number, min: number, max: number) {
 
 function clamp01(value: number) {
     return Math.min(1, Math.max(0, value));
+}
+
+function clampBedPosition(value: number) {
+    return Math.min(BED_POSITION_MAX, Math.max(BED_POSITION_MIN, value));
 }
 
 const BreathingHelicalParamCard = ({ label, value }: { label: string; value: string }) => (
@@ -587,6 +596,7 @@ const ScoutScanScreen = ({
     breathingWorkflowVariant = "training",
 }: ScoutScanScreenProps) => {
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
+    const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const navigate = useNavigate();
     const isBreathingTraining = bottomPanelMode === "breathing" && breathingWorkflowVariant === "training";
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
@@ -697,23 +707,49 @@ const ScoutScanScreen = ({
         tRef.current = 0;
     }, [bottomPanelMode]);
 
-    // Initial data
-    // Initial data
-    const [groups, setGroups] = useState<ProtocolGroup[]>([
-        {
-            id: "g1",
-            name: "Head_FacialBoneVolume",
-            sequences: isBreathingAcquisition
-                ? [
-                    { id: "s1", name: "Scout", steps: [firstStepLabel, "激光灯定位", "参数确认", "执行扫描"] },
-                    { id: "s2", name: "Helical Scan", steps: ["呼吸训练", "参数确认", "执行扫描"] }
-                ]
-                : [
-                    { id: "s1", name: "Scout", steps: [firstStepLabel, "参数确认", "执行扫描"] },
-                    { id: "s2", name: "Helical Scan", steps: ["呼吸训练", "参数确认", "执行扫描"] }
-                ]
+    const buildSequenceSteps = useCallback((type: WorkflowSequenceType) => {
+        if (type === "scout") {
+            return isBreathingAcquisition
+                ? [firstStepLabel, "激光灯定位", "参数确认", "执行扫描"]
+                : [firstStepLabel, "参数确认", "执行扫描"];
         }
-    ]);
+
+        if (type === "helical" || type === "axial" || type === "4d") {
+            return bottomPanelMode === "breathing"
+                ? ["呼吸训练", "参数确认", "执行扫描"]
+                : ["参数确认", "执行扫描"];
+        }
+
+        return ["参数确认", "执行扫描"];
+    }, [bottomPanelMode, firstStepLabel, isBreathingAcquisition]);
+
+    const buildGroupsFromWorkflowPlans = useCallback((): ProtocolGroup[] => {
+        if (workflowPlans.length === 0) {
+            return [
+                {
+                    id: "g1",
+                    name: "Head_FacialBoneVolume",
+                    sequences: [
+                        { id: "s1", name: "Scout", type: "scout", steps: buildSequenceSteps("scout") },
+                        { id: "s2", name: "Helical Scan", type: "helical", steps: buildSequenceSteps("helical") },
+                    ],
+                },
+            ];
+        }
+
+        return workflowPlans.map((plan) => ({
+            id: `group-${plan.id}`,
+            name: plan.title,
+            sequences: plan.sequences.map((sequence) => ({
+                id: `group-${plan.id}-seq-${sequence.id}`,
+                name: sequence.name,
+                type: sequence.type,
+                steps: buildSequenceSteps(sequence.type),
+            })),
+        }));
+    }, [buildSequenceSteps, workflowPlans]);
+
+    const [groups, setGroups] = useState<ProtocolGroup[]>(() => buildGroupsFromWorkflowPlans());
 
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
@@ -722,35 +758,83 @@ const ScoutScanScreen = ({
     const [laserActive, setLaserActive] = useState(false);
     const [selectedPosition, setSelectedPosition] = useState<"start" | "end" | null>(null);
     const [activeStepIdx, setActiveStepIdx] = useState(0); // Add state for active step tracking
-    const [expandedSeqId, setExpandedSeqId] = useState<string | null>(
-        bottomPanelMode === "breathing" && breathingWorkflowVariant === "training" ? "s2" : "s1"
-    );
+    const [expandedSeqId, setExpandedSeqId] = useState<string | null>(() => buildGroupsFromWorkflowPlans()[0]?.sequences[0]?.id ?? null);
 
     useEffect(() => {
-        if (bottomPanelMode !== "breathing") return;
-
         const timer = setTimeout(() => {
-            setGroups([
-                {
-                    id: "g1",
-                    name: "Head_FacialBoneVolume",
-                    sequences: isBreathingAcquisition
-                        ? [
-                            { id: "s1", name: "Scout", steps: [firstStepLabel, "激光灯定位", "参数确认", "执行扫描"] },
-                            { id: "s2", name: "Helical Scan", steps: ["呼吸训练", "参数确认", "执行扫描"] }
-                        ]
-                        : [
-                            { id: "s1", name: "Scout", steps: [firstStepLabel, "参数确认", "执行扫描"] },
-                            { id: "s2", name: "Helical Scan", steps: ["呼吸训练", "参数确认", "执行扫描"] },
-                        ],
-                },
-            ]);
-            setExpandedSeqId(isBreathingTraining ? "s2" : "s1");
+            const nextGroups = buildGroupsFromWorkflowPlans();
+            setGroups(nextGroups);
+            setExpandedSeqId((current) => {
+                if (current && nextGroups.some((group: ProtocolGroup) => group.sequences.some((seq: Sequence) => seq.id === current))) {
+                    return current;
+                }
+                return nextGroups[0]?.sequences[0]?.id ?? null;
+            });
             setActiveStepIdx(0);
         }, 0);
 
         return () => clearTimeout(timer);
-    }, [bottomPanelMode, breathingWorkflowVariant, firstStepLabel, isBreathingAcquisition, isBreathingTraining]);
+    }, [buildGroupsFromWorkflowPlans]);
+
+    useEffect(() => {
+        if (bottomPanelMode !== "positioning") return;
+
+        if (laserActive || selectedPosition) {
+            setActiveStepIdx(0);
+        }
+    }, [bottomPanelMode, laserActive, selectedPosition]);
+
+    useEffect(() => {
+        if (!laserActive || !selectedPosition) return;
+
+        let currentValue = Number(selectedPosition === "start" ? startPos : endPos);
+        if (!Number.isFinite(currentValue)) {
+            currentValue = selectedPosition === "start" ? 472.95 : 595.17;
+        }
+
+        let direction = selectedPosition === "start" ? -1 : 1;
+        const interval = window.setInterval(() => {
+            const delta = 0.85 + Math.random() * 1.8;
+            currentValue = clampBedPosition(currentValue + direction * delta);
+
+            if (currentValue <= BED_POSITION_MIN + 8) {
+                direction = 1;
+            } else if (currentValue >= BED_POSITION_MAX - 8) {
+                direction = -1;
+            }
+
+            const formatted = currentValue.toFixed(2);
+            if (selectedPosition === "start") {
+                setStartPos(formatted);
+            } else {
+                setEndPos(formatted);
+            }
+        }, 180);
+
+        return () => window.clearInterval(interval);
+    }, [laserActive, selectedPosition, startPos, endPos]);
+
+    const positioningHint = !laserActive
+        ? "请打开激光灯获取定位"
+        : selectedPosition === "start"
+            ? "激光灯开启，机床移动中，正在实时采集起始床码"
+            : selectedPosition === "end"
+                ? "激光灯开启，机床移动中，正在实时采集结束床码"
+                : "激光灯已开启，请先选择起始位置或结束位置";
+
+    const persistPositioningToSession = useCallback(async () => {
+        const scanSession = await fetchSelectedScanSession();
+        const topogramParamId = scanSession?.series.find((series) => series.series_type === "topogram")?.topogram_param?.id;
+        if (!topogramParamId) return;
+
+        const start = Number(startPos);
+        const end = Number(endPos);
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+
+        await updateSelectedScanSessionTopogramParam(topogramParamId, {
+            scan_length: Number(Math.abs(end - start).toFixed(2)),
+        });
+    }, [endPos, startPos]);
 
     const toggleSelection = (id: string) => {
         setSelectedIds(prev => {
@@ -849,7 +933,7 @@ const ScoutScanScreen = ({
                         aria-label="激光灯"
                         aria-pressed={laserActive}
                         onClick={() => setLaserActive((prev) => !prev)}
-                        className={`relative p-1 transition-all ${
+                        className={`relative p-1 bg-transparent border-0 shadow-none outline-none transition-all ${
                             laserActive
                                 ? "text-[#F59E0B]"
                                 : "text-[#546E7A] hover:opacity-70"
@@ -890,7 +974,7 @@ const ScoutScanScreen = ({
                     </div>
 
                     {/* Protocol Tree Area - Match ScanConfirm implementation */}
-                    <div className={`overflow-y-auto p-2 flex flex-col gap-0 transition-all duration-300 ${isTreeCollapsed ? 'h-[48px] opacity-40 grayscale overflow-hidden' : 'h-[240px]'}`}>
+                    <div className={`overflow-y-auto p-2 flex flex-col gap-0 transition-all duration-300 ${isTreeCollapsed ? 'h-[48px] opacity-40 grayscale overflow-hidden' : 'flex-1 min-h-0'}`}>
                         {groups.map(group => (
                             <div key={group.id} className="flex flex-col">
                                 <div
@@ -917,19 +1001,18 @@ const ScoutScanScreen = ({
                                     {group.sequences.map(seq => (
                                         <div key={seq.id}>
                                             {(() => {
-                                                const isActiveSequence = bottomPanelMode === 'breathing'
-                                                    ? seq.name === 'Scout'
-                                                    : seq.name === 'Scout';
                                                 const isExpanded = expandedSeqId === seq.id;
-                                                const isBreathingScoutSequence = bottomPanelMode === 'breathing' && seq.name === 'Scout';
-                                                const isBreathingHelicalSequence = bottomPanelMode === 'breathing' && seq.name === 'Helical Scan';
+                                                const isScoutType = seq.type === 'scout';
+                                                const isHelicalType = seq.type === 'helical';
+                                                const isBreathingScoutSequence = bottomPanelMode === 'breathing' && isScoutType;
+                                                const isBreathingHelicalSequence = bottomPanelMode === 'breathing' && isHelicalType;
                                                 const resolvedActiveSequence = bottomPanelMode === 'breathing'
                                                     ? (breathingWorkflowVariant === 'training' ? isBreathingHelicalSequence : isBreathingScoutSequence)
-                                                    : seq.name === 'Scout';
+                                                    : isScoutType;
                                                 const isCompletedSequence = bottomPanelMode === 'breathing'
                                                     && breathingWorkflowVariant === 'training'
-                                                    && seq.name === 'Scout';
-                                                const isUnifiedActiveSequence = bottomPanelMode === 'breathing' ? resolvedActiveSequence : seq.name === 'Scout' || isActiveSequence;
+                                                    && isScoutType;
+                                                const isUnifiedActiveSequence = bottomPanelMode === 'breathing' ? resolvedActiveSequence : isScoutType;
                                                 const shouldShowSteps = !!seq.steps?.length && isExpanded;
 
                                                 return (
@@ -963,13 +1046,12 @@ const ScoutScanScreen = ({
 
                                                         </div>
 
-                                                        {/* Workflow Steps - Prominent icons & connecting line */}
+                                                        {/* Workflow Steps */}
                                                         {shouldShowSteps && (
                                                             <div className="flex flex-col ml-12 mt-2 gap-4 relative pb-4">
                                                                 <div className="absolute left-[7px] top-2 bottom-6 w-[1px] bg-[#B0C4DE]"></div>
                                                                 {seq.steps?.map((step, idx) => {
                                                                     const isCompleted = isCompletedSequence || (isUnifiedActiveSequence && idx < activeStepIdx);
-
                                                                     const isActive = !isCompletedSequence && isUnifiedActiveSequence && idx === activeStepIdx;
 
                                                                     return (
@@ -1083,7 +1165,7 @@ const ScoutScanScreen = ({
                         </div>
                     ) : (
                         <div className={`mt-auto border-t border-[#EEF2F9] bg-[#F8FAFC] px-4 py-3 shrink-0 transition-all duration-300 ${isTreeCollapsed ? 'flex-1 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]' : 'h-[168px]'}`}>
-                            <div className="mb-3 text-[12px] font-bold text-[#546E7A]">请打开激光灯获取定位</div>
+                            <div className="mb-3 text-[12px] font-bold text-[#546E7A]">{positioningHint}</div>
                             <div className="flex items-stretch gap-3 h-[calc(100%-28px)]">
                                 <div className="flex flex-col items-center self-stretch justify-center py-2 shrink-0">
                                     <button
@@ -1465,8 +1547,13 @@ const ScoutScanScreen = ({
                 <div className="flex-1 flex justify-end">
                     <button
                         disabled={bottomPanelMode === 'breathing' && breathingPhase !== 'stable'}
-                        onClick={() => {
+                        onClick={async () => {
                             if (bottomPanelMode !== 'breathing') {
+                                try {
+                                    await persistPositioningToSession();
+                                } catch (error) {
+                                    console.error("Failed to persist scout positioning before navigation.", error);
+                                }
                                 navigate('/scan-confirm');
                             }
                         }}

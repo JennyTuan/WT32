@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
 import {
@@ -26,10 +26,13 @@ import {
 } from "lucide-react";
 import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb, type RawProtocolCase } from "../lib/protocolDb";
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
+import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
+import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 
 interface Sequence {
     id: string;
     name: string;
+    type?: WorkflowSequenceType;
     steps?: string[];
 }
 
@@ -41,7 +44,7 @@ interface ProtocolGroup {
 
 type ScanConfirmScreenProps = {
     activeScoutStepIndex?: number;
-    activeSequenceId?: "s1" | "s2";
+    activeSequenceId?: string;
     activeSequenceStepIndex?: number;
     parameterPanelMode?: "scout" | "tomographicScan" | "helicalScan";
     tomographicParamOverrides?: Partial<TomographicScanDisplayParams>;
@@ -144,6 +147,124 @@ const DEFAULT_SCOUT_DOSE_PARAMS: ScoutDoseDisplayParams = {
     notifyDlp: "--",
 };
 
+const buildSequenceSteps = (type: WorkflowSequenceType) => {
+    if (type === "scout") {
+        return ["激光灯定位", "参数确认", "执行扫描"];
+    }
+
+    return ["参数确认", "执行扫描"];
+};
+
+const DETAIL_TARGET_STORAGE_KEY = "scanConfirmDetailTarget";
+
+const inferSequenceType = (sequence: Sequence): WorkflowSequenceType => {
+    if (sequence.type) return sequence.type;
+
+    const normalizedName = sequence.name.toLowerCase();
+    if (normalizedName.includes("scout")) return "scout";
+    if (normalizedName.includes("helical")) return "helical";
+    if (normalizedName.includes("axial")) return "axial";
+    if (normalizedName.includes("4d")) return "4d";
+    return "other";
+};
+
+const mapScanSessionToProtocolCases = (scanSession: ApiScanSessionDetail | null): RawProtocolCase[] | undefined => {
+    if (!scanSession) return undefined;
+
+    return [{
+        protocol: {
+            id: String(scanSession.id),
+            name: scanSession.name,
+            region: scanSession.body_part,
+            patientType: scanSession.age_group === "adult" ? "adult" : "child",
+            scanLocationLabel: scanSession.body_part,
+            supportedPositions: [scanSession.patient_position],
+            supportedModes: scanSession.series.map((series) => {
+                switch (series.series_type) {
+                    case "topogram":
+                        return "定位像";
+                    case "helical":
+                        return "螺旋扫描";
+                    case "axial":
+                        return "断层扫描";
+                    case "4d":
+                        return "4D";
+                    default:
+                        return series.series_type;
+                }
+            }),
+        },
+        sequences: scanSession.series.map((series) => {
+            const topogram = series.topogram_param;
+            const helical = series.helical_param;
+            const axial = series.axial_param;
+            const scanParams: Record<string, string | number | boolean> = {
+                angle: topogram?.tube_angle ?? 0,
+                collimation: "--",
+                scanningDirection: scanSession.table_direction.toUpperCase(),
+            };
+
+            if (topogram?.scan_length !== undefined) scanParams.scanLength = topogram.scan_length;
+            if (helical?.scan_length !== undefined) scanParams.scanLength = helical.scan_length;
+            if (axial?.scan_length !== undefined) scanParams.scanLength = axial.scan_length;
+            if (topogram?.ma !== undefined) scanParams.mA = topogram.ma;
+            if (helical?.ma !== undefined) scanParams.mA = helical.ma;
+            if (axial?.ma !== undefined) scanParams.mA = axial.ma;
+            if (topogram?.kv !== undefined) scanParams.kV = topogram.kv;
+            if (helical?.kv !== undefined) scanParams.kV = helical.kv;
+            if (axial?.kv !== undefined) scanParams.kV = axial.kv;
+            if (helical?.rotation_time !== undefined) scanParams.rotationTime = helical.rotation_time;
+            if (axial?.rotation_time !== undefined) scanParams.rotationTime = axial.rotation_time;
+            if (helical?.pitch !== undefined) scanParams.pitch = helical.pitch;
+            if (axial?.slice_interval !== undefined) scanParams.scanIncrement = axial.slice_interval;
+            if (axial?.step_count !== undefined && axial.step_count !== null) scanParams.cycleCount = axial.step_count;
+            if (topogram?.fov !== undefined) scanParams.scoutFOV = topogram.fov;
+            if (helical?.fov !== undefined) scanParams.scoutFOV = helical.fov;
+            if (axial?.fov !== undefined) scanParams.scoutFOV = axial.fov;
+
+            return {
+                id: String(series.id),
+                name: series.series_label,
+                sequenceType: series.series_type === "topogram" ? "localizer" : "scan",
+                mode: series.series_type === "topogram" ? "定位像" : series.series_type === "helical" ? "螺旋扫描" : series.series_type === "axial" ? "断层扫描" : "4D",
+                scanParams,
+                reconstructionParams: series.recon_series.map((recon) => {
+                    const params: Record<string, string | number | boolean> = {
+                        sliceThickness: recon.slice_thickness,
+                        kernel: recon.kernel,
+                        windowCenter: recon.window_level,
+                        windowWidth: recon.window_width,
+                        matrix: recon.matrix,
+                    };
+                    if (recon.increment !== undefined && recon.increment !== null) {
+                        params.interval = recon.increment;
+                    }
+
+                    return {
+                        id: String(recon.id),
+                        name: recon.recon_name,
+                        params,
+                    };
+                }),
+            };
+        }),
+    }];
+};
+
+const getScoutDoseDisplayParamsFromSession = (scanSession: ApiScanSessionDetail | null): ScoutDoseDisplayParams | null => {
+    if (!scanSession) return null;
+    const scoutSeries = scanSession.series.find((series) => series.series_type === "topogram");
+    const topogram = scoutSeries?.topogram_param;
+    if (!topogram) return null;
+
+    return {
+        doseCtdiVol: toDisplayValue(topogram.ctdi_vol ?? undefined, 2),
+        doseDlp: toDisplayValue(topogram.dlp ?? undefined, 2),
+        notifyCtdiVol: toDisplayValue(topogram.ctdi_vol ?? undefined, 2),
+        notifyDlp: toDisplayValue(topogram.dlp ?? undefined, 2),
+    };
+};
+
 const toDisplayValue = (value: string | number | boolean | undefined, fractionDigits?: number): string => {
     if (typeof value === "number") {
         return typeof fractionDigits === "number" ? value.toFixed(fractionDigits) : String(value);
@@ -234,7 +355,7 @@ const getHelicalScanDisplayParams = (protocolCases: RawProtocolCase[] | undefine
 
 const ScanConfirmScreen = ({
     activeScoutStepIndex = 1,
-    activeSequenceId = "s1",
+    activeSequenceId,
     activeSequenceStepIndex,
     parameterPanelMode = "scout",
     tomographicParamOverrides,
@@ -246,6 +367,8 @@ const ScanConfirmScreen = ({
 }: ScanConfirmScreenProps) => {
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
+    const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
+    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [bedMode, setBedMode] = useState<"in" | "out">("in");
     const [patientPosition, setPatientPosition] = useState("HFS");
@@ -262,13 +385,86 @@ const ScanConfirmScreen = ({
         }
     ]);
 
-    const [expandedSeqId, setExpandedSeqId] = useState<string | null>(activeSequenceId);
+    const [expandedSeqId, setExpandedSeqId] = useState<string | null>(null);
     const [checkedSeqIds, setCheckedSeqIds] = useState<string[]>([]);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
     const [showPatientConfirm, setShowPatientConfirm] = useState(false);
     const [laserActive, setLaserActive] = useState(false);
     const [scoutDoseDisplayParams, setScoutDoseDisplayParams] = useState<ScoutDoseDisplayParams>(DEFAULT_SCOUT_DOSE_PARAMS);
+
+    const buildGroupsFromWorkflowPlans = useCallback((): ProtocolGroup[] => {
+        if (workflowPlans.length === 0) {
+            return [
+                {
+                    id: "g1",
+                    name: "Head_FacialBoneVolume",
+                    sequences: [
+                        { id: "s1", name: "Scout", type: "scout", steps: buildSequenceSteps("scout") },
+                        { id: "s2", name: "Helical Scan", type: "helical", steps: buildSequenceSteps("helical") },
+                    ],
+                },
+            ];
+        }
+
+        return workflowPlans.map((plan) => ({
+            id: `group-${plan.id}`,
+            name: plan.title,
+            sequences: plan.sequences.map((sequence) => ({
+                id: `group-${plan.id}-seq-${sequence.id}`,
+                name: sequence.name,
+                type: sequence.type,
+                steps: buildSequenceSteps(sequence.type),
+            })),
+        }));
+    }, [workflowPlans]);
+
+    useEffect(() => {
+        if (workflowPlans.length === 0) return;
+        setGroups(buildGroupsFromWorkflowPlans());
+    }, [buildGroupsFromWorkflowPlans, workflowPlans.length]);
+
+    const allSequences = useMemo(() => groups.flatMap((group) => group.sequences), [groups]);
+    const firstScoutSequenceId = useMemo(
+        () => allSequences.find((sequence) => inferSequenceType(sequence) === "scout")?.id ?? null,
+        [allSequences]
+    );
+    const firstTomographicSequenceId = useMemo(
+        () => allSequences.find((sequence) => inferSequenceType(sequence) !== "scout")?.id ?? null,
+        [allSequences]
+    );
+    const resolvedActiveSequenceId = useMemo(() => {
+        if (activeSequenceId && allSequences.some((sequence) => sequence.id === activeSequenceId)) {
+            return activeSequenceId;
+        }
+
+        if (activeSequenceId === "s2") {
+            return firstTomographicSequenceId ?? firstScoutSequenceId ?? allSequences[0]?.id ?? null;
+        }
+
+        return firstScoutSequenceId ?? allSequences[0]?.id ?? null;
+    }, [activeSequenceId, allSequences, firstScoutSequenceId, firstTomographicSequenceId]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadScanSession = async () => {
+            try {
+                const currentScanSession = await fetchSelectedScanSession();
+                if (!cancelled) {
+                    setScanSession(currentScanSession);
+                }
+            } catch (error) {
+                console.error("Failed to load selected scan session.", error);
+            }
+        };
+
+        void loadScanSession();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         let isMounted = true;
@@ -308,9 +504,12 @@ const ScanConfirmScreen = ({
     }, []);
 
     const dbProtocolCases = useLiveQuery(() => loadProtocolCasesFromDb(), [], []);
-    const scoutDisplayParams = getScoutDisplayParams(dbProtocolCases);
-    const tomographicScanDisplayParams = getTomographicScanDisplayParams(dbProtocolCases);
-    const helicalScanDisplayParams = getHelicalScanDisplayParams(dbProtocolCases);
+    const sessionProtocolCases = useMemo(() => mapScanSessionToProtocolCases(scanSession), [scanSession]);
+    const effectiveProtocolCases = sessionProtocolCases ?? dbProtocolCases;
+    const scoutDisplayParams = getScoutDisplayParams(effectiveProtocolCases);
+    const tomographicScanDisplayParams = getTomographicScanDisplayParams(effectiveProtocolCases);
+    const helicalScanDisplayParams = getHelicalScanDisplayParams(effectiveProtocolCases);
+    const scoutDoseFromSession = useMemo(() => getScoutDoseDisplayParamsFromSession(scanSession), [scanSession]);
     const resolvedTomographicScanDisplayParams = {
         ...tomographicScanDisplayParams,
         ...tomographicParamOverrides,
@@ -319,6 +518,21 @@ const ScanConfirmScreen = ({
         ...helicalScanDisplayParams,
         ...helicalParamOverrides,
     };
+    const handleOpenDetails = () => {
+        const detailTarget = parameterPanelMode === "helicalScan"
+            ? "helical"
+            : parameterPanelMode === "tomographicScan"
+                ? "axial"
+                : "topogram";
+        localStorage.setItem(DETAIL_TARGET_STORAGE_KEY, detailTarget);
+        navigate("/protocol-detail");
+    };
+
+    useEffect(() => {
+        if (scoutDoseFromSession) {
+            setScoutDoseDisplayParams(scoutDoseFromSession);
+        }
+    }, [scoutDoseFromSession]);
 
     useEffect(() => {
         const resolvedPosition = parameterPanelMode === "tomographicScan"
@@ -342,8 +556,8 @@ const ScanConfirmScreen = ({
     }, [parameterPanelMode, resolvedTomographicScanDisplayParams.scanningDirection, resolvedHelicalScanDisplayParams.scanningDirection]);
 
     useEffect(() => {
-        setExpandedSeqId(activeSequenceId);
-    }, [activeSequenceId]);
+        setExpandedSeqId(resolvedActiveSequenceId);
+    }, [resolvedActiveSequenceId]);
 
     const toggleCheck = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
@@ -493,7 +707,7 @@ const ScanConfirmScreen = ({
                                 <div className="flex flex-col">
                                     {group.sequences.map(seq => {
                                         const isExpanded = expandedSeqId === seq.id;
-                                        const isActive = seq.id === activeSequenceId;
+                                        const isActive = seq.id === resolvedActiveSequenceId;
 
                                         return (
                                             <div key={seq.id} className="mb-1">
@@ -527,8 +741,8 @@ const ScanConfirmScreen = ({
                                                         <div className="absolute left-[7px] top-2 bottom-6 w-[1px] bg-[#B0C4DE]"></div>
 
                                                         {seq.steps.map((step, idx) => {
-                                                            const isActiveSequence = seq.id === activeSequenceId;
-                                                            const resolvedStepIndex = seq.id === "s1"
+                                                            const isActiveSequence = seq.id === resolvedActiveSequenceId;
+                                                            const resolvedStepIndex = inferSequenceType(seq) === "scout"
                                                                 ? activeScoutStepIndex
                                                                 : (activeSequenceStepIndex ?? 0);
                                                             const isStepCompleted = isActiveSequence && idx < resolvedStepIndex;
@@ -906,7 +1120,7 @@ const ScanConfirmScreen = ({
 
                         {/* Details Button */}
                         <div className="p-2 flex justify-center shrink-0">
-                            <button disabled={readOnlyMode} className={`h-[32px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border shadow-sm transition-all ${readOnlyMode ? "bg-[#F1F5F9] border-[#CBD5E1] text-[#94A3B8] cursor-not-allowed" : "bg-white border-[#B0C4DE] text-[#4D94FF] hover:bg-blue-50 active:scale-95"}`}>
+                            <button onClick={handleOpenDetails} disabled={readOnlyMode} className={`h-[32px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border shadow-sm transition-all ${readOnlyMode ? "bg-[#F1F5F9] border-[#CBD5E1] text-[#94A3B8] cursor-not-allowed" : "bg-white border-[#B0C4DE] text-[#4D94FF] hover:bg-blue-50 active:scale-95"}`}>
                                 <Info size={14} /> 参数详情
                             </button>
                         </div>
