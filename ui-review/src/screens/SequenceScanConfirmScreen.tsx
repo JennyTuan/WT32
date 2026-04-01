@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
 import { Hand, Move, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { fetchSelectedScanSession, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
+import type { ApiScanSessionAxialParam } from "../lib/scanSession";
+import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
 const SCOUT_SERIES = {
@@ -46,22 +49,34 @@ function clamp01(value: number) {
     return clamp(value, 0, 1);
 }
 
+function getHandleCursor(toolMode: "crop" | "pan", handle: DragHandle) {
+    if (toolMode === "pan") return "default";
+    if (handle === "top" || handle === "bottom") return "ns-resize";
+    if (handle === "left" || handle === "right") return "ew-resize";
+    return "move";
+}
+
 export function TomographicScoutViewport({
     onMeasurementChange,
+    initialMeasurements,
 }: {
     onMeasurementChange: (values: { scanLength: string; scoutFov: string }) => void;
+    initialMeasurements?: { scanLength?: string; scoutFov?: string };
 }) {
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const projectionRef = useRef<Uint8ClampedArray | null>(null);
     const metaRef = useRef<ProjectionMeta | null>(null);
+    const initializedCropRef = useRef(false);
     const dragStateRef = useRef<{
         handle: DragHandle;
+        pointerId: number;
         startX: number;
         startY: number;
         initialBox: CropBox;
     } | null>(null);
     const panStateRef = useRef<{
+        pointerId: number;
         startX: number;
         startY: number;
         initialOffsetX: number;
@@ -199,6 +214,19 @@ export function TomographicScoutViewport({
     }, []);
 
     useEffect(() => {
+        const meta = metaRef.current;
+        if (!meta || loadState !== "ready" || initializedCropRef.current) return;
+
+        const savedRange = loadScoutPositioningRange();
+        const baseCropBox = savedRange ? mapScoutRangeToCropBox(savedRange) : DEFAULT_SCOUT_CROP_BOX;
+        const scanLength = initialMeasurements?.scanLength ? Number(initialMeasurements.scanLength) : null;
+        const scoutFov = initialMeasurements?.scoutFov ? Number(initialMeasurements.scoutFov) : null;
+
+        setCropBox(applyMeasurementsToCropBox(baseCropBox, { scanLength, scoutFov }, meta));
+        initializedCropRef.current = true;
+    }, [initialMeasurements?.scanLength, initialMeasurements?.scoutFov, loadState]);
+
+    useEffect(() => {
         const viewport = viewportRef.current;
         const canvas = canvasRef.current;
         const pixels = projectionRef.current;
@@ -256,12 +284,12 @@ export function TomographicScoutViewport({
     }, [cropBox, onMeasurementChange]);
 
     useEffect(() => {
-        const handleMove = (event: MouseEvent) => {
+        const handleMove = (event: PointerEvent) => {
             const viewport = viewportRef.current;
             if (!viewport) return;
 
             const panState = panStateRef.current;
-            if (panState) {
+            if (panState && panState.pointerId === event.pointerId) {
                 setOffset({
                     x: panState.initialOffsetX + (event.clientX - panState.startX),
                     y: panState.initialOffsetY + (event.clientY - panState.startY),
@@ -270,7 +298,7 @@ export function TomographicScoutViewport({
             }
 
             const dragState = dragStateRef.current;
-            if (!dragState) return;
+            if (!dragState || dragState.pointerId !== event.pointerId) return;
 
             const rect = viewport.getBoundingClientRect();
             const dx = (event.clientX - dragState.startX) / rect.width;
@@ -306,16 +334,22 @@ export function TomographicScoutViewport({
             setCropBox(next);
         };
 
-        const handleUp = () => {
-            dragStateRef.current = null;
-            panStateRef.current = null;
+        const handleUp = (event: PointerEvent) => {
+            if (dragStateRef.current?.pointerId === event.pointerId) {
+                dragStateRef.current = null;
+            }
+            if (panStateRef.current?.pointerId === event.pointerId) {
+                panStateRef.current = null;
+            }
         };
 
-        window.addEventListener("mousemove", handleMove);
-        window.addEventListener("mouseup", handleUp);
+        window.addEventListener("pointermove", handleMove);
+        window.addEventListener("pointerup", handleUp);
+        window.addEventListener("pointercancel", handleUp);
         return () => {
-            window.removeEventListener("mousemove", handleMove);
-            window.removeEventListener("mouseup", handleUp);
+            window.removeEventListener("pointermove", handleMove);
+            window.removeEventListener("pointerup", handleUp);
+            window.removeEventListener("pointercancel", handleUp);
         };
     }, []);
 
@@ -328,10 +362,12 @@ export function TomographicScoutViewport({
         };
     }, [cropBox]);
 
-    const startPan = (event: React.MouseEvent<HTMLDivElement>) => {
+    const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
         if (toolMode !== "pan") return;
         event.preventDefault();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
         panStateRef.current = {
+            pointerId: event.pointerId,
             startX: event.clientX,
             startY: event.clientY,
             initialOffsetX: offset.x,
@@ -349,12 +385,14 @@ export function TomographicScoutViewport({
         setToolMode("crop");
     };
 
-    const startDrag = (handle: DragHandle) => (event: React.MouseEvent<HTMLDivElement>) => {
+    const startDrag = (handle: DragHandle) => (event: React.PointerEvent<HTMLDivElement>) => {
         if (toolMode === "pan") return;
         event.preventDefault();
         event.stopPropagation();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
         dragStateRef.current = {
             handle,
+            pointerId: event.pointerId,
             startX: event.clientX,
             startY: event.clientY,
             initialBox: cropBox,
@@ -368,9 +406,10 @@ export function TomographicScoutViewport({
                 className={`relative flex-1 min-w-0 rounded-l-lg bg-black overflow-hidden ${
                     toolMode === "pan" ? "cursor-grab" : "cursor-default"
                 }`}
-                onMouseDown={startPan}
+                onPointerDown={startPan}
+                style={{ touchAction: "none", cursor: toolMode === "pan" ? "grab" : "crosshair" }}
             >
-                <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+                <canvas ref={canvasRef} className="absolute inset-0 h-full w-full pointer-events-none" />
 
                 {loadState === "loading" && (
                     <div className="absolute inset-0 flex items-center justify-center bg-[#05080d]/80 text-[14px] font-bold text-white/70">
@@ -387,26 +426,43 @@ export function TomographicScoutViewport({
                 {loadState === "ready" && (
                     <>
                         <div
-                            className={`absolute border-2 border-[#4D94FF] bg-[#4D94FF]/8 shadow-[0_0_0_1px_rgba(77,148,255,0.2),0_0_24px_rgba(77,148,255,0.15)] ${
-                                toolMode === "pan" ? "cursor-default opacity-80" : "cursor-move"
-                            }`}
+                            className="absolute z-20 border-2 border-[#4D94FF] bg-[#4D94FF]/8 shadow-[0_0_0_1px_rgba(77,148,255,0.2),0_0_24px_rgba(77,148,255,0.15)] pointer-events-auto"
                             style={{
                                 left: `${cropBox.x * 100}%`,
                                 top: `${cropBox.y * 100}%`,
                                 width: `${cropBox.width * 100}%`,
                                 height: `${cropBox.height * 100}%`,
+                                cursor: getHandleCursor(toolMode, "move"),
+                                opacity: toolMode === "pan" ? 0.8 : 1,
+                                touchAction: "none",
                             }}
-                            onMouseDown={startDrag("move")}
+                            onPointerDown={startDrag("move")}
                         >
                             <div className="absolute inset-0 border border-white/20">
                                 <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/20" />
                                 <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-white/20" />
                             </div>
 
-                            <div className={`absolute -top-3 left-1/2 h-6 w-12 -translate-x-1/2 ${toolMode === "pan" ? "cursor-default" : "cursor-ns-resize"}`} onMouseDown={startDrag("top")} />
-                            <div className={`absolute -bottom-3 left-1/2 h-6 w-12 -translate-x-1/2 ${toolMode === "pan" ? "cursor-default" : "cursor-ns-resize"}`} onMouseDown={startDrag("bottom")} />
-                            <div className={`absolute left-0 top-1/2 h-12 w-6 -translate-x-1/2 -translate-y-1/2 ${toolMode === "pan" ? "cursor-default" : "cursor-ew-resize"}`} onMouseDown={startDrag("left")} />
-                            <div className={`absolute right-0 top-1/2 h-12 w-6 translate-x-1/2 -translate-y-1/2 ${toolMode === "pan" ? "cursor-default" : "cursor-ew-resize"}`} onMouseDown={startDrag("right")} />
+                            <div
+                                className="absolute -top-4 left-1/2 h-8 w-16 -translate-x-1/2 bg-transparent"
+                                style={{ cursor: getHandleCursor(toolMode, "top"), touchAction: "none" }}
+                                onPointerDown={startDrag("top")}
+                            />
+                            <div
+                                className="absolute -bottom-4 left-1/2 h-8 w-16 -translate-x-1/2 bg-transparent"
+                                style={{ cursor: getHandleCursor(toolMode, "bottom"), touchAction: "none" }}
+                                onPointerDown={startDrag("bottom")}
+                            />
+                            <div
+                                className="absolute left-0 top-1/2 h-16 w-8 -translate-x-1/2 -translate-y-1/2 bg-transparent"
+                                style={{ cursor: getHandleCursor(toolMode, "left"), touchAction: "none" }}
+                                onPointerDown={startDrag("left")}
+                            />
+                            <div
+                                className="absolute right-0 top-1/2 h-16 w-8 translate-x-1/2 -translate-y-1/2 bg-transparent"
+                                style={{ cursor: getHandleCursor(toolMode, "right"), touchAction: "none" }}
+                                onPointerDown={startDrag("right")}
+                            />
 
                             <div className="absolute -right-3 -top-3 flex h-6 w-6 items-center justify-center rounded-full border border-[#93C5FD] bg-[#0F172A] text-[#93C5FD] shadow-lg">
                                 <Move size={12} />
@@ -472,6 +528,59 @@ export function TomographicScoutViewport({
 
 const SequenceScanConfirmScreen = () => {
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
+    const [axialParamId, setAxialParamId] = useState<number | null>(null);
+    const updateTimerRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadSessionDefaults = async () => {
+            try {
+                const scanSession = await fetchSelectedScanSession();
+                const axialParam = scanSession?.series.find((series) => series.series_type === "axial")?.axial_param as ApiScanSessionAxialParam | null | undefined;
+                if (!axialParam || cancelled) return;
+
+                setAxialParamId(axialParam.id);
+                setMeasurements({
+                    scanLength: String(axialParam.scan_length),
+                    scoutFov: String(axialParam.fov),
+                });
+            } catch (error) {
+                console.error("Failed to load axial scan session defaults.", error);
+            }
+        };
+
+        void loadSessionDefaults();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!axialParamId) return;
+        const scanLength = Number(measurements.scanLength);
+        const scoutFov = Number(measurements.scoutFov);
+        if (!Number.isFinite(scanLength) || !Number.isFinite(scoutFov)) return;
+
+        if (updateTimerRef.current !== null) {
+            window.clearTimeout(updateTimerRef.current);
+        }
+
+        updateTimerRef.current = window.setTimeout(() => {
+            void updateSelectedScanSessionAxialParam(axialParamId, {
+                scan_length: Number(scanLength.toFixed(1)),
+                fov: Number(scoutFov.toFixed(1)),
+            }).catch((error) => {
+                console.error("Failed to persist axial crop measurements.", error);
+            });
+        }, 180);
+
+        return () => {
+            if (updateTimerRef.current !== null) {
+                window.clearTimeout(updateTimerRef.current);
+            }
+        };
+    }, [axialParamId, measurements.scanLength, measurements.scoutFov]);
 
     return (
         <ScanConfirmScreen
@@ -479,7 +588,7 @@ const SequenceScanConfirmScreen = () => {
             activeSequenceStepIndex={0}
             parameterPanelMode="tomographicScan"
             tomographicParamOverrides={measurements}
-            rightViewportContent={<TomographicScoutViewport onMeasurementChange={setMeasurements} />}
+            rightViewportContent={<TomographicScoutViewport onMeasurementChange={setMeasurements} initialMeasurements={measurements} />}
             nextRoute="/image-viewer"
         />
     );

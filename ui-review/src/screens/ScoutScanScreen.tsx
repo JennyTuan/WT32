@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
+import { saveScoutPositioningRange } from "../lib/scoutPositioningSession";
 import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 
@@ -830,6 +831,8 @@ const ScoutScanScreen = ({
         const start = Number(startPos);
         const end = Number(endPos);
         if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+
+        saveScoutPositioningRange({ start, end });
 
         await updateSelectedScanSessionTopogramParam(topogramParamId, {
             scan_length: Number(Math.abs(end - start).toFixed(2)),

@@ -11,6 +11,9 @@
     "preview": "vite preview --port 4174"
   },
   "dependencies": {
+    "@cornerstonejs/core": "^4.20.1",
+    "@cornerstonejs/dicom-image-loader": "^4.20.1",
+    "@cornerstonejs/tools": "^4.20.1",
     "dexie": "^4.3.0",
     "dexie-react-hooks": "^4.2.0",
     "dicom-parser": "^1.8.21",
@@ -22,6 +25,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@originjs/vite-plugin-commonjs": "^1.0.3",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

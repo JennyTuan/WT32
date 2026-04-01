@@ -53,6 +53,7 @@ type ScanConfirmScreenProps = {
     readOnlyMode?: boolean;
     onExecuteScan?: () => void;
     nextRoute?: string;
+    allowBackNavigation?: boolean;
 };
 
 type ScoutDisplayParams = {
@@ -364,6 +365,7 @@ const ScanConfirmScreen = ({
     readOnlyMode = false,
     onExecuteScan,
     nextRoute = "/scout-execute",
+    allowBackNavigation = true,
 }: ScanConfirmScreenProps) => {
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
@@ -1142,7 +1144,7 @@ const ScanConfirmScreen = ({
             {/* 3. Footer (Nav Buttons) */}
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
                 <div className="flex-1">
-                    <button onClick={() => navigate(-1)} disabled={readOnlyMode} className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 shadow-sm transition-all uppercase text-[13px] ${readOnlyMode ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#4D94FF] border-[#4D94FF] hover:bg-solid active:scale-95"}`}>
+                    <button onClick={() => navigate(-1)} disabled={readOnlyMode || !allowBackNavigation} className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 shadow-sm transition-all uppercase text-[13px] ${readOnlyMode || !allowBackNavigation ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#4D94FF] border-[#4D94FF] hover:bg-solid active:scale-95"}`}>
                         <ChevronLeft size={20} /> 上一步
                     </button>
                 </div>

@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
+import DicomViewer from "../components/DicomViewer";
 
 type ImageItem = { id: string; name: string };
 type Series = {
@@ -247,6 +248,17 @@ const REAL_LUNG_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
 };
 
+const getSeriesDicomUrl = (sliceIndex: number) =>
+    `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
+
+const mapCornerstoneTool = (toolMode: "pan" | "wl" | "measure" | "annotate") => {
+    if (toolMode === "wl") return "window";
+    if (toolMode === "measure") return "ruler";
+    return "pan";
+};
+
+const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count / 2));
+
 const ViewScreen = () => {
     const navigate = useNavigate();
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
@@ -364,6 +376,22 @@ const ViewScreen = () => {
         return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
     })();
     const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
+    const seriesImageUrls = useMemo(
+        () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index)),
+        [totalSlices]
+    );
+    const handleSeriesSelect = useCallback((seriesId: string) => {
+        const nextSeries = seriesList.find((series) => series.id === seriesId);
+        setSelectedSeriesId(seriesId);
+        setSliceIndex(getSeriesMidSliceIndex(nextSeries?.count ?? REAL_LUNG_SERIES.count));
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+        setMeasures([]);
+        setAnnotations([]);
+        setDraftMeasure(null);
+        measureStartRef.current = null;
+        dragRef.current = { dragging: false, x: 0, y: 0 };
+    }, [seriesList]);
     const buildVolumeProjection = (
         volume: VolumeData,
         mode: string,
@@ -900,7 +928,7 @@ const ViewScreen = () => {
                 const parsedWw = Number.isFinite(wwFromTag) && wwFromTag > 1 ? wwFromTag : 350;
                 const parsedWl = Number.isFinite(wcFromTag) ? wcFromTag : 45;
                 defaultWindowRef.current = { ww: parsedWw, wl: parsedWl };
-                if (sliceIndex === Math.floor(REAL_LUNG_SERIES.count / 2)) {
+                if (sliceIndex === getSeriesMidSliceIndex(selectedSeries.count)) {
                     setWw(parsedWw);
                     setWl(parsedWl);
                 }
@@ -935,7 +963,7 @@ const ViewScreen = () => {
                     thickness: thickness === "N/A" ? thickness : `${thickness} mm`,
                     rows,
                     cols,
-                    count: REAL_LUNG_SERIES.count,
+                    count: selectedSeries.count,
                 });
             } catch (error) {
                 // Keep UI alive if one slice fails.
@@ -1338,7 +1366,7 @@ const ViewScreen = () => {
                                             <button
                                                 key={series.id}
                                                 onClick={() => {
-                                                    setSelectedSeriesId(series.id);
+                                                    handleSeriesSelect(series.id);
                                                 }}
                                                 className={`w-full text-left mb-1.5 rounded-md border px-3 py-2 transition-all ${active
                                                     ? "bg-[#E3F2FD] border-[#90CAF9]"
@@ -1510,6 +1538,7 @@ const ViewScreen = () => {
                             ref={viewportRef}
                             className={`${imageMode === "3D" ? currentLayoutSpec.panels.axial : "flex-1 min-w-0 bg-black overflow-hidden relative"} ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : toolMode === "pan" ? "cursor-grab" : "cursor-default"}`}
                             onWheel={(e) => {
+                                if (imageMode !== "3D") return;
                                 e.preventDefault();
                                 if (e.ctrlKey) {
                                     setZoom((prev) => Math.min(4, Math.max(0.3, prev + (e.deltaY > 0 ? -0.05 : 0.05))));
@@ -1521,162 +1550,175 @@ const ViewScreen = () => {
                                 }
                             }}
                         >
-                            <canvas
-                                ref={canvasRef}
-                                className="absolute inset-0 w-full h-full"
-                                onMouseDown={(e) => {
-                                    e.stopPropagation();
-                                    if (e.button !== 0) return;
-                                    if (toolMode === "measure") {
-                                        const point = screenPointInViewport(e.clientX, e.clientY);
-                                        if (!point) return;
-                                        measureStartRef.current = point;
-                                        setDraftMeasure({
-                                            sx1: point.x,
-                                            sy1: point.y,
-                                            sx2: point.x,
-                                            sy2: point.y,
-                                            slice: sliceIndex,
-                                        });
-                                        return;
-                                    }
-                                    if (toolMode === "annotate") {
-                                        const point = screenToImage(e.clientX, e.clientY);
-                                        if (!point) return;
-                                        const noteCount = annotations.filter((a) => a.slice === sliceIndex && a.kind === "text").length;
-                                        setAnnotations((prev) => [
-                                            ...prev,
-                                            {
-                                                id: `anno-text-${Date.now()}-${Math.random()}`,
-                                                kind: "text",
-                                                slice: sliceIndex,
-                                                x: point.x,
-                                                y: point.y,
-                                                text: `Note ${noteCount + 1}`,
-                                            },
-                                        ]);
-                                        return;
-                                    }
-                                    dragRef.current = { dragging: true, x: e.clientX, y: e.clientY };
-                                }}
-                                onMouseMove={(e) => {
-                                    e.stopPropagation();
-                                    if (toolMode === "measure" && measureStartRef.current) {
-                                        const point = screenPointInViewport(e.clientX, e.clientY);
-                                        if (!point) return;
-                                        setDraftMeasure((prev) => (prev ? { ...prev, sx2: point.x, sy2: point.y } : null));
-                                        return;
-                                    }
-                                    if (!dragRef.current.dragging) return;
-                                    const dx = e.clientX - dragRef.current.x;
-                                    const dy = e.clientY - dragRef.current.y;
-                                    dragRef.current = { dragging: true, x: e.clientX, y: e.clientY };
-                                    if (toolMode === "pan") {
-                                        setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-                                    } else if (toolMode === "wl") {
-                                        setWl((prev) => prev + dx * 0.8);
-                                        setWw((prev) => Math.max(1, prev + dy * 1.2));
-                                    }
-                                }}
-                                onMouseUp={(e) => {
-                                    e.stopPropagation();
-                                    if (toolMode === "measure" && draftMeasure) {
-                                        const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
-                                        const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
-                                        const dist = (distPx / pxPerImagePixel) * pixelSpacingValue;
-                                        if (dist > 1) {
-                                            setMeasures((prev) => [
-                                                ...prev,
-                                                {
-                                                    id: `measure-${Date.now()}-${Math.random()}`,
-                                                    slice: draftMeasure.slice,
-                                                    sx1: draftMeasure.sx1,
-                                                    sy1: draftMeasure.sy1,
-                                                    sx2: draftMeasure.sx2,
-                                                    sy2: draftMeasure.sy2,
-                                                },
-                                            ]);
-                                        }
-                                        setDraftMeasure(null);
-                                        measureStartRef.current = null;
-                                        return;
-                                    }
-                                    dragRef.current.dragging = false;
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.stopPropagation();
-                                    if (toolMode === "measure" && draftMeasure) {
-                                        const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
-                                        const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
-                                        const dist = (distPx / pxPerImagePixel) * pixelSpacingValue;
-                                        if (dist > 1) {
-                                            setMeasures((prev) => [
-                                                ...prev,
-                                                {
-                                                    id: `measure-${Date.now()}-${Math.random()}`,
-                                                    slice: draftMeasure.slice,
-                                                    sx1: draftMeasure.sx1,
-                                                    sy1: draftMeasure.sy1,
-                                                    sx2: draftMeasure.sx2,
-                                                    sy2: draftMeasure.sy2,
-                                                },
-                                            ]);
-                                        }
-                                        setDraftMeasure(null);
-                                        measureStartRef.current = null;
-                                    }
-                                    dragRef.current.dragging = false;
-                                }}
-                            />
-                            <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                                {measures
-                                    .filter((a) => a.slice === sliceIndex)
-                                    .map((a) => {
-                                        const mx = (a.sx1 + a.sx2) / 2;
-                                        const my = (a.sy1 + a.sy2) / 2;
-                                        const distPx = Math.hypot(a.sx2 - a.sx1, a.sy2 - a.sy1);
-                                        const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
-                                        const mm = (distPx / pxPerImagePixel) * pixelSpacingValue;
-                                        return (
-                                            <g key={a.id}>
-                                                <line x1={a.sx1} y1={a.sy1} x2={a.sx2} y2={a.sy2} stroke="#FF4D4F" strokeWidth="2" />
-                                                <circle cx={a.sx1} cy={a.sy1} r="2.8" fill="#FF4D4F" />
-                                                <circle cx={a.sx2} cy={a.sy2} r="2.8" fill="#FF4D4F" />
-                                                <rect x={mx - 26} y={my - 13} width="52" height="15" rx="3" fill="rgba(0,0,0,0.72)" />
-                                                <text x={mx} y={my - 2} fill="#FFEAEA" fontSize="10" fontFamily="monospace" textAnchor="middle">
-                                                    {mm.toFixed(1)} mm
-                                                </text>
-                                            </g>
-                                        );
-                                    })}
-                                {annotations
-                                    .filter((a): a is TextAnnotation => a.slice === sliceIndex && a.kind === "text")
-                                    .map((a) => {
-                                        const p = imageToScreen(a.x, a.y);
-                                        return (
-                                            <g key={a.id}>
-                                                <circle cx={p.x} cy={p.y} r="3" fill="#FFD54F" />
-                                                <rect x={p.x + 6} y={p.y - 12} width="58" height="16" rx="3" fill="rgba(0,0,0,0.75)" />
-                                                <text x={p.x + 35} y={p.y - 1} fill="#FFF8E1" fontSize="10" fontFamily="monospace" textAnchor="middle">
-                                                    {a.text}
-                                                </text>
-                                            </g>
-                                        );
-                                    })}
-                                {draftMeasure && (() => {
-                                    const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
-                                    const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
-                                    const mm = (distPx / pxPerImagePixel) * pixelSpacingValue;
-                                    return (
-                                        <g>
-                                            <line x1={draftMeasure.sx1} y1={draftMeasure.sy1} x2={draftMeasure.sx2} y2={draftMeasure.sy2} stroke="#FF4D4F" strokeWidth="2" strokeDasharray="4 3" />
-                                            <text x={(draftMeasure.sx1 + draftMeasure.sx2) / 2} y={(draftMeasure.sy1 + draftMeasure.sy2) / 2 - 6} fill="#FFEAEA" fontSize="10" fontFamily="monospace" textAnchor="middle">
-                                                {mm.toFixed(1)} mm
-                                            </text>
-                                        </g>
-                                    );
-                                })()}
-                            </svg>
+                            {imageMode === "2D" ? (
+                                <DicomViewer
+                                    imageUrls={seriesImageUrls}
+                                    currentImageIndex={clampSliceIndex(sliceIndex)}
+                                    onImageIndexChange={setSliceIndex}
+                                    activeTool={mapCornerstoneTool(toolMode)}
+                                    windowCenter={wl}
+                                    windowWidth={ww}
+                                />
+                            ) : (
+                                <>
+                                    <canvas
+                                        ref={canvasRef}
+                                        className="absolute inset-0 w-full h-full"
+                                        onMouseDown={(e) => {
+                                            e.stopPropagation();
+                                            if (e.button !== 0) return;
+                                            if (toolMode === "measure") {
+                                                const point = screenPointInViewport(e.clientX, e.clientY);
+                                                if (!point) return;
+                                                measureStartRef.current = point;
+                                                setDraftMeasure({
+                                                    sx1: point.x,
+                                                    sy1: point.y,
+                                                    sx2: point.x,
+                                                    sy2: point.y,
+                                                    slice: sliceIndex,
+                                                });
+                                                return;
+                                            }
+                                            if (toolMode === "annotate") {
+                                                const point = screenToImage(e.clientX, e.clientY);
+                                                if (!point) return;
+                                                const noteCount = annotations.filter((a) => a.slice === sliceIndex && a.kind === "text").length;
+                                                setAnnotations((prev) => [
+                                                    ...prev,
+                                                    {
+                                                        id: `anno-text-${Date.now()}-${Math.random()}`,
+                                                        kind: "text",
+                                                        slice: sliceIndex,
+                                                        x: point.x,
+                                                        y: point.y,
+                                                        text: `Note ${noteCount + 1}`,
+                                                    },
+                                                ]);
+                                                return;
+                                            }
+                                            dragRef.current = { dragging: true, x: e.clientX, y: e.clientY };
+                                        }}
+                                        onMouseMove={(e) => {
+                                            e.stopPropagation();
+                                            if (toolMode === "measure" && measureStartRef.current) {
+                                                const point = screenPointInViewport(e.clientX, e.clientY);
+                                                if (!point) return;
+                                                setDraftMeasure((prev) => (prev ? { ...prev, sx2: point.x, sy2: point.y } : null));
+                                                return;
+                                            }
+                                            if (!dragRef.current.dragging) return;
+                                            const dx = e.clientX - dragRef.current.x;
+                                            const dy = e.clientY - dragRef.current.y;
+                                            dragRef.current = { dragging: true, x: e.clientX, y: e.clientY };
+                                            if (toolMode === "pan") {
+                                                setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+                                            } else if (toolMode === "wl") {
+                                                setWl((prev) => prev + dx * 0.8);
+                                                setWw((prev) => Math.max(1, prev + dy * 1.2));
+                                            }
+                                        }}
+                                        onMouseUp={(e) => {
+                                            e.stopPropagation();
+                                            if (toolMode === "measure" && draftMeasure) {
+                                                const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
+                                                const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
+                                                const dist = (distPx / pxPerImagePixel) * pixelSpacingValue;
+                                                if (dist > 1) {
+                                                    setMeasures((prev) => [
+                                                        ...prev,
+                                                        {
+                                                            id: `measure-${Date.now()}-${Math.random()}`,
+                                                            slice: draftMeasure.slice,
+                                                            sx1: draftMeasure.sx1,
+                                                            sy1: draftMeasure.sy1,
+                                                            sx2: draftMeasure.sx2,
+                                                            sy2: draftMeasure.sy2,
+                                                        },
+                                                    ]);
+                                                }
+                                                setDraftMeasure(null);
+                                                measureStartRef.current = null;
+                                                return;
+                                            }
+                                            dragRef.current.dragging = false;
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.stopPropagation();
+                                            if (toolMode === "measure" && draftMeasure) {
+                                                const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
+                                                const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
+                                                const dist = (distPx / pxPerImagePixel) * pixelSpacingValue;
+                                                if (dist > 1) {
+                                                    setMeasures((prev) => [
+                                                        ...prev,
+                                                        {
+                                                            id: `measure-${Date.now()}-${Math.random()}`,
+                                                            slice: draftMeasure.slice,
+                                                            sx1: draftMeasure.sx1,
+                                                            sy1: draftMeasure.sy1,
+                                                            sx2: draftMeasure.sx2,
+                                                            sy2: draftMeasure.sy2,
+                                                        },
+                                                    ]);
+                                                }
+                                                setDraftMeasure(null);
+                                                measureStartRef.current = null;
+                                            }
+                                            dragRef.current.dragging = false;
+                                        }}
+                                    />
+                                    <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                                        {measures
+                                            .filter((a) => a.slice === sliceIndex)
+                                            .map((a) => {
+                                                const mx = (a.sx1 + a.sx2) / 2;
+                                                const my = (a.sy1 + a.sy2) / 2;
+                                                const distPx = Math.hypot(a.sx2 - a.sx1, a.sy2 - a.sy1);
+                                                const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
+                                                const mm = (distPx / pxPerImagePixel) * pixelSpacingValue;
+                                                return (
+                                                    <g key={a.id}>
+                                                        <line x1={a.sx1} y1={a.sy1} x2={a.sx2} y2={a.sy2} stroke="#FF4D4F" strokeWidth="2" />
+                                                        <circle cx={a.sx1} cy={a.sy1} r="2.8" fill="#FF4D4F" />
+                                                        <circle cx={a.sx2} cy={a.sy2} r="2.8" fill="#FF4D4F" />
+                                                        <rect x={mx - 26} y={my - 13} width="52" height="15" rx="3" fill="rgba(0,0,0,0.72)" />
+                                                        <text x={mx} y={my - 2} fill="#FFEAEA" fontSize="10" fontFamily="monospace" textAnchor="middle">
+                                                            {mm.toFixed(1)} mm
+                                                        </text>
+                                                    </g>
+                                                );
+                                            })}
+                                        {annotations
+                                            .filter((a): a is TextAnnotation => a.slice === sliceIndex && a.kind === "text")
+                                            .map((a) => {
+                                                const p = imageToScreen(a.x, a.y);
+                                                return (
+                                                    <g key={a.id}>
+                                                        <circle cx={p.x} cy={p.y} r="3" fill="#FFD54F" />
+                                                        <rect x={p.x + 6} y={p.y - 12} width="58" height="16" rx="3" fill="rgba(0,0,0,0.75)" />
+                                                        <text x={p.x + 35} y={p.y - 1} fill="#FFF8E1" fontSize="10" fontFamily="monospace" textAnchor="middle">
+                                                            {a.text}
+                                                        </text>
+                                                    </g>
+                                                );
+                                            })}
+                                        {draftMeasure && (() => {
+                                            const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
+                                            const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
+                                            const mm = (distPx / pxPerImagePixel) * pixelSpacingValue;
+                                            return (
+                                                <g>
+                                                    <line x1={draftMeasure.sx1} y1={draftMeasure.sy1} x2={draftMeasure.sx2} y2={draftMeasure.sy2} stroke="#FF4D4F" strokeWidth="2" strokeDasharray="4 3" />
+                                                    <text x={(draftMeasure.sx1 + draftMeasure.sx2) / 2} y={(draftMeasure.sy1 + draftMeasure.sy2) / 2 - 6} fill="#FFEAEA" fontSize="10" fontFamily="monospace" textAnchor="middle">
+                                                        {mm.toFixed(1)} mm
+                                                    </text>
+                                                </g>
+                                            );
+                                        })()}
+                                    </svg>
+                                </>
+                            )}
                             <div className="absolute top-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35] pointer-events-none">
                                 {imageMode === "3D" && (
                                     <div className="mb-2 inline-flex h-[18px] items-center rounded-full border border-white/10 bg-black/55 px-2 text-[9px] font-black uppercase tracking-[0.18em] text-[#93C5FD]">
@@ -1689,7 +1731,7 @@ const ViewScreen = () => {
                             </div>
                             <div className="absolute top-2 right-2 text-[10px] text-[#CFD8DC] font-mono text-right leading-[1.35] pointer-events-none">
                                 <div className="font-bold">{meta.seriesDescription}</div>
-                                <div>Image {sliceIndex + 1}/{meta.count}</div>
+                                <div>Image {sliceIndex + 1}/{selectedSeries.count}</div>
                                 <div>KV {meta.kvp} | mAs {meta.mas}</div>
                             </div>
                             <div className="absolute bottom-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35] pointer-events-none">
@@ -1698,7 +1740,7 @@ const ViewScreen = () => {
                                 <div>{meta.rows} x {meta.cols} | Zoom {zoom.toFixed(2)}x</div>
                             </div>
                             <div className="absolute bottom-2 right-2 text-[10px] text-[#CFD8DC] font-mono text-right leading-[1.35] pointer-events-none">
-                                <div>Slice {sliceIndex + 1}/{meta.count} | Thick {meta.thickness}</div>
+                                <div>Slice {sliceIndex + 1}/{selectedSeries.count} | Thick {meta.thickness}</div>
                                 <div>Location {meta.sliceLocation}</div>
                                 <div>{meta.institution} | {meta.manufacturer}</div>
                             </div>
