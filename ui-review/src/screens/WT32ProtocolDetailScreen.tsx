@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
     Plus,
     ChevronRight,
@@ -545,6 +545,8 @@ function DoseParamsPanel({ protocol }: { protocol: ApiProtocolDetail | null }) {
 
 export default function WT32ProtocolDetailScreen() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const isNewMode = searchParams.get("mode") === "new";
     const [protocol, setProtocol] = useState<ApiProtocolDetail | null>(null);
     const [selectedPos, setSelectedPos] = useState("HFS");
     const [selection, setSelection] = useState<Selection>({ type: "basic" });
@@ -585,6 +587,20 @@ export default function WT32ProtocolDetailScreen() {
     };
 
     useEffect(() => {
+        if (isNewMode) {
+            setProtocol({
+                id: 0,
+                name: "",
+                body_part: "",
+                age_group: "adult",
+                patient_weight: "",
+                patient_position: "HFS",
+                table_direction: "",
+                series: [],
+            });
+            return;
+        }
+
         let cancelled = false;
 
         const loadProtocolSource = async () => {
@@ -614,7 +630,7 @@ export default function WT32ProtocolDetailScreen() {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [isNewMode]);
 
     const series = protocol?.series ?? [];
     const topograms = series.filter((item) => item.series_type === "topogram");
@@ -778,11 +794,12 @@ export default function WT32ProtocolDetailScreen() {
                     <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
                         <div className="p-3 bg-[#F8FAFC] border border-[#EEF2F9] rounded-md">
                             <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                <span className="font-bold text-sm text-[#37474F]">{protocol?.name ?? "-"}</span>
-                                {protocol?.body_part && (
+                                <span className="font-bold text-sm text-[#37474F]">{isNewMode ? "新建协议" : (protocol?.name ?? "-")}</span>
+                                {!isNewMode && protocol?.body_part && (
                                     <span className="bg-[#EEF2F9] text-[#546E7A] text-[10px] px-1.5 py-0.5 rounded">{protocol.body_part}</span>
                                 )}
-                                <span className="bg-[#EEF2F9] text-[#546E7A] text-[10px] px-1.5 py-0.5 rounded">{ageLabel}</span>
+                                {!isNewMode && <span className="bg-[#EEF2F9] text-[#546E7A] text-[10px] px-1.5 py-0.5 rounded">{ageLabel}</span>}
+                                {isNewMode && <span className="bg-[#E3F2FD] text-[#1E88E5] text-[10px] px-1.5 py-0.5 rounded font-bold">新建</span>}
                             </div>
                             <div className="flex items-start gap-2 text-[#4D94FF]">
                                 <Info size={12} className="shrink-0 mt-0.5" />

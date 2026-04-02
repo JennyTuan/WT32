@@ -6,7 +6,14 @@
       "Bash(curl -s http://localhost:8001/api/protocols/)",
       "Bash(curl -s -I \"http://localhost:8001/api/protocols/\" -H \"Origin: http://localhost:5173\")",
       "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); print\\(set\\(p[''''body_part''''] for p in data\\)\\)\")",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(xargs grep:*)",
+      "Bash(xargs ls:*)",
+      "Bash(grep -n \"rounded-\\\\|border\\\\|shadow\\\\|shell\\\\|frame\" /c/CT-Prototype-backup/CT-Prototype/ui-review/src/components/*.tsx)",
+      "Bash(netstat -ano)",
+      "Bash(wmic process:*)",
+      "Bash(npx tsc:*)",
+      "Bash(grep -E \"\\\\.\\(json|tsx|html|config|ts\\)$|^d\")"
     ]
   }
 }

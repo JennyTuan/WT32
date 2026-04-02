@@ -102,19 +102,19 @@ npm run dev
 ### 访问地址
 | 服务 | 地址 |
 |------|------|
-| 前端页面 | http://localhost:5174 |
+| 前端页面 | http://localhost:5175 |
 | 后端 API | http://localhost:8000 |
 | API 文档（自动生成） | http://localhost:8000/docs |
 
 ### ⚠️ 已知问题：CORS 配置与实际端口不匹配
 `backend/main.py` 中 CORS 白名单为 `localhost:3000` 和 `localhost:5173`，
-但前端实际运行在 **5174**。如遇跨域报错，需将 `5174` 加入 `main.py` 的 `allow_origins`：
+但前端实际运行在 **5175**。如遇跨域报错，需将 `5175` 加入 `main.py` 的 `allow_origins`：
 ```python
 allow_origins=[
     "http://localhost:3000",
     "http://localhost:5173",
-    "http://localhost:5174",   # ← 需要添加
-    "http://127.0.0.1:5174",   # ← 需要添加
+    "http://localhost:5175",   # ← 需要添加
+    "http://127.0.0.1:5175",   # ← 需要添加
 ]
 ```
 
@@ -306,7 +306,7 @@ WS  /ws/scan-control
 
 ## 当前已知问题 / 待办
 
-1. **CORS 端口未匹配**：后端白名单缺少 `5174`，可能导致 API 请求被浏览器拦截
+1. **CORS 端口未匹配**：后端白名单缺少 `5175`，可能导致 API 请求被浏览器拦截
 2. **前端 API 调用未全部使用 .env 变量**：部分组件可能仍硬编码 `localhost:8000`
 3. **WebSocket 为模拟实现**：`scan_ws.py` 发送的是随机模拟数据，非真实设备数据
 4. **app.db 已纳入版本控制**：数据库文件被提交进 git，团队协作时可能产生冲突，建议加入 `.gitignore`

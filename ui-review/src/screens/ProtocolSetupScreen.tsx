@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -612,7 +612,7 @@ type ProtocolSetupScreenProps = {
 
 const API_BASE_URL = (
     (import.meta.env.VITE_API_BASE_URL as string | undefined)
-    ?? (import.meta.env.DEV ? "http://127.0.0.1:8001" : "")
+    ?? (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")
 ).replace(/\/$/, "");
 
 const buildApiUrl = (path: string) => {
@@ -626,7 +626,7 @@ const isSupportedPosition = (value: string): value is "HFS" | "FFS" | "HFP" | "F
 const fetchProtocolCatalogWithFallback = async () => {
     const candidates = API_BASE_URL
         ? [buildApiUrl("/api/protocols/catalog"), "/api/protocols/catalog"]
-        : ["/api/protocols/catalog", "http://127.0.0.1:8001/api/protocols/catalog", "http://127.0.0.1:8000/api/protocols/catalog"];
+        : ["/api/protocols/catalog", "http://127.0.0.1:8000/api/protocols/catalog"];
 
     let lastError: Error | null = null;
 
@@ -863,6 +863,30 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
     const [scanPlans, setScanPlans] = useState<UiPlan[]>(() => buildPlansFromIds(selectedProtocolIds));
 
+    // 本地修改追踪（复制/删除），不受 useEffect 重建覆盖
+    const localEditsRef = useRef<{
+        copiesBySourceSeqId: Record<string, UiSequence[]>;  // 源序列ID → 副本列表
+        copiedPlans: UiPlan[];                               // 整计划副本
+        excludedSeqIds: Set<string>;                         // 被删除的原始序列 ID
+    }>({ copiesBySourceSeqId: {}, copiedPlans: [], excludedSeqIds: new Set() });
+    const [localEditsTrigger, setLocalEditsTrigger] = useState(0);
+
+    const applyLocalEdits = useCallback((basePlans: UiPlan[]): UiPlan[] => {
+        const edits = localEditsRef.current;
+        const merged = basePlans.map((plan) => {
+            const newSeqs: UiSequence[] = [];
+            for (const seq of plan.sequences) {
+                if (edits.excludedSeqIds.has(seq.id)) continue; // 跳过被删除的
+                newSeqs.push(seq);
+                // 在源序列后面插入它的副本
+                const copies = edits.copiesBySourceSeqId[seq.id];
+                if (copies) newSeqs.push(...copies);
+            }
+            return { ...plan, sequences: newSeqs };
+        });
+        return [...merged, ...edits.copiedPlans];
+    }, []);
+
     useEffect(() => {
         if (protocolSummaries.length === 0) {
             const timer = setTimeout(() => {
@@ -874,7 +898,8 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         }
 
         const nextSelectedIds = selectedProtocolIds.filter((id) => Boolean(protocolSummaryMap[id]));
-        const nextPlans = buildPlansFromIds(nextSelectedIds);
+        const basePlans = buildPlansFromIds(nextSelectedIds);
+        const nextPlans = applyLocalEdits(basePlans);
         const nextSelectedSeqId = nextPlans.flatMap((plan) => plan.sequences)[0]?.id || "";
 
         if (
@@ -895,7 +920,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 nextPlans.some((plan: UiPlan) => plan.sequences.some((sequence: UiSequence) => sequence.id === current)) ? current : nextSelectedSeqId
             );
         }
-    }, [protocolSummaryMap, protocolSummaries.length, selectedProtocolIds, buildPlansFromIds]);
+    }, [protocolSummaryMap, protocolSummaries.length, selectedProtocolIds, buildPlansFromIds, localEditsTrigger, applyLocalEdits]);
 
     const openScanSession = useCallback(async (protocolId: number, route: "/protocol-detail" | "/scout-scan") => {
         const protocolSummary = protocolSummaryMap[protocolId];
@@ -944,6 +969,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         const nextIds = isSelected
             ? selectedProtocolIds.filter((id) => id !== protocolId)
             : [...selectedProtocolIds, protocolId];
+        // 新选时清除该协议的 session 缓存，确保 buildPlansFromIds 使用出厂协议数据
+        if (!isSelected) {
+            setScanSessionsByProtocolId((prev) => {
+                const next = { ...prev };
+                delete next[protocolId];
+                return next;
+            });
+        }
         setSelectedProtocolIds(nextIds);
         setCollapsedPlanIds([]);
         setCheckedPlanIds([]);
@@ -951,7 +984,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         setSelectedReconIndex(0);
         setPlanListOpen(true);
 
-        const nextPlans = buildPlansFromIds(nextIds);
+        const nextPlans = applyLocalEdits(buildPlansFromIds(nextIds));
         setScanPlans(nextPlans);
         setSelectedSeqId(nextPlans.flatMap((p) => p.sequences)[0]?.id || "");
     };
@@ -983,6 +1016,54 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const handleCopyClick = () => {
         if (checkedSeqIds.length === 0 && checkedPlanIds.length === 0) return;
 
+        const edits = localEditsRef.current;
+        let handled = false;
+
+        scanPlans.forEach((plan) => {
+            if (plan.sourceSessionId) return; // session 型走后端逻辑
+
+            if (checkedPlanIds.includes(plan.id)) {
+                // 整个计划复制 → 独立新计划
+                const newPlanId = `copy-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                edits.copiedPlans.push({
+                    ...plan,
+                    id: newPlanId,
+                    title: `${plan.title} 副本`,
+                    sequences: plan.sequences.map((seq) => ({
+                        ...seq,
+                        id: `${newPlanId}-${seq.id}`,
+                        sourceSeriesId: undefined,
+                    })),
+                    sourceSessionId: undefined,
+                });
+                handled = true;
+            } else {
+                // 序列粒度复制 → 插入源序列正下方
+                const seqsToCopy = plan.sequences.filter((seq) => checkedSeqIds.includes(seq.id));
+                for (const seq of seqsToCopy) {
+                    const copy: UiSequence = {
+                        ...seq,
+                        id: `copy-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                        name: `${seq.name} 副本`,
+                        sourceSeriesId: undefined,
+                    };
+                    edits.copiesBySourceSeqId[seq.id] = [
+                        ...(edits.copiesBySourceSeqId[seq.id] || []),
+                        copy,
+                    ];
+                    handled = true;
+                }
+            }
+        });
+
+        if (handled) {
+            setCheckedPlanIds([]);
+            setCheckedSeqIds([]);
+            setLocalEditsTrigger((prev) => prev + 1);
+            return;
+        }
+
+        // session 型：调用后端复制接口
         const duplicateIds = new Set<number>();
         scanPlans.forEach((plan) => {
             if (!plan.sourceSessionId) return;
@@ -1023,6 +1104,51 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     };
 
     const handleConfirmDelete = () => {
+        const edits = localEditsRef.current;
+        let editsChanged = false;
+
+        // 1. 删除被勾选的「复制的整个计划」
+        const copiedPlanIdsToRemove = new Set<string>();
+        edits.copiedPlans.forEach((plan) => {
+            if (checkedPlanIds.includes(plan.id)) copiedPlanIdsToRemove.add(plan.id);
+        });
+        if (copiedPlanIdsToRemove.size > 0) {
+            edits.copiedPlans = edits.copiedPlans.filter((p) => !copiedPlanIdsToRemove.has(p.id));
+            editsChanged = true;
+        }
+
+        // 2. 删除被勾选的序列（区分复制序列 vs 原始序列）
+        for (const seqId of checkedSeqIds) {
+            // 检查是否是复制的序列（存在于 copiesBySourceSeqId 值中）
+            let foundInCopies = false;
+            for (const sourceId of Object.keys(edits.copiesBySourceSeqId)) {
+                const copies = edits.copiesBySourceSeqId[sourceId];
+                const idx = copies.findIndex((c) => c.id === seqId);
+                if (idx >= 0) {
+                    copies.splice(idx, 1);
+                    if (copies.length === 0) delete edits.copiesBySourceSeqId[sourceId];
+                    foundInCopies = true;
+                    editsChanged = true;
+                    break;
+                }
+            }
+            // 如果不是复制的序列，则是原始序列 → 标记为排除
+            if (!foundInCopies) {
+                edits.excludedSeqIds.add(seqId);
+                editsChanged = true;
+            }
+        }
+
+        // 3. 收集 catalog 型被勾选的整个 plan（通过 checkedPlanIds，非复制）
+        const catalogProtocolIdsToRemove = new Set<number>();
+        scanPlans.forEach((plan) => {
+            if (plan.sourceSessionId || plan.id.startsWith("copy-")) return;
+            if (checkedPlanIds.includes(plan.id)) {
+                catalogProtocolIdsToRemove.add(Number(plan.id));
+            }
+        });
+
+        // 4. 收集 session 型的 series id
         const deleteIds = new Set<number>();
         scanPlans.forEach((plan) => {
             if (!plan.sourceSessionId) return;
@@ -1038,7 +1164,24 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             }
         });
 
+        // catalog 型整计划删除
+        if (catalogProtocolIdsToRemove.size > 0) {
+            setSelectedProtocolIds((prev) => prev.filter((id) => !catalogProtocolIdsToRemove.has(id)));
+            setScanSessionsByProtocolId((prev) => {
+                const next = { ...prev };
+                catalogProtocolIdsToRemove.forEach((id) => delete next[id]);
+                return next;
+            });
+            editsChanged = true;
+        }
+
+        if (editsChanged) {
+            setLocalEditsTrigger((prev) => prev + 1);
+        }
+
         if (deleteIds.size === 0) {
+            setCheckedPlanIds([]);
+            setCheckedSeqIds([]);
             setShowDeleteConfirm(false);
             return;
         }
@@ -1335,9 +1478,10 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             </header>
 
             {/* Main */}
-            <main className="flex-1 overflow-hidden p-2 flex gap-[12px] bg-[#EEF2F9]">
+            <main className="flex-1 overflow-hidden p-2 bg-[#EEF2F9]">
+                <div className="flex h-full bg-white border border-[#B0C4DE] rounded-md shadow-sm overflow-hidden">
                 {/* Left */}
-                <aside className="w-[310px] flex flex-col bg-white border border-[#B0C4DE] rounded-md shadow-sm overflow-hidden">
+                <aside className="w-[310px] flex flex-col overflow-hidden shrink-0 border-r border-[#E2E8F0]">
                     <div
                         className="shrink-0 flex flex-col min-h-0 overflow-hidden"
                         style={{ height: `${planPanelHeight}px` }}
@@ -1360,6 +1504,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 {/* 新增序列 */}
                                 <button
                                     title="新增序列"
+                                    onClick={() => navigate("/protocol-detail?mode=new")}
                                     className="w-[44px] h-[44px] flex items-center justify-center rounded-md text-[#4D94FF] hover:bg-[#E3F2FD] active:bg-[#BBDEFB] transition-colors"
                                 >
                                     <Plus size={20} />
@@ -1559,10 +1704,10 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             <Info size={14} /> 参数详情
                         </button>
                     </div>
-                </aside >
+                </aside>
 
                 {/* Center */}
-                <section className="flex-1 bg-white border border-[#B0C4DE] rounded-md shadow-sm flex flex-col relative overflow-hidden" >
+                <section className="flex-1 flex flex-col relative overflow-hidden border-r border-[#E2E8F0]">
                     <div className="h-[44px] bg-[#F8FAFC] border-b border-[#EEF2F9] flex items-center justify-between px-6 shrink-0">
                         <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[#37474F]">
                             解剖区域确认
@@ -1718,11 +1863,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             </div>
                         </div>
                     </div>
-                </section >
+                </section>
 
                 {/* Right */}
-                < aside className="w-[360px] flex flex-col" >
-                    <div className="flex-1 bg-white border border-[#B0C4DE] rounded-md shadow-sm flex flex-col overflow-hidden">
+                <aside className="w-[360px] flex flex-col overflow-hidden shrink-0">
+                    <div className="flex-1 flex flex-col overflow-hidden">
                         {/* 协议库 tabs */}
                         <div className="flex h-[48px] bg-[#F8FAFC] border-b border-[#EEF2F9] p-1.5 gap-1.5 shrink-0">
                             <button
@@ -1855,8 +2000,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             </div>
                         </div>
                     </div>
-                </aside >
-            </main >
+                </aside>
+                </div>
+            </main>
 
             {/* Footer */}
             < footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8" >
@@ -2011,3 +2157,4 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
 
 
 export default ProtocolSetupScreen;
+

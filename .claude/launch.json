@@ -6,14 +6,21 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:all"],
       "cwd": "C:/CT-Prototype-backup/CT-Prototype/ui-review",
-      "port": 5174
+      "port": 5175
     },
     {
       "name": "Frontend only (Vite)",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "cwd": "C:/CT-Prototype-backup/CT-Prototype/ui-review",
-      "port": 5174
+      "port": 5175
+    },
+    {
+      "name": "Tablet Frame View",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "C:/CT-Prototype-backup/CT-Prototype/ui-review",
+      "port": 5175
     },
     {
       "name": "Backend only (FastAPI)",
@@ -24,3 +31,4 @@
     }
   ]
 }
+

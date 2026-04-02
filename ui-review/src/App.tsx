@@ -64,19 +64,27 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen w-full overflow-hidden bg-[radial-gradient(circle_at_top,#dbeafe_0%,#e2e8f0_30%,#cbd5e1_60%,#94a3b8_100%)] flex items-center justify-center p-6">
+      <div className="min-h-screen w-full overflow-hidden bg-[radial-gradient(ellipse_at_top,#e0f2fe_0%,#cbd5e1_40%,#94a3b8_100%)] flex items-center justify-center p-6">
         <div
-          className="relative rounded-[42px] bg-[#0f172a] p-5 shadow-[0_40px_100px_rgba(15,23,42,0.38),inset_0_1px_0_rgba(255,255,255,0.08)]"
+          className="relative rounded-[36px] bg-gradient-to-b from-[#1e293b] to-[#0a1120] shadow-[0_60px_140px_rgba(0,0,0,0.55),0_20px_40px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.5)]"
           style={{ width: shellWidth, height: shellHeight }}
         >
-          <div className="pointer-events-none absolute inset-x-0 top-[10px] flex justify-center">
-            <div className="h-[8px] w-[148px] rounded-full bg-[#334155]" />
+          {/* 顶部摄像头 */}
+          <div className="pointer-events-none absolute inset-x-0 top-[11px] flex justify-center items-center gap-[6px]">
+            <div className="h-[8px] w-[8px] rounded-full bg-[#0d1f35] border border-[#1a3050] shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]" />
           </div>
-          <div className="pointer-events-none absolute left-[12px] top-[150px] h-[54px] w-[4px] rounded-full bg-[#1e293b]" />
-          <div className="pointer-events-none absolute right-[12px] top-1/2 h-[72px] w-[4px] -translate-y-1/2 rounded-full bg-[#1e293b]" />
+          {/* 左侧音量键 */}
+          <div className="pointer-events-none absolute left-[-2px] top-[130px] h-[40px] w-[3px] rounded-r-full bg-gradient-to-r from-[#1e293b] to-[#334155]" />
+          <div className="pointer-events-none absolute left-[-2px] top-[180px] h-[40px] w-[3px] rounded-r-full bg-gradient-to-r from-[#1e293b] to-[#334155]" />
+          {/* 右侧电源键 */}
+          <div className="pointer-events-none absolute right-[-2px] top-1/2 h-[56px] w-[3px] -translate-y-1/2 rounded-l-full bg-gradient-to-l from-[#1e293b] to-[#334155]" />
+          {/* 底部 Home 指示条 */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-[8px] flex justify-center">
+            <div className="h-[3px] w-[80px] rounded-full bg-[#334155]/70" />
+          </div>
 
           <div
-            className="absolute left-1/2 top-1/2 origin-center overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+            className="absolute left-1/2 top-1/2 origin-center overflow-hidden rounded-[24px] bg-white ring-1 ring-black/20 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
             style={{
               width: TABLET_WIDTH,
               height: TABLET_HEIGHT,

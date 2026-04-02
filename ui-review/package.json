@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5174",
-    "dev:all": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"cd .. && uvicorn backend.main:app --reload --port 8000\" \"vite --host 0.0.0.0 --port 5174\"",
+    "dev": "vite",
+    "dev:all": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"cd .. && uvicorn backend.main:app --reload --port 8000\" \"vite\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview --port 4174"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@cornerstonejs/core": "^4.20.1",
@@ -43,3 +43,4 @@
     "vite": "^7.3.1"
   }
 }
+
