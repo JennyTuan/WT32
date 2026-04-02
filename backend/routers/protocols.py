@@ -23,6 +23,10 @@ def _protocol_query(db: Session):
     )
 
 
+def _protocol_catalog_query(db: Session):
+    return db.query(models.Protocol).options(selectinload(models.Protocol.series))
+
+
 def _series_query(db: Session):
     return db.query(models.Series).options(
         selectinload(models.Series.topogram_param),
@@ -78,6 +82,35 @@ def _validate_series_logic(series: models.Series) -> None:
     elif series.series_type == "4d":
         if series.recon_series:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="4D series cannot have recon series")
+
+
+def _build_protocol_summary(protocol: models.Protocol) -> schemas.ProtocolSummary:
+    supported_modes: list[str] = []
+    seen_modes: set[str] = set()
+
+    for series in protocol.series:
+        mode = series.series_type
+        if mode in seen_modes:
+            continue
+        seen_modes.add(mode)
+        supported_modes.append(mode)
+
+    return schemas.ProtocolSummary.model_validate(
+        {
+            "id": protocol.id,
+            "name": protocol.name,
+            "body_part": protocol.body_part,
+            "age_group": protocol.age_group,
+            "patient_weight": protocol.patient_weight,
+            "patient_position": protocol.patient_position,
+            "table_direction": protocol.table_direction,
+            "scan_mode": protocol.scan_mode,
+            "description": protocol.description,
+            "created_at": protocol.created_at,
+            "series_count": len(protocol.series),
+            "supported_modes": supported_modes,
+        }
+    )
 
 
 @router.get("/series/", response_model=list[schemas.SeriesDetail])
@@ -243,6 +276,12 @@ def delete_breathing_training(training_id: int, db: Session = Depends(get_db)):
 @router.get("/", response_model=list[schemas.ProtocolDetail])
 def list_protocols(db: Session = Depends(get_db)):
     return _protocol_query(db).order_by(models.Protocol.id.asc()).all()
+
+
+@router.get("/catalog", response_model=list[schemas.ProtocolSummary])
+def list_protocol_catalog(db: Session = Depends(get_db)):
+    protocols = _protocol_catalog_query(db).order_by(models.Protocol.id.asc()).all()
+    return [_build_protocol_summary(protocol) for protocol in protocols]
 
 
 @router.get("/{protocol_id}", response_model=schemas.ProtocolDetail)

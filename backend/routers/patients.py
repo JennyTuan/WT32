@@ -14,6 +14,14 @@ def list_patients(db: Session = Depends(get_db)):
     return db.query(models.Patient).order_by(models.Patient.id.asc()).all()
 
 
+@router.get("/lookup/{patient_code}", response_model=schemas.Patient)
+def get_patient_by_code(patient_code: str, db: Session = Depends(get_db)):
+    patient = db.query(models.Patient).filter(models.Patient.patient_id == patient_code).first()
+    if not patient:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+    return patient
+
+
 @router.get("/{patient_id}", response_model=schemas.Patient)
 def get_patient(patient_id: int, db: Session = Depends(get_db)):
     patient = db.query(models.Patient).filter(models.Patient.id == patient_id).first()

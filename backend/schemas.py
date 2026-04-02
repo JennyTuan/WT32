@@ -325,6 +325,13 @@ class ProtocolDetail(ProtocolBase, ORMModel):
     series: List[SeriesDetail] = Field(default_factory=list)
 
 
+class ProtocolSummary(ProtocolBase, ORMModel):
+    id: int
+    created_at: datetime
+    series_count: int = 0
+    supported_modes: List[str] = Field(default_factory=list)
+
+
 class ScanSessionStatusUpdate(BaseModel):
     status: Literal["draft", "in_progress", "completed", "cancelled"]
 

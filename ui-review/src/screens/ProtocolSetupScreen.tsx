@@ -149,6 +149,20 @@ type ApiProtocolDetail = {
     series: ApiSeriesDetail[];
 };
 
+type ApiProtocolSummary = {
+    id: number;
+    name: string;
+    body_part: string;
+    age_group: "adult" | "child" | "infant";
+    patient_weight: string;
+    patient_position: "HFS" | "FFS" | "HFP" | "FFP";
+    table_direction: "in" | "out";
+    scan_mode: "plain" | "contrast" | "4d";
+    description?: string | null;
+    series_count: number;
+    supported_modes: ApiSeriesDetail["series_type"][];
+};
+
 type UiParam = {
     label: string;
     value: string;
@@ -198,17 +212,12 @@ const normalizeRegion = (value: string | undefined): BodyRegion | "" => {
     return "";
 };
 
-const normalizePatientType = (value: string | undefined): "adult" | "child" => {
-    if (!value) return "adult";
-    return value === "child" ? "child" : "adult";
-};
-
 const normalizeModeTags = (modes: string[] | undefined): string[] => {
     if (!modes) return [];
     return modes.map((mode) => mode.trim());
 };
 
-const mapAgeGroupToPatientType = (ageGroup: ApiProtocolDetail["age_group"]): "adult" | "child" =>
+const mapAgeGroupToPatientType = (ageGroup: ApiProtocolDetail["age_group"] | ApiProtocolSummary["age_group"]): "adult" | "child" =>
     ageGroup === "adult" ? "adult" : "child";
 
 const getModeLabel = (seriesType: ApiSeriesDetail["series_type"]): string => {
@@ -614,10 +623,10 @@ const buildApiUrl = (path: string) => {
 const isSupportedPosition = (value: string): value is "HFS" | "FFS" | "HFP" | "FFP" | "HFDR" | "FFDR" | "HFDL" | "FFDL" =>
     ["HFS", "FFS", "HFP", "FFP", "HFDR", "FFDR", "HFDL", "FFDL"].includes(value);
 
-const fetchProtocolsWithFallback = async () => {
+const fetchProtocolCatalogWithFallback = async () => {
     const candidates = API_BASE_URL
-        ? [buildApiUrl("/api/protocols/"), "/api/protocols/"]
-        : ["/api/protocols/", "http://127.0.0.1:8001/api/protocols/", "http://127.0.0.1:8000/api/protocols/"];
+        ? [buildApiUrl("/api/protocols/catalog"), "/api/protocols/catalog"]
+        : ["/api/protocols/catalog", "http://127.0.0.1:8001/api/protocols/catalog", "http://127.0.0.1:8000/api/protocols/catalog"];
 
     let lastError: Error | null = null;
 
@@ -628,25 +637,49 @@ const fetchProtocolsWithFallback = async () => {
                 lastError = new Error(`Request failed with status ${response.status}`);
                 continue;
             }
-            return (await response.json()) as ApiProtocolDetail[];
+            return (await response.json()) as ApiProtocolSummary[];
         } catch (error) {
             lastError = error instanceof Error ? error : new Error("Unknown request error");
         }
     }
 
-    throw lastError ?? new Error("Failed to load protocols");
+    throw lastError ?? new Error("Failed to load protocol catalog");
+};
+
+const fetchProtocolDetailWithFallback = async (protocolId: number) => {
+    const candidates = API_BASE_URL
+        ? [buildApiUrl(`/api/protocols/${protocolId}`), `/api/protocols/${protocolId}`]
+        : [`/api/protocols/${protocolId}`, `http://127.0.0.1:8001/api/protocols/${protocolId}`, `http://127.0.0.1:8000/api/protocols/${protocolId}`];
+
+    let lastError: Error | null = null;
+
+    for (const url of candidates) {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                lastError = new Error(`Request failed with status ${response.status}`);
+                continue;
+            }
+            return (await response.json()) as ApiProtocolDetail;
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error("Unknown request error");
+        }
+    }
+
+    throw lastError ?? new Error(`Failed to load protocol ${protocolId}`);
 };
 
 const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps) => {
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
-    const [fetchedProtocols, setFetchedProtocols] = useState<ApiProtocolDetail[]>([]);
+    const [protocolSummaries, setProtocolSummaries] = useState<ApiProtocolSummary[]>([]);
+    const [protocolDetailsById, setProtocolDetailsById] = useState<Record<number, ApiProtocolDetail>>({});
     const [isLoadingProtocols, setIsLoadingProtocols] = useState(true);
     const [protocolsError, setProtocolsError] = useState("");
     const [activeTab, setActiveTab] = useState<"scan" | "recon">("scan");
     const [libraryTab, setLibraryTab] = useState<"spiral" | "axial">("spiral");
     const [selectedBodyRegion, setSelectedBodyRegion] = useState<BodyRegion>(bodyRegions[0]);
-    const [selectedProtocolIds, setSelectedProtocolIds] = useState<number[]>([1]);
+    const [selectedProtocolIds, setSelectedProtocolIds] = useState<number[]>([]);
     const [positionGroupIndex, setPositionGroupIndex] = useState<0 | 1>(0);
     const [planListOpen, setPlanListOpen] = useState(true);
     const [collapsedPlanIds, setCollapsedPlanIds] = useState<string[]>([]);
@@ -672,13 +705,13 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             setProtocolsError("");
 
             try {
-                const data = await fetchProtocolsWithFallback();
+                const data = await fetchProtocolCatalogWithFallback();
                 if (cancelled) return;
 
-                setFetchedProtocols(data);
+                setProtocolSummaries(data);
             } catch {
                 if (cancelled) return;
-                setFetchedProtocols([]);
+                setProtocolSummaries([]);
                 setProtocolsError("Failed to load protocols. Please check the backend service and try again.");
             } finally {
                 if (!cancelled) {
@@ -694,34 +727,44 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         };
     }, []);
 
-    const protocolCatalog = useMemo(
-        () => fetchedProtocols.map((protocol) => ({
-            id: protocol.id,
-            protocol,
-            entry: mapApiProtocolToRawCase(protocol),
-        })),
-        [fetchedProtocols]
+    const protocolSummaryMap = useMemo(
+        () => Object.fromEntries(protocolSummaries.map((protocol) => [protocol.id, protocol])),
+        [protocolSummaries]
     );
 
-    const libraryData = useMemo(
-        () => protocolCatalog
-            .filter(({ entry }) => {
-                const normalizedPatientType = normalizePatientType(entry.protocol.patientType);
-                const supportedModes = normalizeModeTags(entry.protocol.supportedModes);
-                const sequenceModes = entry.sequences.map((sequence) => sequence.mode.trim());
-                const hasSpiral = supportedModes.some((mode) => mode.includes("Helical")) || sequenceModes.some((mode) => mode.includes("Helical"));
-                const hasAxial = supportedModes.some((mode) => mode.includes("Axial")) || sequenceModes.some((mode) => mode.includes("Axial"));
+    const ensureProtocolDetailLoaded = useCallback(async (protocolId: number) => {
+        const existing = protocolDetailsById[protocolId];
+        if (existing) return existing;
 
-                const normalizedRegion = normalizeRegion(entry.protocol.region);
-                const regionMatch = normalizedRegion === selectedBodyRegion || entry.protocol.region === selectedBodyRegion;
+        const detail = await fetchProtocolDetailWithFallback(protocolId);
+        setProtocolDetailsById((prev) => {
+            if (prev[protocolId]) return prev;
+            return {
+                ...prev,
+                [protocolId]: detail,
+            };
+        });
+        return detail;
+    }, [protocolDetailsById]);
+
+    const libraryData = useMemo(
+        () => protocolSummaries
+            .filter((protocol) => {
+                const normalizedPatientType = mapAgeGroupToPatientType(protocol.age_group);
+                const supportedModes = normalizeModeTags(protocol.supported_modes);
+                const hasSpiral = supportedModes.some((mode) => mode === "helical");
+                const hasAxial = supportedModes.some((mode) => mode === "axial");
+
+                const normalizedRegion = normalizeRegion(protocol.body_part);
+                const regionMatch = normalizedRegion === selectedBodyRegion || protocol.body_part === selectedBodyRegion;
 
                 return normalizedPatientType === patientType
                     && (libraryTab === "spiral" ? hasSpiral : hasAxial)
                     && regionMatch;
             })
             .sort((left, right) => {
-                const leftRegion = normalizeRegion(left.entry.protocol.region) || left.entry.protocol.region;
-                const rightRegion = normalizeRegion(right.entry.protocol.region) || right.entry.protocol.region;
+                const leftRegion = normalizeRegion(left.body_part) || left.body_part;
+                const rightRegion = normalizeRegion(right.body_part) || right.body_part;
                 const leftRank = leftRegion === selectedBodyRegion ? -1 : bodyRegions.indexOf(leftRegion as BodyRegion);
                 const rightRank = rightRegion === selectedBodyRegion ? -1 : bodyRegions.indexOf(rightRegion as BodyRegion);
 
@@ -729,15 +772,15 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                     return leftRank - rightRank;
                 }
 
-                return left.entry.protocol.name.localeCompare(right.entry.protocol.name, "zh-CN");
+                return left.name.localeCompare(right.name, "zh-CN");
             })
-            .map(({ id, entry }) => ({
-                id,
-                name: entry.protocol.name,
-                region: normalizeRegion(entry.protocol.region) || entry.protocol.region,
-                protocol: protocolCatalog.find((item) => item.id === id)?.protocol,
+            .map((protocol) => ({
+                id: protocol.id,
+                name: protocol.name,
+                region: normalizeRegion(protocol.body_part) || protocol.body_part,
+                protocol: protocolDetailsById[protocol.id] ?? null,
             })),
-        [protocolCatalog, libraryTab, selectedBodyRegion, patientType]
+        [protocolDetailsById, protocolSummaries, libraryTab, selectedBodyRegion, patientType]
     );
 
     const groupedLibraryData = useMemo(() => {
@@ -756,15 +799,18 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
     const buildPlansFromIds = useCallback(
         (ids: number[]): UiPlan[] =>
-            protocolCatalog
-                .filter((item) => ids.includes(item.id))
-                .map((item) => {
-                    const scanSession = scanSessionsByProtocolId[item.id];
+            ids
+                .map((id) => {
+                    const scanSession = scanSessionsByProtocolId[id];
+                    const protocolDetail = protocolDetailsById[id];
                     return scanSession
                         ? toUiPlan(mapScanSessionToRawCase(scanSession), { sourceSessionId: scanSession.id })
-                        : toUiPlan(item.entry);
-                }),
-        [protocolCatalog, scanSessionsByProtocolId]
+                        : protocolDetail
+                            ? toUiPlan(mapApiProtocolToRawCase(protocolDetail))
+                            : null;
+                })
+                .filter((plan): plan is UiPlan => plan !== null),
+        [protocolDetailsById, scanSessionsByProtocolId]
     );
 
     const applySessionToScreen = useCallback((scanSession: ApiScanSessionDetail) => {
@@ -780,15 +826,15 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             setSelectedBodyRegion(region);
         }
 
-        if (protocolCatalog.some((item) => item.id === scanSession.protocol_id)) {
+        if (protocolSummaryMap[scanSession.protocol_id]) {
             setSelectedProtocolIds((prev) =>
                 prev.includes(scanSession.protocol_id) ? prev : [...prev, scanSession.protocol_id]
             );
         }
-    }, [protocolCatalog]);
+    }, [protocolSummaryMap]);
 
     useEffect(() => {
-        if (protocolCatalog.length === 0) return;
+        if (protocolSummaries.length === 0) return;
 
         let cancelled = false;
 
@@ -813,12 +859,12 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             cancelled = true;
             window.removeEventListener("focus", handleFocus);
         };
-    }, [protocolCatalog, applySessionToScreen]);
+    }, [protocolSummaries.length, applySessionToScreen]);
 
     const [scanPlans, setScanPlans] = useState<UiPlan[]>(() => buildPlansFromIds(selectedProtocolIds));
 
     useEffect(() => {
-        if (protocolCatalog.length === 0) {
+        if (protocolSummaries.length === 0) {
             const timer = setTimeout(() => {
                 setScanPlans([]);
                 setSelectedProtocolIds([]);
@@ -827,7 +873,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             return () => clearTimeout(timer);
         }
 
-        const nextSelectedIds = selectedProtocolIds.filter((id) => protocolCatalog.some((item) => item.id === id));
+        const nextSelectedIds = selectedProtocolIds.filter((id) => Boolean(protocolSummaryMap[id]));
         const nextPlans = buildPlansFromIds(nextSelectedIds);
         const nextSelectedSeqId = nextPlans.flatMap((plan) => plan.sequences)[0]?.id || "";
 
@@ -849,20 +895,21 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 nextPlans.some((plan: UiPlan) => plan.sequences.some((sequence: UiSequence) => sequence.id === current)) ? current : nextSelectedSeqId
             );
         }
-    }, [protocolCatalog, selectedProtocolIds, buildPlansFromIds]);
+    }, [protocolSummaryMap, protocolSummaries.length, selectedProtocolIds, buildPlansFromIds]);
 
     const openScanSession = useCallback(async (protocolId: number, route: "/protocol-detail" | "/scout-scan") => {
-        const selectedItem = protocolCatalog.find((item) => item.id === protocolId);
-        if (!selectedItem) return;
+        const protocolSummary = protocolSummaryMap[protocolId];
+        if (!protocolSummary) return;
 
         setSessionActionError("");
         setIsCreatingSession(true);
 
         try {
-            localStorage.setItem("selectedProtocol", JSON.stringify(selectedItem.protocol));
+            const protocolDetail = protocolDetailsById[protocolId] ?? await ensureProtocolDetailLoaded(protocolId);
+            localStorage.setItem("selectedProtocol", JSON.stringify(protocolDetail));
             const existingSession = scanSessionsByProtocolId[protocolId];
             const scanSession = existingSession
-                ?? await createScanSessionForSelectedPatient(protocolId, selectedItem.protocol.name);
+                ?? await createScanSessionForSelectedPatient(protocolId, protocolSummary.name);
             saveSelectedScanSessionId(scanSession.id);
             applySessionToScreen(scanSession);
 
@@ -878,13 +925,23 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         } finally {
             setIsCreatingSession(false);
         }
-    }, [applySessionToScreen, navigate, onOpenProtocolDetail, protocolCatalog, scanSessionsByProtocolId]);
+    }, [applySessionToScreen, ensureProtocolDetailLoaded, navigate, onOpenProtocolDetail, protocolDetailsById, protocolSummaryMap, scanSessionsByProtocolId]);
 
     const handleProtocolSelect = async (protocolId: number) => {
-        const selectedItem = protocolCatalog.find((item) => item.id === protocolId);
-        if (!selectedItem) return;
+        if (!protocolSummaryMap[protocolId]) return;
 
-        const nextIds = selectedProtocolIds.includes(protocolId)
+        const isSelected = selectedProtocolIds.includes(protocolId);
+        if (!isSelected) {
+            try {
+                await ensureProtocolDetailLoaded(protocolId);
+            } catch (error) {
+                console.error(error);
+                setSessionActionError("协议详情加载失败，请检查后端服务。");
+                return;
+            }
+        }
+
+        const nextIds = isSelected
             ? selectedProtocolIds.filter((id) => id !== protocolId)
             : [...selectedProtocolIds, protocolId];
         setSelectedProtocolIds(nextIds);

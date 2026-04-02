@@ -5,6 +5,8 @@ const API_BASE_URL = (
     ?? (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")
 ).replace(/\/$/, "");
 const STORAGE_KEY = "selectedScanSessionId";
+const DETAIL_CACHE_KEY = "selectedScanSessionDetail";
+const PATIENT_CACHE_KEY = "selectedBackendPatient";
 
 const buildApiUrl = (path: string) => {
     if (!API_BASE_URL) return path;
@@ -133,6 +135,27 @@ export const loadSelectedScanSessionId = () => {
 
 export const clearSelectedScanSessionId = () => {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(DETAIL_CACHE_KEY);
+};
+
+const readCachedSelectedScanSession = () => {
+    const scanSessionId = loadSelectedScanSessionId();
+    if (!scanSessionId) return null;
+
+    const raw = localStorage.getItem(DETAIL_CACHE_KEY);
+    if (!raw) return null;
+
+    try {
+        const cached = JSON.parse(raw) as ApiScanSessionDetail;
+        return cached.id === scanSessionId ? cached : null;
+    } catch {
+        return null;
+    }
+};
+
+const cacheSelectedScanSession = (scanSession: ApiScanSessionDetail) => {
+    saveSelectedScanSessionId(scanSession.id);
+    localStorage.setItem(DETAIL_CACHE_KEY, JSON.stringify(scanSession));
 };
 
 const inferBirthDate = (age: number) => {
@@ -141,15 +164,40 @@ const inferBirthDate = (age: number) => {
     return `${birthYear}-01-01`;
 };
 
+const readCachedBackendPatientId = (patientId: string) => {
+    const raw = localStorage.getItem(PATIENT_CACHE_KEY);
+    if (!raw) return null;
+
+    try {
+        const cached = JSON.parse(raw) as { patientId: string; backendPatientId: number };
+        if (cached.patientId !== patientId) return null;
+        return Number.isFinite(cached.backendPatientId) ? cached.backendPatientId : null;
+    } catch {
+        return null;
+    }
+};
+
+const cacheBackendPatientId = (patientId: string, backendPatientId: number) => {
+    localStorage.setItem(PATIENT_CACHE_KEY, JSON.stringify({ patientId, backendPatientId }));
+};
+
 const resolveBackendPatientId = async (selectedPatient: SelectedPatientSession) => {
-    const response = await fetch(buildApiUrl("/api/patients/"));
-    if (!response.ok) {
-        throw new Error(`Failed to list patients: ${response.status}`);
+    const cachedPatientId = readCachedBackendPatientId(selectedPatient.patientId);
+    if (cachedPatientId) {
+        return cachedPatientId;
     }
 
-    const patients = (await response.json()) as ApiPatient[];
-    const existing = patients.find((patient) => patient.patient_id === selectedPatient.patientId);
-    if (existing) return existing.id;
+    const response = await fetch(
+        buildApiUrl(`/api/patients/lookup/${encodeURIComponent(selectedPatient.patientId)}`)
+    );
+    if (response.ok) {
+        const existing = (await response.json()) as ApiPatient;
+        cacheBackendPatientId(selectedPatient.patientId, existing.id);
+        return existing.id;
+    }
+    if (response.status !== 404) {
+        throw new Error(`Failed to lookup patient: ${response.status}`);
+    }
 
     const createResponse = await fetch(buildApiUrl("/api/patients/"), {
         method: "POST",
@@ -171,6 +219,7 @@ const resolveBackendPatientId = async (selectedPatient: SelectedPatientSession) 
     }
 
     const created = (await createResponse.json()) as ApiPatient;
+    cacheBackendPatientId(selectedPatient.patientId, created.id);
     return created.id;
 };
 
@@ -198,13 +247,18 @@ export const createScanSessionForSelectedPatient = async (protocolId: number, se
     }
 
     const scanSession = (await response.json()) as ApiScanSessionDetail;
-    saveSelectedScanSessionId(scanSession.id);
+    cacheSelectedScanSession(scanSession);
     return scanSession;
 };
 
-export const fetchSelectedScanSession = async () => {
+export const fetchSelectedScanSession = async (options?: { preferCache?: boolean }) => {
     const scanSessionId = loadSelectedScanSessionId();
     if (!scanSessionId) return null;
+
+    if (options?.preferCache !== false) {
+        const cached = readCachedSelectedScanSession();
+        if (cached) return cached;
+    }
 
     return fetchScanSessionById(scanSessionId);
 };
@@ -215,7 +269,11 @@ export const fetchScanSessionById = async (scanSessionId: number) => {
         throw new Error(`Failed to fetch scan session: ${response.status}`);
     }
 
-    return (await response.json()) as ApiScanSessionDetail;
+    const scanSession = (await response.json()) as ApiScanSessionDetail;
+    if (loadSelectedScanSessionId() === scanSession.id) {
+        cacheSelectedScanSession(scanSession);
+    }
+    return scanSession;
 };
 
 type UpdatePayload = Record<string, string | number | boolean | null>;
@@ -245,7 +303,12 @@ export const updateSelectedScanSession = async (payload: UpdatePayload) => {
 };
 
 export const updateScanSessionById = async (scanSessionId: number, payload: UpdatePayload) =>
-    updateSelectedScanSessionEntity<ApiScanSessionDetail>(`/api/scan-sessions/${scanSessionId}`, payload);
+    updateSelectedScanSessionEntity<ApiScanSessionDetail>(`/api/scan-sessions/${scanSessionId}`, payload).then((scanSession) => {
+        if (loadSelectedScanSessionId() === scanSession.id) {
+            cacheSelectedScanSession(scanSession);
+        }
+        return scanSession;
+    });
 
 export const updateSelectedScanSessionSeries = async (sessionSeriesId: number, payload: UpdatePayload) =>
     updateSelectedScanSessionEntity<ApiScanSessionSeries>(`/api/scan-sessions/series/${sessionSeriesId}`, payload);
@@ -259,7 +322,11 @@ export const duplicateSelectedScanSessionSeries = async (sessionSeriesId: number
         throw new Error(`Failed to duplicate scan session series: ${response.status}`);
     }
 
-    return (await response.json()) as ApiScanSessionDetail;
+    const scanSession = (await response.json()) as ApiScanSessionDetail;
+    if (loadSelectedScanSessionId() === scanSession.id) {
+        cacheSelectedScanSession(scanSession);
+    }
+    return scanSession;
 };
 
 export const deleteSelectedScanSessionSeries = async (sessionSeriesId: number) => {
@@ -271,7 +338,11 @@ export const deleteSelectedScanSessionSeries = async (sessionSeriesId: number) =
         throw new Error(`Failed to delete scan session series: ${response.status}`);
     }
 
-    return (await response.json()) as ApiScanSessionDetail;
+    const scanSession = (await response.json()) as ApiScanSessionDetail;
+    if (loadSelectedScanSessionId() === scanSession.id) {
+        cacheSelectedScanSession(scanSession);
+    }
+    return scanSession;
 };
 
 export const updateSelectedScanSessionTopogramParam = async (paramId: number, payload: UpdatePayload) =>
