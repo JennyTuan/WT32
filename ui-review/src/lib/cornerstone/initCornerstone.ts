@@ -7,6 +7,7 @@ import {
 import {
   addTool,
   Enums as CornerstoneToolsEnums,
+  EraserTool,
   init as initCornerstoneTools,
   LengthTool,
   PanTool,

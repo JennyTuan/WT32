@@ -13,7 +13,9 @@
       "Bash(netstat -ano)",
       "Bash(wmic process:*)",
       "Bash(npx tsc:*)",
-      "Bash(grep -E \"\\\\.\\(json|tsx|html|config|ts\\)$|^d\")"
+      "Bash(grep -E \"\\\\.\\(json|tsx|html|config|ts\\)$|^d\")",
+      "Bash(npx vite:*)",
+      "Bash(ls /c/CT-Prototype-backup/CT-Prototype/ui-review/src/lib/patientSession*)"
     ]
   }
 }

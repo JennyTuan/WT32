@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Enums, RenderingEngine, type StackViewport } from '@cornerstonejs/core';
 
 import {
@@ -10,7 +10,14 @@ import {
   TOOL_NAMES,
 } from '../lib/cornerstone/initCornerstone';
 
-type ActiveTool = 'pan' | 'zoom' | 'window' | 'ruler' | 'zoomout' | 'fit' | 'flip' | 'reset';
+type ActiveTool = 'pan' | 'zoom' | 'zoomin' | 'window' | 'ruler' | 'zoomout' | 'fit' | 'flip' | 'reset' | 'annotate';
+
+export type CornerstoneViewportHandle = {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fit: () => void;
+  reset: () => void;
+};
 
 interface CornerstoneStackViewportProps {
   dicomUrl?: string;
@@ -20,6 +27,7 @@ interface CornerstoneStackViewportProps {
   activeTool?: string;
   windowCenter?: number;
   windowWidth?: number;
+  onWindowLevelChange?: (windowCenter: number, windowWidth: number) => void;
   className?: string;
 }
 
@@ -31,238 +39,333 @@ function isSupportedActiveTool(value: string | undefined): value is ActiveTool {
   return (
     value === 'pan' ||
     value === 'zoom' ||
+    value === 'zoomin' ||
     value === 'window' ||
     value === 'ruler' ||
     value === 'zoomout' ||
     value === 'fit' ||
     value === 'flip' ||
-    value === 'reset'
+    value === 'reset' ||
+    value === 'annotate'
   );
 }
 
-export default function CornerstoneStackViewport({
-  dicomUrl,
-  imageUrls,
-  currentImageIndex = 0,
-  onImageIndexChange,
-  activeTool = 'pan',
-  windowCenter = 40,
-  windowWidth = 400,
-  className,
-}: CornerstoneStackViewportProps) {
-  const elementRef = useRef<HTMLDivElement>(null);
-  const renderingEngineRef = useRef<RenderingEngine | null>(null);
-  const viewportRef = useRef<StackViewport | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const viewportIdRef = useRef(`cs-viewport-${Math.random().toString(36).slice(2, 10)}`);
-  const renderingEngineIdRef = useRef(`cs-engine-${Math.random().toString(36).slice(2, 10)}`);
-  const toolGroupIdRef = useRef(`cs-tools-${Math.random().toString(36).slice(2, 10)}`);
+const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, CornerstoneStackViewportProps>(
+  function CornerstoneStackViewport(
+    {
+      dicomUrl,
+      imageUrls,
+      currentImageIndex = 0,
+      onImageIndexChange,
+      activeTool = 'pan',
+      windowCenter = 40,
+      windowWidth = 400,
+      onWindowLevelChange,
+      className,
+    },
+    ref
+  ) {
+    const elementRef = useRef<HTMLDivElement>(null);
+    const renderingEngineRef = useRef<RenderingEngine | null>(null);
+    const viewportRef = useRef<StackViewport | null>(null);
+    const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    const viewportIdRef = useRef(`cs-viewport-${Math.random().toString(36).slice(2, 10)}`);
+    const renderingEngineIdRef = useRef(`cs-engine-${Math.random().toString(36).slice(2, 10)}`);
+    const toolGroupIdRef = useRef(`cs-tools-${Math.random().toString(36).slice(2, 10)}`);
+    // Track last WL values sent to Cornerstone to avoid feedback loops
+    const lastSentVoiRef = useRef<{ lower: number; upper: number } | null>(null);
 
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [errorMsg, setErrorMsg] = useState('');
+    const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+    const [errorMsg, setErrorMsg] = useState('');
 
-  useEffect(() => {
-    const urls = imageUrls?.length ? imageUrls : dicomUrl ? [dicomUrl] : [];
-    if (!urls.length || !elementRef.current) {
-      setStatus('error');
-      setErrorMsg('No DICOM image source provided.');
-      return;
-    }
-
-    let disposed = false;
-
-    const setupViewport = async () => {
-      try {
-        setStatus('loading');
-        setErrorMsg('');
-
-        await initCornerstone();
-        if (disposed || !elementRef.current) {
-          return;
-        }
-
-        const renderingEngine = new RenderingEngine(renderingEngineIdRef.current);
-        renderingEngineRef.current = renderingEngine;
-
-        renderingEngine.enableElement({
-          viewportId: viewportIdRef.current,
-          element: elementRef.current,
-          type: Enums.ViewportType.STACK,
-        });
-
-        const viewport = renderingEngine.getStackViewport(viewportIdRef.current);
-        viewportRef.current = viewport;
-
-        const toolGroup = getOrCreateToolGroup(toolGroupIdRef.current);
-        toolGroup.addViewport(viewportIdRef.current, renderingEngineIdRef.current);
-
-        await viewport.setStack(urls.map(buildWadoImageId), clamp(currentImageIndex, 0, Math.max(urls.length - 1, 0)));
+    // Expose imperative API for direct viewport control (zoom, fit, reset)
+    useImperativeHandle(ref, () => ({
+      zoomIn: () => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+        viewport.setZoom(clamp(viewport.getZoom() * 1.15, 0.2, 20));
         viewport.render();
-
-        resizeObserverRef.current = new ResizeObserver(() => {
-          renderingEngine.resize(true, false);
-        });
-        resizeObserverRef.current.observe(elementRef.current);
-
-        if (!disposed) {
-          setStatus('ready');
-        }
-      } catch (error) {
-        console.error('Cornerstone viewport setup failed.', error);
-        if (!disposed) {
-          setStatus('error');
-          setErrorMsg(error instanceof Error ? error.message : String(error));
-        }
-      }
-    };
-
-    void setupViewport();
-
-    return () => {
-      disposed = true;
-      resizeObserverRef.current?.disconnect();
-      resizeObserverRef.current = null;
-      destroyToolGroup(toolGroupIdRef.current);
-      viewportRef.current = null;
-      renderingEngineRef.current?.destroy();
-      renderingEngineRef.current = null;
-    };
-  }, [currentImageIndex, dicomUrl, imageUrls]);
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    const urls = imageUrls?.length ? imageUrls : dicomUrl ? [dicomUrl] : [];
-    if (!viewport || status !== 'ready' || !urls.length) {
-      return;
-    }
-
-    const targetIndex = clamp(currentImageIndex, 0, Math.max(urls.length - 1, 0));
-    if (viewport.getCurrentImageIdIndex() === targetIndex) {
-      return;
-    }
-
-    void viewport.setImageIdIndex(targetIndex).then(() => {
-      viewport.render();
-    });
-  }, [currentImageIndex, dicomUrl, imageUrls, status]);
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport || status !== 'ready') {
-      return;
-    }
-
-    viewport.setProperties({
-      voiRange: {
-        lower: windowCenter - windowWidth / 2,
-        upper: windowCenter + windowWidth / 2,
       },
-    });
-    viewport.render();
-  }, [status, windowCenter, windowWidth]);
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport || status !== 'ready') {
-      return;
-    }
-
-    const toolGroup = getOrCreateToolGroup(toolGroupIdRef.current);
-    const setPrimaryTool = (toolName: string) => {
-      toolGroup.setToolPassive(TOOL_NAMES.pan);
-      toolGroup.setToolPassive(TOOL_NAMES.zoom);
-      toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
-      toolGroup.setToolPassive(TOOL_NAMES.length);
-      toolGroup.setToolActive(toolName, {
-        bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Primary }],
-      });
-    };
-
-    switch (isSupportedActiveTool(activeTool) ? activeTool : 'pan') {
-      case 'pan':
-        setPrimaryTool(TOOL_NAMES.pan);
-        break;
-      case 'zoom':
-        setPrimaryTool(TOOL_NAMES.zoom);
-        break;
-      case 'window':
-        setPrimaryTool(TOOL_NAMES.windowLevel);
-        break;
-      case 'ruler':
-        setPrimaryTool(TOOL_NAMES.length);
-        break;
-      case 'zoomout':
-        viewport.setZoom(clamp(viewport.getZoom() * 0.8, 0.2, 20));
+      zoomOut: () => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+        viewport.setZoom(clamp(viewport.getZoom() * 0.87, 0.2, 20));
         viewport.render();
-        break;
-      case 'fit':
+      },
+      fit: () => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
         viewport.resetCamera();
         viewport.render();
-        break;
-      case 'flip': {
-        const camera = viewport.getCamera();
-        viewport.setCamera({ flipHorizontal: !camera.flipHorizontal });
-        viewport.render();
-        break;
-      }
-      case 'reset':
+      },
+      reset: () => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
         viewport.resetProperties();
         viewport.resetCamera();
+        lastSentVoiRef.current = null;
         viewport.render();
-        break;
-    }
-  }, [activeTool, status]);
+      },
+    }));
 
-  useEffect(() => {
-    const element = elementRef.current;
-    const viewport = viewportRef.current;
-    const urls = imageUrls?.length ? imageUrls : dicomUrl ? [dicomUrl] : [];
-    if (!element || !viewport || status !== 'ready') {
-      return;
-    }
-
-    const handleWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      if (urls.length > 1 && !event.ctrlKey) {
-        const nextIndex = clamp(
-          viewport.getCurrentImageIdIndex() + (event.deltaY > 0 ? 1 : -1),
-          0,
-          urls.length - 1
-        );
-        if (nextIndex !== viewport.getCurrentImageIdIndex()) {
-          void viewport.setImageIdIndex(nextIndex).then(() => {
-            viewport.render();
-            onImageIndexChange?.(nextIndex);
-          });
-        }
+    // ─── Viewport setup (only reruns when the image URLs change, NOT on every slice) ───
+    useEffect(() => {
+      const urls = imageUrls?.length ? imageUrls : dicomUrl ? [dicomUrl] : [];
+      if (!urls.length || !elementRef.current) {
+        setStatus('error');
+        setErrorMsg('No DICOM image source provided.');
         return;
       }
 
-      const factor = event.deltaY > 0 ? 0.92 : 1.08;
-      viewport.setZoom(clamp(viewport.getZoom() * factor, 0.2, 20));
+      let disposed = false;
+
+      const setupViewport = async () => {
+        try {
+          setStatus('loading');
+          setErrorMsg('');
+
+          await initCornerstone();
+          if (disposed || !elementRef.current) {
+            return;
+          }
+
+          const renderingEngine = new RenderingEngine(renderingEngineIdRef.current);
+          renderingEngineRef.current = renderingEngine;
+
+          renderingEngine.enableElement({
+            viewportId: viewportIdRef.current,
+            element: elementRef.current,
+            type: Enums.ViewportType.STACK,
+          });
+
+          const viewport = renderingEngine.getStackViewport(viewportIdRef.current);
+          viewportRef.current = viewport;
+
+          const toolGroup = getOrCreateToolGroup(toolGroupIdRef.current);
+          toolGroup.addViewport(viewportIdRef.current, renderingEngineIdRef.current);
+
+          // Start at index 0; the separate currentImageIndex effect will jump to the right position
+          await viewport.setStack(urls.map(buildWadoImageId), 0);
+          viewport.render();
+
+          resizeObserverRef.current = new ResizeObserver(() => {
+            renderingEngine.resize(true, false);
+          });
+          resizeObserverRef.current.observe(elementRef.current);
+
+          if (!disposed) {
+            setStatus('ready');
+          }
+        } catch (error) {
+          console.error('Cornerstone viewport setup failed.', error);
+          if (!disposed) {
+            setStatus('error');
+            setErrorMsg(error instanceof Error ? error.message : String(error));
+          }
+        }
+      };
+
+      void setupViewport();
+
+      return () => {
+        disposed = true;
+        resizeObserverRef.current?.disconnect();
+        resizeObserverRef.current = null;
+        destroyToolGroup(toolGroupIdRef.current);
+        viewportRef.current = null;
+        renderingEngineRef.current?.destroy();
+        renderingEngineRef.current = null;
+        lastSentVoiRef.current = null;
+      };
+      // currentImageIndex intentionally excluded — handled by the effect below
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [dicomUrl, imageUrls]);
+
+    // ─── Slice navigation (lightweight, no teardown) ───
+    useEffect(() => {
+      const viewport = viewportRef.current;
+      const urls = imageUrls?.length ? imageUrls : dicomUrl ? [dicomUrl] : [];
+      if (!viewport || status !== 'ready' || !urls.length) {
+        return;
+      }
+
+      const targetIndex = clamp(currentImageIndex, 0, Math.max(urls.length - 1, 0));
+      if (viewport.getCurrentImageIdIndex() === targetIndex) {
+        return;
+      }
+
+      void viewport.setImageIdIndex(targetIndex).then(() => {
+        viewport.render();
+      });
+    }, [currentImageIndex, dicomUrl, imageUrls, status]);
+
+    // ─── Window / Level (VOI) ───
+    useEffect(() => {
+      const viewport = viewportRef.current;
+      if (!viewport || status !== 'ready') {
+        return;
+      }
+
+      const newLower = windowCenter - windowWidth / 2;
+      const newUpper = windowCenter + windowWidth / 2;
+
+      // Skip if these exact values are already applied (prevents feedback loop with onWindowLevelChange)
+      const last = lastSentVoiRef.current;
+      if (last && Math.abs(last.lower - newLower) < 0.5 && Math.abs(last.upper - newUpper) < 0.5) {
+        return;
+      }
+
+      lastSentVoiRef.current = { lower: newLower, upper: newUpper };
+      viewport.setProperties({ voiRange: { lower: newLower, upper: newUpper } });
       viewport.render();
-    };
+    }, [status, windowCenter, windowWidth]);
 
-    element.addEventListener('wheel', handleWheel, { passive: false });
-    return () => {
-      element.removeEventListener('wheel', handleWheel);
-    };
-  }, [dicomUrl, imageUrls, onImageIndexChange, status]);
+    // ─── Active tool switching ───
+    useEffect(() => {
+      const viewport = viewportRef.current;
+      if (!viewport || status !== 'ready') {
+        return;
+      }
 
-  return (
-    <div ref={elementRef} className={className ?? 'w-full h-full relative overflow-hidden bg-black'}>
-      {status === 'loading' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#4D94FF]/40">
-          <div className="w-8 h-8 border-2 border-[#4D94FF]/30 border-t-[#4D94FF] rounded-full animate-spin" />
-          <span className="text-[12px] font-mono font-bold uppercase tracking-widest">Loading DICOM...</span>
-        </div>
-      )}
+      const toolGroup = getOrCreateToolGroup(toolGroupIdRef.current);
+      const setPrimaryTool = (toolName: string) => {
+        toolGroup.setToolPassive(TOOL_NAMES.pan);
+        toolGroup.setToolPassive(TOOL_NAMES.zoom);
+        toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
+        toolGroup.setToolPassive(TOOL_NAMES.length);
+        toolGroup.setToolActive(toolName, {
+          bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Primary }],
+        });
+      };
 
-      {status === 'error' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-red-400/70">
-          <span className="text-[12px] font-mono font-bold">Error: {errorMsg}</span>
-        </div>
-      )}
-    </div>
-  );
-}
+      switch (isSupportedActiveTool(activeTool) ? activeTool : 'pan') {
+        case 'pan':
+          setPrimaryTool(TOOL_NAMES.pan);
+          break;
+        case 'zoom':
+          setPrimaryTool(TOOL_NAMES.zoom);
+          break;
+        case 'window':
+          setPrimaryTool(TOOL_NAMES.windowLevel);
+          break;
+        case 'ruler':
+          setPrimaryTool(TOOL_NAMES.length);
+          break;
+        case 'zoomin':
+          viewport.setZoom(clamp(viewport.getZoom() * 1.15, 0.2, 20));
+          viewport.render();
+          break;
+        case 'zoomout':
+          viewport.setZoom(clamp(viewport.getZoom() * 0.87, 0.2, 20));
+          viewport.render();
+          break;
+        case 'fit':
+          viewport.resetCamera();
+          viewport.render();
+          break;
+        case 'flip': {
+          const camera = viewport.getCamera();
+          viewport.setCamera({ flipHorizontal: !camera.flipHorizontal });
+          viewport.render();
+          break;
+        }
+        case 'reset':
+          viewport.resetProperties();
+          viewport.resetCamera();
+          lastSentVoiRef.current = null;
+          viewport.render();
+          break;
+        case 'annotate':
+          // Annotation is handled by the React overlay; deactivate all CS tools
+          // so the mouse doesn't pan/zoom while the user clicks to place annotations.
+          toolGroup.setToolPassive(TOOL_NAMES.pan);
+          toolGroup.setToolPassive(TOOL_NAMES.zoom);
+          toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
+          toolGroup.setToolPassive(TOOL_NAMES.length);
+          break;
+      }
+    }, [activeTool, status]);
+
+    // ─── Report WW/WL changes back to parent (e.g. after user drags WL tool) ───
+    useEffect(() => {
+      const element = elementRef.current;
+      if (!element || status !== 'ready' || !onWindowLevelChange) return;
+
+      const handleImageRendered = () => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+        try {
+          const props = viewport.getProperties();
+          if (props.voiRange) {
+            const ww = props.voiRange.upper - props.voiRange.lower;
+            const wc = (props.voiRange.upper + props.voiRange.lower) / 2;
+            // Update the lastSentVoi to reflect what Cornerstone now has, preventing a round-trip
+            lastSentVoiRef.current = { lower: props.voiRange.lower, upper: props.voiRange.upper };
+            onWindowLevelChange(wc, ww);
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      element.addEventListener(Enums.Events.IMAGE_RENDERED, handleImageRendered);
+      return () => element.removeEventListener(Enums.Events.IMAGE_RENDERED, handleImageRendered);
+    }, [status, onWindowLevelChange]);
+
+    // ─── Mouse wheel: slice scroll or zoom ───
+    useEffect(() => {
+      const element = elementRef.current;
+      const viewport = viewportRef.current;
+      const urls = imageUrls?.length ? imageUrls : dicomUrl ? [dicomUrl] : [];
+      if (!element || !viewport || status !== 'ready') {
+        return;
+      }
+
+      const handleWheel = (event: WheelEvent) => {
+        event.preventDefault();
+        if (urls.length > 1 && !event.ctrlKey) {
+          const nextIndex = clamp(
+            viewport.getCurrentImageIdIndex() + (event.deltaY > 0 ? 1 : -1),
+            0,
+            urls.length - 1
+          );
+          if (nextIndex !== viewport.getCurrentImageIdIndex()) {
+            void viewport.setImageIdIndex(nextIndex).then(() => {
+              viewport.render();
+              onImageIndexChange?.(nextIndex);
+            });
+          }
+          return;
+        }
+
+        const factor = event.deltaY > 0 ? 0.92 : 1.08;
+        viewport.setZoom(clamp(viewport.getZoom() * factor, 0.2, 20));
+        viewport.render();
+      };
+
+      element.addEventListener('wheel', handleWheel, { passive: false });
+      return () => {
+        element.removeEventListener('wheel', handleWheel);
+      };
+    }, [dicomUrl, imageUrls, onImageIndexChange, status]);
+
+    return (
+      <div ref={elementRef} className={className ?? 'w-full h-full relative overflow-hidden bg-black'}>
+        {status === 'loading' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#4D94FF]/40">
+            <div className="w-8 h-8 border-2 border-[#4D94FF]/30 border-t-[#4D94FF] rounded-full animate-spin" />
+            <span className="text-[12px] font-mono font-bold uppercase tracking-widest">Loading DICOM...</span>
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-red-400/70">
+            <span className="text-[12px] font-mono font-bold">Error: {errorMsg}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+);
+
+export default CornerstoneStackViewport;

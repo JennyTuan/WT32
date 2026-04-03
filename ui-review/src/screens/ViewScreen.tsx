@@ -24,9 +24,15 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
-import DicomViewer from "../components/DicomViewer";
+import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
+import {
+    fetchSelectedScanSession,
+    type ApiScanSessionDetail,
+} from "../lib/scanSession";
 
 type ImageItem = { id: string; name: string };
+type SeriesType = "topogram" | "helical" | "axial" | "4d" | "static";
+/** A single selectable image series in the viewer sidebar */
 type Series = {
     id: string;
     name: string;
@@ -38,11 +44,22 @@ type Series = {
     fov: string;
     matrix: string;
     images: ImageItem[];
+    seriesType: SeriesType;
+    /** WW/WL preset applied when this series is selected */
+    defaultWw?: number;
+    defaultWl?: number;
+};
+/** A scan acquisition group (topogram/helical/axial) — may contain multiple recon series */
+type ScanGroup = {
+    id: string;
+    label: string;
+    type: SeriesType;
+    series: Series[];
 };
 type Study = {
     id: string;
     name: string;
-    series: Series[];
+    scanGroups: ScanGroup[];
 };
 type DrawRect = { x: number; y: number; w: number; h: number };
 type ScreenMeasure = {
@@ -57,9 +74,12 @@ type TextAnnotation = {
     id: string;
     kind: "text";
     slice: number;
+    /** image-pixel coords in 3D mode; viewport-% (0-100) in 2D mode */
     x: number;
     y: number;
     text: string;
+    /** "2d" = created in Cornerstone viewer; "3d" / undefined = created on canvas */
+    mode?: "2d" | "3d";
 };
 type Annotation = TextAnnotation;
 type VolumeData = {
@@ -254,6 +274,7 @@ const getSeriesDicomUrl = (sliceIndex: number) =>
 const mapCornerstoneTool = (toolMode: "pan" | "wl" | "measure" | "annotate") => {
     if (toolMode === "wl") return "window";
     if (toolMode === "measure") return "ruler";
+    if (toolMode === "annotate") return "annotate";
     return "pan";
 };
 
@@ -261,6 +282,7 @@ const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count /
 
 const ViewScreen = () => {
     const navigate = useNavigate();
+    // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
     const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
@@ -272,6 +294,29 @@ const ViewScreen = () => {
     const [ww, setWw] = useState(350);
     const [wl, setWl] = useState(45);
     const [isPlaying, setIsPlaying] = useState(false);
+    // Displayed WW/WL — updated both from DICOM tags and from Cornerstone WL tool feedback
+    const [displayWw, setDisplayWw] = useState(350);
+    const [displayWl, setDisplayWl] = useState(45);
+    // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
+    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    // Ref for imperative control of the Cornerstone viewport (zoom/fit/reset in 2D mode)
+    const dicomViewerRef = useRef<DicomViewerHandle>(null);
+
+    // ─── Live clock ───────────────────────────────────────────────────────────
+    const buildClock = () => {
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, "0");
+        const mm = String(now.getMinutes()).padStart(2, "0");
+        return `${hh}:${mm}`;
+    };
+    const buildDate = () => {
+        const now = new Date();
+        const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+        return `${now.getMonth() + 1}月${now.getDate()}日 ${weekdays[now.getDay()]}`;
+    };
+    const [clockStr, setClockStr] = useState(buildClock);
+    const [dateStr, setDateStr] = useState(buildDate);
+
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLElement | null>(null);
     const coronalCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -340,13 +385,22 @@ const ViewScreen = () => {
         [currentLayoutSpec, imageMode]
     );
 
-    const studyTree = useMemo<Study[]>(
-        () => [
-            {
+    // ─── Build study tree from scan session (falls back to static DICOM data) ──
+    const studyTree = useMemo<Study[]>(() => {
+        // ── Helper: build an ImageItem array using the static DICOM dataset ──────
+        const makeImages = (count: number, prefix: string): ImageItem[] =>
+            Array.from({ length: count }, (_, i) => ({ id: `${prefix}-img-${i + 1}`, name: `Image ${i + 1}` }));
+
+        // ── Static fallback (no scan session in localStorage) ────────────────────
+        if (!scanSession) {
+            return [{
                 id: REAL_LUNG_SERIES.studyId,
                 name: REAL_LUNG_SERIES.studyName,
-                series: [
-                    {
+                scanGroups: [{
+                    id: "static-group",
+                    label: REAL_LUNG_SERIES.seriesName,
+                    type: "static" as SeriesType,
+                    series: [{
                         id: REAL_LUNG_SERIES.seriesId,
                         name: REAL_LUNG_SERIES.seriesName,
                         count: REAL_LUNG_SERIES.count,
@@ -356,19 +410,133 @@ const ViewScreen = () => {
                         mAs: REAL_LUNG_SERIES.mAs,
                         fov: REAL_LUNG_SERIES.fov,
                         matrix: REAL_LUNG_SERIES.matrix,
-                        images: Array.from({ length: REAL_LUNG_SERIES.count }).map((_, i) => ({
-                            id: `img-qin-${i + 1}`,
-                            name: `Image ${i + 1}`
-                        }))
-                    }
-                ]
-            }
-        ],
-        []
-    );
+                        seriesType: "static" as SeriesType,
+                        images: makeImages(REAL_LUNG_SERIES.count, "qin"),
+                    }],
+                }],
+            }];
+        }
 
-    const seriesList = studyTree.flatMap((study) => study.series);
-    const selectedSeries = seriesList.find((s) => s.id === selectedSeriesId) ?? seriesList[0];
+        // ── Build from scan session data ─────────────────────────────────────────
+        const scanGroups: ScanGroup[] = [];
+        const sorted = [...scanSession.series].sort((a, b) => a.series_order - b.series_order);
+
+        for (const s of sorted) {
+            const type = s.series_type as SeriesType;
+            const prefix = `sess${scanSession.id}-ser${s.id}`;
+
+            if (s.series_type === "topogram") {
+                const p = s.topogram_param;
+                scanGroups.push({
+                    id: `group-${s.id}`,
+                    label: s.series_label || "定位像",
+                    type,
+                    series: [{
+                        id: `${prefix}-topo`,
+                        name: s.series_label || "定位像",
+                        count: REAL_LUNG_SERIES.count,
+                        kernel: "—",
+                        thickness: p ? `${p.scan_length} mm` : "—",
+                        kV: p ? String(p.kv) : "—",
+                        mAs: p ? String(p.ma) : "—",
+                        fov: p ? `${p.fov} mm` : "—",
+                        matrix: "512",
+                        seriesType: type,
+                        images: makeImages(REAL_LUNG_SERIES.count, `${prefix}-topo`),
+                        defaultWw: 1500,
+                        defaultWl: -600,
+                    }],
+                });
+            } else {
+                // helical / axial / 4d — leaf items are the recon series
+                const p = s.helical_param ?? s.axial_param;
+                const leafSeries: Series[] = s.recon_series.map((r) => ({
+                    id: `${prefix}-recon${r.id}`,
+                    name: r.recon_name,
+                    count: REAL_LUNG_SERIES.count,
+                    kernel: r.kernel,
+                    thickness: `${r.slice_thickness} mm`,
+                    kV: p ? String(p.kv) : "—",
+                    mAs: p ? ((p as { auto_ma?: boolean }).auto_ma ? "Auto" : String(p.ma)) : "—",
+                    fov: p ? `${p.fov} mm` : "—",
+                    matrix: String(r.matrix),
+                    seriesType: type,
+                    images: makeImages(REAL_LUNG_SERIES.count, `${prefix}-recon${r.id}`),
+                    defaultWw: r.window_width,
+                    defaultWl: r.window_level,
+                }));
+
+                // Fallback if protocol has no recon series configured
+                if (leafSeries.length === 0) {
+                    leafSeries.push({
+                        id: `${prefix}-scan`,
+                        name: s.series_label,
+                        count: REAL_LUNG_SERIES.count,
+                        kernel: "—",
+                        thickness: p ? `${(p as { slice_thickness?: number }).slice_thickness ?? "—"} mm` : "—",
+                        kV: p ? String(p.kv) : "—",
+                        mAs: p ? ((p as { auto_ma?: boolean }).auto_ma ? "Auto" : String(p.ma)) : "—",
+                        fov: p ? `${p.fov} mm` : "—",
+                        matrix: "512",
+                        seriesType: type,
+                        images: makeImages(REAL_LUNG_SERIES.count, `${prefix}-scan`),
+                    });
+                }
+
+                scanGroups.push({
+                    id: `group-${s.id}`,
+                    label: s.series_label,
+                    type,
+                    series: leafSeries,
+                });
+            }
+        }
+
+        // If the session has no series at all (e.g. just created), add the static fallback so the viewer never crashes
+        if (scanGroups.length === 0) {
+            scanGroups.push({
+                id: "static-group",
+                label: REAL_LUNG_SERIES.seriesName,
+                type: "static" as SeriesType,
+                series: [{
+                    id: REAL_LUNG_SERIES.seriesId,
+                    name: REAL_LUNG_SERIES.seriesName,
+                    count: REAL_LUNG_SERIES.count,
+                    kernel: REAL_LUNG_SERIES.kernel,
+                    thickness: REAL_LUNG_SERIES.thickness,
+                    kV: REAL_LUNG_SERIES.kV,
+                    mAs: REAL_LUNG_SERIES.mAs,
+                    fov: REAL_LUNG_SERIES.fov,
+                    matrix: REAL_LUNG_SERIES.matrix,
+                    seriesType: "static" as SeriesType,
+                    images: Array.from({ length: REAL_LUNG_SERIES.count }, (_, i) => ({ id: `qin-img-${i + 1}`, name: `Image ${i + 1}` })),
+                }],
+            });
+        }
+
+        return [{
+            id: `session-${scanSession.id}`,
+            name: scanSession.name || "扫描序列",
+            scanGroups,
+        }];
+    }, [scanSession]);
+
+    const seriesList = studyTree.flatMap((study) => study.scanGroups.flatMap((g) => g.series));
+    // Guard: if seriesList is somehow still empty, always fall back to the static series
+    const safeSeriesList = seriesList.length > 0 ? seriesList : [{
+        id: REAL_LUNG_SERIES.seriesId,
+        name: REAL_LUNG_SERIES.seriesName,
+        count: REAL_LUNG_SERIES.count,
+        kernel: REAL_LUNG_SERIES.kernel,
+        thickness: REAL_LUNG_SERIES.thickness,
+        kV: REAL_LUNG_SERIES.kV,
+        mAs: REAL_LUNG_SERIES.mAs,
+        fov: REAL_LUNG_SERIES.fov,
+        matrix: REAL_LUNG_SERIES.matrix,
+        seriesType: "static" as SeriesType,
+        images: Array.from({ length: REAL_LUNG_SERIES.count }, (_, i) => ({ id: `qin-img-${i + 1}`, name: `Image ${i + 1}` })),
+    }];
+    const selectedSeries = safeSeriesList.find((s) => s.id === selectedSeriesId) ?? safeSeriesList[0];
     const totalSlices = selectedSeries.count;
     const pixelSpacingValue = (() => {
         const raw = meta.pixelSpacing.split("/")[0]?.trim() ?? "";
@@ -376,12 +544,35 @@ const ViewScreen = () => {
         return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
     })();
     const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
+
+    // Auto-select first series when session data loads (or series list changes)
+    useEffect(() => {
+        const first = safeSeriesList[0];
+        if (!first) return;
+        setSelectedSeriesId((prev) => {
+            // If current ID is still the static placeholder and we now have session data, switch to first session series
+            if (prev === REAL_LUNG_SERIES.seriesId && scanSession) return first.id;
+            // If selected ID is no longer in the list (series was removed), fall back to first
+            if (!safeSeriesList.find((s) => s.id === prev)) return first.id;
+            return prev;
+        });
+        // Apply first series WW/WL preset on session load
+        if (scanSession && first.defaultWw != null && first.defaultWl != null) {
+            setWw(first.defaultWw);
+            setWl(first.defaultWl);
+            setDisplayWw(first.defaultWw);
+            setDisplayWl(first.defaultWl);
+            defaultWindowRef.current = { ww: first.defaultWw, wl: first.defaultWl };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [scanSession]);
+
     const seriesImageUrls = useMemo(
         () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index)),
         [totalSlices]
     );
     const handleSeriesSelect = useCallback((seriesId: string) => {
-        const nextSeries = seriesList.find((series) => series.id === seriesId);
+        const nextSeries = safeSeriesList.find((series) => series.id === seriesId);
         setSelectedSeriesId(seriesId);
         setSliceIndex(getSeriesMidSliceIndex(nextSeries?.count ?? REAL_LUNG_SERIES.count));
         setZoom(1);
@@ -391,6 +582,14 @@ const ViewScreen = () => {
         setDraftMeasure(null);
         measureStartRef.current = null;
         dragRef.current = { dragging: false, x: 0, y: 0 };
+        // Apply WW/WL preset defined by the series/recon
+        if (nextSeries?.defaultWw != null && nextSeries?.defaultWl != null) {
+            setWw(nextSeries.defaultWw);
+            setWl(nextSeries.defaultWl);
+            setDisplayWw(nextSeries.defaultWw);
+            setDisplayWl(nextSeries.defaultWl);
+            defaultWindowRef.current = { ww: nextSeries.defaultWw, wl: nextSeries.defaultWl };
+        }
     }, [seriesList]);
     const buildVolumeProjection = (
         volume: VolumeData,
@@ -590,6 +789,8 @@ const ViewScreen = () => {
         setInvert(false);
         setWw(defaultWindowRef.current.ww);
         setWl(defaultWindowRef.current.wl);
+        setDisplayWw(defaultWindowRef.current.ww);
+        setDisplayWl(defaultWindowRef.current.wl);
         setToolMode("pan");
         setMeasures([]);
         setAnnotations([]);
@@ -597,6 +798,26 @@ const ViewScreen = () => {
         measureStartRef.current = null;
         dragRef.current = { dragging: false, x: 0, y: 0 };
     };
+
+    // ─── Clock tick (every 30 s is enough for HH:MM display) ─────────────────
+    useEffect(() => {
+        const tick = () => {
+            setClockStr(buildClock());
+            setDateStr(buildDate());
+        };
+        const id = window.setInterval(tick, 30_000);
+        return () => window.clearInterval(id);
+    }, []);
+
+    // ─── Load scan session from localStorage / backend ─────────────────────────
+    useEffect(() => {
+        fetchSelectedScanSession({ preferCache: true })
+            .then((session) => {
+                if (!session) return;
+                setScanSession(session);
+            })
+            .catch(() => { /* fall back to static data */ });
+    }, []);
 
     const createColorizedCanvas = useCallback((
         width: number,
@@ -907,40 +1128,18 @@ const ViewScreen = () => {
                 const mas = cleanOverlayText(dataSet.string("x00181152"));
                 const thickness = dataSet.string("x00180050") ?? "N/A";
 
-                const pixelDataElement = dataSet.elements.x7fe00010;
-                if (!pixelDataElement || !canvasRef.current || rows === 0 || cols === 0) return;
-
-                const pixelDataOffset = pixelDataElement.dataOffset;
-                const pixelDataLength = pixelDataElement.length;
-                const pixelData = byteArray.slice(pixelDataOffset, pixelDataOffset + pixelDataLength);
-                const pixelBuffer = pixelData.buffer.slice(
-                    pixelData.byteOffset,
-                    pixelData.byteOffset + pixelData.byteLength
-                );
-
-                let values: Int16Array | Uint16Array;
-                if (bitsAllocated === 16) {
-                    values = pixelRepresentation === 1 ? new Int16Array(pixelBuffer) : new Uint16Array(pixelBuffer);
-                } else {
-                    values = new Uint16Array(pixelBuffer);
-                }
-
+                // ── Compute WW/WL defaults (always, before any canvas check) ────────
                 const parsedWw = Number.isFinite(wwFromTag) && wwFromTag > 1 ? wwFromTag : 350;
                 const parsedWl = Number.isFinite(wcFromTag) ? wcFromTag : 45;
                 defaultWindowRef.current = { ww: parsedWw, wl: parsedWl };
                 if (sliceIndex === getSeriesMidSliceIndex(selectedSeries.count)) {
                     setWw(parsedWw);
                     setWl(parsedWl);
+                    setDisplayWw(parsedWw);
+                    setDisplayWl(parsedWl);
                 }
 
-                const huValues = new Float32Array(values.length);
-                for (let i = 0; i < values.length; i += 1) {
-                    huValues[i] = values[i] * slope + intercept;
-                }
-                huDataRef.current = huValues;
-                imgSizeRef.current = { rows, cols };
-                setRenderTick((n) => n + 1);
-
+                // ── Update overlay metadata (always — works in both 2D and 3D mode) ──
                 setMeta({
                     patientName,
                     patientId,
@@ -965,6 +1164,33 @@ const ViewScreen = () => {
                     cols,
                     count: selectedSeries.count,
                 });
+
+                // ── 3D canvas pixel rendering (only when the canvas element exists) ──
+                const pixelDataElement = dataSet.elements.x7fe00010;
+                if (!pixelDataElement || !canvasRef.current || rows === 0 || cols === 0) return;
+
+                const pixelDataOffset = pixelDataElement.dataOffset;
+                const pixelDataLength = pixelDataElement.length;
+                const pixelData = byteArray.slice(pixelDataOffset, pixelDataOffset + pixelDataLength);
+                const pixelBuffer = pixelData.buffer.slice(
+                    pixelData.byteOffset,
+                    pixelData.byteOffset + pixelData.byteLength
+                );
+
+                let values: Int16Array | Uint16Array;
+                if (bitsAllocated === 16) {
+                    values = pixelRepresentation === 1 ? new Int16Array(pixelBuffer) : new Uint16Array(pixelBuffer);
+                } else {
+                    values = new Uint16Array(pixelBuffer);
+                }
+
+                const huValues = new Float32Array(values.length);
+                for (let i = 0; i < values.length; i += 1) {
+                    huValues[i] = values[i] * slope + intercept;
+                }
+                huDataRef.current = huValues;
+                imgSizeRef.current = { rows, cols };
+                setRenderTick((n) => n + 1);
             } catch (error) {
                 // Keep UI alive if one slice fails.
                 console.error(error);
@@ -1143,7 +1369,7 @@ const ViewScreen = () => {
                         `Y ${yIndex + 1}/${rows}`,
                     ],
                     bottomLeft: [
-                        `WW/WL ${Math.round(ww)} / ${Math.round(wl)}`,
+                        `WW/WL ${Math.round(displayWw)} / ${Math.round(displayWl)}`,
                         `Spacing ${volume.pixelSpacingX.toFixed(3)} / ${volume.sliceSpacing.toFixed(3)}`,
                         `${cols} x ${depth}`,
                     ],
@@ -1311,8 +1537,12 @@ const ViewScreen = () => {
                             <User size={24} />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[16px] font-bold text-[#37474F]">Roky Zhang</span>
-                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: 67890</span>
+                            <span className="text-[16px] font-bold text-[#37474F]">
+                                {meta.patientName !== "N/A" ? meta.patientName : "—"}
+                            </span>
+                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">
+                                {meta.patientId !== "N/A" ? `ID: ${meta.patientId}` : "加载中…"}
+                            </span>
                         </div>
                     </div>
                     <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
@@ -1326,8 +1556,8 @@ const ViewScreen = () => {
                 </div>
 
                 <div className="text-center">
-                    <div className="text-[28px] font-bold tracking-tight text-[#37474F] leading-none">13:52</div>
-                    <div className="text-[12px] text-[#546E7A] font-medium mt-1 uppercase opacity-80">2月26日 周四</div>
+                    <div className="text-[28px] font-bold tracking-tight text-[#37474F] leading-none">{clockStr}</div>
+                    <div className="text-[12px] text-[#546E7A] font-medium mt-1 uppercase opacity-80">{dateStr}</div>
                 </div>
 
                 <div className="flex items-center gap-5 pr-2">
@@ -1355,30 +1585,76 @@ const ViewScreen = () => {
 
                     <div className="h-[220px] overflow-y-auto p-2 border-b border-[#EEF2F9]">
                         {studyTree.map((study) => (
-                            <div key={study.id} className="mb-2">
-                                <div className="px-2 py-1.5 text-[11px] font-black text-[#546E7A] uppercase tracking-wide">
-                                    {study.name}
+                            <div key={study.id} className="mb-1">
+                                {/* ── Protocol / Session name ── */}
+                                <div className="px-2 py-1.5 flex items-center gap-1.5">
+                                    <span className="text-[10px] font-black text-[#546E7A] uppercase tracking-wide">{study.name}</span>
                                 </div>
-                                <div className="pl-2 border-l border-[#DCE6F2] ml-2">
-                                    {study.series.map((series) => {
-                                        const active = series.id === selectedSeriesId;
+
+                                {/* ── Scan acquisition groups ── */}
+                                {study.scanGroups.map((group) => {
+                                    const typeLabel: Record<SeriesType, string> = {
+                                        topogram: "定位", helical: "螺旋", axial: "轴扫", "4d": "4D", static: "序列",
+                                    };
+                                    const typeBadgeColor: Record<SeriesType, string> = {
+                                        topogram: "bg-emerald-100 text-emerald-700",
+                                        helical:  "bg-blue-100 text-blue-700",
+                                        axial:    "bg-violet-100 text-violet-700",
+                                        "4d":     "bg-orange-100 text-orange-700",
+                                        static:   "bg-slate-100 text-slate-600",
+                                    };
+
+                                    // Topogram: single leaf — render as a direct button (no sub-indent)
+                                    if (group.type === "topogram" && group.series.length === 1) {
+                                        const s = group.series[0];
+                                        const active = s.id === selectedSeriesId;
                                         return (
                                             <button
-                                                key={series.id}
-                                                onClick={() => {
-                                                    handleSeriesSelect(series.id);
-                                                }}
-                                                className={`w-full text-left mb-1.5 rounded-md border px-3 py-2 transition-all ${active
-                                                    ? "bg-[#E3F2FD] border-[#90CAF9]"
-                                                    : "bg-white border-[#DCE6F2] hover:bg-[#F8FAFC]"
-                                                    }`}
+                                                key={group.id}
+                                                onClick={() => handleSeriesSelect(s.id)}
+                                                className={`w-full text-left mb-1.5 rounded-md border px-3 py-2 transition-all flex items-start gap-2 ${active ? "bg-[#E3F2FD] border-[#90CAF9]" : "bg-white border-[#DCE6F2] hover:bg-[#F8FAFC]"}`}
                                             >
-                                                <div className={`text-[12px] font-bold ${active ? "text-[#1565C0]" : "text-[#37474F]"}`}>{series.name}</div>
-                                                <div className="text-[10px] text-[#78909C] mt-0.5">{series.count} images</div>
+                                                <span className={`mt-0.5 shrink-0 rounded px-1 py-0.5 text-[8px] font-black uppercase ${typeBadgeColor[group.type]}`}>
+                                                    {typeLabel[group.type]}
+                                                </span>
+                                                <div className="min-w-0">
+                                                    <div className={`text-[12px] font-bold truncate ${active ? "text-[#1565C0]" : "text-[#37474F]"}`}>{s.name}</div>
+                                                    <div className="text-[10px] text-[#78909C] mt-0.5">{s.count} images</div>
+                                                </div>
                                             </button>
                                         );
-                                    })}
-                                </div>
+                                    }
+
+                                    // Helical / Axial / 4D: group header + recon series as indented items
+                                    return (
+                                        <div key={group.id} className="mb-1.5">
+                                            {/* Group header — non-clickable */}
+                                            <div className="flex items-center gap-1.5 px-2 py-1">
+                                                <span className={`shrink-0 rounded px-1 py-0.5 text-[8px] font-black uppercase ${typeBadgeColor[group.type]}`}>
+                                                    {typeLabel[group.type]}
+                                                </span>
+                                                <span className="text-[11px] font-bold text-[#37474F] truncate">{group.label}</span>
+                                            </div>
+
+                                            {/* Recon series — selectable, indented */}
+                                            <div className="ml-3 pl-2 border-l-2 border-[#DCE6F2] flex flex-col gap-1">
+                                                {group.series.map((s) => {
+                                                    const active = s.id === selectedSeriesId;
+                                                    return (
+                                                        <button
+                                                            key={s.id}
+                                                            onClick={() => handleSeriesSelect(s.id)}
+                                                            className={`w-full text-left rounded-md border px-2.5 py-1.5 transition-all ${active ? "bg-[#E3F2FD] border-[#90CAF9]" : "bg-white border-[#DCE6F2] hover:bg-[#F8FAFC]"}`}
+                                                        >
+                                                            <div className={`text-[11px] font-bold ${active ? "text-[#1565C0]" : "text-[#37474F]"}`}>{s.name}</div>
+                                                            <div className="text-[9px] text-[#78909C] mt-0.5">{s.kernel !== "—" ? s.kernel : ""} {s.thickness}</div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         ))}
                     </div>
@@ -1551,14 +1827,63 @@ const ViewScreen = () => {
                             }}
                         >
                             {imageMode === "2D" ? (
-                                <DicomViewer
-                                    imageUrls={seriesImageUrls}
-                                    currentImageIndex={clampSliceIndex(sliceIndex)}
-                                    onImageIndexChange={setSliceIndex}
-                                    activeTool={mapCornerstoneTool(toolMode)}
-                                    windowCenter={wl}
-                                    windowWidth={ww}
-                                />
+                                <>
+                                    <DicomViewer
+                                        ref={dicomViewerRef}
+                                        imageUrls={seriesImageUrls}
+                                        currentImageIndex={clampSliceIndex(sliceIndex)}
+                                        onImageIndexChange={setSliceIndex}
+                                        activeTool={mapCornerstoneTool(toolMode)}
+                                        windowCenter={wl}
+                                        windowWidth={ww}
+                                        onWindowLevelChange={(wc, wwidth) => {
+                                            setDisplayWl(Math.round(wc));
+                                            setDisplayWw(Math.round(wwidth));
+                                        }}
+                                    />
+                                    {/* ── Annotate click-intercept overlay (2D mode only) ── */}
+                                    {toolMode === "annotate" && (
+                                        <div
+                                            className="absolute inset-0 z-10 cursor-cell"
+                                            onClick={(e) => {
+                                                const rect = viewportRef.current?.getBoundingClientRect();
+                                                if (!rect) return;
+                                                const xPct = ((e.clientX - rect.left) / rect.width) * 100;
+                                                const yPct = ((e.clientY - rect.top) / rect.height) * 100;
+                                                const noteCount = annotations.filter(
+                                                    (a) => a.slice === sliceIndex && a.kind === "text" && a.mode === "2d"
+                                                ).length;
+                                                setAnnotations((prev) => [
+                                                    ...prev,
+                                                    {
+                                                        id: `anno-text-${Date.now()}-${Math.random()}`,
+                                                        kind: "text" as const,
+                                                        slice: sliceIndex,
+                                                        x: xPct,
+                                                        y: yPct,
+                                                        text: `Note ${noteCount + 1}`,
+                                                        mode: "2d" as const,
+                                                    },
+                                                ]);
+                                            }}
+                                        />
+                                    )}
+                                    {/* ── 2D annotation label overlays ── */}
+                                    {annotations
+                                        .filter((a): a is TextAnnotation => a.slice === sliceIndex && a.kind === "text" && a.mode === "2d")
+                                        .map((a) => (
+                                            <div
+                                                key={a.id}
+                                                className="absolute z-10 pointer-events-none flex items-center gap-1"
+                                                style={{ left: `${a.x}%`, top: `${a.y}%`, transform: "translate(-50%, -50%)" }}
+                                            >
+                                                <div className="w-1.5 h-1.5 rounded-full bg-[#FFD54F] shrink-0" />
+                                                <div className="bg-black/75 text-[#FFF8E1] text-[10px] font-mono px-1.5 py-0.5 rounded whitespace-nowrap">
+                                                    {a.text}
+                                                </div>
+                                            </div>
+                                        ))}
+                                </>
                             ) : (
                                 <>
                                     <canvas
@@ -1614,8 +1939,8 @@ const ViewScreen = () => {
                                             if (toolMode === "pan") {
                                                 setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
                                             } else if (toolMode === "wl") {
-                                                setWl((prev) => prev + dx * 0.8);
-                                                setWw((prev) => Math.max(1, prev + dy * 1.2));
+                                                setWl((prev) => { const next = prev + dx * 0.8; setDisplayWl(Math.round(next)); return next; });
+                                                setWw((prev) => { const next = Math.max(1, prev + dy * 1.2); setDisplayWw(Math.round(next)); return next; });
                                             }
                                         }}
                                         onMouseUp={(e) => {
@@ -1690,7 +2015,7 @@ const ViewScreen = () => {
                                                 );
                                             })}
                                         {annotations
-                                            .filter((a): a is TextAnnotation => a.slice === sliceIndex && a.kind === "text")
+                                            .filter((a): a is TextAnnotation => a.slice === sliceIndex && a.kind === "text" && a.mode !== "2d")
                                             .map((a) => {
                                                 const p = imageToScreen(a.x, a.y);
                                                 return (
@@ -1735,7 +2060,7 @@ const ViewScreen = () => {
                                 <div>KV {meta.kvp} | mAs {meta.mas}</div>
                             </div>
                             <div className="absolute bottom-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35] pointer-events-none">
-                                <div>WW/WL {Math.round(ww)} / {Math.round(wl)}</div>
+                                <div>WW/WL {Math.round(displayWw)} / {Math.round(displayWl)}</div>
                                 <div>Spacing {meta.pixelSpacing}</div>
                                 <div>{meta.rows} x {meta.cols} | Zoom {zoom.toFixed(2)}x</div>
                             </div>
@@ -1803,25 +2128,57 @@ const ViewScreen = () => {
                             <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
 
                             {[
-                                { title: "Zoom In", icon: <ZoomIn size={20} strokeWidth={1.5} />, action: () => setZoom((z) => Math.min(4, z + 0.1)) },
-                                { title: "Zoom Out", icon: <ZoomOut size={20} strokeWidth={1.5} />, action: () => setZoom((z) => Math.max(0.3, z - 0.1)) },
                                 {
-                                    title: "Fit to Screen", icon: <Maximize size={20} strokeWidth={1.5} />, action: () => {
-                                        setZoom(1);
-                                        setPan({ x: 0, y: 0 });
-                                    }
+                                    title: "Zoom In",
+                                    icon: <ZoomIn size={20} strokeWidth={1.5} />,
+                                    action: () => {
+                                        if (imageMode === "2D") {
+                                            dicomViewerRef.current?.zoomIn();
+                                        } else {
+                                            setZoom((z) => Math.min(4, z + 0.1));
+                                        }
+                                    },
                                 },
                                 {
-                                    title: "Reset", icon: <RefreshCw size={20} strokeWidth={1.5} />, action: () => {
-                                        handleResetAll();
-                                    }
+                                    title: "Zoom Out",
+                                    icon: <ZoomOut size={20} strokeWidth={1.5} />,
+                                    action: () => {
+                                        if (imageMode === "2D") {
+                                            dicomViewerRef.current?.zoomOut();
+                                        } else {
+                                            setZoom((z) => Math.max(0.3, z - 0.1));
+                                        }
+                                    },
+                                },
+                                {
+                                    title: "Fit to Screen",
+                                    icon: <Maximize size={20} strokeWidth={1.5} />,
+                                    action: () => {
+                                        if (imageMode === "2D") {
+                                            dicomViewerRef.current?.fit();
+                                        } else {
+                                            setZoom(1);
+                                            setPan({ x: 0, y: 0 });
+                                        }
+                                    },
+                                },
+                                {
+                                    title: "Reset",
+                                    icon: <RefreshCw size={20} strokeWidth={1.5} />,
+                                    action: () => {
+                                        if (imageMode === "2D") {
+                                            dicomViewerRef.current?.reset();
+                                            setDisplayWw(defaultWindowRef.current.ww);
+                                            setDisplayWl(defaultWindowRef.current.wl);
+                                        } else {
+                                            handleResetAll();
+                                        }
+                                    },
                                 },
                                 {
                                     title: isPlaying ? "Pause" : "Play",
                                     icon: isPlaying ? <Pause size={20} strokeWidth={1.5} /> : <Play size={20} strokeWidth={1.5} />,
-                                    action: () => {
-                                        setIsPlaying((prev) => !prev);
-                                    },
+                                    action: () => setIsPlaying((prev) => !prev),
                                     active: isPlaying,
                                 },
                             ].map(({ title, icon, action, active }) => (
