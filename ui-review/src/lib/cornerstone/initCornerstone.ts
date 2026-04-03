@@ -26,6 +26,7 @@ const TOOL_NAMES = {
   zoom: 'Zoom',
   windowLevel: 'WindowLevel',
   length: 'Length',
+  eraser: 'Eraser',
   stackScroll: 'StackScroll',
 } as const;
 
@@ -38,6 +39,7 @@ function registerTools() {
   addTool(ZoomTool);
   addTool(WindowLevelTool);
   addTool(LengthTool);
+  addTool(EraserTool);
   addTool(StackScrollTool);
   toolsRegistered = true;
 }
@@ -78,11 +80,13 @@ export function getOrCreateToolGroup(toolGroupId: string) {
   toolGroup.addTool(TOOL_NAMES.zoom);
   toolGroup.addTool(TOOL_NAMES.windowLevel);
   toolGroup.addTool(TOOL_NAMES.length);
+  toolGroup.addTool(TOOL_NAMES.eraser);
   toolGroup.addTool(TOOL_NAMES.stackScroll);
   toolGroup.setToolPassive(TOOL_NAMES.pan);
   toolGroup.setToolPassive(TOOL_NAMES.zoom);
   toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
   toolGroup.setToolPassive(TOOL_NAMES.length);
+  toolGroup.setToolPassive(TOOL_NAMES.eraser);
   toolGroup.setToolActive(TOOL_NAMES.stackScroll, {
     bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Wheel }],
   });

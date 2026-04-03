@@ -13,6 +13,8 @@ import {
     Hand,
     Ruler,
     Pencil,
+    Eraser,
+    Trash2,
     CircleDot,
     Maximize,
     RefreshCw,
@@ -271,9 +273,10 @@ const REAL_LUNG_SERIES = {
 const getSeriesDicomUrl = (sliceIndex: number) =>
     `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
 
-const mapCornerstoneTool = (toolMode: "pan" | "wl" | "measure" | "annotate") => {
+const mapCornerstoneTool = (toolMode: "pan" | "wl" | "measure" | "annotate" | "eraser") => {
     if (toolMode === "wl") return "window";
     if (toolMode === "measure") return "ruler";
+    if (toolMode === "eraser") return "eraser";
     if (toolMode === "annotate") return "annotate";
     return "pan";
 };
@@ -286,7 +289,7 @@ const ViewScreen = () => {
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
     const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
-    const [toolMode, setToolMode] = useState<"pan" | "wl" | "measure" | "annotate">("pan");
+    const [toolMode, setToolMode] = useState<"pan" | "wl" | "measure" | "annotate" | "eraser">("pan");
     const [zoom, setZoom] = useState(1);
     const [pan, setPan] = useState({ x: 0, y: 0 });
     const [rotation, setRotation] = useState(0);
@@ -797,6 +800,14 @@ const ViewScreen = () => {
         setDraftMeasure(null);
         measureStartRef.current = null;
         dragRef.current = { dragging: false, x: 0, y: 0 };
+    };
+
+    const handleClearAllAnnotations = () => {
+        dicomViewerRef.current?.clearAnnotations();
+        setMeasures([]);
+        setAnnotations([]);
+        setDraftMeasure(null);
+        measureStartRef.current = null;
     };
 
     // ─── Clock tick (every 30 s is enough for HH:MM display) ─────────────────
@@ -1874,8 +1885,13 @@ const ViewScreen = () => {
                                         .map((a) => (
                                             <div
                                                 key={a.id}
-                                                className="absolute z-10 pointer-events-none flex items-center gap-1"
+                                                className={`absolute z-10 flex items-center gap-1 ${toolMode === "eraser" ? "cursor-pointer" : "pointer-events-none"}`}
                                                 style={{ left: `${a.x}%`, top: `${a.y}%`, transform: "translate(-50%, -50%)" }}
+                                                onClick={(e) => {
+                                                    if (toolMode !== "eraser") return;
+                                                    e.stopPropagation();
+                                                    setAnnotations((prev) => prev.filter((item) => item.id !== a.id));
+                                                }}
                                             >
                                                 <div className="w-1.5 h-1.5 rounded-full bg-[#FFD54F] shrink-0" />
                                                 <div className="bg-black/75 text-[#FFF8E1] text-[10px] font-mono px-1.5 py-0.5 rounded whitespace-nowrap">
@@ -1920,6 +1936,10 @@ const ViewScreen = () => {
                                                         text: `Note ${noteCount + 1}`,
                                                     },
                                                 ]);
+                                                return;
+                                            }
+                                            if (toolMode === "eraser") {
+                                                dragRef.current.dragging = false;
                                                 return;
                                             }
                                             dragRef.current = { dragging: true, x: e.clientX, y: e.clientY };
@@ -1993,7 +2013,7 @@ const ViewScreen = () => {
                                             dragRef.current.dragging = false;
                                         }}
                                     />
-                                    <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                                    <svg className={`absolute inset-0 w-full h-full ${toolMode === "eraser" ? "pointer-events-auto" : "pointer-events-none"}`}>
                                         {measures
                                             .filter((a) => a.slice === sliceIndex)
                                             .map((a) => {
@@ -2003,7 +2023,14 @@ const ViewScreen = () => {
                                                 const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
                                                 const mm = (distPx / pxPerImagePixel) * pixelSpacingValue;
                                                 return (
-                                                    <g key={a.id}>
+                                                    <g
+                                                        key={a.id}
+                                                        onClick={(e) => {
+                                                            if (toolMode !== "eraser") return;
+                                                            e.stopPropagation();
+                                                            setMeasures((prev) => prev.filter((item) => item.id !== a.id));
+                                                        }}
+                                                    >
                                                         <line x1={a.sx1} y1={a.sy1} x2={a.sx2} y2={a.sy2} stroke="#FF4D4F" strokeWidth="2" />
                                                         <circle cx={a.sx1} cy={a.sy1} r="2.8" fill="#FF4D4F" />
                                                         <circle cx={a.sx2} cy={a.sy2} r="2.8" fill="#FF4D4F" />
@@ -2019,7 +2046,14 @@ const ViewScreen = () => {
                                             .map((a) => {
                                                 const p = imageToScreen(a.x, a.y);
                                                 return (
-                                                    <g key={a.id}>
+                                                    <g
+                                                        key={a.id}
+                                                        onClick={(e) => {
+                                                            if (toolMode !== "eraser") return;
+                                                            e.stopPropagation();
+                                                            setAnnotations((prev) => prev.filter((item) => item.id !== a.id));
+                                                        }}
+                                                    >
                                                         <circle cx={p.x} cy={p.y} r="3" fill="#FFD54F" />
                                                         <rect x={p.x + 6} y={p.y - 12} width="58" height="16" rx="3" fill="rgba(0,0,0,0.75)" />
                                                         <text x={p.x + 35} y={p.y - 1} fill="#FFF8E1" fontSize="10" fontFamily="monospace" textAnchor="middle">
@@ -2091,14 +2125,15 @@ const ViewScreen = () => {
                     </div>
                     <aside className="w-[72px] bg-[#111827] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3" onPointerDown={(e) => e.stopPropagation()}>
-                            {(["pan", "wl", "measure", "annotate"] as const).map((mode, i) => {
+                            {(["pan", "wl", "measure", "annotate", "eraser"] as const).map((mode, i) => {
                                 const icons = [
                                     <Hand size={20} strokeWidth={1.5} key="hand" />,
-                                    <CircleDot size={20} strokeWidth={1.5} key="circle" />,
+                                    <SlidersHorizontal size={20} strokeWidth={1.5} key="sliders" />,
                                     <Ruler size={20} strokeWidth={1.5} key="ruler" />,
                                     <Pencil size={20} strokeWidth={1.5} key="pencil" />,
+                                    <Eraser size={20} strokeWidth={1.5} key="eraser" />,
                                 ];
-                                const titles = ["Pan", "WW/WL", "Measure", "Annotate"];
+                                const titles = ["Pan", "WW/WL", "Measure", "Annotate", "Eraser"];
                                 const active = toolMode === mode;
                                 return (
                                     <button
@@ -2204,6 +2239,28 @@ const ViewScreen = () => {
                                     {icon}
                                 </button>
                             ))}
+
+                            <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
+
+                            <button
+                                title="Clear All"
+                                onClick={handleClearAllAnnotations}
+                                style={{
+                                    width: "44px",
+                                    height: "44px",
+                                    borderRadius: "10px",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    transition: "all 0.15s ease",
+                                    background: "transparent",
+                                    color: "#FCA5A5",
+                                }}
+                            >
+                                <Trash2 size={20} strokeWidth={1.5} />
+                            </button>
                         </div>
                     </aside>
                 </div>
@@ -2213,6 +2270,14 @@ const ViewScreen = () => {
                 <div className="flex-1">
                     <button className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95">
                         <ChevronLeft size={20} /> 高级处理
+                    </button>
+                </div>
+                <div className="flex-1 flex justify-center">
+                    <button
+                        onClick={handleClearAllAnnotations}
+                        className="flex items-center gap-2 px-8 h-[52px] bg-white text-[#DC2626] font-bold rounded-md border-2 border-[#FCA5A5] hover:bg-red-50 shadow-sm transition-all uppercase text-[13px] active:scale-95"
+                    >
+                        <Trash2 size={18} /> 清除全部
                     </button>
                 </div>
                 <div className="flex-1 flex justify-end">

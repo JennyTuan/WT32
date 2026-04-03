@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Enums, RenderingEngine, type StackViewport } from '@cornerstonejs/core';
+import { annotation } from '@cornerstonejs/tools';
 
 import {
   buildWadoImageId,
@@ -10,13 +11,14 @@ import {
   TOOL_NAMES,
 } from '../lib/cornerstone/initCornerstone';
 
-type ActiveTool = 'pan' | 'zoom' | 'zoomin' | 'window' | 'ruler' | 'zoomout' | 'fit' | 'flip' | 'reset' | 'annotate';
+type ActiveTool = 'pan' | 'zoom' | 'zoomin' | 'window' | 'ruler' | 'eraser' | 'zoomout' | 'fit' | 'flip' | 'reset' | 'annotate';
 
 export type CornerstoneViewportHandle = {
   zoomIn: () => void;
   zoomOut: () => void;
   fit: () => void;
   reset: () => void;
+  clearAnnotations: () => void;
 };
 
 interface CornerstoneStackViewportProps {
@@ -42,6 +44,7 @@ function isSupportedActiveTool(value: string | undefined): value is ActiveTool {
     value === 'zoomin' ||
     value === 'window' ||
     value === 'ruler' ||
+    value === 'eraser' ||
     value === 'zoomout' ||
     value === 'fit' ||
     value === 'flip' ||
@@ -105,6 +108,11 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         viewport.resetCamera();
         lastSentVoiRef.current = null;
         viewport.render();
+      },
+      clearAnnotations: () => {
+        const viewport = viewportRef.current;
+        annotation.state.removeAllAnnotations();
+        viewport?.render();
       },
     }));
 
@@ -233,6 +241,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         toolGroup.setToolPassive(TOOL_NAMES.zoom);
         toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
         toolGroup.setToolPassive(TOOL_NAMES.length);
+        toolGroup.setToolPassive(TOOL_NAMES.eraser);
         toolGroup.setToolActive(toolName, {
           bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Primary }],
         });
@@ -250,6 +259,9 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
           break;
         case 'ruler':
           setPrimaryTool(TOOL_NAMES.length);
+          break;
+        case 'eraser':
+          setPrimaryTool(TOOL_NAMES.eraser);
           break;
         case 'zoomin':
           viewport.setZoom(clamp(viewport.getZoom() * 1.15, 0.2, 20));
@@ -282,6 +294,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
           toolGroup.setToolPassive(TOOL_NAMES.zoom);
           toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
           toolGroup.setToolPassive(TOOL_NAMES.length);
+          toolGroup.setToolPassive(TOOL_NAMES.eraser);
           break;
       }
     }, [activeTool, status]);

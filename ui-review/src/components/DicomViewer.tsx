@@ -34,6 +34,7 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
         zoomOut: () => csRef.current?.zoomOut(),
         fit:     () => csRef.current?.fit(),
         reset:   () => csRef.current?.reset(),
+        clearAnnotations: () => csRef.current?.clearAnnotations(),
     }));
 
     return (
