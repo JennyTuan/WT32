@@ -52,6 +52,7 @@ type ScanConfirmScreenProps = {
     rightViewportContent?: React.ReactNode;
     readOnlyMode?: boolean;
     onExecuteScan?: () => void;
+    executeButtonLabel?: string;
     nextRoute?: string;
     allowBackNavigation?: boolean;
 };
@@ -364,6 +365,7 @@ const ScanConfirmScreen = ({
     rightViewportContent,
     readOnlyMode = false,
     onExecuteScan,
+    executeButtonLabel = "执行扫描",
     nextRoute = "/scout-execute",
     allowBackNavigation = true,
 }: ScanConfirmScreenProps) => {
@@ -519,6 +521,17 @@ const ScanConfirmScreen = ({
     const resolvedHelicalScanDisplayParams = {
         ...helicalScanDisplayParams,
         ...helicalParamOverrides,
+    };
+    const currentProtocolLabel =
+        parameterPanelMode === "helicalScan"
+            ? "螺旋扫描"
+            : parameterPanelMode === "tomographicScan"
+                ? "断层扫描"
+                : "定位像";
+    const currentScanData = {
+        ctdi: scoutDoseDisplayParams.doseCtdiVol,
+        dlp: scoutDoseDisplayParams.doseDlp,
+        protocol: currentProtocolLabel,
     };
     const handleOpenDetails = () => {
         const detailTarget = parameterPanelMode === "helicalScan"
@@ -1168,7 +1181,7 @@ const ScanConfirmScreen = ({
                         disabled={readOnlyMode && !onExecuteScan}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md transition-all uppercase text-[13px] ${readOnlyMode && !onExecuteScan ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
                     >
-                        执行扫描 <ChevronRight size={20} />
+                        {executeButtonLabel} <ChevronRight size={20} />
                     </button>
                 </div>
             </footer>
@@ -1271,6 +1284,7 @@ const ScanConfirmScreen = ({
                     patientId: selectedPatient.patientId,
                     checkType: selectedPatient.checkType ?? "CT Routine",
                 } : undefined}
+                scanData={currentScanData}
             />
         </div>
     );

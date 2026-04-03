@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
-import { CircleDot, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { fetchSelectedScanSession } from "../lib/scanSession";
+import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
 const HOLD_DURATION_MS = 3000;
@@ -34,6 +36,33 @@ type LoadedSlice = {
     pixelSpacingX: number;
     sliceThickness: number;
     hu: Float32Array;
+};
+
+type PostScoutScanType = Extract<WorkflowSequenceType, "helical" | "axial">;
+
+const DEFAULT_POST_SCOUT_SCAN_TYPE: PostScoutScanType = "helical";
+
+const POST_SCOUT_SCAN_CONFIG: Record<PostScoutScanType, { label: string; route: string }> = {
+    helical: {
+        label: "螺旋扫描",
+        route: "/helical-confirm",
+    },
+    axial: {
+        label: "断层扫描",
+        route: "/sequence-confirm",
+    },
+};
+
+const resolvePostScoutScanTypeFromWorkflowPlans = (): PostScoutScanType | null => {
+    const workflowPlans = loadSelectedScanWorkflowPlans();
+    for (const plan of workflowPlans) {
+        const nextSequence = plan.sequences.find((sequence) => sequence.type === "helical" || sequence.type === "axial");
+        if (nextSequence && (nextSequence.type === "helical" || nextSequence.type === "axial")) {
+            return nextSequence.type;
+        }
+    }
+
+    return null;
 };
 
 function clamp01(value: number) {
@@ -262,7 +291,7 @@ function ScoutProjectionViewport({
         const drawW = size.width * drawScale;
         const drawH = size.height * drawScale;
         const x = (viewW - drawW) / 2;
-        const y = (viewH - drawH) / 2;
+        const y = 20;
 
         ctx.save();
         ctx.imageSmoothingEnabled = true;
@@ -340,10 +369,47 @@ export default function ScoutExecuteScanScreen() {
     const [holdProgress, setHoldProgress] = useState(0);
     const [guideVisible, setGuideVisible] = useState(true);
     const [renderProgress, setRenderProgress] = useState(0);
+    const [postScoutScanType, setPostScoutScanType] = useState<PostScoutScanType>(DEFAULT_POST_SCOUT_SCAN_TYPE);
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
     const exposureTimerRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const workflowType = resolvePostScoutScanTypeFromWorkflowPlans();
+        if (workflowType) {
+            setPostScoutScanType(workflowType);
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        const resolveFromSession = async () => {
+            try {
+                const scanSession = await fetchSelectedScanSession();
+                if (cancelled || !scanSession) return;
+
+                const nextSeries = scanSession.series.find(
+                    (series) => series.series_type === "helical" || series.series_type === "axial"
+                );
+                if (nextSeries?.series_type === "helical" || nextSeries?.series_type === "axial") {
+                    setPostScoutScanType(nextSeries.series_type);
+                }
+            } catch (error) {
+                console.error("Failed to resolve post-scout scan type.", error);
+            }
+        };
+
+        void resolveFromSession();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const postScoutAction = POST_SCOUT_SCAN_CONFIG[postScoutScanType];
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -400,7 +466,7 @@ export default function ScoutExecuteScanScreen() {
 
     const handleExecuteScanClick = () => {
         if (stage === "completed") {
-            navigate("/helical-confirm");
+            navigate(postScoutAction.route);
             return;
         }
 
@@ -473,30 +539,11 @@ export default function ScoutExecuteScanScreen() {
                 activeScoutStepIndex={stage === "completed" ? 3 : 2}
                 readOnlyMode
                 onExecuteScan={handleExecuteScanClick}
+                executeButtonLabel={stage === "completed" ? postScoutAction.label : "执行扫描"}
             />
-
-            {stage === "completed" && (
-                <div className="absolute bottom-[14px] right-8 z-50">
-                    <button
-                        type="button"
-                        onClick={() => navigate("/helical-confirm", { replace: true })}
-                        className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
-                    >
-                        螺旋/断层扫描
-                    </button>
-                </div>
-            )}
 
             <div className="pointer-events-none absolute bottom-[80px] left-[246px] right-0 top-[82px] z-20 overflow-hidden rounded-lg">
                 <div className="flex h-full flex-col border border-white/5 bg-[#1A222B]">
-                    <div className="flex h-[44px] items-center justify-between border-b border-white/10 bg-[#131A22] px-4">
-                        <div className="flex items-center gap-2 text-[#C6D4E1]">
-                            <CircleDot size={12} className={stage === "exposing" ? "text-[#66BB6A]" : "text-[#4D94FF]"} />
-                            <span className="text-[11px] font-bold tracking-wide">影像区域</span>
-                        </div>
-                        <span className="text-[11px] text-[#90A4AE]">{statusText}</span>
-                    </div>
-
                     <div className="relative flex-1 overflow-hidden bg-[#05080C]">
                         <div className={`absolute inset-0 transition-opacity duration-500 ${stage === "idle" || stage === "arming" || stage === "enabled" ? "opacity-100" : "opacity-0"}`}>
                             <div className="flex h-full items-center justify-center text-[42px] font-thin uppercase tracking-[8px] text-[#44515F]/55">
@@ -512,7 +559,6 @@ export default function ScoutExecuteScanScreen() {
             </div>
 
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
-                <div className="w-12 bg-gradient-to-l from-black/18 to-transparent" />
                 <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
                     <div className="border-b border-slate-200 px-5 py-4">
                         <div className="text-[14px] font-black text-slate-700">实体按键操作引导</div>

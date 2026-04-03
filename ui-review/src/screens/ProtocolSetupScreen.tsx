@@ -27,11 +27,13 @@ import {
 import { loadSelectedPatient, formatPatientCardSubtitle } from "../lib/patientSession";
 import { saveSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import {
+    clearSelectedScanSessionId,
     createScanSessionForSelectedPatient,
     deleteSelectedScanSessionSeries,
     duplicateSelectedScanSessionSeries,
     fetchScanSessionById,
     fetchSelectedScanSession,
+    isAdHocScanSessionId,
     saveSelectedScanSessionId,
     updateSelectedScanSessionAxialParam,
     updateSelectedScanSessionHelicalParam,
@@ -40,6 +42,12 @@ import {
     updateSelectedScanSessionTopogramParam,
 } from "../lib/scanSession";
 import type { ApiScanSessionDetail } from "../lib/scanSession";
+
+const PROTOCOL_SELECT_RESUME_KEY = "protocolSelectResume";
+const PROTOCOL_SELECT_SELECTED_IDS_KEY = "protocolSelectSelectedIds";
+const PROTOCOL_SELECT_SELECTED_PLAN_KEY = "protocolSelectSelectedPlanId";
+const PROTOCOL_SELECT_SELECTED_SEQ_KEY = "protocolSelectSelectedSeqId";
+const DRAFT_SCAN_PLAN_ID = "__draft_scan_plan__";
 
 type RawProtocol = {
     id: string;
@@ -318,6 +326,75 @@ const mapApiProtocolToRawCase = (protocol: ApiProtocolDetail): RawProtocolCase =
     sequences: protocol.series.map((series) => mapApiSeriesToRawSequence(protocol, series)),
 });
 
+const loadDraftProtocolFromStorage = (): ApiProtocolDetail | null => {
+    if (typeof window === "undefined") return null;
+
+    const raw = localStorage.getItem("selectedProtocol");
+    if (!raw) return null;
+
+    try {
+        const parsed = JSON.parse(raw) as ApiProtocolDetail;
+        return parsed.id === 0 ? parsed : null;
+    } catch {
+        return null;
+    }
+};
+
+const buildDraftScanPlan = (protocol: ApiProtocolDetail): UiPlan => {
+    const basePlan = toUiPlan(mapApiProtocolToRawCase({ ...protocol, id: -1 }));
+    return {
+        ...basePlan,
+        id: DRAFT_SCAN_PLAN_ID,
+        title: protocol.name || "新建协议",
+        patientPosition: protocol.patient_position,
+    };
+};
+
+const loadStoredSelectedProtocolIds = () => {
+    if (typeof window === "undefined") return [];
+    const raw = sessionStorage.getItem(PROTOCOL_SELECT_SELECTED_IDS_KEY);
+    if (!raw) return [];
+
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map((value) => Number(value))
+            .filter((value) => Number.isFinite(value));
+    } catch {
+        return [];
+    }
+};
+
+const loadStoredSelectedPlanId = () => {
+    if (typeof window === "undefined") return "";
+    return sessionStorage.getItem(PROTOCOL_SELECT_SELECTED_PLAN_KEY) ?? "";
+};
+
+const loadStoredSelectedSeqId = () => {
+    if (typeof window === "undefined") return "";
+    return sessionStorage.getItem(PROTOCOL_SELECT_SELECTED_SEQ_KEY) ?? "";
+};
+
+const persistProtocolSelectState = (payload: {
+    selectedProtocolIds: number[];
+    selectedPlanId?: string;
+    selectedSeqId?: string;
+}) => {
+    if (typeof window === "undefined") return;
+    sessionStorage.setItem(PROTOCOL_SELECT_SELECTED_IDS_KEY, JSON.stringify(payload.selectedProtocolIds));
+    if (payload.selectedPlanId) {
+        sessionStorage.setItem(PROTOCOL_SELECT_SELECTED_PLAN_KEY, payload.selectedPlanId);
+    } else {
+        sessionStorage.removeItem(PROTOCOL_SELECT_SELECTED_PLAN_KEY);
+    }
+    if (payload.selectedSeqId) {
+        sessionStorage.setItem(PROTOCOL_SELECT_SELECTED_SEQ_KEY, payload.selectedSeqId);
+    } else {
+        sessionStorage.removeItem(PROTOCOL_SELECT_SELECTED_SEQ_KEY);
+    }
+};
+
 const mapScanSessionToRawCase = (scanSession: ApiScanSessionDetail): RawProtocolCase => ({
     protocol: {
         id: String(scanSession.protocol_id),
@@ -572,8 +649,8 @@ const formatValue = (key: string, value: string | number | boolean | undefined):
     }
 };
 
-const toUiPlan = (entry: RawProtocolCase, options?: { sourceSessionId?: number }): UiPlan => ({
-    id: entry.protocol.id,
+const toUiPlan = (entry: RawProtocolCase, options?: { sourceSessionId?: number; planId?: string }): UiPlan => ({
+    id: options?.planId ?? entry.protocol.id,
     title: entry.protocol.name,
     patientPosition: entry.protocol.supportedPositions[0] ?? "HFS",
     sourceSessionId: options?.sourceSessionId,
@@ -649,7 +726,7 @@ const fetchProtocolCatalogWithFallback = async () => {
 const fetchProtocolDetailWithFallback = async (protocolId: number) => {
     const candidates = API_BASE_URL
         ? [buildApiUrl(`/api/protocols/${protocolId}`), `/api/protocols/${protocolId}`]
-        : [`/api/protocols/${protocolId}`, `http://127.0.0.1:8001/api/protocols/${protocolId}`, `http://127.0.0.1:8000/api/protocols/${protocolId}`];
+        : [`/api/protocols/${protocolId}`, `http://127.0.0.1:8000/api/protocols/${protocolId}`];
 
     let lastError: Error | null = null;
 
@@ -674,19 +751,21 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const [protocolSummaries, setProtocolSummaries] = useState<ApiProtocolSummary[]>([]);
     const [protocolDetailsById, setProtocolDetailsById] = useState<Record<number, ApiProtocolDetail>>({});
+    const [draftScanProtocol, setDraftScanProtocol] = useState<ApiProtocolDetail | null>(null);
     const [isLoadingProtocols, setIsLoadingProtocols] = useState(true);
     const [protocolsError, setProtocolsError] = useState("");
     const [activeTab, setActiveTab] = useState<"scan" | "recon">("scan");
     const [libraryTab, setLibraryTab] = useState<"spiral" | "axial">("spiral");
     const [selectedBodyRegion, setSelectedBodyRegion] = useState<BodyRegion>(bodyRegions[0]);
-    const [selectedProtocolIds, setSelectedProtocolIds] = useState<number[]>([]);
+    const [selectedProtocolIds, setSelectedProtocolIds] = useState<number[]>(() => loadStoredSelectedProtocolIds());
     const [positionGroupIndex, setPositionGroupIndex] = useState<0 | 1>(0);
     const [planListOpen, setPlanListOpen] = useState(true);
     const [collapsedPlanIds, setCollapsedPlanIds] = useState<string[]>([]);
     const [patientType, setPatientType] = useState<"adult" | "child">("adult");
+    const [selectedPlanId, setSelectedPlanId] = useState(() => loadStoredSelectedPlanId());
 
     // 选中序列 ID 和重建方案索引
-    const [selectedSeqId, setSelectedSeqId] = useState("");
+    const [selectedSeqId, setSelectedSeqId] = useState(() => loadStoredSelectedSeqId());
     const [selectedReconIndex, setSelectedReconIndex] = useState(0);
 
     // 多选删除相关
@@ -696,6 +775,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const [isCreatingSession, setIsCreatingSession] = useState(false);
     const [sessionActionError, setSessionActionError] = useState("");
     const [scanSessionsByProtocolId, setScanSessionsByProtocolId] = useState<Record<number, ApiScanSessionDetail>>({});
+    const [adHocScanSessions, setAdHocScanSessions] = useState<ApiScanSessionDetail[]>([]);
 
     useEffect(() => {
         let cancelled = false;
@@ -797,9 +877,49 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         }));
     }, [libraryData]);
 
+    const [shouldResumePreviousSession] = useState(() => {
+        if (typeof window === "undefined") return false;
+        const shouldResume = sessionStorage.getItem(PROTOCOL_SELECT_RESUME_KEY) === "1";
+        sessionStorage.removeItem(PROTOCOL_SELECT_RESUME_KEY);
+        return shouldResume;
+    });
+
+    useEffect(() => {
+        if (shouldResumePreviousSession) {
+            setDraftScanProtocol(loadDraftProtocolFromStorage());
+            return;
+        }
+        clearSelectedScanSessionId();
+        localStorage.removeItem("selectedProtocol");
+        setDraftScanProtocol(null);
+    }, [shouldResumePreviousSession]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        sessionStorage.setItem(PROTOCOL_SELECT_SELECTED_IDS_KEY, JSON.stringify(selectedProtocolIds));
+    }, [selectedProtocolIds]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        if (selectedPlanId) {
+            sessionStorage.setItem(PROTOCOL_SELECT_SELECTED_PLAN_KEY, selectedPlanId);
+        } else {
+            sessionStorage.removeItem(PROTOCOL_SELECT_SELECTED_PLAN_KEY);
+        }
+    }, [selectedPlanId]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        if (selectedSeqId) {
+            sessionStorage.setItem(PROTOCOL_SELECT_SELECTED_SEQ_KEY, selectedSeqId);
+        } else {
+            sessionStorage.removeItem(PROTOCOL_SELECT_SELECTED_SEQ_KEY);
+        }
+    }, [selectedSeqId]);
+
     const buildPlansFromIds = useCallback(
-        (ids: number[]): UiPlan[] =>
-            ids
+        (ids: number[]): UiPlan[] => {
+            const basePlans = ids
                 .map((id) => {
                     const scanSession = scanSessionsByProtocolId[id];
                     const protocolDetail = protocolDetailsById[id];
@@ -809,15 +929,32 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             ? toUiPlan(mapApiProtocolToRawCase(protocolDetail))
                             : null;
                 })
-                .filter((plan): plan is UiPlan => plan !== null),
-        [protocolDetailsById, scanSessionsByProtocolId]
+                .filter((plan): plan is UiPlan => plan !== null);
+
+            const adHocPlans = adHocScanSessions
+                .map((scanSession) => toUiPlan(
+                    mapScanSessionToRawCase(scanSession),
+                    { sourceSessionId: scanSession.id, planId: `session-${scanSession.id}` }
+                ));
+
+            const plansWithAdHoc = [...basePlans, ...adHocPlans];
+            return draftScanProtocol ? [...plansWithAdHoc, buildDraftScanPlan(draftScanProtocol)] : plansWithAdHoc;
+        },
+        [adHocScanSessions, draftScanProtocol, protocolDetailsById, scanSessionsByProtocolId]
     );
 
     const applySessionToScreen = useCallback((scanSession: ApiScanSessionDetail) => {
-        setScanSessionsByProtocolId((prev) => ({
-            ...prev,
-            [scanSession.protocol_id]: scanSession,
-        }));
+        if (isAdHocScanSessionId(scanSession.id)) {
+            setAdHocScanSessions((prev) => {
+                const next = prev.filter((session) => session.id !== scanSession.id);
+                return [...next, scanSession];
+            });
+        } else {
+            setScanSessionsByProtocolId((prev) => ({
+                ...prev,
+                [scanSession.protocol_id]: scanSession,
+            }));
+        }
 
         setPatientType(mapAgeGroupToPatientType(scanSession.age_group));
 
@@ -826,15 +963,13 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             setSelectedBodyRegion(region);
         }
 
-        if (protocolSummaryMap[scanSession.protocol_id]) {
-            setSelectedProtocolIds((prev) =>
-                prev.includes(scanSession.protocol_id) ? prev : [...prev, scanSession.protocol_id]
-            );
+        if (isAdHocScanSessionId(scanSession.id)) {
+            setSelectedProtocolIds((prev) => prev.filter((id) => id !== scanSession.protocol_id));
         }
     }, [protocolSummaryMap]);
 
     useEffect(() => {
-        if (protocolSummaries.length === 0) return;
+        if (!shouldResumePreviousSession || protocolSummaries.length === 0) return;
 
         let cancelled = false;
 
@@ -859,7 +994,33 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             cancelled = true;
             window.removeEventListener("focus", handleFocus);
         };
-    }, [protocolSummaries.length, applySessionToScreen]);
+    }, [protocolSummaries.length, applySessionToScreen, shouldResumePreviousSession]);
+
+    useEffect(() => {
+        if (!shouldResumePreviousSession) return;
+        const missingProtocolIds = selectedProtocolIds.filter((id) => !protocolDetailsById[id]);
+        if (missingProtocolIds.length === 0) return;
+
+        let cancelled = false;
+
+        const loadMissingProtocols = async () => {
+            for (const protocolId of missingProtocolIds) {
+                try {
+                    await ensureProtocolDetailLoaded(protocolId);
+                } catch (error) {
+                    if (!cancelled) {
+                        console.error(error);
+                    }
+                }
+            }
+        };
+
+        void loadMissingProtocols();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [ensureProtocolDetailLoaded, protocolDetailsById, selectedProtocolIds, shouldResumePreviousSession]);
 
     const [scanPlans, setScanPlans] = useState<UiPlan[]>(() => buildPlansFromIds(selectedProtocolIds));
 
@@ -888,9 +1049,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     }, []);
 
     useEffect(() => {
+        if (isLoadingProtocols) {
+            return;
+        }
+
         if (protocolSummaries.length === 0) {
             const timer = setTimeout(() => {
                 setScanPlans([]);
+                setSelectedPlanId("");
                 setSelectedProtocolIds([]);
                 setSelectedSeqId("");
             }, 0);
@@ -909,6 +1075,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             const timer = setTimeout(() => {
                 setSelectedProtocolIds(nextSelectedIds);
                 setScanPlans(nextPlans);
+                setSelectedPlanId((current) =>
+                    nextPlans.some((plan: UiPlan) => plan.id === current) ? current : nextPlans[0]?.id || ""
+                );
                 setSelectedSeqId((current) =>
                     nextPlans.some((plan: UiPlan) => plan.sequences.some((sequence: UiSequence) => sequence.id === current)) ? current : nextSelectedSeqId
                 );
@@ -916,11 +1085,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             return () => clearTimeout(timer);
         } else {
             setScanPlans(nextPlans);
+            setSelectedPlanId((current) =>
+                nextPlans.some((plan: UiPlan) => plan.id === current) ? current : nextPlans[0]?.id || ""
+            );
             setSelectedSeqId((current) =>
                 nextPlans.some((plan: UiPlan) => plan.sequences.some((sequence: UiSequence) => sequence.id === current)) ? current : nextSelectedSeqId
             );
         }
-    }, [protocolSummaryMap, protocolSummaries.length, selectedProtocolIds, buildPlansFromIds, localEditsTrigger, applyLocalEdits]);
+    }, [applyLocalEdits, buildPlansFromIds, isLoadingProtocols, localEditsTrigger, protocolSummaries.length, protocolSummaryMap, selectedProtocolIds]);
 
     const openScanSession = useCallback(async (protocolId: number, route: "/protocol-detail" | "/scout-scan") => {
         const protocolSummary = protocolSummaryMap[protocolId];
@@ -930,13 +1102,29 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         setIsCreatingSession(true);
 
         try {
-            const protocolDetail = protocolDetailsById[protocolId] ?? await ensureProtocolDetailLoaded(protocolId);
+            const baseProtocolDetail = protocolDetailsById[protocolId] ?? await ensureProtocolDetailLoaded(protocolId);
+            const activePlanForProtocol = scanPlans.find((plan) => Number(plan.id) === protocolId);
+            const protocolDetail = activePlanForProtocol && ["HFS", "FFS", "HFP", "FFP"].includes(activePlanForProtocol.patientPosition)
+                ? {
+                    ...baseProtocolDetail,
+                    patient_position: activePlanForProtocol.patientPosition as ApiProtocolDetail["patient_position"],
+                }
+                : baseProtocolDetail;
             localStorage.setItem("selectedProtocol", JSON.stringify(protocolDetail));
             const existingSession = scanSessionsByProtocolId[protocolId];
             const scanSession = existingSession
                 ?? await createScanSessionForSelectedPatient(protocolId, protocolSummary.name);
             saveSelectedScanSessionId(scanSession.id);
             applySessionToScreen(scanSession);
+
+            if (typeof window !== "undefined") {
+                persistProtocolSelectState({
+                    selectedProtocolIds,
+                    selectedPlanId: activePlanForProtocol?.id ?? String(protocolId),
+                    selectedSeqId,
+                });
+                sessionStorage.setItem(PROTOCOL_SELECT_RESUME_KEY, "1");
+            }
 
             if (onOpenProtocolDetail && route === "/protocol-detail") {
                 onOpenProtocolDetail();
@@ -950,7 +1138,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         } finally {
             setIsCreatingSession(false);
         }
-    }, [applySessionToScreen, ensureProtocolDetailLoaded, navigate, onOpenProtocolDetail, protocolDetailsById, protocolSummaryMap, scanSessionsByProtocolId]);
+    }, [applySessionToScreen, ensureProtocolDetailLoaded, navigate, onOpenProtocolDetail, protocolDetailsById, protocolSummaryMap, scanPlans, scanSessionsByProtocolId, selectedProtocolIds, selectedSeqId]);
 
     const handleProtocolSelect = async (protocolId: number) => {
         if (!protocolSummaryMap[protocolId]) return;
@@ -976,6 +1164,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 delete next[protocolId];
                 return next;
             });
+            setAdHocScanSessions((prev) => prev.filter((session) => session.protocol_id !== protocolId));
         }
         setSelectedProtocolIds(nextIds);
         setCollapsedPlanIds([]);
@@ -986,6 +1175,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
         const nextPlans = applyLocalEdits(buildPlansFromIds(nextIds));
         setScanPlans(nextPlans);
+        setSelectedPlanId(nextPlans[0]?.id || "");
         setSelectedSeqId(nextPlans.flatMap((p) => p.sequences)[0]?.id || "");
     };
 
@@ -1209,16 +1399,27 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
     // 获取当前选中序列对象
     const allSequences = scanPlans.flatMap((p) => p.sequences);
-    const activeSeq = allSequences.find((s) => s.id === selectedSeqId) || allSequences[0] || {
+    const planSelectedBySequence = scanPlans.find((plan) => plan.sequences.some((sequence) => sequence.id === selectedSeqId));
+    const activePlan = scanPlans.find((plan) => plan.id === selectedPlanId) ?? planSelectedBySequence ?? scanPlans[0];
+    const planSequences = activePlan?.sequences ?? [];
+    const activeSeq = planSequences.find((s) => s.id === selectedSeqId) || planSequences[0] || allSequences[0] || {
         type: "",
         mode: "",
         scanParams: [],
         reconPlans: [],
     };
-    const activePlan = scanPlans.find((plan) => plan.sequences.some((sequence) => sequence.id === activeSeq.id)) ?? scanPlans[0];
     const activePlanId = activePlan?.id;
-    const activeProtocolId = activePlanId ? Number(activePlanId) : selectedProtocolIds[0];
-    const activeScanSession = activeProtocolId ? scanSessionsByProtocolId[activeProtocolId] ?? null : null;
+    const isDraftActivePlan = activePlanId === DRAFT_SCAN_PLAN_ID;
+    const activeProtocolId = activePlanId && !isDraftActivePlan && !activePlan?.sourceSessionId
+        ? Number(activePlanId)
+        : selectedProtocolIds[0];
+    const activeScanSession = activePlan?.sourceSessionId
+        ? adHocScanSessions.find((session) => session.id === activePlan.sourceSessionId)
+            ?? Object.values(scanSessionsByProtocolId).find((session) => session.id === activePlan.sourceSessionId)
+            ?? null
+        : activeProtocolId
+            ? scanSessionsByProtocolId[activeProtocolId] ?? null
+            : null;
     const activePositioning = isSupportedPosition(activePlan?.patientPosition ?? "") ? activePlan.patientPosition : "HFS";
     const activeSessionSeries = activeScanSession?.series.find((series) => series.id === activeSeq.sourceSeriesId) ?? null;
     const activeSessionRecon = activeSessionSeries?.recon_series.find(
@@ -1368,12 +1569,42 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         : planHeaderHeight;
     const planPanelHeight = Math.min(Math.max(desiredPlanPanelHeight, planHeaderHeight), 420);
     const handleOpenProtocolDetail = async () => {
+        if (isDraftActivePlan) {
+            if (typeof window !== "undefined") {
+                persistProtocolSelectState({
+                    selectedProtocolIds,
+                    selectedPlanId: activePlanId,
+                    selectedSeqId,
+                });
+                sessionStorage.setItem(PROTOCOL_SELECT_RESUME_KEY, "1");
+            }
+            navigate("/protocol-detail?mode=new");
+            return;
+        }
+        if (activeScanSession && activePlan?.sourceSessionId) {
+            saveSelectedScanSessionId(activeScanSession.id);
+            localStorage.removeItem("selectedProtocol");
+            if (typeof window !== "undefined") {
+                persistProtocolSelectState({
+                    selectedProtocolIds,
+                    selectedPlanId: activePlan.id,
+                    selectedSeqId,
+                });
+                sessionStorage.setItem(PROTOCOL_SELECT_RESUME_KEY, "1");
+            }
+            if (onOpenProtocolDetail) {
+                onOpenProtocolDetail();
+                return;
+            }
+            navigate("/protocol-detail");
+            return;
+        }
         if (!activeProtocolId) return;
         await openScanSession(activeProtocolId, "/protocol-detail");
     };
 
     const handleStartScanFlow = async () => {
-        if (!activeProtocolId) return;
+        if (!activePlan) return;
         saveSelectedScanWorkflowPlans(
             scanPlans.map((plan) => ({
                 id: plan.id,
@@ -1395,6 +1626,34 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 })),
             }))
         );
+        if (isDraftActivePlan) {
+            if (typeof window !== "undefined") {
+                persistProtocolSelectState({
+                    selectedProtocolIds,
+                    selectedPlanId: activePlanId,
+                    selectedSeqId,
+                });
+                sessionStorage.setItem(PROTOCOL_SELECT_RESUME_KEY, "1");
+            }
+            navigate("/protocol-detail?mode=new");
+            return;
+        }
+        if (activeScanSession && activePlan?.sourceSessionId) {
+            saveSelectedScanSessionId(activeScanSession.id);
+            localStorage.removeItem("selectedProtocol");
+            if (typeof window !== "undefined") {
+                persistProtocolSelectState({
+                    selectedProtocolIds,
+                    selectedPlanId: activePlan.id,
+                    selectedSeqId,
+                });
+                sessionStorage.setItem(PROTOCOL_SELECT_RESUME_KEY, "1");
+            }
+            navigate("/scout-scan");
+            return;
+        }
+
+        if (!activeProtocolId) return;
         await openScanSession(activeProtocolId, "/scout-scan");
     };
 
@@ -1403,7 +1662,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     }, [activePositioning]);
 
     const handlePositioningChange = async (pos: "HFS" | "FFS" | "HFP" | "FFP" | "HFDR" | "FFDR" | "HFDL" | "FFDL") => {
-        if (!activeScanSession || !activePlanId) return;
+        if (!activePlanId) return;
 
         setScanPlans((plans) =>
             plans.map((plan) =>
@@ -1412,7 +1671,53 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                     : plan
             )
         );
+
+        if (["HFS", "FFS", "HFP", "FFP"].includes(pos)) {
+            const normalizedPos = pos as ApiProtocolDetail["patient_position"];
+
+            if (isDraftActivePlan) {
+                setDraftScanProtocol((current) => {
+                    if (!current) return current;
+                    const nextDraft = { ...current, patient_position: normalizedPos };
+                    localStorage.setItem("selectedProtocol", JSON.stringify(nextDraft));
+                    return nextDraft;
+                });
+            } else if (activeProtocolId) {
+                setProtocolDetailsById((prev) => {
+                    const existing = prev[activeProtocolId];
+                    if (!existing) return prev;
+                    return {
+                        ...prev,
+                        [activeProtocolId]: {
+                            ...existing,
+                            patient_position: normalizedPos,
+                        },
+                    };
+                });
+
+                try {
+                    const rawSelectedProtocol = localStorage.getItem("selectedProtocol");
+                    if (rawSelectedProtocol) {
+                        const parsedSelectedProtocol = JSON.parse(rawSelectedProtocol) as ApiProtocolDetail;
+                        if (parsedSelectedProtocol.id === activeProtocolId) {
+                            localStorage.setItem(
+                                "selectedProtocol",
+                                JSON.stringify({
+                                    ...parsedSelectedProtocol,
+                                    patient_position: normalizedPos,
+                                })
+                            );
+                        }
+                    }
+                } catch {
+                    // Ignore stale cached protocol payloads.
+                }
+            }
+        }
+
         setPositionGroupIndex(["HFS", "FFS", "HFP", "FFP"].includes(pos) ? 0 : 1);
+
+        if (!activeScanSession) return;
 
         try {
             const updatedSession = await updateScanSessionById(activeScanSession.id, { patient_position: pos });
@@ -1504,7 +1809,12 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 {/* 新增序列 */}
                                 <button
                                     title="新增序列"
-                                    onClick={() => navigate("/protocol-detail?mode=new")}
+                                    onClick={() => {
+                                        if (typeof window !== "undefined") {
+                                            sessionStorage.setItem(PROTOCOL_SELECT_RESUME_KEY, "1");
+                                        }
+                                        navigate("/protocol-detail?mode=new");
+                                    }}
                                     className="w-[44px] h-[44px] flex items-center justify-center rounded-md text-[#4D94FF] hover:bg-[#E3F2FD] active:bg-[#BBDEFB] transition-colors"
                                 >
                                     <Plus size={20} />
@@ -1544,10 +1854,22 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 {scanPlans.map((plan) => (
                                     <div key={plan.id} className="border-b border-gray-100/50">
                                         {/* 计划标题行 */}
-                                        <div className="h-[32px] px-4 flex items-center gap-2 bg-[#F8FAFC] border-b border-[#EEF2F9]">
+                                        <div
+                                            onClick={() => {
+                                                setSelectedPlanId(plan.id);
+                                                if (!plan.sequences.some((sequence) => sequence.id === selectedSeqId)) {
+                                                    setSelectedSeqId(plan.sequences[0]?.id || "");
+                                                    setSelectedReconIndex(0);
+                                                }
+                                            }}
+                                            className={`h-[32px] px-4 flex items-center gap-2 border-b border-[#EEF2F9] ${selectedPlanId === plan.id ? "bg-[#EAF3FF]" : "bg-[#F8FAFC]"}`}
+                                        >
                                             <button
                                                 type="button"
-                                                onClick={() => togglePlanCollapse(plan.id)}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    togglePlanCollapse(plan.id);
+                                                }}
                                                 title={collapsedPlanIds.includes(plan.id) ? "展开该协议内扫描序列" : "收起该协议内扫描序列"}
                                                 className="inline-flex w-6 h-6 items-center justify-center rounded-sm hover:bg-[#E3F2FD] transition-colors"
                                             >
@@ -1558,6 +1880,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                             </button>
                                             <input
                                                 type="checkbox"
+                                                onClick={(event) => event.stopPropagation()}
                                                 checked={checkedPlanIds.includes(plan.id)}
                                                 onChange={() => toggleCheckPlan(plan.id)}
                                                 className="w-3.5 h-3.5 rounded-sm accent-[#4D94FF]"
@@ -1571,6 +1894,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                             <div
                                                 key={seq.id}
                                                 onClick={() => {
+                                                    setSelectedPlanId(plan.id);
                                                     setSelectedSeqId(seq.id);
                                                     setSelectedReconIndex(0);
                                                 }}
@@ -1988,8 +2312,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 ).map((pos) => (
                                     <button
                                         key={pos}
+                                        type="button"
                                         onClick={() => void handlePositioningChange(pos)}
-                                        className={`h-full rounded-md border-2 font-black text-[13px] shadow-sm transition-all flex items-center justify-center ${activePositioning === pos
+                                        className={`h-full rounded-md border-2 font-black text-[13px] shadow-sm transition-all flex items-center justify-center outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4D94FF]/20 ${activePositioning === pos
                                             ? "bg-white border-[#4D94FF] text-[#4D94FF] ring-2 ring-[#4D94FF]/10"
                                             : "bg-white border-[#B0C4DE]/40 text-[#B0C4DE] hover:border-[#B0C4DE]"
                                             }`}

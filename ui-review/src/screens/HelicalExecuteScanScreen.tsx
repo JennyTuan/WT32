@@ -1,14 +1,75 @@
 import { useEffect, useRef, useState } from "react";
-import { CircleDot, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import DicomViewer from "../components/DicomViewer";
+import { fetchSelectedScanSession } from "../lib/scanSession";
 import ScanConfirmScreen from "./ScanConfirmScreen";
-import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
 
 type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "rendering" | "completed";
 
 const HOLD_DURATION_MS = 3000;
 const EXPOSURE_DURATION_MS = 1500;
 const RENDER_DURATION_MS = 1600;
+const LIVE_FRAME_INTERVAL_MS = 85;
+const HELICAL_RESULT_SERIES = {
+    basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
+    count: 118,
+    fallbackWindowWidth: 350,
+    fallbackWindowLevel: 45,
+};
+
+function HelicalExecuteIdleViewport() {
+    return (
+        <div className="relative h-full w-full overflow-hidden bg-black">
+            <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="text-[14px] font-semibold tracking-[0.28em] text-[#7E8CA0]">LIVE VIEW</div>
+                    <div className="mt-3 text-[12px] text-[#566474]">等待触发扫描，影像将在扫描过程中实时显示</div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function HelicalLiveViewport({ playbackActive }: { playbackActive: boolean }) {
+    const imageUrls = Array.from(
+        { length: HELICAL_RESULT_SERIES.count },
+        (_, index) => `${HELICAL_RESULT_SERIES.basePath}/1-${String(index + 1).padStart(3, "0")}.dcm`
+    );
+    const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+    useEffect(() => {
+        if (!playbackActive) return;
+
+        setCurrentImageIndex(0);
+        const timer = window.setInterval(() => {
+            setCurrentImageIndex((prev) => {
+                if (prev >= imageUrls.length - 1) {
+                    window.clearInterval(timer);
+                    return prev;
+                }
+                return prev + 1;
+            });
+        }, LIVE_FRAME_INTERVAL_MS);
+
+        return () => {
+            window.clearInterval(timer);
+        };
+    }, [imageUrls.length, playbackActive]);
+
+    return (
+        <div className="relative h-full w-full overflow-hidden bg-black">
+            <DicomViewer
+                imageUrls={imageUrls}
+                currentImageIndex={currentImageIndex}
+                onImageIndexChange={setCurrentImageIndex}
+                activeTool="pan"
+                windowCenter={HELICAL_RESULT_SERIES.fallbackWindowLevel}
+                windowWidth={HELICAL_RESULT_SERIES.fallbackWindowWidth}
+            />
+        </div>
+    );
+}
 
 export default function HelicalExecuteScanScreen() {
     const navigate = useNavigate();
@@ -29,6 +90,31 @@ export default function HelicalExecuteScanScreen() {
     };
 
     useEffect(() => {
+        let cancelled = false;
+
+        const loadSessionMeasurements = async () => {
+            try {
+                const scanSession = await fetchSelectedScanSession();
+                const helicalParam = scanSession?.series.find((series) => series.series_type === "helical")?.helical_param;
+                if (!helicalParam || cancelled) return;
+
+                setMeasurements({
+                    scanLength: String(helicalParam.scan_length),
+                    scoutFov: String(helicalParam.fov),
+                });
+            } catch (error) {
+                console.error("Failed to load helical execute parameters.", error);
+            }
+        };
+
+        void loadSessionMeasurements();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
         return () => {
             clearHoldRaf();
             if (exposureTimerRef.current !== null) {
@@ -43,12 +129,10 @@ export default function HelicalExecuteScanScreen() {
         const tick = (timestamp: number) => {
             const startedAt = progressStartRef.current ?? timestamp;
             const nextProgress = Math.min((timestamp - startedAt) / RENDER_DURATION_MS, 1);
-
             if (nextProgress < 1) {
                 rafRef.current = requestAnimationFrame(tick);
                 return;
             }
-
             rafRef.current = null;
             setStage("completed");
         };
@@ -109,10 +193,7 @@ export default function HelicalExecuteScanScreen() {
     };
 
     const stopHold = () => {
-        if (stage !== "arming") {
-            return;
-        }
-
+        if (stage !== "arming") return;
         clearHoldRaf();
         holdStartRef.current = null;
         setHoldProgress(0);
@@ -121,25 +202,27 @@ export default function HelicalExecuteScanScreen() {
 
     const statusText =
         stage === "arming"
-            ? `长按触发 ${Math.max(0, ((1 - holdProgress) * 3)).toFixed(1)}s`
+            ? `Hold to trigger ${Math.max(0, ((1 - holdProgress) * 3)).toFixed(1)}s`
             : stage === "enabled"
-                ? "扫描已使能"
+                ? "Scan enabled"
                 : stage === "exposing"
-                    ? "螺旋扫描中..."
+                    ? "Helical scan in progress..."
                     : stage === "rendering"
-                        ? "图像重建中..."
+                        ? "Rendering images..."
                         : stage === "completed"
-                            ? "螺旋扫描已完成"
-                            : "等待操作";
+                            ? "Helical scan completed"
+                            : "Waiting";
 
     const guideTitle =
         stage === "arming"
-            ? "持续按住绿色按键"
+            ? "Keep holding the green button"
             : stage === "enabled"
-                ? "系统已使能"
+                ? "System enabled"
                 : stage === "exposing"
-                    ? "正在执行螺旋扫描"
-                    : "按住绿色按键";
+                    ? "Running helical scan"
+                    : "Hold the green button";
+
+    const showLiveViewport = stage === "exposing" || stage === "rendering" || stage === "completed";
 
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
@@ -148,29 +231,17 @@ export default function HelicalExecuteScanScreen() {
                 activeSequenceStepIndex={stage === "completed" ? 2 : 1}
                 parameterPanelMode="helicalScan"
                 helicalParamOverrides={measurements}
-                rightViewportContent={<TomographicScoutViewport onMeasurementChange={setMeasurements} />}
+                rightViewportContent={showLiveViewport ? <HelicalLiveViewport playbackActive={stage !== "completed"} /> : <HelicalExecuteIdleViewport />}
                 readOnlyMode
                 onExecuteScan={handleExecuteScanClick}
+                executeButtonLabel={stage === "completed" ? "图像浏览" : "执行扫描"}
             />
 
-            {stage === "completed" && (
-                <div className="absolute bottom-[14px] right-8 z-50">
-                    <button
-                        type="button"
-                        onClick={() => navigate("/image-viewer")}
-                        className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
-                    >
-                        图像浏览
-                    </button>
-                </div>
-            )}
-
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
-                <div className="w-12 bg-gradient-to-l from-black/18 to-transparent" />
                 <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
                     <div className="border-b border-slate-200 px-5 py-4">
-                        <div className="text-[14px] font-black text-slate-700">实体按键操作引导</div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">演示长按三秒触发使能与螺旋扫描，扫描完成后再进入图像浏览。</div>
+                        <div className="text-[14px] font-black text-slate-700">Physical button guide</div>
+                        <div className="mt-1 text-[11px] font-medium text-slate-400">Hold for three seconds to enable and start the helical scan.</div>
                     </div>
 
                     <div className="flex flex-1 flex-col">
@@ -204,7 +275,7 @@ export default function HelicalExecuteScanScreen() {
 
                             <div className="w-full rounded-2xl border border-[#D6E0EA] bg-white/70 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
                                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                                    <span>长按进度</span>
+                                    <span>Hold progress</span>
                                     <span>{Math.round(holdProgress * 100)}%</span>
                                 </div>
                                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#DCE6F1]">
@@ -221,18 +292,6 @@ export default function HelicalExecuteScanScreen() {
                                 {statusText}
                             </div>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            <div className="pointer-events-none absolute bottom-[80px] left-[246px] right-0 top-[82px] z-20 overflow-hidden rounded-lg">
-                <div className="flex h-full flex-col border border-white/5 bg-[#1A222B]/20">
-                    <div className="flex h-[44px] items-center justify-between border-b border-white/10 bg-[#131A22]/80 px-4">
-                        <div className="flex items-center gap-2 text-[#C6D4E1]">
-                            <CircleDot size={12} className={stage === "exposing" ? "text-[#66BB6A]" : "text-[#4D94FF]"} />
-                            <span className="text-[11px] font-bold tracking-wide">螺旋扫描状态</span>
-                        </div>
-                        <span className="text-[11px] text-[#90A4AE]">{statusText}</span>
                     </div>
                 </div>
             </div>

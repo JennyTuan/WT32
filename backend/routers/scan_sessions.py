@@ -202,6 +202,37 @@ def _normalize_series_order(scan_session: models.ScanSession):
         series.series_order = index
 
 
+def _build_session_series_from_payload(payload: schemas.ScanSessionSeriesCreate) -> models.ScanSessionSeries:
+    session_series = models.ScanSessionSeries(
+        series_order=payload.series_order,
+        series_type=payload.series_type,
+        series_label=payload.series_label,
+        contrast_delay=payload.contrast_delay,
+        trigger_mode=payload.trigger_mode,
+        tracking_threshold=payload.tracking_threshold,
+    )
+
+    if payload.topogram_param:
+        topogram = payload.topogram_param.model_dump(exclude_unset=True, exclude={"series_id"})
+        session_series.topogram_param = models.ScanSessionTopogramParam(**topogram)
+
+    if payload.helical_param:
+        helical = payload.helical_param.model_dump(exclude_unset=True, exclude={"series_id"})
+        session_series.helical_param = models.ScanSessionHelicalParam(**helical)
+
+    if payload.axial_param:
+        axial = payload.axial_param.model_dump(exclude_unset=True, exclude={"series_id"})
+        session_series.axial_param = models.ScanSessionAxialParam(**axial)
+
+    for recon_payload in payload.recon_series:
+        recon = recon_payload.model_dump(exclude_unset=True, exclude={"series_id"})
+        if "recon_type" not in recon or recon["recon_type"] is None:
+            recon["recon_type"] = "soft"
+        session_series.recon_series.append(models.ScanSessionReconSeries(**recon))
+
+    return session_series
+
+
 def _clone_session_series(source: models.ScanSessionSeries) -> models.ScanSessionSeries:
     cloned = models.ScanSessionSeries(
         scan_session_id=source.scan_session_id,
@@ -317,6 +348,32 @@ def create_scan_session(payload: schemas.ScanSessionCreate, db: Session = Depend
     return _get_scan_session_or_404(scan_session.id, db)
 
 
+@router.post("/ad-hoc", response_model=schemas.ScanSessionDetail, status_code=status.HTTP_201_CREATED)
+def create_ad_hoc_scan_session(payload: schemas.ScanSessionAdHocCreate, db: Session = Depends(get_db)):
+    patient = _get_patient_or_404(payload.patient_id, db)
+    protocol = _get_protocol_or_404(payload.source_protocol_id, db)
+
+    scan_session = models.ScanSession(
+        patient_id=patient.id,
+        protocol_id=protocol.id,
+        session_name=payload.session_name,
+        status="draft",
+        name=payload.name,
+        body_part=payload.body_part,
+        age_group=payload.age_group,
+        patient_weight=payload.patient_weight,
+        patient_position=payload.patient_position,
+        table_direction=payload.table_direction,
+        scan_mode=payload.scan_mode,
+        description=payload.description,
+    )
+
+    db.add(scan_session)
+    db.commit()
+    db.refresh(scan_session)
+    return _get_scan_session_or_404(scan_session.id, db)
+
+
 @router.put("/{scan_session_id}", response_model=schemas.ScanSessionDetail)
 def update_scan_session(scan_session_id: int, payload: schemas.ScanSessionUpdate, db: Session = Depends(get_db)):
     scan_session = _get_scan_session_or_404(scan_session_id, db)
@@ -365,6 +422,19 @@ def update_scan_session_contrast_config(config_id: int, payload: schemas.ScanSes
     db.commit()
     db.refresh(entity)
     return entity
+
+
+@router.post("/{scan_session_id}/series", response_model=schemas.ScanSessionDetail, status_code=status.HTTP_201_CREATED)
+def create_scan_session_series(scan_session_id: int, payload: schemas.ScanSessionSeriesCreate, db: Session = Depends(get_db)):
+    scan_session = _get_scan_session_or_404(scan_session_id, db)
+    session_series = _build_session_series_from_payload(payload)
+    session_series.scan_session_id = scan_session.id
+    db.add(session_series)
+    db.flush()
+    _normalize_series_order(scan_session)
+    db.commit()
+    db.refresh(session_series)
+    return _get_scan_session_or_404(scan_session.id, db)
 
 
 @router.put("/series/{session_series_id}", response_model=schemas.ScanSessionSeries)

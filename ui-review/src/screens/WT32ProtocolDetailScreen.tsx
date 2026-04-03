@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
     Plus,
@@ -9,6 +9,8 @@ import {
     X,
 } from "lucide-react";
 import {
+    createAdHocScanSessionForSelectedPatient,
+    createScanSessionSeries,
     fetchSelectedScanSession,
     updateSelectedScanSession,
     updateSelectedScanSessionAxialParam,
@@ -65,6 +67,109 @@ type ApiProtocolDetail = {
     table_direction: string;
     description?: string | null;
     series: ApiSeriesDetail[];
+};
+
+type ApiProtocolSummary = {
+    id: number;
+    name: string;
+    body_part: string;
+    age_group: "adult" | "child" | "infant";
+    patient_weight: string;
+    patient_position: string;
+    table_direction: string;
+    description?: string | null;
+    series_count: number;
+    supported_modes: ApiSeriesDetail["series_type"][];
+};
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "";
+
+const buildApiUrl = (path: string) => {
+    if (!API_BASE_URL) return path;
+    return `${API_BASE_URL}${path}`;
+};
+
+const fetchProtocolCatalogWithFallback = async () => {
+    const candidates = API_BASE_URL
+        ? [buildApiUrl("/api/protocols/catalog"), "/api/protocols/catalog"]
+        : ["/api/protocols/catalog", "http://127.0.0.1:8000/api/protocols/catalog"];
+
+    let lastError: Error | null = null;
+
+    for (const url of candidates) {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                lastError = new Error(`Request failed with status ${response.status}`);
+                continue;
+            }
+            return (await response.json()) as ApiProtocolSummary[];
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error("Unknown request error");
+        }
+    }
+
+    throw lastError ?? new Error("Failed to load protocol catalog");
+};
+
+const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["series_type"], index: number): ApiSeriesDetail => {
+    if (seriesType === "topogram") {
+        return {
+            id,
+            series_type: "topogram",
+            series_label: `定位像 ${index}`,
+            topogram_param: {
+                kv: 120,
+                ma: 50,
+                scan_length: 80,
+                tube_angle: 270,
+                fov: 500,
+            },
+            helical_param: null,
+            axial_param: null,
+            recon_series: [],
+        };
+    }
+
+    if (seriesType === "axial") {
+        return {
+            id,
+            series_type: "axial",
+            series_label: `断层扫描 ${index}`,
+            topogram_param: null,
+            helical_param: null,
+            axial_param: {
+                kv: 120,
+                ma: 150,
+                slice_thickness: 5,
+                slice_interval: 5,
+                rotation_time: 1,
+                scan_length: 120,
+                fov: 350,
+                step_count: 24,
+            },
+            recon_series: [],
+        };
+    }
+
+    return {
+        id,
+        series_type: "helical",
+        series_label: `螺旋扫描 ${index}`,
+        topogram_param: null,
+        helical_param: {
+            kv: 120,
+            ma: 180,
+            slice_thickness: 1,
+            pitch: 1,
+            rotation_time: 1,
+            scan_length: 120,
+            fov: 350,
+            auto_ma: false,
+        },
+        axial_param: null,
+        recon_series: [],
+    };
 };
 
 const mapScanSessionToProtocolDetail = (scanSession: Awaited<ReturnType<typeof fetchSelectedScanSession>>): ApiProtocolDetail | null => {
@@ -149,13 +254,14 @@ const DETAIL_TARGET_STORAGE_KEY = "scanConfirmDetailTarget";
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const AGE_LABEL: Record<string, string> = { adult: "成人", child: "儿童", infant: "婴儿" };
-
 const SERIES_TYPE_LABEL: Record<string, { zh: string; en: string }> = {
     topogram: { zh: "定位像", en: "LOCALIZER" },
     helical:  { zh: "螺旋扫描", en: "HELICAL" },
     axial:    { zh: "轴位扫描", en: "AXIAL" },
     "4d":     { zh: "4D 扫描",  en: "4D" },
 };
+const EDITABLE_SERIES_TYPES: ApiSeriesDetail["series_type"][] = ["topogram", "helical", "axial"];
+const EDITABLE_SERIES_TYPE_OPTIONS = EDITABLE_SERIES_TYPES.map((type: ApiSeriesDetail["series_type"]) => SERIES_TYPE_LABEL[type].zh);
 
 const ALL_POSITIONS = [
     { id: "HFS",  label: "头先进-仰卧" },
@@ -239,6 +345,8 @@ function Divider() {
 
 type BasicDraft = {
     name: string;
+    bodyPart: string;
+    ageGroup: "adult" | "child" | "infant";
     patientWeight: string;
     patientPosition: string;
 };
@@ -268,14 +376,17 @@ type ReconDraft = {
 
 // ── Right panels ───────────────────────────────────────────────────────────
 
-function BasicInfoPanel({ protocol, draft, selectedPos, onPosChange, onDraftChange }: {
+function BasicInfoPanel({ protocol, draft, selectedPos, bodyPartOptions, ageGroupOptions, onPosChange, onDraftChange }: {
     protocol: ApiProtocolDetail | null;
     draft: BasicDraft;
     selectedPos: string;
+    bodyPartOptions: string[];
+    ageGroupOptions: BasicDraft["ageGroup"][];
     onPosChange: (pos: string) => void;
     onDraftChange: (patch: Partial<BasicDraft>) => void;
 }) {
-    const ageLabel = protocol ? (AGE_LABEL[protocol.age_group] ?? protocol.age_group) : "-";
+    const bodyPartValue = draft.bodyPart || protocol?.body_part || bodyPartOptions[0] || "";
+    const ageValue = draft.ageGroup || protocol?.age_group || ageGroupOptions[0] || "adult";
     return (
         <>
             <div className="h-[44px] bg-[#F8FAFC] border-b border-[#EEF2F9] flex items-center justify-between px-6 shrink-0">
@@ -285,9 +396,18 @@ function BasicInfoPanel({ protocol, draft, selectedPos, onPosChange, onDraftChan
             <div className="flex-1 px-8 py-4 overflow-y-auto">
                 <div className="grid grid-cols-2 gap-x-6 gap-y-4 mb-6">
                     <FieldInput label="协议名称" value={draft.name} required onChange={(value) => onDraftChange({ name: value })} />
-                    <FieldSelect label="部位" value={protocol?.body_part} options={[protocol?.body_part ?? "-"]} required />
+                    <FieldSelect label="部位" value={bodyPartValue} options={bodyPartOptions} required onChange={(value) => onDraftChange({ bodyPart: value })} />
                     <FieldInput label="体型范围" value={draft.patientWeight} onChange={(value) => onDraftChange({ patientWeight: value })} />
-                    <FieldSelect label="年龄" value={ageLabel} options={[ageLabel]} required />
+                    <FieldSelect
+                        label="年龄"
+                        value={AGE_LABEL[ageValue] ?? ageValue}
+                        options={ageGroupOptions.map((option) => AGE_LABEL[option])}
+                        required
+                        onChange={(value) => {
+                            const nextAge = (Object.entries(AGE_LABEL).find(([, label]) => label === value)?.[0] ?? "adult") as BasicDraft["ageGroup"];
+                            onDraftChange({ ageGroup: nextAge });
+                        }}
+                    />
                 </div>
                 <div className="border-t border-[#EEF2F9] pt-5">
                     <h3 className="text-[12px] font-black text-[#37474F] uppercase tracking-wider flex items-center gap-0.5 mb-4 px-1">
@@ -319,15 +439,18 @@ function BasicInfoPanel({ protocol, draft, selectedPos, onPosChange, onDraftChan
     );
 }
 
-function ScoutParamsPanel({ draft, onDraftChange }: {
+function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, onDraftChange }: {
     draft: SeriesDraft;
+    canEditMode?: boolean;
+    onModeChange?: (value: string) => void;
+    onDelete?: () => void;
     onDraftChange: (patch: Partial<SeriesDraft>) => void;
 }) {
     return (
         <>
             <div className="h-[52px] bg-[#F8FAFC] border-b border-[#EEF2F9] flex items-center justify-between px-6 shrink-0">
                 <span className="text-[11px] font-black uppercase tracking-widest text-[#37474F]">定位像采集参数 (Scout Params)</span>
-                <button className="flex items-center gap-1.5 text-[#94A3B8] hover:text-[#D32F2F] transition-colors group">
+                <button onClick={onDelete} className="flex items-center gap-1.5 text-[#94A3B8] hover:text-[#D32F2F] transition-colors group">
                     <X size={14} className="opacity-70 group-hover:opacity-100" />
                     <span className="text-[11px] font-bold">删除该采集序列</span>
                 </button>
@@ -343,7 +466,7 @@ function ScoutParamsPanel({ draft, onDraftChange }: {
                 </div>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-4">
                     <FieldInput label="名称" value={draft.seriesLabel} onChange={(value) => onDraftChange({ seriesLabel: value })} />
-                    <FieldSelect label="模式" value="定位像" options={["定位像", "螺旋扫描", "断层扫描"]} />
+                    <FieldSelect label="模式" value="定位像" options={EDITABLE_SERIES_TYPE_OPTIONS} onChange={canEditMode ? onModeChange : undefined} />
                     <Divider />
                     <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
                     <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
@@ -360,9 +483,12 @@ function ScoutParamsPanel({ draft, onDraftChange }: {
     );
 }
 
-function HelicalParamsPanel({ series, draft, onDraftChange }: {
+function HelicalParamsPanel({ series, draft, canEditMode, onModeChange, onDelete, onDraftChange }: {
     series: ApiSeriesDetail;
     draft: SeriesDraft;
+    canEditMode?: boolean;
+    onModeChange?: (value: string) => void;
+    onDelete?: () => void;
     onDraftChange: (patch: Partial<SeriesDraft>) => void;
 }) {
     const typeLabel = SERIES_TYPE_LABEL[series.series_type]?.zh ?? series.series_type;
@@ -373,7 +499,7 @@ function HelicalParamsPanel({ series, draft, onDraftChange }: {
                 <span className="text-[11px] font-black uppercase tracking-widest text-[#37474F]">
                     扫描采集：{draft.seriesLabel || series.series_label} ({typeKey})
                 </span>
-                <button className="flex items-center gap-1.5 text-[#94A3B8] hover:text-[#D32F2F] transition-colors group">
+                <button onClick={onDelete} className="flex items-center gap-1.5 text-[#94A3B8] hover:text-[#D32F2F] transition-colors group">
                     <X size={14} className="opacity-70 group-hover:opacity-100" />
                     <span className="text-[11px] font-bold">删除该采集序列</span>
                 </button>
@@ -381,7 +507,7 @@ function HelicalParamsPanel({ series, draft, onDraftChange }: {
             <div className="flex-1 p-6 overflow-y-auto bg-white">
                 <div className="grid grid-cols-2 gap-x-8 gap-y-5">
                     <FieldInput label="名称" value={draft.seriesLabel} onChange={(value) => onDraftChange({ seriesLabel: value })} />
-                    <FieldSelect label="模式" value={typeLabel} options={[typeLabel, "定位像", "断层扫描"]} />
+                    <FieldSelect label="模式" value={typeLabel} options={EDITABLE_SERIES_TYPE_OPTIONS} onChange={canEditMode ? onModeChange : undefined} />
                     <Divider />
                     <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
                     <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
@@ -404,9 +530,10 @@ function HelicalParamsPanel({ series, draft, onDraftChange }: {
     );
 }
 
-function ReconParamsPanel({ series, draft, onDraftChange }: {
+function ReconParamsPanel({ series, draft, onDelete, onDraftChange }: {
     series: ApiSeriesDetail;
     draft: ReconDraft;
+    onDelete?: () => void;
     onDraftChange: (patch: Partial<ReconDraft>) => void;
 }) {
     return (
@@ -418,7 +545,7 @@ function ReconParamsPanel({ series, draft, onDraftChange }: {
                     </span>
                     <span className="text-[10px] text-[#94A3B8] font-bold">修改仅作用于本次扫描会话</span>
                 </div>
-                <button className="flex items-center gap-1.5 text-[#94A3B8] hover:text-[#D32F2F] transition-colors group">
+                <button onClick={onDelete} className="flex items-center gap-1.5 text-[#94A3B8] hover:text-[#D32F2F] transition-colors group">
                     <X size={14} className="opacity-70 group-hover:opacity-100" />
                     <span className="text-[11px] font-bold">删除该重建序列</span>
                 </button>
@@ -548,9 +675,10 @@ export default function WT32ProtocolDetailScreen() {
     const [searchParams] = useSearchParams();
     const isNewMode = searchParams.get("mode") === "new";
     const [protocol, setProtocol] = useState<ApiProtocolDetail | null>(null);
+    const [catalogProtocols, setCatalogProtocols] = useState<ApiProtocolSummary[]>([]);
     const [selectedPos, setSelectedPos] = useState("HFS");
     const [selection, setSelection] = useState<Selection>({ type: "basic" });
-    const [basicDraft, setBasicDraft] = useState<BasicDraft>({ name: "", patientWeight: "", patientPosition: "HFS" });
+    const [basicDraft, setBasicDraft] = useState<BasicDraft>({ name: "", bodyPart: "", ageGroup: "adult", patientWeight: "", patientPosition: "HFS" });
     const [seriesDraft, setSeriesDraft] = useState<SeriesDraft>({
         seriesLabel: "",
         kv: "",
@@ -574,6 +702,45 @@ export default function WT32ProtocolDetailScreen() {
     });
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState<string | null>(null);
+    const tempSeriesIdRef = useRef(-1);
+
+    const bodyPartOptions = useMemo(() => {
+        const options = Array.from(new Set(catalogProtocols.map((item) => item.body_part.trim()).filter(Boolean)));
+        if (options.length > 0) return options;
+        if (protocol?.body_part) return [protocol.body_part];
+        return [];
+    }, [catalogProtocols, protocol?.body_part]);
+
+    const ageGroupOptions = useMemo<BasicDraft["ageGroup"][]>(() => {
+        const options = Array.from(new Set(catalogProtocols.map((item) => item.age_group))) as BasicDraft["ageGroup"][];
+        if (options.length > 0) return options;
+        if (protocol?.age_group) return [protocol.age_group as BasicDraft["ageGroup"]];
+        return ["adult"];
+    }, [catalogProtocols, protocol?.age_group]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCatalog = async () => {
+            try {
+                const data = await fetchProtocolCatalogWithFallback();
+                if (!cancelled) {
+                    setCatalogProtocols(data);
+                }
+            } catch (error) {
+                console.error(error);
+                if (!cancelled) {
+                    setCatalogProtocols([]);
+                }
+            }
+        };
+
+        void loadCatalog();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const syncProtocolFromSession = async () => {
         const scanSession = await fetchSelectedScanSession();
@@ -661,10 +828,20 @@ export default function WT32ProtocolDetailScreen() {
     useEffect(() => {
         setBasicDraft({
             name: protocol?.name ?? "",
+            bodyPart: protocol?.body_part || bodyPartOptions[0] || "",
+            ageGroup: (protocol?.age_group ?? ageGroupOptions[0] ?? "adult") as BasicDraft["ageGroup"],
             patientWeight: protocol?.patient_weight ?? "",
-            patientPosition: selectedPos,
+            patientPosition: protocol?.patient_position ?? selectedPos,
         });
-    }, [protocol?.name, protocol?.patient_weight, selectedPos]);
+    }, [protocol?.id, protocol?.name, protocol?.body_part, protocol?.age_group, protocol?.patient_weight, protocol?.patient_position, bodyPartOptions, ageGroupOptions]);
+
+    useEffect(() => {
+        setBasicDraft((current) => (
+            current.patientPosition === selectedPos
+                ? current
+                : { ...current, patientPosition: selectedPos }
+        ));
+    }, [selectedPos]);
 
     useEffect(() => {
         if (!activeSeries || selection.type !== "series") return;
@@ -695,9 +872,154 @@ export default function WT32ProtocolDetailScreen() {
         });
     }, [activeRecon, selection.type]);
 
+    const appendDraftSeries = (seriesType: ApiSeriesDetail["series_type"]) => {
+        if (!isNewMode) return;
+
+        const nextId = tempSeriesIdRef.current;
+        tempSeriesIdRef.current -= 1;
+
+        setProtocol((current) => {
+            if (!current) return current;
+            const existingCount = current.series.filter((item) => item.series_type === seriesType).length;
+            const createdSeries = createDraftSeries(nextId, seriesType, existingCount + 1);
+            return {
+                ...current,
+                series: [...current.series, createdSeries],
+            };
+        });
+
+        setSelection({ type: "series", seriesId: nextId });
+    };
+
+    const appendDraftRecon = (seriesId: number) => {
+        if (!isNewMode) return;
+
+        const nextId = tempSeriesIdRef.current;
+        tempSeriesIdRef.current -= 1;
+
+        setProtocol((current) => {
+            if (!current) return current;
+            return {
+                ...current,
+                series: current.series.map((item) => {
+                    if (item.id !== seriesId) return item;
+                    const nextReconIndex = item.recon_series.length + 1;
+                    return {
+                        ...item,
+                        recon_series: [
+                            ...item.recon_series,
+                            {
+                                id: nextId,
+                                recon_name: `重建 ${nextReconIndex}`,
+                                kernel: "STANDARD",
+                                matrix: 512,
+                                window_width: 400,
+                                window_level: 40,
+                                slice_thickness: 1,
+                                increment: 1,
+                            },
+                        ],
+                    };
+                }),
+            };
+        });
+
+        setSelection({ type: "recon", seriesId, reconId: nextId });
+    };
+
     const isSeriesSelected = (id: number) => selection.type === "series" && selection.seriesId === id;
     const isReconSelected = (seriesId: number, reconId: number) =>
         selection.type === "recon" && selection.seriesId === seriesId && selection.reconId === reconId;
+
+    const handleDeleteActiveSeries = () => {
+        if (!activeSeries) return;
+
+        if (isNewMode) {
+            setProtocol((current) => {
+                if (!current) return current;
+                const remainingSeries = current.series.filter((seriesItem) => seriesItem.id !== activeSeries.id);
+                return {
+                    ...current,
+                    series: remainingSeries,
+                };
+            });
+
+            const remainingSeries = series.filter((seriesItem) => seriesItem.id !== activeSeries.id);
+            if (remainingSeries.length > 0) {
+                setSelection({ type: "series", seriesId: remainingSeries[0].id });
+            } else {
+                setSelection({ type: "basic" });
+            }
+            return;
+        }
+    };
+
+    const handleDeleteActiveRecon = () => {
+        if (!activeSeries || !activeRecon) return;
+
+        if (isNewMode) {
+            setProtocol((current) => {
+                if (!current) return current;
+                return {
+                    ...current,
+                    series: current.series.map((seriesItem) => (
+                        seriesItem.id !== activeSeries.id
+                            ? seriesItem
+                            : {
+                                ...seriesItem,
+                                recon_series: seriesItem.recon_series.filter((reconItem) => reconItem.id !== activeRecon.id),
+                            }
+                    )),
+                };
+            });
+
+            const remainingRecon = activeSeries.recon_series.filter((reconItem) => reconItem.id !== activeRecon.id);
+            if (remainingRecon.length > 0) {
+                setSelection({ type: "recon", seriesId: activeSeries.id, reconId: remainingRecon[0].id });
+            } else {
+                setSelection({ type: "series", seriesId: activeSeries.id });
+            }
+            return;
+        }
+    };
+
+    const handleSeriesModeChange = (modeLabel: string) => {
+        if (!isNewMode || !activeSeries) return;
+
+        const nextType = EDITABLE_SERIES_TYPES.find((type: ApiSeriesDetail["series_type"]) => SERIES_TYPE_LABEL[type].zh === modeLabel);
+        if (!nextType || nextType === activeSeries.series_type) return;
+
+        setProtocol((current) => {
+            if (!current) return current;
+            return {
+                ...current,
+                series: current.series.map((seriesItem) => {
+                    if (seriesItem.id !== activeSeries.id) return seriesItem;
+                    const renamedLabel =
+                        nextType === "topogram"
+                            ? seriesItem.series_label.replace(/螺旋扫描|断层扫描/g, "定位像")
+                            : nextType === "helical"
+                                ? seriesItem.series_label.replace(/定位像|断层扫描/g, "螺旋扫描")
+                                : seriesItem.series_label.replace(/定位像|螺旋扫描/g, "断层扫描");
+
+                    return {
+                        ...seriesItem,
+                        series_type: nextType,
+                        series_label: renamedLabel,
+                        topogram_param: nextType === "topogram"
+                            ? (seriesItem.topogram_param ?? { kv: 120, ma: 50, scan_length: 80, tube_angle: 270, fov: 500 })
+                            : null,
+                        helical_param: nextType === "helical"
+                            ? (seriesItem.helical_param ?? { kv: 120, ma: 180, slice_thickness: 1, pitch: 1, rotation_time: 1, scan_length: 120, fov: 350, auto_ma: false })
+                            : null,
+                        axial_param: nextType === "axial"
+                            ? (seriesItem.axial_param ?? { kv: 120, ma: 150, slice_thickness: 5, slice_interval: 5, rotation_time: 1, scan_length: 120, fov: 350, step_count: 24 })
+                            : null,
+                    };
+                }),
+            };
+        });
+    };
 
     const parseNumber = (value: string) => {
         const trimmed = value.trim();
@@ -713,6 +1035,173 @@ export default function WT32ProtocolDetailScreen() {
         setSaveMessage(null);
 
         try {
+            if (isNewMode) {
+                let nextProtocol = {
+                    ...protocol,
+                    name: basicDraft.name.trim() || protocol.name,
+                    body_part: basicDraft.bodyPart,
+                    age_group: basicDraft.ageGroup,
+                    patient_weight: basicDraft.patientWeight.trim(),
+                    patient_position: basicDraft.patientPosition,
+                };
+
+                if (selection.type === "series" && activeSeries) {
+                    nextProtocol = {
+                        ...nextProtocol,
+                        series: nextProtocol.series.map((seriesItem) => {
+                            if (seriesItem.id !== activeSeries.id) return seriesItem;
+                            return {
+                                ...seriesItem,
+                                series_label: seriesDraft.seriesLabel.trim() || seriesItem.series_label,
+                                topogram_param: seriesItem.series_type === "topogram"
+                                    ? {
+                                        ...(seriesItem.topogram_param ?? { kv: 120, ma: 50, scan_length: 80, tube_angle: 270, fov: 500 }),
+                                        kv: parseNumber(seriesDraft.kv) ?? seriesItem.topogram_param?.kv ?? 120,
+                                        ma: parseNumber(seriesDraft.ma) ?? seriesItem.topogram_param?.ma ?? 50,
+                                        scan_length: parseNumber(seriesDraft.scanLength) ?? seriesItem.topogram_param?.scan_length ?? 80,
+                                        fov: parseNumber(seriesDraft.fov) ?? seriesItem.topogram_param?.fov ?? 500,
+                                        tube_angle: parseNumber(seriesDraft.tubeAngle) ?? seriesItem.topogram_param?.tube_angle ?? 270,
+                                    }
+                                    : seriesItem.topogram_param,
+                                helical_param: seriesItem.series_type === "helical"
+                                    ? {
+                                        ...(seriesItem.helical_param ?? { kv: 120, ma: 180, slice_thickness: 1, pitch: 1, rotation_time: 1, scan_length: 120, fov: 350, auto_ma: false }),
+                                        kv: parseNumber(seriesDraft.kv) ?? seriesItem.helical_param?.kv ?? 120,
+                                        ma: parseNumber(seriesDraft.ma) ?? seriesItem.helical_param?.ma ?? 180,
+                                        scan_length: parseNumber(seriesDraft.scanLength) ?? seriesItem.helical_param?.scan_length ?? 120,
+                                        fov: parseNumber(seriesDraft.fov) ?? seriesItem.helical_param?.fov ?? 350,
+                                        rotation_time: parseNumber(seriesDraft.rotationTime) ?? seriesItem.helical_param?.rotation_time ?? 1,
+                                        pitch: parseNumber(seriesDraft.pitch) ?? seriesItem.helical_param?.pitch ?? 1,
+                                        slice_thickness: parseNumber(seriesDraft.sliceThickness) ?? seriesItem.helical_param?.slice_thickness ?? 1,
+                                    }
+                                    : seriesItem.helical_param,
+                                axial_param: seriesItem.series_type === "axial"
+                                    ? {
+                                        ...(seriesItem.axial_param ?? { kv: 120, ma: 150, slice_thickness: 5, slice_interval: 5, rotation_time: 1, scan_length: 120, fov: 350, step_count: 24 }),
+                                        kv: parseNumber(seriesDraft.kv) ?? seriesItem.axial_param?.kv ?? 120,
+                                        ma: parseNumber(seriesDraft.ma) ?? seriesItem.axial_param?.ma ?? 150,
+                                        scan_length: parseNumber(seriesDraft.scanLength) ?? seriesItem.axial_param?.scan_length ?? 120,
+                                        fov: parseNumber(seriesDraft.fov) ?? seriesItem.axial_param?.fov ?? 350,
+                                        rotation_time: parseNumber(seriesDraft.rotationTime) ?? seriesItem.axial_param?.rotation_time ?? 1,
+                                        slice_interval: parseNumber(seriesDraft.sliceInterval) ?? seriesItem.axial_param?.slice_interval ?? 5,
+                                        slice_thickness: parseNumber(seriesDraft.sliceThickness) ?? seriesItem.axial_param?.slice_thickness ?? 5,
+                                    }
+                                    : seriesItem.axial_param,
+                            };
+                        }),
+                    };
+                } else if (selection.type === "recon" && activeSeries && activeRecon) {
+                    nextProtocol = {
+                        ...nextProtocol,
+                        series: nextProtocol.series.map((seriesItem) => {
+                            if (seriesItem.id !== activeSeries.id) return seriesItem;
+                            return {
+                                ...seriesItem,
+                                recon_series: seriesItem.recon_series.map((reconItem) => (
+                                    reconItem.id !== activeRecon.id
+                                        ? reconItem
+                                        : {
+                                            ...reconItem,
+                                            recon_name: reconDraft.reconName.trim() || reconItem.recon_name,
+                                            kernel: reconDraft.kernel.trim() || reconItem.kernel,
+                                            slice_thickness: parseNumber(reconDraft.sliceThickness) ?? reconItem.slice_thickness,
+                                            increment: parseNumber(reconDraft.increment) ?? reconItem.increment ?? reconItem.slice_thickness,
+                                            matrix: parseNumber(reconDraft.matrix) ?? reconItem.matrix,
+                                            window_level: parseNumber(reconDraft.windowLevel) ?? reconItem.window_level,
+                                            window_width: parseNumber(reconDraft.windowWidth) ?? reconItem.window_width,
+                                        }
+                                )),
+                            };
+                        }),
+                    };
+                }
+
+                const sourceProtocolId = catalogProtocols.find(
+                    (item) => item.body_part === nextProtocol.body_part && item.age_group === nextProtocol.age_group
+                )?.id ?? catalogProtocols[0]?.id;
+
+                if (!sourceProtocolId) {
+                    throw new Error("No protocol catalog available for ad hoc scan session");
+                }
+
+                let savedSession = await createAdHocScanSessionForSelectedPatient({
+                    source_protocol_id: sourceProtocolId,
+                    session_name: nextProtocol.name,
+                    name: nextProtocol.name,
+                    body_part: nextProtocol.body_part,
+                    age_group: nextProtocol.age_group,
+                    patient_weight: nextProtocol.patient_weight,
+                    patient_position: nextProtocol.patient_position,
+                    table_direction: nextProtocol.table_direction || "in",
+                    scan_mode: nextProtocol.series.some((item) => item.series_type === "4d") ? "4d" : "plain",
+                    description: nextProtocol.description ?? null,
+                });
+
+                for (const [index, seriesItem] of nextProtocol.series.entries()) {
+                    savedSession = await createScanSessionSeries(savedSession.id, {
+                        series_order: index + 1,
+                        series_type: seriesItem.series_type,
+                        series_label: seriesItem.series_label,
+                        topogram_param: seriesItem.topogram_param
+                            ? {
+                                kv: seriesItem.topogram_param.kv,
+                                ma: seriesItem.topogram_param.ma,
+                                scan_length: seriesItem.topogram_param.scan_length,
+                                tube_angle: seriesItem.topogram_param.tube_angle,
+                                fov: seriesItem.topogram_param.fov,
+                                ctdi_vol: seriesItem.topogram_param.ctdi_vol ?? null,
+                                dlp: seriesItem.topogram_param.dlp ?? null,
+                            }
+                            : null,
+                        helical_param: seriesItem.helical_param
+                            ? {
+                                kv: seriesItem.helical_param.kv,
+                                ma: seriesItem.helical_param.ma,
+                                slice_thickness: seriesItem.helical_param.slice_thickness,
+                                pitch: seriesItem.helical_param.pitch,
+                                rotation_time: seriesItem.helical_param.rotation_time,
+                                scan_length: seriesItem.helical_param.scan_length,
+                                fov: seriesItem.helical_param.fov,
+                                auto_ma: seriesItem.helical_param.auto_ma ?? false,
+                                ctdi_vol: seriesItem.helical_param.ctdi_vol ?? null,
+                                dlp: seriesItem.helical_param.dlp ?? null,
+                            }
+                            : null,
+                        axial_param: seriesItem.axial_param
+                            ? {
+                                kv: seriesItem.axial_param.kv,
+                                ma: seriesItem.axial_param.ma,
+                                slice_thickness: seriesItem.axial_param.slice_thickness,
+                                slice_interval: seriesItem.axial_param.slice_interval,
+                                rotation_time: seriesItem.axial_param.rotation_time,
+                                scan_length: seriesItem.axial_param.scan_length,
+                                fov: seriesItem.axial_param.fov,
+                                step_count: seriesItem.axial_param.step_count ?? null,
+                                auto_ma: false,
+                                ctdi_vol: seriesItem.axial_param.ctdi_vol ?? null,
+                                dlp: seriesItem.axial_param.dlp ?? null,
+                            }
+                            : null,
+                        recon_series: seriesItem.recon_series.map((reconItem) => ({
+                            recon_name: reconItem.recon_name,
+                            recon_type: "soft",
+                            kernel: reconItem.kernel,
+                            matrix: reconItem.matrix,
+                            window_width: reconItem.window_width,
+                            window_level: reconItem.window_level,
+                            slice_thickness: reconItem.slice_thickness,
+                            increment: reconItem.increment ?? null,
+                        })),
+                    });
+                }
+
+                setProtocol(mapScanSessionToProtocolDetail(savedSession));
+                localStorage.removeItem("selectedProtocol");
+                setSaveMessage("本次扫描计划已保存");
+                navigate(-1);
+                return;
+            }
+
             if (selection.type === "basic") {
                 await updateSelectedScanSession({
                     name: basicDraft.name.trim() || protocol.name,
@@ -822,7 +1311,10 @@ export default function WT32ProtocolDetailScreen() {
                             <div className="mt-1 flex flex-col">
                                 <div className="flex justify-between items-center px-1 mb-2">
                                     <span className="text-[10px] text-[#94A3B8] font-black uppercase tracking-widest">采集队列</span>
-                                    <button className="text-[#4D94FF] flex items-center gap-1 text-[11px] hover:underline font-bold px-2 py-1 rounded hover:bg-blue-50 transition-colors">
+                                    <button
+                                        onClick={() => appendDraftSeries("helical")}
+                                        className="text-[#4D94FF] flex items-center gap-1 text-[11px] hover:underline font-bold px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+                                    >
                                         <Plus size={12} /> 新增
                                     </button>
                                 </div>
@@ -831,7 +1323,13 @@ export default function WT32ProtocolDetailScreen() {
                                     {(topograms.length > 0 ? topograms : [{ id: -1, series_label: "定位像", series_type: "topogram" as const, recon_series: [] }]).map((seriesItem) => (
                                         <div
                                             key={seriesItem.id}
-                                            onClick={() => seriesItem.id !== -1 && setSelection({ type: "series", seriesId: seriesItem.id })}
+                                            onClick={() => {
+                                                if (seriesItem.id !== -1) {
+                                                    setSelection({ type: "series", seriesId: seriesItem.id });
+                                                    return;
+                                                }
+                                                appendDraftSeries("topogram");
+                                            }}
                                             className={`rounded-md px-3 py-2 cursor-pointer transition-colors shadow-sm flex justify-between items-start ${
                                                 isSeriesSelected(seriesItem.id)
                                                     ? "bg-[#4D94FF] text-white"
@@ -877,7 +1375,10 @@ export default function WT32ProtocolDetailScreen() {
                                                         {isReconSelected(seriesItem.id, recon.id) && <ChevronRight size={12} className="ml-auto text-[#1E88E5]" />}
                                                     </div>
                                                 ))}
-                                                <button className="mt-0.5 w-full py-1.5 bg-white border border-[#4D94FF]/10 text-[#4D94FF] hover:border-[#4D94FF]/30 rounded text-[10px] font-black transition-all flex items-center justify-center gap-1.5 shadow-sm">
+                                                <button
+                                                    onClick={() => appendDraftRecon(seriesItem.id)}
+                                                    className="mt-0.5 w-full py-1.5 bg-white border border-[#4D94FF]/10 text-[#4D94FF] hover:border-[#4D94FF]/30 rounded text-[10px] font-black transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                                                >
                                                     <Plus size={10} strokeWidth={3} /> 新增重建
                                                 </button>
                                             </div>
@@ -911,6 +1412,8 @@ export default function WT32ProtocolDetailScreen() {
                             protocol={protocol}
                             draft={basicDraft}
                             selectedPos={selectedPos}
+                            bodyPartOptions={bodyPartOptions}
+                            ageGroupOptions={ageGroupOptions}
                             onPosChange={setSelectedPos}
                             onDraftChange={(patch) => setBasicDraft((current) => ({ ...current, ...patch }))}
                         />
@@ -918,6 +1421,9 @@ export default function WT32ProtocolDetailScreen() {
                     {selection.type === "series" && activeSeries?.series_type === "topogram" && (
                         <ScoutParamsPanel
                             draft={seriesDraft}
+                            canEditMode={isNewMode}
+                            onModeChange={handleSeriesModeChange}
+                            onDelete={handleDeleteActiveSeries}
                             onDraftChange={(patch) => setSeriesDraft((current) => ({ ...current, ...patch }))}
                         />
                     )}
@@ -925,6 +1431,9 @@ export default function WT32ProtocolDetailScreen() {
                         <HelicalParamsPanel
                             series={activeSeries}
                             draft={seriesDraft}
+                            canEditMode={isNewMode}
+                            onModeChange={handleSeriesModeChange}
+                            onDelete={handleDeleteActiveSeries}
                             onDraftChange={(patch) => setSeriesDraft((current) => ({ ...current, ...patch }))}
                         />
                     )}
@@ -932,6 +1441,7 @@ export default function WT32ProtocolDetailScreen() {
                         <ReconParamsPanel
                             series={activeSeries}
                             draft={reconDraft}
+                            onDelete={handleDeleteActiveRecon}
                             onDraftChange={(patch) => setReconDraft((current) => ({ ...current, ...patch }))}
                         />
                     )}

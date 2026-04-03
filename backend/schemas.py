@@ -346,6 +346,20 @@ class ScanSessionCreate(ScanSessionBase):
     pass
 
 
+class ScanSessionAdHocCreate(BaseModel):
+    patient_id: int
+    source_protocol_id: int
+    session_name: Optional[str] = None
+    name: str
+    body_part: str
+    age_group: Literal["adult", "child", "infant"]
+    patient_weight: str
+    patient_position: str
+    table_direction: str
+    scan_mode: Literal["plain", "contrast", "4d"] = "plain"
+    description: Optional[str] = None
+
+
 class ScanSessionUpdate(BaseModel):
     status: Optional[Literal["draft", "in_progress", "completed", "cancelled"]] = None
     session_name: Optional[str] = None
@@ -378,6 +392,19 @@ class ScanSessionContrastConfig(ScanSessionContrastConfigBase, ORMModel):
     id: int
     scan_session_id: int
     template_contrast_config_id: Optional[int] = None
+
+
+class ScanSessionSeriesCreate(BaseModel):
+    series_order: int
+    series_type: Literal["topogram", "helical", "axial", "4d"]
+    series_label: str
+    contrast_delay: Optional[float] = None
+    trigger_mode: Optional[Literal["manual", "auto_timing", "bolus_tracking"]] = None
+    tracking_threshold: Optional[float] = None
+    topogram_param: Optional[TopogramParamUpdate] = None
+    helical_param: Optional[HelicalParamUpdate] = None
+    axial_param: Optional[AxialParamUpdate] = None
+    recon_series: List[ReconSeriesUpdate] = Field(default_factory=list)
 
 
 class ScanSessionSeriesUpdate(BaseModel):
