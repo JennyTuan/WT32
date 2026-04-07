@@ -9,20 +9,32 @@ export default function DailyQAScreen() {
   return (
     <ServiceModeShell
       currentRoute="/service/daily-qa"
+      footerStatus={{
+        label: qa.isRunningQa ? "RUN" : qa.overallJudgment === "PASS" ? "PASS" : "IDLE",
+        tone: qa.isRunningQa ? "active" : qa.overallJudgment === "PASS" ? "success" : "idle",
+      }}
       overlays={
         <DailyQAOverlays
+          analysisStage={qa.analysisStage}
+          isRunningQa={qa.isRunningQa}
           onCancel={() => qa.setShowAnalyzeConfirm(false)}
-          onConfirm={() => qa.setShowAnalyzeConfirm(false)}
+          onClosePreview={() => qa.setPreviewRecordId(null)}
+          onConfirm={qa.onConfirmAnalyze}
+          onPrintPreview={qa.onPrintPreview}
           phantomType={qa.phantomType}
+          previewRecord={qa.previewRecord}
           showAnalyzeConfirm={qa.showAnalyzeConfirm}
         />
       }
     >
       <DailyQAContent
         cards={qa.cards}
-        onAnalyze={() => qa.setShowAnalyzeConfirm(true)}
+        onAnalyze={qa.onAnalyze}
         onPhantomTypeChange={qa.setPhantomType}
+        onRoiPointChange={qa.onRoiPointChange}
+        phantomImage={qa.phantomImage}
         phantomType={qa.phantomType}
+        selectedDate={qa.selectedDate}
       />
     </ServiceModeShell>
   );

@@ -1,50 +1,160 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { CalibrationSelections } from "./types";
+import {
+  buildCalibrationCombos,
+  clearAirCalibrationState,
+  createCalibrationComboKey,
+  loadAirCalibrationState,
+  saveAirCalibrationState,
+} from "./storage";
+import type {
+  CalibrationCombo,
+  CalibrationComboRecord,
+  CalibrationCompletedMap,
+  CalibrationExecutionStage,
+  CalibrationRunStatus,
+  CalibrationSelections,
+} from "./types";
 
 const INITIAL_SELECTIONS: CalibrationSelections = {
-  rotationSpeeds: ["1"],
-  voltages: ["100", "140"],
-  focuses: ["small"],
+  rotationSpeeds: ["1", "2", "0.75"],
+  voltages: ["80", "100", "120", "140"],
+  focuses: ["small", "big"],
   collimators: ["32*0.6"],
 };
 
+const WAIT_DURATIONS: Record<
+  Exclude<CalibrationExecutionStage, "idle" | "paused" | "completed">,
+  number
+> = {
+  validating: 350,
+  configuring: 500,
+  scanning: 1100,
+  "waiting-data": 650,
+  computing: 420,
+  saving: 360,
+};
+
+const ABORT_ERROR_NAME = "AirCalibrationAbort";
+
+const buildResultSummary = (combo: CalibrationCombo) =>
+  `Air calibration complete for ${combo.rotationSpeed}s / ${combo.focus} / ${combo.voltage}kV / ${combo.collimator}`;
+
+const buildStageLabel = (stage: CalibrationExecutionStage) => {
+  switch (stage) {
+    case "validating":
+      return "Checking device state";
+    case "configuring":
+      return "Setting scan parameters";
+    case "scanning":
+      return "Running air scan";
+    case "waiting-data":
+      return "Waiting for detector data";
+    case "computing":
+      return "Computing calibration result";
+    case "saving":
+      return "Saving calibration output";
+    case "paused":
+      return "Calibration paused";
+    case "completed":
+      return "Calibration completed";
+    default:
+      return "Ready";
+  }
+};
+
+const createAbortError = () => {
+  const error = new Error("Calibration aborted");
+  error.name = ABORT_ERROR_NAME;
+  return error;
+};
+
+const sleep = (durationMs: number, signal: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    let completed = false;
+
+    const handleAbort = () => {
+      if (completed) return;
+      window.clearTimeout(timer);
+      completed = true;
+      reject(createAbortError());
+    };
+
+    const timer = window.setTimeout(() => {
+      if (completed) return;
+      completed = true;
+      signal.removeEventListener("abort", handleAbort);
+      resolve();
+    }, durationMs);
+
+    signal.addEventListener("abort", handleAbort, { once: true });
+  });
+
 export function useAirCalibration() {
-  const [isCalibrating, setIsCalibrating] = useState(false);
-  const [calibrationProgress, setCalibrationProgress] = useState(0);
+  const persistedState = typeof window === "undefined" ? null : loadAirCalibrationState();
+  const [selectionState, setSelectionState] = useState<CalibrationSelections>(
+    persistedState?.selections ?? INITIAL_SELECTIONS,
+  );
+  const [completedCombos, setCompletedCombos] = useState<CalibrationCompletedMap>(
+    persistedState?.completedCombos ?? {},
+  );
+  const [currentComboKey, setCurrentComboKey] = useState<string | null>(
+    persistedState?.runStatus === "running" ? null : (persistedState?.currentComboKey ?? null),
+  );
+  const [runStatus, setRunStatus] = useState<CalibrationRunStatus>(
+    persistedState?.runStatus === "running" ? "paused" : (persistedState?.runStatus ?? "idle"),
+  );
+  const [executionStage, setExecutionStage] = useState<CalibrationExecutionStage>(
+    persistedState?.runStatus === "running" ? "paused" : "idle",
+  );
   const [showAbortConfirm, setShowAbortConfirm] = useState(false);
-  const [selectionState, setSelectionState] = useState<CalibrationSelections>(INITIAL_SELECTIONS);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const completedCombosRef = useRef(completedCombos);
 
   useEffect(() => {
-    let interval: number | undefined;
+    completedCombosRef.current = completedCombos;
+  }, [completedCombos]);
 
-    if (isCalibrating && !showAbortConfirm) {
-      interval = window.setInterval(() => {
-        setCalibrationProgress((prev) => {
-          if (prev >= 100) {
-            setIsCalibrating(false);
-            return 100;
-          }
-          return prev + 0.5;
-        });
-      }, 100);
-    }
-
-    return () => {
-      if (interval) window.clearInterval(interval);
-    };
-  }, [isCalibrating, showAbortConfirm]);
-
-  const totalCombinations = useMemo(
-    () =>
-      selectionState.rotationSpeeds.length *
-      selectionState.focuses.length *
-      selectionState.voltages.length *
-      selectionState.collimators.length,
-    [selectionState],
+  const combos = useMemo(() => buildCalibrationCombos(selectionState), [selectionState]);
+  const totalCombinations = combos.length;
+  const currentCombo = useMemo(
+    () => combos.find((combo) => createCalibrationComboKey(combo) === currentComboKey) ?? null,
+    [combos, currentComboKey],
   );
+  const completedCount = useMemo(
+    () =>
+      combos.filter((combo) => completedCombos[createCalibrationComboKey(combo)]?.status === "success").length,
+    [combos, completedCombos],
+  );
+  const failedCount = useMemo(
+    () =>
+      combos.filter((combo) => completedCombos[createCalibrationComboKey(combo)]?.status === "failed").length,
+    [combos, completedCombos],
+  );
+  const pendingCount = Math.max(0, totalCombinations - completedCount - failedCount);
+  const calibrationProgress = totalCombinations === 0 ? 0 : (completedCount / totalCombinations) * 100;
+  const isCalibrating = runStatus === "running";
+  const stageLabel = buildStageLabel(executionStage);
+
+  useEffect(() => {
+    saveAirCalibrationState({
+      selections: selectionState,
+      completedCombos,
+      currentComboKey,
+      runStatus,
+      lastUpdatedAt: new Date().toISOString(),
+    });
+  }, [completedCombos, currentComboKey, runStatus, selectionState]);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const toggleSelection = (key: keyof CalibrationSelections, value: string) => {
+    if (isCalibrating) return;
+
     setSelectionState((prev) => {
       const current = prev[key];
       if (current.includes(value)) {
@@ -56,24 +166,136 @@ export function useAirCalibration() {
     });
   };
 
-  const resetSelections = () => setSelectionState(INITIAL_SELECTIONS);
+  const resetSelections = () => {
+    if (isCalibrating) return;
+
+    abortControllerRef.current?.abort();
+    clearAirCalibrationState();
+    setSelectionState(INITIAL_SELECTIONS);
+    setCompletedCombos({});
+    setCurrentComboKey(null);
+    setRunStatus("idle");
+    setExecutionStage("idle");
+    setShowAbortConfirm(false);
+  };
+
+  const runStep = async (
+    stage: Exclude<CalibrationExecutionStage, "idle" | "paused" | "completed">,
+    signal: AbortSignal,
+  ) => {
+    setExecutionStage(stage);
+    await sleep(WAIT_DURATIONS[stage], signal);
+  };
+
+  const executeSingleCombo = async (combo: CalibrationCombo, signal: AbortSignal) => {
+    const comboKey = createCalibrationComboKey(combo);
+    setCurrentComboKey(comboKey);
+
+    await runStep("validating", signal);
+    await runStep("configuring", signal);
+    await runStep("scanning", signal);
+    await runStep("waiting-data", signal);
+    await runStep("computing", signal);
+    await runStep("saving", signal);
+
+    return {
+      combo,
+      status: "success",
+      timestamp: new Date().toISOString(),
+      resultSummary: buildResultSummary(combo),
+    } satisfies CalibrationComboRecord;
+  };
+
+  const handleStartCalibration = async () => {
+    if (isCalibrating || totalCombinations === 0) return;
+
+    const remainingCombos = combos.filter(
+      (combo) => completedCombosRef.current[createCalibrationComboKey(combo)]?.status !== "success",
+    );
+
+    if (remainingCombos.length === 0) {
+      setExecutionStage("completed");
+      setRunStatus("completed");
+      setCurrentComboKey(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setShowAbortConfirm(false);
+    setRunStatus("running");
+    setExecutionStage("validating");
+
+    try {
+      for (const combo of remainingCombos) {
+        const comboKey = createCalibrationComboKey(combo);
+
+        try {
+          const result = await executeSingleCombo(combo, controller.signal);
+          setCompletedCombos((prev) => ({
+            ...prev,
+            [comboKey]: result,
+          }));
+        } catch (error) {
+          if ((error as Error).name === ABORT_ERROR_NAME) {
+            throw error;
+          }
+
+          const message = error instanceof Error ? error.message : "Unknown calibration failure";
+          setCompletedCombos((prev) => ({
+            ...prev,
+            [comboKey]: {
+              combo,
+              status: "failed",
+              timestamp: new Date().toISOString(),
+              resultSummary: `Calibration failed for ${combo.rotationSpeed}s / ${combo.focus} / ${combo.voltage}kV / ${combo.collimator}`,
+              error: message,
+            },
+          }));
+        }
+      }
+
+      setExecutionStage("completed");
+      setRunStatus("completed");
+      setCurrentComboKey(null);
+    } catch (error) {
+      if ((error as Error).name === ABORT_ERROR_NAME) {
+        setExecutionStage("paused");
+        setRunStatus("paused");
+        setCurrentComboKey(null);
+      } else {
+        setExecutionStage("paused");
+        setRunStatus("paused");
+      }
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+    }
+  };
+
+  const confirmAbort = () => {
+    abortControllerRef.current?.abort();
+    setShowAbortConfirm(false);
+  };
 
   return {
     calibrationProgress,
-    confirmAbort: () => {
-      setIsCalibrating(false);
-      setShowAbortConfirm(false);
-      setCalibrationProgress(0);
-    },
+    completedCombos,
+    completedCount,
+    confirmAbort,
+    currentCombo,
+    executionStage,
+    failedCount,
     handleAbort: () => setShowAbortConfirm(true),
-    handleStartCalibration: () => {
-      setCalibrationProgress(0);
-      setIsCalibrating(true);
-    },
+    handleStartCalibration,
     isCalibrating,
+    pendingCount,
     resetSelections,
+    runStatus,
     selectionState,
     setShowAbortConfirm,
+    stageLabel,
     showAbortConfirm,
     toggleSelection,
     totalCombinations,

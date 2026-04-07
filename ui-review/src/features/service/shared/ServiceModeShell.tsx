@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
+  ChevronRight,
   LayoutGrid,
   Lightbulb,
   Menu,
@@ -12,7 +13,12 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { SERVICE_MODE_ITEMS, getServiceModeItem } from "./serviceModeRegistry";
+import {
+  SERVICE_MODE_ITEMS,
+  SERVICE_MODE_SECTION_ORDER,
+  type ServiceModeSection,
+  getServiceModeItem,
+} from "./serviceModeRegistry";
 
 type FooterStatusTone = "idle" | "active" | "success";
 
@@ -49,6 +55,12 @@ const getFooterStatusClassName = (tone: FooterStatusTone) => {
   return "bg-[#607D8B]";
 };
 
+const buildExpandedState = (activeSection?: ServiceModeSection) =>
+  SERVICE_MODE_SECTION_ORDER.reduce<Record<ServiceModeSection, boolean>>((acc, section) => {
+    acc[section] = section === (activeSection ?? "硬件");
+    return acc;
+  }, {} as Record<ServiceModeSection, boolean>);
+
 export default function ServiceModeShell({
   currentRoute,
   currentHeat = 60,
@@ -62,6 +74,9 @@ export default function ServiceModeShell({
   const [searchKeyword, setSearchKeyword] = useState("");
 
   const currentItem = getServiceModeItem(currentRoute);
+  const [expandedSections, setExpandedSections] = useState<Record<ServiceModeSection, boolean>>(
+    buildExpandedState(currentItem?.section),
+  );
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(new Date()), 1000);
@@ -74,6 +89,15 @@ export default function ServiceModeShell({
     return SERVICE_MODE_ITEMS.filter((item) => item.label.includes(keyword));
   }, [searchKeyword]);
 
+  const sectionedItems = useMemo(
+    () =>
+      SERVICE_MODE_SECTION_ORDER.map((section) => ({
+        section,
+        items: filteredItems.filter((item) => item.section === section),
+      })).filter((group) => group.items.length > 0),
+    [filteredItems],
+  );
+
   return (
     <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl relative">
       <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
@@ -84,10 +108,10 @@ export default function ServiceModeShell({
             </div>
             <div className="flex flex-col">
               <span className="text-[14px] font-bold text-[#263238]">暂无选中患者</span>
-              <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: —</span>
+              <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: --</span>
             </div>
             <div className="ml-auto flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-              <div className="text-[9px] font-bold italic">∟ 60 mm</div>
+              <div className="text-[9px] font-bold italic">L 60 mm</div>
               <div className="text-[9px] font-bold">∠ 3.0°</div>
               <div className="text-[9px] font-bold">热 {currentHeat.toFixed(0)}%</div>
             </div>
@@ -154,40 +178,95 @@ export default function ServiceModeShell({
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-            <div
-              className={`flex items-center ${isCollapsed ? "justify-center" : "justify-between"} p-3 bg-[#4D94FF] text-white rounded-md mb-4 shadow-sm transition-all`}
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-1.5 bg-white/20 rounded-md">
-                  <LayoutGrid size={20} />
-                </div>
-                {!isCollapsed && <span className="font-bold text-[14px]">{currentItem?.section ?? "硬件"}</span>}
+          <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
+            {isCollapsed ? (
+              <div className="space-y-2">
+                {sectionedItems.map((group) => {
+                  const active = group.section === currentItem?.section;
+                  const SectionIcon = group.items[0]?.icon ?? LayoutGrid;
+
+                  return (
+                    <button
+                      key={group.section}
+                      onClick={() => {
+                        setIsCollapsed(false);
+                        setExpandedSections((prev) => ({ ...prev, [group.section]: true }));
+                      }}
+                      className={`w-full h-[48px] rounded-md flex items-center justify-center transition-all ${
+                        active ? "bg-[#4D94FF] text-white shadow-sm" : "bg-white text-[#7B92A8] border border-[#D8E4F2] hover:bg-gray-50"
+                      }`}
+                    >
+                      <SectionIcon size={18} />
+                    </button>
+                  );
+                })}
               </div>
-              {!isCollapsed && <ChevronDown size={18} className="opacity-60" />}
-            </div>
+            ) : (
+              <div className="space-y-2">
+                {sectionedItems.map((group) => {
+                  const sectionActive = group.section === currentItem?.section;
+                  const isExpanded = expandedSections[group.section];
+                  const SectionIcon = group.items[0]?.icon ?? LayoutGrid;
 
-            {filteredItems.map((item) => {
-              const active = item.route === currentRoute;
-              const Icon = item.icon;
+                  return (
+                    <div key={group.section} className="rounded-md">
+                      <button
+                        onClick={() =>
+                          setExpandedSections((prev) => ({
+                            ...prev,
+                            [group.section]: !prev[group.section],
+                          }))
+                        }
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-md transition-all ${
+                          sectionActive
+                            ? "bg-[#EAF3FF] text-[#1E88E5] border border-[#B8D8FF] shadow-sm"
+                            : "bg-[#F8FBFF] text-[#4F6B86] border border-[#D8E4F2] hover:bg-[#F1F6FC]"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`p-1.5 rounded-md ${sectionActive ? "bg-white" : "bg-[#E8F0FA]"}`}>
+                            <SectionIcon size={18} />
+                          </div>
+                          <span className="text-[14px] font-bold">{group.section}</span>
+                        </div>
+                        <div className={`transition-transform ${isExpanded ? "rotate-0" : "-rotate-90"}`}>
+                          <ChevronDown size={16} />
+                        </div>
+                      </button>
 
-              return (
-                <button
-                  key={item.route}
-                  onClick={() => navigate(item.route)}
-                  className={`w-full flex items-center ${isCollapsed ? "justify-center px-0" : "gap-3 px-4"} py-2.5 rounded-md transition-all ${active ? "bg-[#E3F2FD] text-[#1E88E5] border-l-4 border-[#1E88E5]" : "text-[#546E7A] hover:bg-gray-50"}`}
-                >
-                  <div className={active ? "text-[#1E88E5]" : "text-[#90A4AE]"}>
-                    <Icon size={18} />
-                  </div>
-                  {!isCollapsed && (
-                    <span className={`text-[13px] ${active ? "font-bold" : "font-medium"} whitespace-nowrap`}>
-                      {item.label}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+                      {isExpanded && (
+                        <div className="mt-1.5 ml-3 pl-3 border-l border-[#DCE7F3] space-y-1">
+                          {group.items.map((item) => {
+                            const active = item.route === currentRoute;
+                            const Icon = item.icon;
+
+                            return (
+                              <button
+                                key={item.route}
+                                onClick={() => navigate(item.route)}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all ${
+                                  active
+                                    ? "bg-[#E3F2FD] text-[#1E88E5] border border-[#A9D0FF]"
+                                    : "text-[#546E7A] hover:bg-gray-50"
+                                }`}
+                              >
+                                <div className={active ? "text-[#1E88E5]" : "text-[#90A4AE]"}>
+                                  <Icon size={17} />
+                                </div>
+                                <span className={`text-[13px] whitespace-nowrap ${active ? "font-bold" : "font-medium"}`}>
+                                  {item.label}
+                                </span>
+                                {active && <ChevronRight size={14} className="ml-auto text-[#1E88E5]" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </aside>
 

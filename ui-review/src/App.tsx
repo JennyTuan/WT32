@@ -25,6 +25,7 @@ import HardwareTestScreen from "./screens/HardwareTestScreen";
 import BatteryManagementScreen from "./screens/BatteryManagementScreen";
 import DiskManagementScreen from "./screens/DiskManagementScreen";
 import PerformanceEvaluationScreen from "./screens/PerformanceEvaluationScreen";
+import ServicePlaceholderScreen from "./screens/ServicePlaceholderScreen";
 
 const HomeRoute = HomeScreen ?? (() => <Navigate to="/patients" replace />);
 const TABLET_WIDTH = 1024;
@@ -120,6 +121,18 @@ export default function App() {
               <Route path="/service/battery" element={<BatteryManagementScreen />} />
               <Route path="/service/disk" element={<DiskManagementScreen />} />
               <Route path="/service/performance" element={<PerformanceEvaluationScreen />} />
+              <Route path="/service/settings/protocol-management" element={<ServicePlaceholderScreen currentRoute="/service/settings/protocol-management" title="协议管理" description="用于维护协议模板、分组和协议参数的管理入口。" />} />
+              <Route path="/service/settings/corner-info" element={<ServicePlaceholderScreen currentRoute="/service/settings/corner-info" title="四角信息" description="用于配置界面四角显示信息、状态字段和显示规则。" />} />
+              <Route path="/service/settings/dicom" element={<ServicePlaceholderScreen currentRoute="/service/settings/dicom" title="DICOM" description="用于配置 DICOM 节点、传输、发送接收策略和连接参数。" />} />
+              <Route path="/service/settings/user-management" element={<ServicePlaceholderScreen currentRoute="/service/settings/user-management" title="用户管理" description="用于维护用户、角色、权限和登录访问控制。" />} />
+              <Route path="/service/settings/system-settings" element={<ServicePlaceholderScreen currentRoute="/service/settings/system-settings" title="系统设置" description="用于设置系统级参数、时间网络、设备偏好和基础配置。" />} />
+              <Route path="/service/settings/organization-info" element={<ServicePlaceholderScreen currentRoute="/service/settings/organization-info" title="机构信息设置" description="用于配置机构名称、标识、科室信息和对外显示内容。" />} />
+              <Route path="/service/reports/qa-report" element={<ServicePlaceholderScreen currentRoute="/service/reports/qa-report" title="质控报告" description="用于查看和导出质控结果、历史记录以及相关汇总报告。" />} />
+              <Route path="/service/reports/system-log" element={<ServicePlaceholderScreen currentRoute="/service/reports/system-log" title="系统日志" description="用于检索系统运行日志、异常信息和关键事件记录。" />} />
+              <Route path="/service/reports/runtime-stats" element={<ServicePlaceholderScreen currentRoute="/service/reports/runtime-stats" title="运行统计" description="用于查看设备运行时长、使用频率和关键运行指标统计。" />} />
+              <Route path="/service/reports/audit-log" element={<ServicePlaceholderScreen currentRoute="/service/reports/audit-log" title="审计日志" description="用于查看关键操作记录、用户行为轨迹和审计追踪信息。" />} />
+              <Route path="/service/dose/settings" element={<ServicePlaceholderScreen currentRoute="/service/dose/settings" title="剂量设置" description="用于配置剂量策略、剂量阈值和扫描剂量相关参数。" />} />
+              <Route path="/service/dose/logs" element={<ServicePlaceholderScreen currentRoute="/service/dose/logs" title="剂量日志" description="用于查看剂量历史、剂量事件记录和相关追踪信息。" />} />
 
               <Route path="*" element={<Navigate to="/patients" replace />} />
             </Routes>
