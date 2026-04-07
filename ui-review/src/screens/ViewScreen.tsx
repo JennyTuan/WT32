@@ -27,6 +27,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
+import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
 import {
     fetchSelectedScanSession,
     type ApiScanSessionDetail,
@@ -304,6 +305,8 @@ const ViewScreen = () => {
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     // Ref for imperative control of the Cornerstone viewport (zoom/fit/reset in 2D mode)
     const dicomViewerRef = useRef<DicomViewerHandle>(null);
+    // Ref for the 3D MPR Cornerstone viewport
+    const mprRef = useRef<CornerstoneMPRHandle>(null);
 
     // ─── Live clock ───────────────────────────────────────────────────────────
     const buildClock = () => {
@@ -320,18 +323,12 @@ const ViewScreen = () => {
     const [clockStr, setClockStr] = useState(buildClock);
     const [dateStr, setDateStr] = useState(buildDate);
 
-    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    // The main axial viewport container (used for 2D mode event handling + overlays)
     const viewportRef = useRef<HTMLElement | null>(null);
-    const coronalCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const coronalViewportRef = useRef<HTMLDivElement | null>(null);
-    const sagittalCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const sagittalViewportRef = useRef<HTMLDivElement | null>(null);
-    const volumeCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const volumeViewportRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{ dragging: boolean; x: number; y: number }>({ dragging: false, x: 0, y: 0 });
     const measureStartRef = useRef<{ x: number; y: number } | null>(null);
+    // For 2D canvas-based measures (3D mode canvas removed — now Cornerstone MPR)
     const huDataRef = useRef<Float32Array | null>(null);
-    const volumeDataRef = useRef<VolumeData | null>(null);
     const imgSizeRef = useRef({ rows: 0, cols: 0 });
     const defaultWindowRef = useRef({ ww: 350, wl: 45 });
     const drawRectRef = useRef<DrawRect>({ x: 0, y: 0, w: 1, h: 1 });
@@ -1176,32 +1173,7 @@ const ViewScreen = () => {
                     count: selectedSeries.count,
                 });
 
-                // ── 3D canvas pixel rendering (only when the canvas element exists) ──
-                const pixelDataElement = dataSet.elements.x7fe00010;
-                if (!pixelDataElement || !canvasRef.current || rows === 0 || cols === 0) return;
-
-                const pixelDataOffset = pixelDataElement.dataOffset;
-                const pixelDataLength = pixelDataElement.length;
-                const pixelData = byteArray.slice(pixelDataOffset, pixelDataOffset + pixelDataLength);
-                const pixelBuffer = pixelData.buffer.slice(
-                    pixelData.byteOffset,
-                    pixelData.byteOffset + pixelData.byteLength
-                );
-
-                let values: Int16Array | Uint16Array;
-                if (bitsAllocated === 16) {
-                    values = pixelRepresentation === 1 ? new Int16Array(pixelBuffer) : new Uint16Array(pixelBuffer);
-                } else {
-                    values = new Uint16Array(pixelBuffer);
-                }
-
-                const huValues = new Float32Array(values.length);
-                for (let i = 0; i < values.length; i += 1) {
-                    huValues[i] = values[i] * slope + intercept;
-                }
-                huDataRef.current = huValues;
-                imgSizeRef.current = { rows, cols };
-                setRenderTick((n) => n + 1);
+                // Cornerstone handles pixel rendering; we only needed metadata above.
             } catch (error) {
                 // Keep UI alive if one slice fails.
                 console.error(error);
@@ -1211,73 +1183,7 @@ const ViewScreen = () => {
         loadSlice();
     }, [sliceIndex, selectedSeriesId, selectedSeries.name, clampSliceIndex]);
 
-    useEffect(() => {
-        const renderCurrentSlice = () => {
-            const canvas = canvasRef.current;
-            const viewport = viewportRef.current;
-            const huValues = huDataRef.current;
-            const { rows, cols } = imgSizeRef.current;
-            if (!canvas || !viewport || !huValues || rows === 0 || cols === 0) return;
-
-            const viewW = Math.max(1, Math.floor(viewport.clientWidth));
-            const viewH = Math.max(1, Math.floor(viewport.clientHeight));
-            if (canvas.width !== viewW || canvas.height !== viewH) {
-                canvas.width = viewW;
-                canvas.height = viewH;
-            }
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return;
-
-            const offscreen = document.createElement("canvas");
-            offscreen.width = cols;
-            offscreen.height = rows;
-            const offCtx = offscreen.getContext("2d");
-            if (!offCtx) return;
-
-            const imageData = offCtx.createImageData(cols, rows);
-            const out = imageData.data;
-            const minVal = wl - ww / 2;
-            const maxVal = wl + ww / 2;
-            const range = Math.max(maxVal - minVal, 1);
-
-            for (let i = 0; i < huValues.length; i += 1) {
-                const normalized = Math.min(1, Math.max(0, (huValues[i] - minVal) / range));
-                const gray = Math.round(normalized * 255);
-                const pixel = invert ? 255 - gray : gray;
-                const j = i * 4;
-                out[j] = pixel;
-                out[j + 1] = pixel;
-                out[j + 2] = pixel;
-                out[j + 3] = 255;
-            }
-            offCtx.putImageData(imageData, 0, 0);
-
-            ctx.fillStyle = "#000";
-            ctx.fillRect(0, 0, viewW, viewH);
-
-            const fitScale = Math.min(viewW / cols, viewH / rows);
-            const drawScale = fitScale * zoom;
-            const drawW = cols * drawScale;
-            const drawH = rows * drawScale;
-            const x = (viewW - drawW) / 2 + pan.x;
-            const y = (viewH - drawH) / 2 + pan.y;
-            drawRectRef.current = { x, y, w: drawW, h: drawH };
-
-            ctx.imageSmoothingEnabled = true;
-            ctx.save();
-            if (rotation !== 0) {
-                const cx = x + drawW / 2;
-                const cy = y + drawH / 2;
-                ctx.translate(cx, cy);
-                ctx.rotate((rotation * Math.PI) / 180);
-                ctx.translate(-cx, -cy);
-            }
-            ctx.drawImage(offscreen, x, y, drawW, drawH);
-            ctx.restore();
-        };
-
-        renderCurrentSlice();
-    }, [renderTick, ww, wl, zoom, pan, invert, rotation]);
+    // (3D canvas renderCurrentSlice removed — now handled by CornerstoneMPRViewport)
 
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
@@ -1338,206 +1244,7 @@ const ViewScreen = () => {
         };
     }, [toolMode, draftMeasure, pixelSpacingValue]);
 
-    useEffect(() => {
-        const volume = volumeDataRef.current;
-        if (!volume) return;
-
-        const { rows, cols, depth, hu } = volume;
-        const coronalSlice = new Float32Array(cols * depth);
-        const sagittalSlice = new Float32Array(rows * depth);
-        const yIndex = Math.max(0, Math.min(rows - 1, Math.round((sliceIndex / Math.max(depth - 1, 1)) * (rows - 1))));
-        const xIndex = Math.max(0, Math.min(cols - 1, Math.round((sliceIndex / Math.max(depth - 1, 1)) * (cols - 1))));
-
-        for (let z = 0; z < depth; z += 1) {
-            for (let x = 0; x < cols; x += 1) {
-                coronalSlice[z * cols + x] = hu[z * rows * cols + yIndex * cols + x];
-            }
-            for (let y = 0; y < rows; y += 1) {
-                sagittalSlice[z * rows + y] = hu[z * rows * cols + y * cols + xIndex];
-            }
-        }
-
-        renderGrayscaleToCanvas(
-            coronalCanvasRef.current,
-            coronalViewportRef.current,
-            cols,
-            depth,
-            coronalSlice,
-            {
-                overlayTitle: "Coronal",
-                overlayDetail: `Y ${yIndex + 1}/${rows}`,
-                physicalWidth: cols * volume.pixelSpacingX,
-                physicalHeight: depth * volume.sliceSpacing,
-                corners: {
-                    topLeft: [
-                        meta.patientName,
-                        `${meta.patientSex} ${meta.patientAge}`,
-                        `${meta.modality} | ${meta.studyDate} ${meta.studyTime}`,
-                    ],
-                    topRight: [
-                        "Coronal MPR",
-                        meta.seriesDescription,
-                        `Y ${yIndex + 1}/${rows}`,
-                    ],
-                    bottomLeft: [
-                        `WW/WL ${Math.round(displayWw)} / ${Math.round(displayWl)}`,
-                        `Spacing ${volume.pixelSpacingX.toFixed(3)} / ${volume.sliceSpacing.toFixed(3)}`,
-                        `${cols} x ${depth}`,
-                    ],
-                    bottomRight: [
-                        `Source Slice ${sliceIndex + 1}/${depth}`,
-                        `Thick ${meta.thickness}`,
-                        `${meta.institution} | ${meta.manufacturer}`,
-                    ],
-                },
-            }
-        );
-        renderGrayscaleToCanvas(
-            sagittalCanvasRef.current,
-            sagittalViewportRef.current,
-            rows,
-            depth,
-            sagittalSlice,
-            {
-                overlayTitle: "Sagittal",
-                overlayDetail: `X ${xIndex + 1}/${cols}`,
-                physicalWidth: rows * volume.pixelSpacingY,
-                physicalHeight: depth * volume.sliceSpacing,
-                corners: {
-                    topLeft: [
-                        meta.patientName,
-                        `${meta.patientSex} ${meta.patientAge}`,
-                        `${meta.modality} | ${meta.studyDate} ${meta.studyTime}`,
-                    ],
-                    topRight: [
-                        "Sagittal MPR",
-                        meta.seriesDescription,
-                        `X ${xIndex + 1}/${cols}`,
-                    ],
-                    bottomLeft: [
-                        `WW/WL ${Math.round(ww)} / ${Math.round(wl)}`,
-                        `Spacing ${volume.pixelSpacingY.toFixed(3)} / ${volume.sliceSpacing.toFixed(3)}`,
-                        `${rows} x ${depth}`,
-                    ],
-                    bottomRight: [
-                        `Source Slice ${sliceIndex + 1}/${depth}`,
-                        `Thick ${meta.thickness}`,
-                        `${meta.institution} | ${meta.manufacturer}`,
-                    ],
-                },
-            }
-        );
-    }, [sliceIndex, renderTick, ww, wl, invert, meta, renderGrayscaleToCanvas]);
-
-    useEffect(() => {
-        const volume = volumeDataRef.current;
-        if (!volume) return;
-
-        const canvas = volumeCanvasRef.current;
-        const viewport = volumeViewportRef.current;
-        if (!canvas || !viewport) return;
-
-        const projection = buildOrthoProjection(volume, "coronal", selectedRenderMode, sliceIndex);
-        const physicalW = volume.cols * volume.pixelSpacingX;
-        const physicalH = volume.depth * volume.sliceSpacing;
-
-        const viewW = Math.max(1, Math.floor(viewport.clientWidth));
-        const viewH = Math.max(1, Math.floor(viewport.clientHeight));
-        if (canvas.width !== viewW || canvas.height !== viewH) {
-            canvas.width = viewW;
-            canvas.height = viewH;
-        }
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-
-        const scale = Math.min((viewW - 40) / physicalW, (viewH - 40) / physicalH);
-        const drawW = physicalW * scale;
-        const drawH = physicalH * scale;
-        const x = (viewW - drawW) / 2;
-        const y = (viewH - drawH) / 2;
-
-        ctx.fillStyle = "#020617";
-        ctx.fillRect(0, 0, viewW, viewH);
-
-        const colorized = createColorizedCanvas(projection.width, projection.height, projection.pixels, {
-            pseudoColorMode: selectedPseudoColor
-        });
-
-        if (colorized) {
-            ctx.imageSmoothingEnabled = true;
-
-            if (selectedRenderMode === "VR" || selectedRenderMode === "MIP") {
-                const overlayCanvas = document.createElement("canvas");
-                overlayCanvas.width = projection.width;
-                overlayCanvas.height = projection.height;
-                const overlayCtx = overlayCanvas.getContext("2d");
-                if (overlayCtx) {
-                    overlayCtx.drawImage(colorized, 0, 0);
-
-                    const mask = buildCoronalBodyMask(volume);
-                    const maskCanvas = createMaskCanvas(mask.width, mask.height, mask.mask);
-                    if (maskCanvas) {
-                        overlayCtx.globalCompositeOperation = "destination-in";
-                        overlayCtx.drawImage(maskCanvas, 0, 0);
-                        overlayCtx.globalCompositeOperation = "source-over";
-                    }
-
-                    ctx.shadowBlur = 25;
-                    ctx.shadowColor = "rgba(0,0,0,0.8)";
-                    ctx.drawImage(overlayCanvas, x, y, drawW, drawH);
-                    ctx.shadowBlur = 0;
-
-                    const gradient = ctx.createLinearGradient(x, y, x + drawW, y + drawH);
-                    gradient.addColorStop(0, "rgba(255,255,255,0.06)");
-                    gradient.addColorStop(0.5, "rgba(255,255,255,0)");
-                    gradient.addColorStop(1, "rgba(0,0,0,0.1)");
-                    ctx.fillStyle = gradient;
-                    ctx.globalCompositeOperation = "source-atop";
-                    ctx.fillRect(x, y, drawW, drawH);
-                    ctx.globalCompositeOperation = "source-over";
-                }
-            } else {
-                ctx.drawImage(colorized, x, y, drawW, drawH);
-            }
-        }
-
-        const title = selectedRenderMode === "VR" ? "Volume" : selectedRenderMode;
-        const detail = `${volume.depth} slices composited | ${selectedPseudoColor}`;
-
-        ctx.fillStyle = "rgba(0,0,0,0.65)";
-        ctx.fillRect(10, 10, 180, 40);
-        ctx.fillStyle = "#F8FAFC";
-        ctx.font = "bold 12px Inter, system-ui, sans-serif";
-        ctx.fillText(title, 20, 26);
-        ctx.font = "400 11px Inter, system-ui, sans-serif";
-        ctx.fillStyle = "#94A3B8";
-        ctx.fillText(detail, 20, 41);
-
-        const drawCornerBlock = (lines: string[], x: number, y: number, align: CanvasTextAlign) => {
-            ctx.fillStyle = "#94A3B8";
-            ctx.font = "11px monospace";
-            ctx.textAlign = align;
-            lines.forEach((line, index) => {
-                ctx.fillText(line, x, y + index * 15);
-            });
-        };
-
-        drawCornerBlock([
-            meta.patientName,
-            `${meta.patientSex} ${meta.patientAge}`,
-            `${meta.modality} | ${meta.studyDate}`,
-        ], 12, 65, "left");
-
-        drawCornerBlock([
-            `WW/WL ${Math.round(ww)}/${Math.round(wl)}`,
-            `FOV ${physicalW.toFixed(0)}mm x ${physicalH.toFixed(0)}mm`,
-        ], 12, viewH - 45, "left");
-
-        drawCornerBlock([
-            `Slice ${sliceIndex + 1}/${volume.depth}`,
-            `${meta.institution}`,
-        ], viewW - 12, viewH - 45, "right");
-    }, [sliceIndex, selectedRenderMode, selectedLayout, selectedPseudoColor, renderTick, ww, wl, invert, meta, buildOrthoProjection, createColorizedCanvas]);
+    // (Canvas-based coronal/sagittal/volume render effects removed — now Cornerstone MPR handles all 3D panels)
 
     return (
         <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl">
@@ -1698,28 +1405,28 @@ const ViewScreen = () => {
                         <div className="flex-1 p-3 grid grid-cols-2 gap-2 overflow-y-auto">
                             {imageMode === "2D" ? (
                                 <>
-                                    <Param label="Kernel" value={selectedSeries.kernel} />
-                                    <Param label="Slice" value={selectedSeries.thickness} />
-                                    <Param label="kV" value={selectedSeries.kV} />
-                                    <Param label="mAs" value={selectedSeries.mAs} />
+                                    {/* Prefer live DICOM tag values; fall back to scan session / static values */}
+                                    <Param label="Kernel" value={selectedSeries.kernel !== "—" ? selectedSeries.kernel : meta.seriesDescription} />
+                                    <Param label="Thick" value={meta.thickness !== "N/A" ? meta.thickness : selectedSeries.thickness} />
                                     <Param label="FOV" value={selectedSeries.fov} />
-                                    <Param label="Matrix" value={selectedSeries.matrix} />
+                                    <Param label="Matrix" value={meta.rows > 0 ? `${meta.rows}×${meta.cols}` : selectedSeries.matrix} />
+                                    <Param label="WW" value={String(Math.round(displayWw))} />
+                                    <Param label="WL" value={String(Math.round(displayWl))} />
                                 </>
                             ) : (
-                                <div className="col-span-2 flex flex-col gap-5 pt-1">
+                                <div className="col-span-2 flex flex-col gap-2">
                                     {/* Layout Dropdown */}
-                                    <div className="flex flex-col gap-2 relative">
-                                        <span className="text-[12px] font-bold text-[#546E7A]">屏幕布局 (Layouts):</span>
+                                    <div className="flex items-center gap-2 relative">
+                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">布局</span>
                                         <div
                                             onClick={() => setIsLayoutOpen(!isLayoutOpen)}
-                                            className={`h-[40px] w-full bg-white border-2 rounded-lg px-3 flex items-center justify-between shadow-[0_2px_8px_rgba(77,148,255,0.1)] cursor-pointer transition-all ${isLayoutOpen ? 'border-[#4D94FF]' : 'border-[#4D94FF]'}`}
+                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isLayoutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
                                         >
-                                            <span className="text-[14px] font-bold text-[#37474F]">{selectedLayout}</span>
-                                            <ChevronDown size={16} className={`text-[#4D94FF] transition-transform ${isLayoutOpen ? 'rotate-180' : ''}`} />
+                                            <span className="text-[12px] font-medium text-[#37474F] truncate">{selectedLayout}</span>
+                                            <ChevronDown size={13} className={`text-[#4D94FF] transition-transform shrink-0 ml-1 ${isLayoutOpen ? 'rotate-180' : ''}`} />
                                         </div>
-
                                         {isLayoutOpen && (
-                                            <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                 {[
                                                     "多平面重建",
                                                     "三维四窗",
@@ -1730,11 +1437,8 @@ const ViewScreen = () => {
                                                 ].map((opt) => (
                                                     <div
                                                         key={opt}
-                                                        onClick={() => {
-                                                            setSelectedLayout(opt);
-                                                            setIsLayoutOpen(false);
-                                                        }}
-                                                        className={`px-3 py-2.5 text-[14px] font-medium cursor-pointer transition-colors ${selectedLayout === opt ? 'bg-[#E0E0E0] text-[#37474F]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                        onClick={() => { setSelectedLayout(opt); setIsLayoutOpen(false); }}
+                                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedLayout === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
                                                     >
                                                         {opt}
                                                     </div>
@@ -1742,35 +1446,24 @@ const ViewScreen = () => {
                                             </div>
                                         )}
                                     </div>
-
-                                    <div className="h-[1px] bg-[#EEF2F9] mx-1" />
 
                                     {/* Render Mode Dropdown */}
-                                    <div className="flex flex-col gap-2 relative">
-                                        <span className="text-[12px] font-bold text-[#546E7A]">渲染模式 (Render Mode):</span>
+                                    <div className="flex items-center gap-2 relative">
+                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">渲染</span>
                                         <div
                                             onClick={() => setIsRenderModeOpen(!isRenderModeOpen)}
-                                            className={`h-[40px] w-full bg-white border rounded-lg px-3 flex items-center justify-between shadow-sm cursor-pointer transition-all ${isRenderModeOpen ? 'border-[#4D94FF] ring-2 ring-[#4D94FF]/10' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
                                         >
-                                            <span className="text-[14px] font-bold text-[#37474F]">{selectedRenderMode}</span>
-                                            <ChevronDown size={16} className={`text-[#94A3B8] transition-transform ${isRenderModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                            <span className="text-[12px] font-medium text-[#37474F]">{selectedRenderMode}</span>
+                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                         </div>
-
                                         {isRenderModeOpen && (
-                                            <div className="absolute bottom-[calc(100%+4px)] left-0 right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200">
-                                                {[
-                                                    "MIP",
-                                                    "MPR",
-                                                    "VR",
-                                                    "MinIP"
-                                                ].map((opt) => (
+                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                {["MIP", "MPR", "VR", "MinIP"].map((opt) => (
                                                     <div
                                                         key={opt}
-                                                        onClick={() => {
-                                                            setSelectedRenderMode(opt);
-                                                            setIsRenderModeOpen(false);
-                                                        }}
-                                                        className={`px-3 py-2.5 text-[14px] font-medium cursor-pointer transition-colors ${selectedRenderMode === opt ? 'bg-[#E0E0E0] text-[#37474F]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                        onClick={() => { setSelectedRenderMode(opt); setIsRenderModeOpen(false); }}
+                                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedRenderMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
                                                     >
                                                         {opt}
                                                     </div>
@@ -1779,28 +1472,23 @@ const ViewScreen = () => {
                                         )}
                                     </div>
 
-                                    <div className="h-[1px] bg-[#EEF2F9] mx-1" />
-
-                                    <div className="flex flex-col gap-2 relative">
-                                        <span className="text-[12px] font-bold text-[#546E7A]">伪彩方案 (Pseudo Color):</span>
+                                    {/* Pseudo Color Dropdown */}
+                                    <div className="flex items-center gap-2 relative">
+                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">伪彩</span>
                                         <div
                                             onClick={() => setIsPseudoColorOpen(!isPseudoColorOpen)}
-                                            className={`h-[40px] w-full bg-white border rounded-lg px-3 flex items-center justify-between shadow-sm cursor-pointer transition-all ${isPseudoColorOpen ? 'border-[#4D94FF] ring-2 ring-[#4D94FF]/10' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isPseudoColorOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
                                         >
-                                            <span className="text-[14px] font-bold text-[#37474F]">{selectedPseudoColor}</span>
-                                            <ChevronDown size={16} className={`text-[#94A3B8] transition-transform ${isPseudoColorOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                            <span className="text-[12px] font-medium text-[#37474F] truncate">{selectedPseudoColor}</span>
+                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isPseudoColorOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                         </div>
-
                                         {isPseudoColorOpen && (
-                                            <div className="absolute bottom-[calc(100%+4px)] left-0 right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200">
+                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden max-h-[160px] overflow-y-auto">
                                                 {PSEUDO_COLOR_OPTIONS.map((opt) => (
                                                     <div
                                                         key={opt}
-                                                        onClick={() => {
-                                                            setSelectedPseudoColor(opt);
-                                                            setIsPseudoColorOpen(false);
-                                                        }}
-                                                        className={`px-3 py-2.5 text-[14px] font-medium cursor-pointer transition-colors ${selectedPseudoColor === opt ? 'bg-[#E0E0E0] text-[#37474F]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                        onClick={() => { setSelectedPseudoColor(opt); setIsPseudoColorOpen(false); }}
+                                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedPseudoColor === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
                                                     >
                                                         {opt}
                                                     </div>
@@ -1820,270 +1508,91 @@ const ViewScreen = () => {
                 </aside>
 
                 <div className="flex-1 flex min-w-0 rounded-lg border border-[#B0C4DE] bg-[#0F172A] shadow-sm overflow-hidden">
-                    <div className={viewerWorkspaceClassName}>
+                    {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
+                    {imageMode === "3D" && (
+                        <CornerstoneMPRViewport
+                            ref={mprRef}
+                            imageUrls={seriesImageUrls}
+                            windowCenter={wl}
+                            windowWidth={ww}
+                            activeTool={mapCornerstoneTool(toolMode)}
+                            renderMode={selectedRenderMode as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
+                            onWindowLevelChange={(wc, wwidth) => {
+                                setDisplayWl(Math.round(wc));
+                                setDisplayWw(Math.round(wwidth));
+                            }}
+                            className="flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden relative"
+                        />
+                    )}
+                    {/* ── 2D mode: single Cornerstone stack viewport ── */}
+                    {imageMode === "2D" && (
                         <section
                             ref={viewportRef}
-                            className={`${imageMode === "3D" ? currentLayoutSpec.panels.axial : "flex-1 min-w-0 bg-black overflow-hidden relative"} ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : toolMode === "pan" ? "cursor-grab" : "cursor-default"}`}
-                            onWheel={(e) => {
-                                if (imageMode !== "3D") return;
-                                e.preventDefault();
-                                if (e.ctrlKey) {
-                                    setZoom((prev) => Math.min(4, Math.max(0.3, prev + (e.deltaY > 0 ? -0.05 : 0.05))));
-                                } else {
-                                    setSliceIndex((prev) => {
-                                        const next = e.deltaY > 0 ? prev + 1 : prev - 1;
-                                        return Math.max(0, Math.min(totalSlices - 1, next));
-                                    });
-                                }
-                            }}
+                            className={`flex-1 min-w-0 bg-black overflow-hidden relative ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : toolMode === "pan" ? "cursor-grab" : "cursor-default"}`}
                         >
-                            {imageMode === "2D" ? (
-                                <>
-                                    <DicomViewer
-                                        ref={dicomViewerRef}
-                                        imageUrls={seriesImageUrls}
-                                        currentImageIndex={clampSliceIndex(sliceIndex)}
-                                        onImageIndexChange={setSliceIndex}
-                                        activeTool={mapCornerstoneTool(toolMode)}
-                                        windowCenter={wl}
-                                        windowWidth={ww}
-                                        onWindowLevelChange={(wc, wwidth) => {
-                                            setDisplayWl(Math.round(wc));
-                                            setDisplayWw(Math.round(wwidth));
-                                        }}
-                                    />
-                                    {/* ── Annotate click-intercept overlay (2D mode only) ── */}
-                                    {toolMode === "annotate" && (
-                                        <div
-                                            className="absolute inset-0 z-10 cursor-cell"
-                                            onClick={(e) => {
-                                                const rect = viewportRef.current?.getBoundingClientRect();
-                                                if (!rect) return;
-                                                const xPct = ((e.clientX - rect.left) / rect.width) * 100;
-                                                const yPct = ((e.clientY - rect.top) / rect.height) * 100;
-                                                const noteCount = annotations.filter(
-                                                    (a) => a.slice === sliceIndex && a.kind === "text" && a.mode === "2d"
-                                                ).length;
-                                                setAnnotations((prev) => [
-                                                    ...prev,
-                                                    {
-                                                        id: `anno-text-${Date.now()}-${Math.random()}`,
-                                                        kind: "text" as const,
-                                                        slice: sliceIndex,
-                                                        x: xPct,
-                                                        y: yPct,
-                                                        text: `Note ${noteCount + 1}`,
-                                                        mode: "2d" as const,
-                                                    },
-                                                ]);
-                                            }}
-                                        />
-                                    )}
-                                    {/* ── 2D annotation label overlays ── */}
-                                    {annotations
-                                        .filter((a): a is TextAnnotation => a.slice === sliceIndex && a.kind === "text" && a.mode === "2d")
-                                        .map((a) => (
-                                            <div
-                                                key={a.id}
-                                                className={`absolute z-10 flex items-center gap-1 ${toolMode === "eraser" ? "cursor-pointer" : "pointer-events-none"}`}
-                                                style={{ left: `${a.x}%`, top: `${a.y}%`, transform: "translate(-50%, -50%)" }}
-                                                onClick={(e) => {
-                                                    if (toolMode !== "eraser") return;
-                                                    e.stopPropagation();
-                                                    setAnnotations((prev) => prev.filter((item) => item.id !== a.id));
-                                                }}
-                                            >
-                                                <div className="w-1.5 h-1.5 rounded-full bg-[#FFD54F] shrink-0" />
-                                                <div className="bg-black/75 text-[#FFF8E1] text-[10px] font-mono px-1.5 py-0.5 rounded whitespace-nowrap">
-                                                    {a.text}
-                                                </div>
-                                            </div>
-                                        ))}
-                                </>
-                            ) : (
-                                <>
-                                    <canvas
-                                        ref={canvasRef}
-                                        className="absolute inset-0 w-full h-full"
-                                        onMouseDown={(e) => {
-                                            e.stopPropagation();
-                                            if (e.button !== 0) return;
-                                            if (toolMode === "measure") {
-                                                const point = screenPointInViewport(e.clientX, e.clientY);
-                                                if (!point) return;
-                                                measureStartRef.current = point;
-                                                setDraftMeasure({
-                                                    sx1: point.x,
-                                                    sy1: point.y,
-                                                    sx2: point.x,
-                                                    sy2: point.y,
-                                                    slice: sliceIndex,
-                                                });
-                                                return;
-                                            }
-                                            if (toolMode === "annotate") {
-                                                const point = screenToImage(e.clientX, e.clientY);
-                                                if (!point) return;
-                                                const noteCount = annotations.filter((a) => a.slice === sliceIndex && a.kind === "text").length;
-                                                setAnnotations((prev) => [
-                                                    ...prev,
-                                                    {
-                                                        id: `anno-text-${Date.now()}-${Math.random()}`,
-                                                        kind: "text",
-                                                        slice: sliceIndex,
-                                                        x: point.x,
-                                                        y: point.y,
-                                                        text: `Note ${noteCount + 1}`,
-                                                    },
-                                                ]);
-                                                return;
-                                            }
-                                            if (toolMode === "eraser") {
-                                                dragRef.current.dragging = false;
-                                                return;
-                                            }
-                                            dragRef.current = { dragging: true, x: e.clientX, y: e.clientY };
-                                        }}
-                                        onMouseMove={(e) => {
-                                            e.stopPropagation();
-                                            if (toolMode === "measure" && measureStartRef.current) {
-                                                const point = screenPointInViewport(e.clientX, e.clientY);
-                                                if (!point) return;
-                                                setDraftMeasure((prev) => (prev ? { ...prev, sx2: point.x, sy2: point.y } : null));
-                                                return;
-                                            }
-                                            if (!dragRef.current.dragging) return;
-                                            const dx = e.clientX - dragRef.current.x;
-                                            const dy = e.clientY - dragRef.current.y;
-                                            dragRef.current = { dragging: true, x: e.clientX, y: e.clientY };
-                                            if (toolMode === "pan") {
-                                                setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-                                            } else if (toolMode === "wl") {
-                                                setWl((prev) => { const next = prev + dx * 0.8; setDisplayWl(Math.round(next)); return next; });
-                                                setWw((prev) => { const next = Math.max(1, prev + dy * 1.2); setDisplayWw(Math.round(next)); return next; });
-                                            }
-                                        }}
-                                        onMouseUp={(e) => {
-                                            e.stopPropagation();
-                                            if (toolMode === "measure" && draftMeasure) {
-                                                const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
-                                                const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
-                                                const dist = (distPx / pxPerImagePixel) * pixelSpacingValue;
-                                                if (dist > 1) {
-                                                    setMeasures((prev) => [
-                                                        ...prev,
-                                                        {
-                                                            id: `measure-${Date.now()}-${Math.random()}`,
-                                                            slice: draftMeasure.slice,
-                                                            sx1: draftMeasure.sx1,
-                                                            sy1: draftMeasure.sy1,
-                                                            sx2: draftMeasure.sx2,
-                                                            sy2: draftMeasure.sy2,
-                                                        },
-                                                    ]);
-                                                }
-                                                setDraftMeasure(null);
-                                                measureStartRef.current = null;
-                                                return;
-                                            }
-                                            dragRef.current.dragging = false;
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.stopPropagation();
-                                            if (toolMode === "measure" && draftMeasure) {
-                                                const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
-                                                const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
-                                                const dist = (distPx / pxPerImagePixel) * pixelSpacingValue;
-                                                if (dist > 1) {
-                                                    setMeasures((prev) => [
-                                                        ...prev,
-                                                        {
-                                                            id: `measure-${Date.now()}-${Math.random()}`,
-                                                            slice: draftMeasure.slice,
-                                                            sx1: draftMeasure.sx1,
-                                                            sy1: draftMeasure.sy1,
-                                                            sx2: draftMeasure.sx2,
-                                                            sy2: draftMeasure.sy2,
-                                                        },
-                                                    ]);
-                                                }
-                                                setDraftMeasure(null);
-                                                measureStartRef.current = null;
-                                            }
-                                            dragRef.current.dragging = false;
-                                        }}
-                                    />
-                                    <svg className={`absolute inset-0 w-full h-full ${toolMode === "eraser" ? "pointer-events-auto" : "pointer-events-none"}`}>
-                                        {measures
-                                            .filter((a) => a.slice === sliceIndex)
-                                            .map((a) => {
-                                                const mx = (a.sx1 + a.sx2) / 2;
-                                                const my = (a.sy1 + a.sy2) / 2;
-                                                const distPx = Math.hypot(a.sx2 - a.sx1, a.sy2 - a.sy1);
-                                                const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
-                                                const mm = (distPx / pxPerImagePixel) * pixelSpacingValue;
-                                                return (
-                                                    <g
-                                                        key={a.id}
-                                                        onClick={(e) => {
-                                                            if (toolMode !== "eraser") return;
-                                                            e.stopPropagation();
-                                                            setMeasures((prev) => prev.filter((item) => item.id !== a.id));
-                                                        }}
-                                                    >
-                                                        <line x1={a.sx1} y1={a.sy1} x2={a.sx2} y2={a.sy2} stroke="#FF4D4F" strokeWidth="2" />
-                                                        <circle cx={a.sx1} cy={a.sy1} r="2.8" fill="#FF4D4F" />
-                                                        <circle cx={a.sx2} cy={a.sy2} r="2.8" fill="#FF4D4F" />
-                                                        <rect x={mx - 26} y={my - 13} width="52" height="15" rx="3" fill="rgba(0,0,0,0.72)" />
-                                                        <text x={mx} y={my - 2} fill="#FFEAEA" fontSize="10" fontFamily="monospace" textAnchor="middle">
-                                                            {mm.toFixed(1)} mm
-                                                        </text>
-                                                    </g>
-                                                );
-                                            })}
-                                        {annotations
-                                            .filter((a): a is TextAnnotation => a.slice === sliceIndex && a.kind === "text" && a.mode !== "2d")
-                                            .map((a) => {
-                                                const p = imageToScreen(a.x, a.y);
-                                                return (
-                                                    <g
-                                                        key={a.id}
-                                                        onClick={(e) => {
-                                                            if (toolMode !== "eraser") return;
-                                                            e.stopPropagation();
-                                                            setAnnotations((prev) => prev.filter((item) => item.id !== a.id));
-                                                        }}
-                                                    >
-                                                        <circle cx={p.x} cy={p.y} r="3" fill="#FFD54F" />
-                                                        <rect x={p.x + 6} y={p.y - 12} width="58" height="16" rx="3" fill="rgba(0,0,0,0.75)" />
-                                                        <text x={p.x + 35} y={p.y - 1} fill="#FFF8E1" fontSize="10" fontFamily="monospace" textAnchor="middle">
-                                                            {a.text}
-                                                        </text>
-                                                    </g>
-                                                );
-                                            })}
-                                        {draftMeasure && (() => {
-                                            const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
-                                            const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
-                                            const mm = (distPx / pxPerImagePixel) * pixelSpacingValue;
-                                            return (
-                                                <g>
-                                                    <line x1={draftMeasure.sx1} y1={draftMeasure.sy1} x2={draftMeasure.sx2} y2={draftMeasure.sy2} stroke="#FF4D4F" strokeWidth="2" strokeDasharray="4 3" />
-                                                    <text x={(draftMeasure.sx1 + draftMeasure.sx2) / 2} y={(draftMeasure.sy1 + draftMeasure.sy2) / 2 - 6} fill="#FFEAEA" fontSize="10" fontFamily="monospace" textAnchor="middle">
-                                                        {mm.toFixed(1)} mm
-                                                    </text>
-                                                </g>
-                                            );
-                                        })()}
-                                    </svg>
-                                </>
+                            {/* Cornerstone DICOM viewer */}
+                            <DicomViewer
+                                ref={dicomViewerRef}
+                                imageUrls={seriesImageUrls}
+                                currentImageIndex={clampSliceIndex(sliceIndex)}
+                                onImageIndexChange={setSliceIndex}
+                                activeTool={mapCornerstoneTool(toolMode)}
+                                windowCenter={wl}
+                                windowWidth={ww}
+                                onWindowLevelChange={(wc, wwidth) => {
+                                    setDisplayWl(Math.round(wc));
+                                    setDisplayWw(Math.round(wwidth));
+                                }}
+                            />
+                            {/* ── Annotate click-intercept overlay ── */}
+                            {toolMode === "annotate" && (
+                                <div
+                                    className="absolute inset-0 z-10 cursor-cell"
+                                    onClick={(e) => {
+                                        const rect = viewportRef.current?.getBoundingClientRect();
+                                        if (!rect) return;
+                                        const xPct = ((e.clientX - rect.left) / rect.width) * 100;
+                                        const yPct = ((e.clientY - rect.top) / rect.height) * 100;
+                                        const noteCount = annotations.filter(
+                                            (a) => a.slice === sliceIndex && a.kind === "text" && a.mode === "2d"
+                                        ).length;
+                                        setAnnotations((prev) => [
+                                            ...prev,
+                                            {
+                                                id: `anno-text-${Date.now()}-${Math.random()}`,
+                                                kind: "text" as const,
+                                                slice: sliceIndex,
+                                                x: xPct,
+                                                y: yPct,
+                                                text: `Note ${noteCount + 1}`,
+                                                mode: "2d" as const,
+                                            },
+                                        ]);
+                                    }}
+                                />
                             )}
-                            <div className="absolute top-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35] pointer-events-none">
-                                {imageMode === "3D" && (
-                                    <div className="mb-2 inline-flex h-[18px] items-center rounded-full border border-white/10 bg-black/55 px-2 text-[9px] font-black uppercase tracking-[0.18em] text-[#93C5FD]">
-                                        Axial
+                            {/* ── Text annotation label overlays ── */}
+                            {annotations
+                                .filter((a): a is TextAnnotation => a.slice === sliceIndex && a.kind === "text" && a.mode === "2d")
+                                .map((a) => (
+                                    <div
+                                        key={a.id}
+                                        className={`absolute z-10 flex items-center gap-1 ${toolMode === "eraser" ? "cursor-pointer" : "pointer-events-none"}`}
+                                        style={{ left: `${a.x}%`, top: `${a.y}%`, transform: "translate(-50%, -50%)" }}
+                                        onClick={(e) => {
+                                            if (toolMode !== "eraser") return;
+                                            e.stopPropagation();
+                                            setAnnotations((prev) => prev.filter((item) => item.id !== a.id));
+                                        }}
+                                    >
+                                        <div className="w-1.5 h-1.5 rounded-full bg-[#FFD54F] shrink-0" />
+                                        <div className="bg-black/75 text-[#FFF8E1] text-[10px] font-mono px-1.5 py-0.5 rounded whitespace-nowrap">
+                                            {a.text}
+                                        </div>
                                     </div>
-                                )}
+                                ))}
+                            {/* ── Corner DICOM overlays ── */}
+                            <div className="absolute top-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35] pointer-events-none">
                                 <div className="font-bold">{meta.patientName}</div>
                                 <div>ID {meta.patientId} | {meta.patientSex} {meta.patientAge}</div>
                                 <div>{meta.modality} | {meta.studyDate} {meta.studyTime}</div>
@@ -2096,7 +1605,7 @@ const ViewScreen = () => {
                             <div className="absolute bottom-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35] pointer-events-none">
                                 <div>WW/WL {Math.round(displayWw)} / {Math.round(displayWl)}</div>
                                 <div>Spacing {meta.pixelSpacing}</div>
-                                <div>{meta.rows} x {meta.cols} | Zoom {zoom.toFixed(2)}x</div>
+                                <div>{meta.rows > 0 ? `${meta.rows} × ${meta.cols}` : "—"}</div>
                             </div>
                             <div className="absolute bottom-2 right-2 text-[10px] text-[#CFD8DC] font-mono text-right leading-[1.35] pointer-events-none">
                                 <div>Slice {sliceIndex + 1}/{selectedSeries.count} | Thick {meta.thickness}</div>
@@ -2104,25 +1613,7 @@ const ViewScreen = () => {
                                 <div>{meta.institution} | {meta.manufacturer}</div>
                             </div>
                         </section>
-                        {imageMode === "3D" && (
-                            <>
-                                <div ref={coronalViewportRef} className={currentLayoutSpec.panels.coronal}>
-                                    <canvas ref={coronalCanvasRef} className="absolute inset-0 h-full w-full" />
-                                </div>
-                                <div ref={sagittalViewportRef} className={currentLayoutSpec.panels.sagittal}>
-                                    <canvas ref={sagittalCanvasRef} className="absolute inset-0 h-full w-full" />
-                                </div>
-                                <div ref={volumeViewportRef} className={currentLayoutSpec.panels.volume}>
-                                    <canvas ref={volumeCanvasRef} className="absolute inset-0 h-full w-full" />
-                                    <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/55 to-transparent" />
-                                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/55 to-transparent" />
-                                    <div className="pointer-events-none absolute left-3 top-3 inline-flex items-center rounded-full border border-emerald-300/25 bg-black/45 px-2 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-[#86EFAC]">
-                                        {selectedRenderMode === "VR" ? "3D Volume" : selectedRenderMode}
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
+                    )}
                     <aside className="w-[72px] bg-[#111827] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3" onPointerDown={(e) => e.stopPropagation()}>
                             {(["pan", "wl", "measure", "annotate", "eraser"] as const).map((mode, i) => {
@@ -2167,22 +1658,15 @@ const ViewScreen = () => {
                                     title: "Zoom In",
                                     icon: <ZoomIn size={20} strokeWidth={1.5} />,
                                     action: () => {
-                                        if (imageMode === "2D") {
-                                            dicomViewerRef.current?.zoomIn();
-                                        } else {
-                                            setZoom((z) => Math.min(4, z + 0.1));
-                                        }
+                                        dicomViewerRef.current?.zoomIn();
+                                        // MPR: Cornerstone handles zoom via scroll/pinch internally
                                     },
                                 },
                                 {
                                     title: "Zoom Out",
                                     icon: <ZoomOut size={20} strokeWidth={1.5} />,
                                     action: () => {
-                                        if (imageMode === "2D") {
-                                            dicomViewerRef.current?.zoomOut();
-                                        } else {
-                                            setZoom((z) => Math.max(0.3, z - 0.1));
-                                        }
+                                        dicomViewerRef.current?.zoomOut();
                                     },
                                 },
                                 {
@@ -2192,8 +1676,7 @@ const ViewScreen = () => {
                                         if (imageMode === "2D") {
                                             dicomViewerRef.current?.fit();
                                         } else {
-                                            setZoom(1);
-                                            setPan({ x: 0, y: 0 });
+                                            mprRef.current?.resetAll();
                                         }
                                     },
                                 },
@@ -2206,7 +1689,11 @@ const ViewScreen = () => {
                                             setDisplayWw(defaultWindowRef.current.ww);
                                             setDisplayWl(defaultWindowRef.current.wl);
                                         } else {
-                                            handleResetAll();
+                                            mprRef.current?.resetAll();
+                                            setWw(defaultWindowRef.current.ww);
+                                            setWl(defaultWindowRef.current.wl);
+                                            setDisplayWw(defaultWindowRef.current.ww);
+                                            setDisplayWl(defaultWindowRef.current.wl);
                                         }
                                     },
                                 },
