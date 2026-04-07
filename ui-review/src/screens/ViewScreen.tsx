@@ -1769,7 +1769,7 @@ const ViewScreen = () => {
                 </div>
                 <div className="flex-1 flex justify-end">
                     <button
-                        onClick={() => navigate("/patients")}
+                        onClick={() => navigate("/patients", { replace: true, state: { backRoute: "/" } })}
                         className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
                     >
                         结束检查 <ChevronRight size={20} />

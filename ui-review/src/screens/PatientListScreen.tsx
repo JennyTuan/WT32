@@ -20,7 +20,7 @@ import {
     ChevronsLeft,
     ChevronsRight
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import AddPatientScreen from './AddPatientScreen';
 import { saveSelectedPatient } from '../lib/patientSession';
@@ -50,6 +50,7 @@ const INITIAL_PATIENT_DATA: PatientRecord[] = [
 ];
 
 const PatientListScreen = () => {
+    const location = useLocation();
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'completed'
     const [patients, setPatients] = useState<PatientRecord[]>(INITIAL_PATIENT_DATA);
@@ -92,6 +93,9 @@ const PatientListScreen = () => {
         && selectedPatients.length > 0
         && selectedPatients.every((patient) => patient.checkStatus !== '已完成');
     const canExportSelected = selectedPatients.length > 0;
+    const backRoute = typeof location.state === 'object' && location.state && 'backRoute' in location.state
+        ? location.state.backRoute
+        : null;
 
     const maskName = (name: string) => {
         if (!isNameMasked) return name;
@@ -373,7 +377,14 @@ const PatientListScreen = () => {
                 <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8">
                     <div className="flex-1">
                         <button
-                            onClick={() => navigate(-1)}
+                            onClick={() => {
+                                if (typeof backRoute === 'string' && backRoute.length > 0) {
+                                    navigate(backRoute, { replace: true });
+                                    return;
+                                }
+
+                                navigate(-1);
+                            }}
                             className="flex items-center gap-2 px-12 h-[56px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 transition-all uppercase text-[14px] shadow-sm active:scale-95"
                         >
                             <ChevronLeft size={22} /> 上一步
