@@ -1,11 +1,18 @@
 import { useRef, useState } from "react";
-import { History } from "lucide-react";
 
 import type { MetricKey, PhantomImageData, PhantomType, QACardItem, RoiPoint } from "../types";
 
-const STATUS_CLASS: Record<"PASS" | "FAIL", string> = {
-  PASS: "bg-[#E8F5E9] text-[#2E7D32]",
-  FAIL: "bg-[#FFEBEE] text-[#C62828]",
+const STATUS_CONFIG: Record<"PASS" | "FAIL", { badge: string; accent: string; dot: string }> = {
+  PASS: {
+    badge: "bg-[#E8F5E9] text-[#2E7D32] ring-1 ring-[#A5D6A7]",
+    accent: "bg-gradient-to-r from-[#43A047] to-[#66BB6A]",
+    dot: "bg-[#43A047]",
+  },
+  FAIL: {
+    badge: "bg-[#FFF0F0] text-[#C62828] ring-1 ring-[#FFCDD2]",
+    accent: "bg-gradient-to-r from-[#E53935] to-[#EF5350]",
+    dot: "bg-[#E53935]",
+  },
 };
 
 const MetricViewport = ({
@@ -34,10 +41,16 @@ const MetricViewport = ({
       onPointerMove={handlePointerMove}
       onPointerUp={() => setDragIndex(null)}
       onPointerLeave={() => setDragIndex(null)}
-      className="relative h-[128px] rounded-xl border border-[#C8D8EB] overflow-hidden bg-[radial-gradient(circle_at_center,#F3F7FD_0%,#CBD6E2_55%,#8192A8_100%)]"
+      className="relative h-[136px] rounded-xl overflow-hidden bg-[radial-gradient(ellipse_at_center,#3D4F65_0%,#1E2A38_60%,#111820_100%)] shadow-inner"
     >
-      <div className="absolute inset-0 opacity-20 bg-[linear-gradient(0deg,transparent_24%,rgba(255,255,255,0.3)_25%,transparent_26%,transparent_49%,rgba(255,255,255,0.3)_50%,transparent_51%,transparent_74%,rgba(255,255,255,0.3)_75%,transparent_76%)] bg-[length:100%_36px]" />
-      <div className="absolute left-3 top-3 rounded-full bg-black/45 px-3 py-1 text-[11px] font-bold text-white">
+      {/* scanline overlay */}
+      <div className="absolute inset-0 opacity-[0.06] bg-[repeating-linear-gradient(0deg,transparent,transparent_2px,rgba(255,255,255,1)_2px,rgba(255,255,255,1)_3px)] pointer-events-none" />
+      {/* corner marks */}
+      <div className="absolute top-2 left-2 w-4 h-4 border-l border-t border-white/30 pointer-events-none" />
+      <div className="absolute top-2 right-2 w-4 h-4 border-r border-t border-white/30 pointer-events-none" />
+      <div className="absolute bottom-2 left-2 w-4 h-4 border-l border-b border-white/30 pointer-events-none" />
+      <div className="absolute bottom-2 right-2 w-4 h-4 border-r border-b border-white/30 pointer-events-none" />
+      <div className="absolute left-3 top-3 rounded-md bg-black/60 backdrop-blur-sm px-2.5 py-1 text-[10px] font-bold text-white/90 tracking-wide">
         {image ? `${card.viewportLabel} · ${image.phantomType}` : "等待采集"}
       </div>
       {card.roiPoints.map((point, index) => (
@@ -47,8 +60,8 @@ const MetricViewport = ({
             event.currentTarget.setPointerCapture(event.pointerId);
             setDragIndex(index);
           }}
-          className={`absolute -translate-x-1/2 -translate-y-1/2 border-2 border-white bg-[#4D94FF]/80 shadow-md ${
-            card.roiShape === "circle" ? "w-9 h-9 rounded-full" : "w-5 h-5 rounded-full"
+          className={`absolute -translate-x-1/2 -translate-y-1/2 border-2 border-white/90 bg-[#4D94FF]/75 shadow-lg hover:bg-[#4D94FF] transition-colors ${
+            card.roiShape === "circle" ? "w-9 h-9 rounded-full" : "w-4 h-4 rounded-full"
           }`}
           style={{ left: `${point.x}%`, top: `${point.y}%` }}
           title="拖动 ROI 重新计算"
@@ -65,9 +78,9 @@ const QAMetricCell = ({
   label: string;
   value: string;
 }) => (
-  <div className="flex items-start justify-between gap-3 rounded-lg bg-[#F8FAFC] border border-[#E7EEF8] px-3 py-2.5">
-    <span className="text-[12px] font-bold text-[#8AA0B6] uppercase">{label}</span>
-    <span className="text-[13px] font-bold text-[#37474F] text-right leading-5">{value}</span>
+  <div className="flex flex-col gap-1 rounded-lg bg-[#F5F8FC] border border-[#E2EBF5] px-3 py-2.5">
+    <span className="text-[10px] font-bold text-[#9DB5CB] uppercase tracking-wider">{label}</span>
+    <span className="text-[14px] font-black text-[#2C3E50] leading-5 whitespace-pre-line">{value === "-" ? <span className="text-[#BDC8D4]">—</span> : value}</span>
   </div>
 );
 
@@ -79,28 +92,44 @@ const QACard = ({
   card: QACardItem;
   image: PhantomImageData | null;
   onRoiPointChange: (metric: MetricKey, pointIndex: number, nextPoint: RoiPoint) => void;
-}) => (
-  <div className="bg-white border border-[#C8D8EB] rounded-xl px-5 py-4 flex flex-col shadow-sm min-h-[270px]">
-    <div className="flex items-start justify-between gap-3 mb-4">
-      <div>
-        <h3 className="text-[16px] font-black text-[#37474F]">{card.title}</h3>
-        <div className="mt-1 text-[12px] text-[#90A4AE]">拖动 ROI 后自动重算</div>
+}) => {
+  const cfg = STATUS_CONFIG[card.status];
+  return (
+    <div className="bg-white border border-[#D0DFF0] rounded-2xl flex flex-col shadow-md overflow-hidden min-h-[290px]">
+      {/* top accent bar */}
+      <div className={`h-1 w-full ${cfg.accent}`} />
+
+      <div className="px-5 py-4 flex flex-col flex-1">
+        {/* header */}
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h3 className="text-[17px] font-black text-[#1E2D3D] tracking-tight">{card.title}</h3>
+            <div className="mt-0.5 text-[11px] text-[#9DB5CB] font-medium">拖动 ROI 后自动重算</div>
+          </div>
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-black ${cfg.badge}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+            {card.status}
+          </div>
+        </div>
+
+        {/* imaging viewport */}
+        <MetricViewport card={card} image={image} onRoiPointChange={onRoiPointChange} />
+
+        {/* metrics row */}
+        <div className="grid grid-cols-2 gap-2 mt-3">
+          <QAMetricCell label="Limit" value={card.limit} />
+          <QAMetricCell label="Actual" value={card.actual} />
+        </div>
+
+        {/* summary */}
+        <div className="mt-3 flex items-center gap-2 rounded-xl bg-[#F5F8FC] border border-[#E2EBF5] px-3 py-2.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#9DB5CB] flex-shrink-0" />
+          <span className="text-[12px] text-[#607D8B] font-semibold leading-5">{card.summary}</span>
+        </div>
       </div>
-      <div className={`px-3 py-1 rounded-full text-[12px] font-black ${STATUS_CLASS[card.status]}`}>{card.status}</div>
     </div>
-
-    <MetricViewport card={card} image={image} onRoiPointChange={onRoiPointChange} />
-
-    <div className="grid grid-cols-2 gap-2.5 mt-4">
-      <QAMetricCell label="Limit" value={card.limit} />
-      <QAMetricCell label="Actual" value={card.actual} />
-    </div>
-
-    <div className="mt-3 rounded-lg bg-[#FBFDFF] border border-[#EEF2F9] px-3 py-2.5 text-[12px] text-[#546E7A] font-medium leading-5">
-      {card.summary}
-    </div>
-  </div>
-);
+  );
+};
 
 type DailyQAContentProps = {
   cards: QACardItem[];
@@ -152,10 +181,7 @@ export function DailyQAContent({
           >
             运行 QA
           </button>
-          <button className="px-5 h-10 bg-white border border-[#4D94FF] text-[#4D94FF] font-black rounded-full hover:bg-[#F9FBFC] transition-all active:scale-95 text-[14px] flex items-center gap-2 shadow-sm">
-            <History size={14} strokeWidth={3} />
-            报告历史
-          </button>
+        
         </div>
       </div>
 

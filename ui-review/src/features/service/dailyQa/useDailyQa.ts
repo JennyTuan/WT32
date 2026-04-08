@@ -230,7 +230,6 @@ export function useDailyQa() {
     const nextRecords = [record, ...records];
     setRecords(nextRecords);
     saveDailyQaRecords(nextRecords);
-    setPreviewRecordId(record.id);
     setIsRunningQa(false);
     setAnalysisStage("执行完成");
   };
@@ -257,10 +256,6 @@ export function useDailyQa() {
     setPreviewRecordId(selectedRecordIds[0]);
   };
 
-  const printPreview = () => {
-    window.print();
-  };
-
   return {
     analysisStage,
     cards,
@@ -269,7 +264,6 @@ export function useDailyQa() {
     onAnalyze: () => setShowAnalyzeConfirm(true),
     onConfirmAnalyze: runQa,
     onPreviewRecord: setPreviewRecordId,
-    onPrintPreview: printPreview,
     onRecordDateFilterChange: setRecordDateFilter,
     onRecordPhantomFilterChange: setRecordPhantomFilter,
     onRoiPointChange: updateRoiPoint,

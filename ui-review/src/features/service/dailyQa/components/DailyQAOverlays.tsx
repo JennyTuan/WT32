@@ -1,16 +1,13 @@
-import { AlertTriangle, Printer } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
-import type { DailyQaRecord, PhantomType } from "../types";
+import type { PhantomType } from "../types";
 
 type DailyQAOverlaysProps = {
   analysisStage: string;
   isRunningQa: boolean;
   onCancel: () => void;
-  onClosePreview: () => void;
   onConfirm: () => void;
-  onPrintPreview: () => void;
   phantomType: PhantomType;
-  previewRecord: DailyQaRecord | null;
   showAnalyzeConfirm: boolean;
 };
 
@@ -18,11 +15,8 @@ export function DailyQAOverlays({
   analysisStage,
   isRunningQa,
   onCancel,
-  onClosePreview,
   onConfirm,
-  onPrintPreview,
   phantomType,
-  previewRecord,
   showAnalyzeConfirm,
 }: DailyQAOverlaysProps) {
   return (
@@ -74,52 +68,6 @@ export function DailyQAOverlays({
         </div>
       )}
 
-      {previewRecord && (
-        <div className="absolute inset-0 bg-black/35 backdrop-blur-[2px] z-[110] flex items-center justify-center">
-          <div className="w-[720px] rounded-[28px] bg-white p-8 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-[24px] font-black text-[#263238]">日常 QA 报告预览</div>
-                <div className="mt-2 text-[13px] text-[#6B85A0]">
-                  {previewRecord.date} {previewRecord.time} · {previewRecord.phantomType} · {previewRecord.deviceName} · {previewRecord.operator}
-                </div>
-              </div>
-              <div className={`px-4 py-2 rounded-full text-[12px] font-black ${previewRecord.judgment === "PASS" ? "bg-[#E8F5E9] text-[#2E7D32]" : "bg-[#FFEBEE] text-[#C62828]"}`}>
-                综合判定 {previewRecord.judgment}
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-3 gap-4">
-              {previewRecord.cards.map((card) => (
-                <div key={card.key} className="rounded-xl border border-[#D6E2EF] bg-[#F8FAFC] p-4">
-                  <div className="text-[16px] font-black text-[#37474F]">{card.title}</div>
-                  <div className="mt-3 text-[13px] text-[#6B85A0]">Limit</div>
-                  <div className="mt-1 text-[14px] font-bold text-[#37474F]">{card.limit}</div>
-                  <div className="mt-3 text-[13px] text-[#6B85A0]">Actual</div>
-                  <div className="mt-1 text-[14px] font-bold text-[#37474F]">{card.actual}</div>
-                  <div className="mt-3 text-[13px] text-[#6B85A0]">{card.summary}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={onClosePreview}
-                className="px-6 h-10 rounded-lg border border-[#B0C4DE] bg-white text-[#37474F] font-bold hover:bg-gray-50"
-              >
-                关闭
-              </button>
-              <button
-                onClick={onPrintPreview}
-                className="px-6 h-10 rounded-lg bg-[#4D94FF] text-white font-bold hover:bg-blue-600 flex items-center gap-2"
-              >
-                <Printer size={14} />
-                打印
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

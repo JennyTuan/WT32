@@ -21,7 +21,11 @@
       "Bash(node -e \"const p = require\\(''./node_modules/@cornerstonejs/streaming-image-volume-loader/package.json''\\); console.log\\(p.version\\)\")",
       "Bash(node -e \"const keys = Object.keys\\(require\\(''./node_modules/@cornerstonejs/core/dist/umd/index.js''\\)\\); console.log\\(keys.filter\\(k => /volume/i.test\\(k\\)\\).slice\\(0, 30\\)\\)\")",
       "Bash(npm uninstall:*)",
-      "Bash(grep -E \"\\\\.tsx$\")"
+      "Bash(grep -E \"\\\\.tsx$\")",
+      "Bash(curl -s http://localhost:5175)",
+      "Bash(taskkill //PID 5952 //F)",
+      "Bash(taskkill //F //PID 24792)",
+      "Bash(taskkill //F //PID 13748)"
     ]
   }
 }

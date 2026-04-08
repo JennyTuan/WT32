@@ -18,11 +18,8 @@ export default function DailyQAScreen() {
           analysisStage={qa.analysisStage}
           isRunningQa={qa.isRunningQa}
           onCancel={() => qa.setShowAnalyzeConfirm(false)}
-          onClosePreview={() => qa.setPreviewRecordId(null)}
           onConfirm={qa.onConfirmAnalyze}
-          onPrintPreview={qa.onPrintPreview}
           phantomType={qa.phantomType}
-          previewRecord={qa.previewRecord}
           showAnalyzeConfirm={qa.showAnalyzeConfirm}
         />
       }
