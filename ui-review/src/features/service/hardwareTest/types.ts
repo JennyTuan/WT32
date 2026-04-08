@@ -1,27 +1,41 @@
-export type HardwareTestTab = "机架" | "床旁" | "影像";
+export type HardwareTestTab = "机架" | "轨道" | "影像";
 
-export type GantryParams = {
-  gantryAngle: string;
-  rotateSpeed: string;
+export type HardwareActionControl = "toggle" | "trigger" | "reset";
+
+export type HardwareActionTone = "primary" | "neutral";
+
+export type HardwareTestParam = {
+  key: string;
+  label: string;
+  value: string;
+  widthClass?: string;
 };
 
-export type HardwareTestRow = {
-  actionLabel: string;
-  code?: string;
+export type HardwareTestAction = {
+  id: string;
   name: string;
-  params?: Array<{
-    tone?: "muted" | "primary" | "secondary";
-    value: string;
-    label: string;
-    widthClass?: string;
-  }>;
+  code?: string;
+  control: HardwareActionControl;
+  idleLabel: string;
+  runningLabel?: string;
+  runningResult?: string;
+  stoppedResult?: string;
+  completedResult?: string;
+  buttonTone?: HardwareActionTone;
+  params?: HardwareTestParam[];
 };
 
 export type HardwareTestLog = {
-  time: string;
-  module: string;
-  action: string;
-  params: string;
+  id: string;
+  actionName: string;
+  module: HardwareTestTab;
+  paramsSnapshot: string;
   result: string;
-  resultTone: "success" | "warning" | "error" | "info";
+  time: string;
+};
+
+export type EditingField = {
+  paramKey: string;
+  rowId: string;
+  tab: HardwareTestTab;
 };
