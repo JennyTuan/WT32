@@ -1,0 +1,6 @@
+[
+  { "id": "RawData", "label": "生数据", "capacity_mb": 2048000, "threshold": 80 },
+  { "id": "DICOM", "label": "DICOM", "capacity_mb": 1024000, "threshold": 80 },
+  { "id": "PACS", "label": "PACS", "capacity_mb": 512000, "threshold": 80 },
+  { "id": "Phantom", "label": "模体", "capacity_mb": 204800, "threshold": 80 }
+]
