@@ -1,4 +1,4 @@
-export type DiskPartitionId = "RawData" | "DICOM" | "PACS" | "Phantom";
+﻿export type DiskPartitionId = "RawData" | "DICOM" | "PACS" | "Phantom";
 
 export type ScanFileStatus = "ACQUIRED" | "RESERVED" | "RELEASED";
 
@@ -34,4 +34,21 @@ export type DiskManagerConfig = {
 export type PartitionsResponse = {
   partitions: DiskPartition[];
   config: DiskManagerConfig;
+};
+
+export type DiskActionBlocked = {
+  id: string;
+  reason: string;
+};
+
+export type DiskActionResponse = {
+  count: number;
+  updated?: string[];
+  purged?: string[];
+  blocked?: DiskActionBlocked[];
+};
+
+export type FlashMessage = {
+  type: "success" | "error";
+  text: string;
 };

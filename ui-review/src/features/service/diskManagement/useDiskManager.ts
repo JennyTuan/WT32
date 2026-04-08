@@ -1,30 +1,67 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
+  DiskActionResponse,
   DiskManagerConfig,
   DiskPartition,
   DiskPartitionId,
+  FlashMessage,
   PartitionsResponse,
   ScanFile,
 } from "./types";
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
+const metaEnv = (import.meta as ImportMeta & {
+  env?: {
+    DEV?: boolean;
+    VITE_API_BASE_URL?: string;
+  };
+}).env;
+
 const API_BASE_URL = (
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")
+  metaEnv?.VITE_API_BASE_URL ??
+  (metaEnv?.DEV ? "http://127.0.0.1:8000" : "")
 ).replace(/\/$/, "");
 
-const api = (path: string, init?: RequestInit) =>
-  fetch(`${API_BASE_URL}/api/disk-manager${path}`, {
+const api = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(`${API_BASE_URL}/api/disk-manager${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
+  const raw = await response.text();
+  const data = raw ? JSON.parse(raw) : null;
+
+  if (!response.ok) {
+    const detail = data?.detail;
+    if (typeof detail === "string") {
+      throw new Error(detail);
+    }
+    if (detail?.message) {
+      throw new Error(detail.message);
+    }
+    throw new Error("请求失败");
+  }
+
+  return data as T;
+};
+
+const createEmptySelection = (): Record<DiskPartitionId, Set<string>> => ({
+  RawData: new Set(),
+  DICOM: new Set(),
+  PACS: new Set(),
+  Phantom: new Set(),
+});
+
+const getBlockedReason = (file: ScanFile, action: "release" | "purge") => {
+  if (file.active_recon_jobs > 0) {
+    return `存在 ${file.active_recon_jobs} 个重建任务`;
+  }
+  if (action === "purge" && file.status === "RESERVED") {
+    return "文件已保留，请先释放";
+  }
+  return null;
+};
+
 export function useDiskManager() {
   const [partitions, setPartitions] = useState<DiskPartition[]>([]);
   const [config, setConfig] = useState<DiskManagerConfig>({
@@ -33,222 +70,154 @@ export function useDiskManager() {
     auto_cleanup: false,
   });
   const [loading, setLoading] = useState(true);
-  const [expandedPartition, setExpandedPartition] =
-    useState<DiskPartitionId | null>("RawData");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedFiles, setSelectedFiles] = useState<
-    Record<DiskPartitionId, Set<string>>
-  >({
-    RawData: new Set(),
-    DICOM: new Set(),
-    PACS: new Set(),
-    Phantom: new Set(),
-  });
-  const [message, setMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
+  const [expandedPartition, setExpandedPartition] = useState<DiskPartitionId | null>("RawData");
+  const [selectedFiles, setSelectedFiles] = useState<Record<DiskPartitionId, Set<string>>>(createEmptySelection);
+  const [message, setMessage] = useState<FlashMessage | null>(null);
+  const [busyPartition, setBusyPartition] = useState<DiskPartitionId | null>(null);
 
-  // ── Fetch ────────────────────────────────────────────────────────────
+  const flash = useCallback((next: FlashMessage | null) => {
+    setMessage(next);
+    if (next) {
+      window.setTimeout(() => setMessage(null), 3200);
+    }
+  }, []);
+
   const fetchPartitions = useCallback(async () => {
     try {
-      const res = await api("/partitions");
-      if (!res.ok) throw new Error("Failed to fetch");
-      const data: PartitionsResponse = await res.json();
+      const data = await api<PartitionsResponse>("/partitions");
       setPartitions(data.partitions);
       setConfig(data.config);
-    } catch {
-      // keep stale data on error
+    } catch (error) {
+      flash({ type: "error", text: error instanceof Error ? error.message : "加载磁盘数据失败" });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [flash]);
 
   useEffect(() => {
     fetchPartitions();
   }, [fetchPartitions]);
 
-  // ── Filtered files ───────────────────────────────────────────────────
+  const getPartition = useCallback(
+    (partitionId: DiskPartitionId) => partitions.find((item) => item.id === partitionId) ?? null,
+    [partitions],
+  );
+
   const getFilteredFiles = useCallback(
-    (partitionId: DiskPartitionId): ScanFile[] => {
-      const p = partitions.find((d) => d.id === partitionId);
-      if (!p) return [];
-      if (!searchQuery.trim()) return p.files;
-      const q = searchQuery.trim().toLowerCase();
-      return p.files.filter((f) => f.patient_id.toLowerCase().includes(q));
+    (partitionId: DiskPartitionId) => {
+      const partition = getPartition(partitionId);
+      if (!partition) return [];
+      const keyword = searchQuery.trim().toLowerCase();
+      if (!keyword) return partition.files;
+      return partition.files.filter((file) => file.patient_id.toLowerCase().includes(keyword));
     },
-    [partitions, searchQuery],
+    [getPartition, searchQuery],
   );
 
-  // ── Selection helpers ────────────────────────────────────────────────
-  const toggleFileSelection = useCallback(
-    (partitionId: DiskPartitionId, fileId: string) => {
-      setSelectedFiles((prev) => {
-        const next = new Set(prev[partitionId]);
-        if (next.has(fileId)) next.delete(fileId);
-        else next.add(fileId);
-        return { ...prev, [partitionId]: next };
-      });
-    },
-    [],
-  );
+  const toggleFileSelection = useCallback((partitionId: DiskPartitionId, fileId: string) => {
+    setSelectedFiles((prev) => {
+      const next = new Set(prev[partitionId]);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return { ...prev, [partitionId]: next };
+    });
+  }, []);
 
-  const toggleAllFiles = useCallback(
-    (partitionId: DiskPartitionId, files: ScanFile[]) => {
-      setSelectedFiles((prev) => {
-        const current = prev[partitionId];
-        const allSelected = files.length > 0 && files.every((f) => current.has(f.id));
-        const next = allSelected
-          ? new Set<string>()
-          : new Set(files.map((f) => f.id));
-        return { ...prev, [partitionId]: next };
-      });
-    },
-    [],
-  );
+  const toggleAllFiles = useCallback((partitionId: DiskPartitionId, files: ScanFile[]) => {
+    setSelectedFiles((prev) => {
+      const current = prev[partitionId];
+      const allSelected = files.length > 0 && files.every((file) => current.has(file.id));
+      return {
+        ...prev,
+        [partitionId]: allSelected ? new Set() : new Set(files.map((file) => file.id)),
+      };
+    });
+  }, []);
 
   const clearSelection = useCallback((partitionId: DiskPartitionId) => {
     setSelectedFiles((prev) => ({ ...prev, [partitionId]: new Set() }));
   }, []);
 
-  // ── Constraint checks ────────────────────────────────────────────────
   const getSelectedScanFiles = useCallback(
-    (partitionId: DiskPartitionId): ScanFile[] => {
-      const p = partitions.find((d) => d.id === partitionId);
-      if (!p) return [];
-      const sel = selectedFiles[partitionId];
-      return p.files.filter((f) => sel.has(f.id));
+    (partitionId: DiskPartitionId) => {
+      const partition = getPartition(partitionId);
+      if (!partition) return [];
+      const selection = selectedFiles[partitionId];
+      return partition.files.filter((file) => selection.has(file.id));
     },
-    [partitions, selectedFiles],
+    [getPartition, selectedFiles],
   );
 
   const canRelease = useCallback(
-    (partitionId: DiskPartitionId): { ok: boolean; reason?: string } => {
+    (partitionId: DiskPartitionId) => {
       const files = getSelectedScanFiles(partitionId);
       if (files.length === 0) return { ok: false, reason: "未选择文件" };
-      const blocked = files.filter((f) => f.active_recon_jobs > 0);
-      if (blocked.length > 0)
-        return {
-          ok: false,
-          reason: `${blocked.length} 个文件有活跃重建任务`,
-        };
-      return { ok: true };
+      const blocked = files.find((file) => getBlockedReason(file, "release"));
+      return blocked
+        ? { ok: false, reason: getBlockedReason(blocked, "release") ?? "当前无法释放" }
+        : { ok: true };
     },
     [getSelectedScanFiles],
   );
 
   const canPurge = useCallback(
-    (partitionId: DiskPartitionId): { ok: boolean; reason?: string } => {
+    (partitionId: DiskPartitionId) => {
       const files = getSelectedScanFiles(partitionId);
       if (files.length === 0) return { ok: false, reason: "未选择文件" };
-      const reconBlocked = files.filter((f) => f.active_recon_jobs > 0);
-      if (reconBlocked.length > 0)
-        return {
-          ok: false,
-          reason: `${reconBlocked.length} 个文件有活跃重建任务`,
-        };
-      const reserved = files.filter((f) => f.status === "RESERVED");
-      if (reserved.length > 0)
-        return {
-          ok: false,
-          reason: `${reserved.length} 个文件已保留，需先释放`,
-        };
-      return { ok: true };
+      const blocked = files.find((file) => getBlockedReason(file, "purge"));
+      return blocked
+        ? { ok: false, reason: getBlockedReason(blocked, "purge") ?? "当前无法删除" }
+        : { ok: true };
     },
     [getSelectedScanFiles],
   );
 
-  // ── Flash message ────────────────────────────────────────────────────
-  const flash = useCallback(
-    (type: "success" | "error", text: string) => {
-      setMessage({ type, text });
-      setTimeout(() => setMessage(null), 3000);
-    },
-    [],
-  );
-
-  // ── Operations ───────────────────────────────────────────────────────
-  const reserveFiles = useCallback(
-    async (partitionId: DiskPartitionId, fileIds: string[]) => {
+  const runAction = useCallback(
+    async (
+      partitionId: DiskPartitionId,
+      fileIds: string[],
+      action: "reserve" | "release" | "purge",
+      successText: string,
+    ) => {
+      setBusyPartition(partitionId);
       try {
-        const res = await api("/files/reserve", {
-          method: "POST",
+        const method = action === "purge" ? "DELETE" : "POST";
+        const data = await api<DiskActionResponse>(`/files/${action}`, {
+          method,
           body: JSON.stringify({ file_ids: fileIds, partition: partitionId }),
         });
-        if (!res.ok) {
-          const err = await res.json();
-          flash("error", err.detail?.message ?? "保留失败");
-          return;
-        }
-        const data = await res.json();
-        flash("success", `已保留 ${data.count} 个文件`);
+
+        const blockedCount = data.blocked?.length ?? 0;
+        const text = blockedCount > 0 ? `${successText}${data.count} 个，阻止 ${blockedCount} 个` : `${successText}${data.count} 个`;
+        flash({ type: blockedCount > 0 ? "error" : "success", text });
         clearSelection(partitionId);
         await fetchPartitions();
-      } catch {
-        flash("error", "网络错误");
+      } catch (error) {
+        flash({ type: "error", text: error instanceof Error ? error.message : "操作失败" });
+      } finally {
+        setBusyPartition(null);
       }
     },
-    [fetchPartitions, clearSelection, flash],
+    [clearSelection, fetchPartitions, flash],
+  );
+
+  const reserveFiles = useCallback(
+    (partitionId: DiskPartitionId, fileIds: string[]) => runAction(partitionId, fileIds, "reserve", "已保留 "),
+    [runAction],
   );
 
   const releaseFiles = useCallback(
-    async (partitionId: DiskPartitionId, fileIds: string[]) => {
-      try {
-        const res = await api("/files/release", {
-          method: "POST",
-          body: JSON.stringify({ file_ids: fileIds, partition: partitionId }),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          flash("error", err.detail?.message ?? "释放失败");
-          return;
-        }
-        const data = await res.json();
-        flash(
-          data.blocked?.length
-            ? "error"
-            : "success",
-          data.blocked?.length
-            ? `已释放 ${data.count} 个，${data.blocked.length} 个被阻止`
-            : `已释放 ${data.count} 个文件`,
-        );
-        clearSelection(partitionId);
-        await fetchPartitions();
-      } catch {
-        flash("error", "网络错误");
-      }
-    },
-    [fetchPartitions, clearSelection, flash],
+    (partitionId: DiskPartitionId, fileIds: string[]) => runAction(partitionId, fileIds, "release", "已释放 "),
+    [runAction],
   );
 
   const purgeFiles = useCallback(
-    async (partitionId: DiskPartitionId, fileIds: string[]) => {
-      try {
-        const res = await api("/files/purge", {
-          method: "POST",
-          body: JSON.stringify({ file_ids: fileIds, partition: partitionId }),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          flash("error", err.detail?.message ?? "删除失败");
-          return;
-        }
-        const data = await res.json();
-        flash(
-          data.blocked?.length
-            ? "error"
-            : "success",
-          data.blocked?.length
-            ? `已删除 ${data.count} 个，${data.blocked.length} 个被阻止`
-            : `已删除 ${data.count} 个文件`,
-        );
-        clearSelection(partitionId);
-        await fetchPartitions();
-      } catch {
-        flash("error", "网络错误");
-      }
-    },
-    [fetchPartitions, clearSelection, flash],
+    (partitionId: DiskPartitionId, fileIds: string[]) => runAction(partitionId, fileIds, "purge", "已删除 "),
+    [runAction],
   );
 
   const updateThreshold = useCallback(
@@ -259,86 +228,79 @@ export function useDiskManager() {
           body: JSON.stringify({ threshold }),
         });
         await fetchPartitions();
-      } catch {
-        // silent
+      } catch (error) {
+        flash({ type: "error", text: error instanceof Error ? error.message : "阈值更新失败" });
       }
     },
-    [fetchPartitions],
+    [fetchPartitions, flash],
   );
 
   const updateConfig = useCallback(
     async (patch: Partial<DiskManagerConfig>) => {
       try {
-        const res = await api("/config", {
+        const data = await api<DiskManagerConfig>("/config", {
           method: "PATCH",
           body: JSON.stringify(patch),
         });
-        if (res.ok) {
-          const data = await res.json();
-          setConfig(data);
-        }
-      } catch {
-        // silent
+        setConfig(data);
+        flash({ type: "success", text: "配置已更新" });
+      } catch (error) {
+        flash({ type: "error", text: error instanceof Error ? error.message : "配置更新失败" });
       }
     },
-    [],
+    [flash],
   );
 
-  // ── Derived ──────────────────────────────────────────────────────────
   const getUsagePercent = useCallback(
-    (partitionId: DiskPartitionId): number => {
-      const p = partitions.find((d) => d.id === partitionId);
-      if (!p || p.capacity_mb === 0) return 0;
-      return Math.round((p.used_mb / p.capacity_mb) * 10000) / 100;
+    (partitionId: DiskPartitionId) => {
+      const partition = getPartition(partitionId);
+      if (!partition || partition.capacity_mb === 0) return 0;
+      return (partition.used_mb / partition.capacity_mb) * 100;
     },
-    [partitions],
+    [getPartition],
   );
 
   const isOverThreshold = useCallback(
-    (partitionId: DiskPartitionId): boolean => {
-      const p = partitions.find((d) => d.id === partitionId);
-      if (!p) return false;
-      return getUsagePercent(partitionId) > p.threshold;
+    (partitionId: DiskPartitionId) => {
+      const partition = getPartition(partitionId);
+      if (!partition) return false;
+      return getUsagePercent(partitionId) >= partition.threshold;
     },
-    [partitions, getUsagePercent],
+    [getPartition, getUsagePercent],
   );
 
   const selectedCount = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const [k, v] of Object.entries(selectedFiles)) {
-      counts[k] = v.size;
-    }
-    return counts;
+    return Object.fromEntries(
+      Object.entries(selectedFiles).map(([partitionId, fileIds]) => [partitionId, fileIds.size]),
+    ) as Record<DiskPartitionId, number>;
   }, [selectedFiles]);
 
   return {
-    partitions,
+    busyPartition,
+    canPurge,
+    canRelease,
+    clearSelection,
     config,
-    loading,
     expandedPartition,
-    setExpandedPartition,
-    searchQuery,
-    setSearchQuery,
-    selectedFiles,
-    selectedCount,
-    message,
-    // per-partition
     getFilteredFiles,
+    getSelectedScanFiles,
     getUsagePercent,
     isOverThreshold,
-    // selection
-    toggleFileSelection,
-    toggleAllFiles,
-    clearSelection,
-    // constraints
-    canRelease,
-    canPurge,
-    // operations
-    reserveFiles,
-    releaseFiles,
+    loading,
+    message,
+    partitions,
     purgeFiles,
-    updateThreshold,
-    updateConfig,
     refreshData: fetchPartitions,
+    releaseFiles,
+    reserveFiles,
+    searchQuery,
+    selectedCount,
+    selectedFiles,
+    setExpandedPartition,
+    setSearchQuery,
+    toggleAllFiles,
+    toggleFileSelection,
+    updateConfig,
+    updateThreshold,
   };
 }
