@@ -26,6 +26,7 @@ export type HardwareTestAction = {
   runningResult?: string;
   stoppedResult?: string;
   completedResult?: string;
+  autoCompleteMs?: number;
   buttonTone?: HardwareActionTone;
   params?: HardwareTestParam[];
 };

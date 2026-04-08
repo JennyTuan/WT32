@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   EditingField,
@@ -20,10 +20,34 @@ const TAB_LABELS: Record<HardwareTestTab, string> = {
   imaging: "影像",
 };
 
+const DEFAULT_AUTO_COMPLETE_MS = 1400;
+
 const INITIAL_ACTIONS: Record<HardwareTestTab, HardwareTestAction[]> = {
   gantry: [
-    { id: "gantry-reset", name: "机架复位", code: "(RCB)", control: "reset", idleLabel: "复位", completedResult: "已复位", buttonTone: "neutral" },
-    { id: "rotation-home", name: "旋转找零", control: "trigger", idleLabel: "开始", completedResult: "已开始" },
+    {
+      id: "gantry-reset",
+      name: "机架复位",
+      code: "(RCB)",
+      control: "reset",
+      idleLabel: "复位",
+      runningLabel: "停止",
+      runningResult: "复位中",
+      stoppedResult: "已停止",
+      completedResult: "已复位",
+      autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
+      buttonTone: "neutral",
+    },
+    {
+      id: "rotation-home",
+      name: "旋转找零",
+      control: "trigger",
+      idleLabel: "开始",
+      runningLabel: "停止",
+      runningResult: "执行中",
+      stoppedResult: "已停止",
+      completedResult: "已完成",
+      autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
+    },
     {
       id: "rotation-control",
       name: "旋转控制",
@@ -39,13 +63,28 @@ const INITIAL_ACTIONS: Record<HardwareTestTab, HardwareTestAction[]> = {
       name: "机架定位",
       control: "trigger",
       idleLabel: "开始",
-      completedResult: "已开始",
+      runningLabel: "停止",
+      runningResult: "定位中",
+      stoppedResult: "已停止",
+      completedResult: "已完成",
+      autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
       params: [
         { key: "speed", label: "速度", value: "3", widthClass: "w-14" },
         { key: "angle", label: "角度", value: "180", widthClass: "w-16" },
       ],
     },
-    { id: "tilt-reset", name: "倾斜复位", control: "reset", idleLabel: "复位", completedResult: "已复位", buttonTone: "neutral" },
+    {
+      id: "tilt-reset",
+      name: "倾斜复位",
+      control: "reset",
+      idleLabel: "复位",
+      runningLabel: "停止",
+      runningResult: "复位中",
+      stoppedResult: "已停止",
+      completedResult: "已复位",
+      autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
+      buttonTone: "neutral",
+    },
     {
       id: "tilt-control",
       name: "倾斜控制",
@@ -58,13 +97,29 @@ const INITIAL_ACTIONS: Record<HardwareTestTab, HardwareTestAction[]> = {
     },
   ],
   rail: [
-    { id: "bed-reset", name: "扫描床复位", code: "(UCB)", control: "reset", idleLabel: "复位", completedResult: "已复位", buttonTone: "neutral" },
+    {
+      id: "bed-reset",
+      name: "扫描床复位",
+      code: "(UCB)",
+      control: "reset",
+      idleLabel: "复位",
+      runningLabel: "停止",
+      runningResult: "复位中",
+      stoppedResult: "已停止",
+      completedResult: "已复位",
+      autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
+      buttonTone: "neutral",
+    },
     {
       id: "bed-move-target",
       name: "移动开始(目标位置)",
       control: "trigger",
       idleLabel: "开始",
-      completedResult: "已开始",
+      runningLabel: "停止",
+      runningResult: "移动中",
+      stoppedResult: "已停止",
+      completedResult: "已完成",
+      autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
       params: [
         { key: "speed", label: "速度", value: "33", widthClass: "w-14" },
         { key: "position", label: "位置", value: "500", widthClass: "w-16" },
@@ -86,11 +141,22 @@ const INITIAL_ACTIONS: Record<HardwareTestTab, HardwareTestAction[]> = {
       name: "激光灯控制",
       control: "toggle",
       idleLabel: "点亮",
-      runningLabel: "关闭",
+      runningLabel: "停止",
       runningResult: "已点亮",
       stoppedResult: "已关闭",
     },
-    { id: "collimator-reset", name: "准直器复位", control: "reset", idleLabel: "复位", completedResult: "已复位", buttonTone: "neutral" },
+    {
+      id: "collimator-reset",
+      name: "准直器复位",
+      control: "reset",
+      idleLabel: "复位",
+      runningLabel: "停止",
+      runningResult: "复位中",
+      stoppedResult: "已停止",
+      completedResult: "已复位",
+      autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
+      buttonTone: "neutral",
+    },
     {
       id: "collimator-control",
       name: "准直器控制",
@@ -155,6 +221,13 @@ export function useHardwareTest() {
   const [runningActions, setRunningActions] = useState<Record<string, boolean>>({});
   const [actionsByTab, setActionsByTab] = useState<Record<HardwareTestTab, HardwareTestAction[]>>(cloneActions);
   const [logs, setLogs] = useState<HardwareTestLog[]>(INITIAL_LOGS);
+  const timersRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    return () => {
+      Object.values(timersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, []);
 
   const rows = actionsByTab[activeTab];
   const editingFieldKey = buildFieldKey(editingField);
@@ -187,6 +260,14 @@ export function useHardwareTest() {
     ].slice(0, 50));
   };
 
+  const clearRunningTimer = (actionKey: string) => {
+    const timerId = timersRef.current[actionKey];
+    if (timerId) {
+      window.clearTimeout(timerId);
+      delete timersRef.current[actionKey];
+    }
+  };
+
   const executeAction = (rowId: string) => {
     const row = actionsByTab[activeTab].find((item) => item.id === rowId);
     if (!row) return;
@@ -198,24 +279,44 @@ export function useHardwareTest() {
         ? row.params.map((param) => `${param.label}=${param.value}`).join("，")
         : "无参数";
 
-    let result = row.completedResult ?? "已执行";
+    setEditingField(null);
 
-    if (row.control === "toggle") {
-      const nextRunning = !isRunning;
-      setRunningActions((prev) => ({ ...prev, [actionKey]: nextRunning }));
-      result = nextRunning ? row.runningResult ?? "已开始" : row.stoppedResult ?? "已停止";
-    } else if (isRunning) {
+    if (isRunning) {
+      clearRunningTimer(actionKey);
       setRunningActions((prev) => ({ ...prev, [actionKey]: false }));
+      prependLog({
+        time: formatTime(),
+        module: TAB_LABELS[activeTab],
+        actionName: row.name,
+        paramsSnapshot,
+        result: row.stoppedResult ?? "已停止",
+      });
+      return;
     }
 
-    setEditingField(null);
+    setRunningActions((prev) => ({ ...prev, [actionKey]: true }));
     prependLog({
       time: formatTime(),
       module: TAB_LABELS[activeTab],
       actionName: row.name,
       paramsSnapshot,
-      result,
+      result: row.runningResult ?? "执行中",
     });
+
+    if (row.control !== "toggle") {
+      clearRunningTimer(actionKey);
+      timersRef.current[actionKey] = window.setTimeout(() => {
+        setRunningActions((prev) => ({ ...prev, [actionKey]: false }));
+        prependLog({
+          time: formatTime(),
+          module: TAB_LABELS[activeTab],
+          actionName: row.name,
+          paramsSnapshot,
+          result: row.completedResult ?? "已完成",
+        });
+        delete timersRef.current[actionKey];
+      }, row.autoCompleteMs ?? DEFAULT_AUTO_COMPLETE_MS);
+    }
   };
 
   const anyRunning = useMemo(() => Object.values(runningActions).some(Boolean), [runningActions]);
