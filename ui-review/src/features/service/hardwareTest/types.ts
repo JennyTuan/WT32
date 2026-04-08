@@ -1,4 +1,9 @@
-export type HardwareTestTab = "机架" | "轨道" | "影像";
+export type HardwareTestTab = "gantry" | "rail" | "imaging";
+
+export type HardwareTestTabOption = {
+  id: HardwareTestTab;
+  label: string;
+};
 
 export type HardwareActionControl = "toggle" | "trigger" | "reset";
 
@@ -28,7 +33,7 @@ export type HardwareTestAction = {
 export type HardwareTestLog = {
   id: string;
   actionName: string;
-  module: HardwareTestTab;
+  module: string;
   paramsSnapshot: string;
   result: string;
   time: string;

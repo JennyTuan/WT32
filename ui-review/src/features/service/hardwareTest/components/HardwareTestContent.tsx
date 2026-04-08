@@ -1,4 +1,4 @@
-import type { EditingField, HardwareTestAction, HardwareTestTab } from "../types";
+import type { EditingField, HardwareTestAction, HardwareTestTab, HardwareTestTabOption } from "../types";
 
 const actionToneClassMap = {
   neutral: "bg-white border border-[#D7E1EC] text-[#43576B] hover:bg-[#F8FAFC]",
@@ -10,7 +10,7 @@ type HardwareTestContentProps = {
   editingFieldKey: string | null;
   rows: HardwareTestAction[];
   runningActions: Record<string, boolean>;
-  tabs: HardwareTestTab[];
+  tabs: HardwareTestTabOption[];
   onActionExecute: (rowId: string) => void;
   onParamChange: (tab: HardwareTestTab, rowId: string, paramKey: string, nextValue: string) => void;
   onStartEditing: (field: EditingField | null) => void;
@@ -36,15 +36,15 @@ export function HardwareTestContent({
         <div className="flex rounded-[18px] border border-[#2B3440] bg-white p-1 shadow-sm">
           {tabs.map((tab) => (
             <button
-              key={tab}
-              onClick={() => onTabChange(tab)}
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
               className={`h-[44px] min-w-[104px] rounded-[14px] px-6 text-[14px] font-black transition-all ${
-                activeTab === tab
+                activeTab === tab.id
                   ? "bg-white text-[#2F67D8] shadow-[0_2px_10px_rgba(15,23,42,0.08)]"
                   : "text-[#75879B] hover:text-[#465A70]"
               }`}
             >
-              {tab}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -57,7 +57,7 @@ export function HardwareTestContent({
           <div className="text-center">操作控制</div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div key={activeTab} className="flex-1 overflow-y-auto custom-scrollbar">
           {rows.map((row, index) => {
             const actionKey = buildActionKey(activeTab, row.id);
             const isRunning = Boolean(runningActions[actionKey]);
@@ -132,10 +132,10 @@ export function HardwareTestContent({
                   </button>
                 </div>
               </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
   );
 }

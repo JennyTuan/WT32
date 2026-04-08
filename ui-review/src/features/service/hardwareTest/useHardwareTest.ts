@@ -5,12 +5,23 @@ import type {
   HardwareTestAction,
   HardwareTestLog,
   HardwareTestTab,
+  HardwareTestTabOption,
 } from "./types";
 
-const TABS: HardwareTestTab[] = ["机架", "轨道", "影像"];
+const TAB_OPTIONS: HardwareTestTabOption[] = [
+  { id: "gantry", label: "机架" },
+  { id: "rail", label: "轨道" },
+  { id: "imaging", label: "影像" },
+];
+
+const TAB_LABELS: Record<HardwareTestTab, string> = {
+  gantry: "机架",
+  rail: "轨道",
+  imaging: "影像",
+};
 
 const INITIAL_ACTIONS: Record<HardwareTestTab, HardwareTestAction[]> = {
-  机架: [
+  gantry: [
     { id: "gantry-reset", name: "机架复位", code: "(RCB)", control: "reset", idleLabel: "复位", completedResult: "已复位", buttonTone: "neutral" },
     { id: "rotation-home", name: "旋转找零", control: "trigger", idleLabel: "开始", completedResult: "已开始" },
     {
@@ -46,7 +57,7 @@ const INITIAL_ACTIONS: Record<HardwareTestTab, HardwareTestAction[]> = {
       params: [{ key: "angle", label: "角度", value: "0", widthClass: "w-16" }],
     },
   ],
-  轨道: [
+  rail: [
     { id: "bed-reset", name: "扫描床复位", code: "(UCB)", control: "reset", idleLabel: "复位", completedResult: "已复位", buttonTone: "neutral" },
     {
       id: "bed-move-target",
@@ -60,7 +71,7 @@ const INITIAL_ACTIONS: Record<HardwareTestTab, HardwareTestAction[]> = {
       ],
     },
   ],
-  影像: [
+  imaging: [
     {
       id: "rotor-control",
       name: "Rotor(阳极)控制",
@@ -90,7 +101,7 @@ const INITIAL_ACTIONS: Record<HardwareTestTab, HardwareTestAction[]> = {
       stoppedResult: "已停止",
       params: [
         { key: "collimator", label: "规格", value: "32*0.6", widthClass: "w-20" },
-        { key: "level", label: "级别", value: "1", widthClass: "w-12" },
+        { key: "level", label: "1", value: "1", widthClass: "w-12" },
       ],
     },
   ],
@@ -116,7 +127,8 @@ const INITIAL_LOGS: HardwareTestLog[] = [
 ];
 
 const cloneActions = () =>
-  TABS.reduce<Record<HardwareTestTab, HardwareTestAction[]>>((acc, tab) => {
+  Object.keys(INITIAL_ACTIONS).reduce<Record<HardwareTestTab, HardwareTestAction[]>>((acc, rawTab) => {
+    const tab = rawTab as HardwareTestTab;
     acc[tab] = INITIAL_ACTIONS[tab].map((action) => ({
       ...action,
       params: action.params?.map((param) => ({ ...param })),
@@ -138,7 +150,7 @@ const formatTime = () =>
   });
 
 export function useHardwareTest() {
-  const [activeTab, setActiveTabState] = useState<HardwareTestTab>("机架");
+  const [activeTab, setActiveTabState] = useState<HardwareTestTab>("gantry");
   const [editingField, setEditingField] = useState<EditingField | null>(null);
   const [runningActions, setRunningActions] = useState<Record<string, boolean>>({});
   const [actionsByTab, setActionsByTab] = useState<Record<HardwareTestTab, HardwareTestAction[]>>(cloneActions);
@@ -199,7 +211,7 @@ export function useHardwareTest() {
     setEditingField(null);
     prependLog({
       time: formatTime(),
-      module: activeTab,
+      module: TAB_LABELS[activeTab],
       actionName: row.name,
       paramsSnapshot,
       result,
@@ -212,7 +224,6 @@ export function useHardwareTest() {
     activeTab,
     anyRunning,
     clearLogs: () => setLogs([]),
-    editingField,
     editingFieldKey,
     executeAction,
     logs,
@@ -220,7 +231,7 @@ export function useHardwareTest() {
     runningActions,
     setActiveTab,
     setEditingField,
-    tabs: TABS,
+    tabs: TAB_OPTIONS,
     updateParamValue,
   };
 }
