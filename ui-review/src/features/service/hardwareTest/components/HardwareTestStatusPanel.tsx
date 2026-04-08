@@ -6,65 +6,61 @@ type HardwareTestStatusPanelProps = {
   runningCount: number;
 };
 
-export function HardwareTestStatusPanel({
-  logs,
-  onClearLogs,
-  runningCount,
-}: HardwareTestStatusPanelProps) {
+export function HardwareTestStatusPanel({ logs, onClearLogs, runningCount }: HardwareTestStatusPanelProps) {
   return (
-    <section className="mt-4 rounded-md border border-[#B0C4DE] bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={`h-2.5 w-2.5 rounded-full ${runningCount > 0 ? "bg-[#2F67D8]" : "bg-[#90A4AE]"}`} />
-          <div>
-            <div className="text-[14px] font-black text-[#31485E]">操作日志</div>
-            <div className="text-[12px] text-[#7B92A8]">
-              最近 {logs.length} 条记录
-              {runningCount > 0 ? `，当前有 ${runningCount} 项动作运行中` : "，当前无动作运行"}
-            </div>
-          </div>
+    <section className="mt-3 shrink-0 overflow-hidden rounded-xl border border-[#E2E8F0] bg-white shadow-sm">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-[#EEF2F9] bg-[#F8FAFC] px-5 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${runningCount > 0 ? "bg-[#2F7BFF]" : "bg-[#4ADE80]"}`}
+          />
+          <span className="text-[12px] font-semibold text-[#475569]">操作日志</span>
+          <span className="text-[11px] text-[#94A3B8]">
+            最近 {logs.length} 条记录
+            {runningCount > 0 ? `，${runningCount} 项运行中` : "，当前无动作运行"}
+          </span>
         </div>
-
         <button
           type="button"
           onClick={onClearLogs}
-          className="rounded-full border border-[#D7E3F0] px-4 py-2 text-[12px] font-black text-[#5D7288] transition-colors hover:bg-[#F8FAFC]"
+          className="rounded px-2 py-0.5 text-[11px] font-medium text-[#94A3B8] transition-colors hover:bg-[#F1F5F9] hover:text-[#475569]"
         >
           清空日志
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-[#DCE6F0] bg-[#F8FAFD]">
-        <div className="grid grid-cols-[96px_88px_1.1fr_1.2fr_100px] border-b border-[#DCE6F0] px-4 py-3 text-[12px] font-black tracking-[0.04em] text-[#7B92A8]">
-          <div>时间</div>
-          <div>模块</div>
-          <div>动作</div>
-          <div>参数快照</div>
-          <div>结果</div>
-        </div>
+      {/* Table header */}
+      <div className="grid grid-cols-[96px_72px_1fr_1.2fr_120px] border-b border-[#F1F5F9] px-5 py-1.5">
+        {["时间", "模块", "动作", "参数快照", "结果"].map((col) => (
+          <div key={col} className="text-[10px] font-semibold uppercase tracking-widest text-[#CBD5E1]">
+            {col}
+          </div>
+        ))}
+      </div>
 
-        <div className="max-h-[172px] overflow-y-auto custom-scrollbar">
-          {logs.length === 0 ? (
-            <div className="px-4 py-6 text-[13px] font-medium text-[#9FB0C0]">暂无日志</div>
-          ) : (
-            logs.map((log, index) => (
-              <div
-                key={log.id}
-                className={`grid grid-cols-[96px_88px_1.1fr_1.2fr_100px] px-4 py-3 text-[13px] text-[#31485E] ${
-                  index < logs.length - 1 ? "border-b border-[#E7EEF7]" : ""
-                }`}
-              >
-                <div className="font-mono text-[#6A7F96]">{log.time}</div>
-                <div className="font-bold">{log.module}</div>
-                <div className="font-semibold">{log.actionName}</div>
-                <div className="truncate text-[#6A7F96]" title={log.paramsSnapshot}>
-                  {log.paramsSnapshot}
-                </div>
-                <div className="font-bold text-[#2F67D8]">{log.result}</div>
+      {/* Log rows */}
+      <div className="max-h-[130px] overflow-y-auto custom-scrollbar">
+        {logs.length === 0 ? (
+          <div className="px-5 py-4 text-[12px] italic text-[#CBD5E1]">暂无日志</div>
+        ) : (
+          logs.map((log, index) => (
+            <div
+              key={log.id}
+              className={`grid grid-cols-[96px_72px_1fr_1.2fr_120px] items-center px-5 py-2 transition-colors hover:bg-[#FAFCFF] ${
+                index < logs.length - 1 ? "border-b border-[#F8FAFC]" : ""
+              }`}
+            >
+              <div className="font-mono text-[11px] text-[#94A3B8]">{log.time}</div>
+              <div className="text-[12px] font-semibold text-[#475569]">{log.module}</div>
+              <div className="text-[12px] text-[#475569]">{log.actionName}</div>
+              <div className="truncate text-[12px] text-[#94A3B8]" title={log.paramsSnapshot}>
+                {log.paramsSnapshot}
               </div>
-            ))
-          )}
-        </div>
+              <div className="text-[12px] font-semibold text-[#2F7BFF]">{log.result}</div>
+            </div>
+          ))
+        )}
       </div>
     </section>
   );

@@ -14,7 +14,7 @@ export default function HardwareTestPage() {
         tone: hardwareTest.anyRunning ? "active" : "idle",
       }}
     >
-      <div className="flex-1 flex flex-col h-full">
+      <div className="flex-1 flex flex-col h-full min-h-0">
         <HardwareTestContent
           activeTab={hardwareTest.activeTab}
           editingFieldKey={hardwareTest.editingFieldKey}

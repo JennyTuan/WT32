@@ -19,7 +19,7 @@
       "name": "Tablet Frame View",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "cwd": "C:/CT-Prototype-backup/CT-Prototype/ui-review",
+      "cwd": "ui-review",
       "port": 5175
     },
     {
