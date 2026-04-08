@@ -18,6 +18,10 @@ export type HardwareTestRow = {
 };
 
 export type HardwareTestLog = {
-  message: string;
-  tone: "active" | "normal" | "muted";
+  time: string;
+  module: string;
+  action: string;
+  params: string;
+  result: string;
+  resultTone: "success" | "warning" | "error" | "info";
 };

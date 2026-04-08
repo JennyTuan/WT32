@@ -1,9 +1,15 @@
 import type { HardwareTestRow, HardwareTestTab } from "../types";
 
-const toneStyles = {
-  muted: "text-[#B0C4DE]",
-  primary: "text-[#4D94FF]",
-  secondary: "text-[#2F54EB]",
+const paramToneStyles = {
+  muted: "text-[#94A3B8]",
+  primary: "text-[#2F7BFF]",
+  secondary: "text-[#6366F1]",
+} as const;
+
+const paramBorderStyles = {
+  muted: "border-[#CBD5E1]",
+  primary: "border-[#93C5FD]",
+  secondary: "border-[#A5B4FC]",
 } as const;
 
 type HardwareTestContentProps = {
@@ -20,72 +26,91 @@ export function HardwareTestContent({
   onTabChange,
 }: HardwareTestContentProps) {
   return (
-    <section className="flex-1 bg-white border border-[#B0C4DE] rounded-md shadow-sm p-5 flex flex-col relative overflow-hidden h-full">
-      <div className="flex mb-4">
-        <div className="flex items-center bg-[#F8FBFF] p-1 rounded-lg border border-[#C9D8EA] shadow-sm">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => onTabChange(tab)}
-              className={`w-[108px] h-[36px] text-[13px] font-bold rounded-md transition-all duration-200 ${activeTab === tab ? "bg-[#EAF3FF] text-[#2F7BFF] border border-[#C9DEFF]" : "text-[#3B82F6] hover:bg-white"} ${tab !== tabs[tabs.length - 1] ? "mr-1" : ""}`}
+    <div className="flex-1 min-h-0 bg-white border border-[#E2E8F0] rounded-xl shadow-sm flex flex-col overflow-hidden">
+      {/* Tab bar */}
+      <div className="flex items-center gap-0 px-4 pt-3 pb-0 border-b border-[#EEF2F9]">
+        {tabs.map((tab) => (
+          <button
+            key={tab}
+            onClick={() => onTabChange(tab)}
+            className={`px-5 py-2 text-[13px] font-semibold rounded-t-md transition-all relative -mb-px ${
+              activeTab === tab
+                ? "text-[#2F7BFF] border border-b-white border-[#E2E8F0] bg-white z-10"
+                : "text-[#94A3B8] hover:text-[#64748B] border border-transparent"
+            }`}
+          >
+            {tab}
+            {activeTab === tab && (
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#2F7BFF] rounded-t-full" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Table header */}
+      <div className="grid grid-cols-[2fr_2fr_1fr] px-5 py-2 bg-[#F8FAFC] border-b border-[#EEF2F9]">
+        <div className="text-[11px] font-semibold text-[#94A3B8] tracking-widest uppercase">测试项目</div>
+        <div className="text-[11px] font-semibold text-[#94A3B8] tracking-widest uppercase text-center">参数调节</div>
+        <div className="text-[11px] font-semibold text-[#94A3B8] tracking-widest uppercase text-right">操作</div>
+      </div>
+
+      {/* Rows */}
+      <div className="flex-1 overflow-y-auto">
+        {rows.map((row, index) => {
+          const isLast = index === rows.length - 1;
+          const isPrimary = row.actionLabel === "开始";
+
+          return (
+            <div
+              key={`${row.name}-${index}`}
+              className={`grid grid-cols-[2fr_2fr_1fr] items-center px-5 py-3 hover:bg-[#FAFCFF] transition-colors ${!isLast ? "border-b border-[#F1F5F9]" : ""}`}
             >
-              {tab}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex-1 flex flex-col bg-white border border-[#B0C4DE] rounded-2xl overflow-hidden shadow-sm">
-        <div className="h-[48px] bg-[#F8FAFC] border-b border-[#EEF2F9] flex items-center px-6 text-[13px] font-black text-[#90A4AE] tracking-wider">
-          <div className="w-1/3 text-left">测试项目</div>
-          <div className="w-1/3 text-center">参数调节</div>
-          <div className="w-1/3 text-right pr-10">操作控制</div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          {rows.map((row, index) => {
-            const bordered = index < rows.length - 1;
-            const primaryAction = row.actionLabel === "开始";
-
-            return (
-              <div
-                key={`${row.name}-${index}`}
-                className={`flex items-center px-6 py-4 hover:bg-[#FAFCFF] transition-all ${bordered ? "border-b border-[#EEF2F9]" : ""}`}
-              >
-                <div className="w-1/3">
-                  <div className="text-[15px] font-black text-[#263238] leading-6">{row.name}</div>
-                  {row.code && <div className="text-[12px] font-bold text-[#90A4AE] mt-0.5">{row.code}</div>}
-                </div>
-
-                <div className="w-1/3 flex justify-center items-center gap-6">
-                  {row.params?.length ? (
-                    row.params.map((param) => (
-                      <div key={param.label} className="flex items-center gap-3">
-                        <span className={`text-[12px] font-bold ${toneStyles[param.tone ?? "muted"]}`}>{param.label}</span>
-                        <div
-                          className={`${param.widthClass ?? "w-16"} h-9 bg-[#F8FAFC] border border-[#B0C4DE] rounded-lg flex items-center justify-center font-bold text-[14px] shadow-inner ${toneStyles[param.tone ?? "primary"]}`}
-                        >
-                          {param.value}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="italic text-[#B0C4DE] font-bold text-[13px]">无需参数</div>
-                  )}
-                </div>
-
-                <div className="w-1/3 flex justify-end pr-6">
-                  <button
-                    className={`px-8 h-9 font-black rounded-full transition-all active:scale-95 text-[13px] ${primaryAction ? "bg-[#4D94FF] text-white hover:bg-[#3B82F6] active:bg-[#2563EB] shadow-md" : "bg-white border border-[#B0C4DE] text-[#546E7A] hover:bg-gray-50 shadow-sm"}`}
-                  >
-                    {row.actionLabel}
-                  </button>
-                </div>
+              {/* Name */}
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] font-semibold text-[#1E293B]">{row.name}</span>
+                {row.code && (
+                  <span className="text-[10px] font-medium text-[#94A3B8] bg-[#F1F5F9] px-1.5 py-0.5 rounded">
+                    {row.code}
+                  </span>
+                )}
               </div>
-            );
-          })}
-        </div>
+
+              {/* Params */}
+              <div className="flex justify-center items-center gap-4">
+                {row.params?.length ? (
+                  row.params.map((param) => (
+                    <div key={param.label} className="flex items-center gap-2">
+                      <span className={`text-[11px] font-medium ${paramToneStyles[param.tone ?? "muted"]}`}>
+                        {param.label}
+                      </span>
+                      <div
+                        className={`${param.widthClass ?? "w-14"} h-7 bg-white border rounded-md flex items-center justify-center text-[13px] font-semibold ${paramToneStyles[param.tone ?? "primary"]} ${paramBorderStyles[param.tone ?? "muted"]}`}
+                      >
+                        {param.value}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <span className="text-[12px] text-[#CBD5E1] italic">无需参数</span>
+                )}
+              </div>
+
+              {/* Action */}
+              <div className="flex justify-end">
+                <button
+                  className={`h-7 px-5 text-[12px] font-semibold rounded-full transition-all active:scale-95 ${
+                    isPrimary
+                      ? "bg-[#2F7BFF] text-white hover:bg-[#1D6AF5] shadow-sm shadow-blue-200"
+                      : "bg-white border border-[#CBD5E1] text-[#475569] hover:bg-[#F8FAFC]"
+                  }`}
+                >
+                  {row.actionLabel}
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
-    </section>
+    </div>
   );
 }

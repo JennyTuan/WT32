@@ -8,7 +8,7 @@ export default function HardwareTestPage() {
 
   return (
     <ServiceModeShell currentRoute="/service/hardware-test">
-      <div className="flex-1 flex flex-col h-full">
+      <div className="flex-1 flex flex-col h-full gap-3 min-h-0">
         <HardwareTestContent
           activeTab={hardwareTest.activeTab}
           onTabChange={hardwareTest.setActiveTab}

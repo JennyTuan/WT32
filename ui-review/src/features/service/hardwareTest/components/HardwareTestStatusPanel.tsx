@@ -5,38 +5,55 @@ type HardwareTestStatusPanelProps = {
   onClearLogs: () => void;
 };
 
-const toneClassMap = {
-  active: "text-[#52C41A]",
-  normal: "text-white opacity-80",
-  muted: "text-white opacity-40",
+const resultToneStyles = {
+  success: "text-[#16A34A]",
+  warning: "text-[#D97706]",
+  error: "text-[#DC2626]",
+  info: "text-[#2F7BFF]",
 } as const;
 
-export function HardwareTestStatusPanel({
-  logs,
-  onClearLogs,
-}: HardwareTestStatusPanelProps) {
+export function HardwareTestStatusPanel({ logs, onClearLogs }: HardwareTestStatusPanelProps) {
   return (
-    <div className="mt-4 flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+    <div className="shrink-0 bg-white border border-[#E2E8F0] rounded-xl shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-2.5 border-b border-[#EEF2F9] bg-[#F8FAFC]">
         <div className="flex items-center gap-2">
-          <span className="text-[13px] font-black text-[#90A4AE]">运行状态</span>
-          <div className="w-2 h-2 rounded-full bg-[#52C41A] shadow-[0_0_8px_rgba(82,196,26,0.5)]" />
+          <span className="text-[12px] font-semibold text-[#475569]">操作日志</span>
+          <span className="text-[11px] text-[#94A3B8]">最近 {logs.length} 条记录，当前无动作运行</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] ml-1" />
         </div>
         <button
           onClick={onClearLogs}
-          className="bg-transparent border-0 p-0 m-0 shadow-none appearance-none text-[12px] font-black text-[#90A4AE] hover:text-[#546E7A] transition-colors"
+          className="text-[11px] font-medium text-[#94A3B8] hover:text-[#475569] transition-colors px-2 py-0.5 rounded hover:bg-[#F1F5F9]"
         >
-          清除日志
+          清空日志
         </button>
       </div>
 
-      <div className="h-[100px] bg-black rounded-xl p-4 font-mono text-[13px] border-l-4 border-[#2F54EB] overflow-y-auto custom-scrollbar shadow-inner">
+      {/* Table header */}
+      <div className="grid grid-cols-[100px_80px_120px_1fr_1fr] px-5 py-1.5 border-b border-[#F1F5F9]">
+        {["时间", "模块", "动作", "参数快照", "结果"].map((col) => (
+          <div key={col} className="text-[10px] font-semibold text-[#CBD5E1] tracking-widest uppercase">
+            {col}
+          </div>
+        ))}
+      </div>
+
+      {/* Log rows */}
+      <div className="max-h-[120px] overflow-y-auto">
         {logs.length === 0 ? (
-          <div className="text-white opacity-40 leading-relaxed">暂无日志</div>
+          <div className="px-5 py-3 text-[12px] text-[#CBD5E1] italic">暂无日志</div>
         ) : (
-          logs.map((log) => (
-            <div key={log.message} className={`${toneClassMap[log.tone]} leading-relaxed`}>
-              {log.message}
+          logs.map((log, i) => (
+            <div
+              key={i}
+              className={`grid grid-cols-[100px_80px_120px_1fr_1fr] items-center px-5 py-2 ${i < logs.length - 1 ? "border-b border-[#F8FAFC]" : ""} hover:bg-[#FAFCFF] transition-colors`}
+            >
+              <div className="text-[11px] font-mono text-[#94A3B8]">{log.time}</div>
+              <div className="text-[12px] font-medium text-[#475569]">{log.module}</div>
+              <div className="text-[12px] text-[#475569]">{log.action}</div>
+              <div className="text-[12px] text-[#94A3B8]">{log.params}</div>
+              <div className={`text-[12px] font-medium ${resultToneStyles[log.resultTone]}`}>{log.result}</div>
             </div>
           ))
         )}
