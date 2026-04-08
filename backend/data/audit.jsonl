@@ -1,0 +1,3 @@
+{"timestamp": "2026-04-08T14:53:22.283947", "action": "RESERVE", "partition": "RawData", "file_ids": ["sf-001", "sf-002", "sf-003", "sf-004", "sf-005", "sf-006", "sf-007", "sf-008", "sf-009", "sf-010"], "result": "success"}
+{"timestamp": "2026-04-08T16:00:13.175185", "action": "RESERVE", "partition": "RawData", "file_ids": ["sf-001"], "result": "success"}
+{"timestamp": "2026-04-08T16:12:27.685985", "action": "RELEASE", "partition": "RawData", "file_ids": ["sf-002"], "blocked": [], "result": "success"}

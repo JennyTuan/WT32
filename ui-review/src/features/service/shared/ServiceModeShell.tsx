@@ -270,7 +270,7 @@ export default function ServiceModeShell({
           </div>
         </aside>
 
-        <div className="flex-1 min-w-0 relative">{children}</div>
+        <div className="relative flex min-h-0 flex-1 min-w-0 flex-col">{children}</div>
       </main>
 
       <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center px-8 shrink-0">

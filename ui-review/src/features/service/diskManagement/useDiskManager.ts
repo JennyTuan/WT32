@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
   DiskActionResponse,
@@ -52,7 +52,13 @@ const createEmptySelection = (): Record<DiskPartitionId, Set<string>> => ({
   Phantom: new Set(),
 });
 
-const getBlockedReason = (file: ScanFile, action: "release" | "purge") => {
+const getBlockedReason = (file: ScanFile, action: "reserve" | "release" | "purge") => {
+  if (action === "reserve" && file.status === "RESERVED") {
+    return "文件已保留";
+  }
+  if (action === "release" && file.status !== "RESERVED") {
+    return "文件当前未保留";
+  }
   if (file.active_recon_jobs > 0) {
     return `存在 ${file.active_recon_jobs} 个重建任务`;
   }
@@ -159,6 +165,18 @@ export function useDiskManager() {
       const blocked = files.find((file) => getBlockedReason(file, "release"));
       return blocked
         ? { ok: false, reason: getBlockedReason(blocked, "release") ?? "当前无法释放" }
+        : { ok: true };
+    },
+    [getSelectedScanFiles],
+  );
+
+  const canReserve = useCallback(
+    (partitionId: DiskPartitionId) => {
+      const files = getSelectedScanFiles(partitionId);
+      if (files.length === 0) return { ok: false, reason: "未选择文件" };
+      const blocked = files.find((file) => getBlockedReason(file, "reserve"));
+      return blocked
+        ? { ok: false, reason: getBlockedReason(blocked, "reserve") ?? "当前无法保留" }
         : { ok: true };
     },
     [getSelectedScanFiles],
@@ -278,6 +296,7 @@ export function useDiskManager() {
   return {
     busyPartition,
     canPurge,
+    canReserve,
     canRelease,
     clearSelection,
     config,
