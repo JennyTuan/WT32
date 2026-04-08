@@ -25,7 +25,9 @@
       "Bash(curl -s http://localhost:5175)",
       "Bash(taskkill //PID 5952 //F)",
       "Bash(taskkill //F //PID 24792)",
-      "Bash(taskkill //F //PID 13748)"
+      "Bash(taskkill //F //PID 13748)",
+      "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")",
+      "Bash(node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

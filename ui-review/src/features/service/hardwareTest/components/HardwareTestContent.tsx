@@ -132,10 +132,10 @@ export function HardwareTestContent({
                   </button>
                 </div>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
-    </section>
+    </div>
   );
 }
