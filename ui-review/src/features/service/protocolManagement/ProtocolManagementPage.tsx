@@ -543,7 +543,7 @@ export default function ProtocolManagementPage() {
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5 custom-scrollbar">
 
         {/* ── Tab + Toolbar ─────────────────────────────────── */}
-        <div className="rounded-xl border border-[#DDEAF8] bg-white shadow-sm overflow-hidden">
+        <div className="overflow-hidden rounded-xl border border-[#DDEAF8] bg-white shadow-sm">
           {/* Tabs */}
           <div className="flex border-b border-[#EEF2F9]">
             {([["custom", "自设协议", customCount], ["factory", "出厂协议", factoryCount]] as const).map(([key, label, count]) => (
@@ -566,7 +566,7 @@ export default function ProtocolManagementPage() {
           </div>
 
           {/* Toolbar */}
-          <div className="flex items-center gap-2.5 px-4 py-3">
+          <div className="flex items-center gap-2.5 border-b border-[#EEF2F9] px-4 py-3">
             <div className="relative flex-1 max-w-[280px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B0BEC5]" size={14} />
               <input
@@ -593,7 +593,6 @@ export default function ProtocolManagementPage() {
               )}
             </div>
           </div>
-        </div>
 
         {/* ── Toast ─────────────────────────────────────────── */}
         {toast && (
@@ -608,7 +607,7 @@ export default function ProtocolManagementPage() {
         )}
 
         {/* ── Table ─────────────────────────────────────────── */}
-        <div className="rounded-xl border border-[#DDEAF8] bg-white shadow-sm overflow-hidden">
+        <div className="border-b border-[#EEF2F9]">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-14 gap-3 text-[#B0BEC5]">
               <RefreshCcw size={22} className="animate-spin" />
@@ -758,7 +757,7 @@ export default function ProtocolManagementPage() {
 
         {/* ── Pagination ────────────────────────────────────── */}
         {!loading && !error && filtered.length > 0 && (
-          <div className="flex items-center justify-between rounded-xl border border-[#DDEAF8] bg-white px-4 py-2.5 shadow-sm">
+          <div className="flex items-center justify-between px-4 py-2.5">
             <div className="flex items-center gap-2 text-[12px] text-[#78909C]">
               每页
               <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
@@ -801,6 +800,7 @@ export default function ProtocolManagementPage() {
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* ── Overlays ──────────────────────────────────────────── */}
