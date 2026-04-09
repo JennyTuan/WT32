@@ -59,11 +59,6 @@ export default function CornerPreview({ config }: CornerPreviewProps) {
                 </div>
             </div>
 
-            {/* Bottom Status Bar Simulation */}
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-white/5 backdrop-blur-xl rounded-full border border-white/10 text-white/30 text-[9px] font-black uppercase tracking-[0.2em] pointer-events-none flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-[#00FF33] animate-pulse"></div>
-                LIVE OVERLAY PREVIEW
-            </div>
         </div>
     );
 }
