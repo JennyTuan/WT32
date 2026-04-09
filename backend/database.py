@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import json
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -688,8 +689,8 @@ def _migrate_protocol_columns() -> None:
 def init_db() -> None:
     from . import models
 
-    _migrate_protocol_columns()
     Base.metadata.create_all(bind=engine)
+    _migrate_protocol_columns()
 
     db = SessionLocal()
     try:
@@ -767,6 +768,33 @@ def init_db() -> None:
                         increment=recon_seed["increment"],
                     )
                 )
+
+        # Seed default corner config
+        default_corners = {
+            "corners": {
+                "topLeft": [
+                    {"key": "patient_name", "label": "姓名", "visible": True},
+                    {"key": "patient_id", "label": "ID", "visible": True}
+                ],
+                "topRight": [
+                    {"key": "scan_time", "label": "时间", "visible": True},
+                    {"key": "protocol_name", "label": "协议", "visible": True}
+                ],
+                "bottomLeft": [
+                    {"key": "kv", "label": "kV", "visible": True},
+                    {"key": "ma", "label": "mA", "visible": True}
+                ],
+                "bottomRight": [
+                    {"key": "series_number", "label": "序列号", "visible": True},
+                    {"key": "image_number", "label": "图像号", "visible": True}
+                ]
+            }
+        }
+        db.add(models.CornerConfig(
+            template_name="Default",
+            is_active=True,
+            config_json=json.dumps(default_corners)
+        ))
 
         db.commit()
         print(f"Seeded protocols: {len(PROTOCOL_SEEDS)}")

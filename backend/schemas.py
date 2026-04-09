@@ -685,4 +685,21 @@ class ScanSessionSummary(ORMModel):
     scan_mode: Literal["plain", "contrast", "4d"]
     created_at: datetime
     started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+
+class CornerConfigBase(BaseModel):
+    template_name: str
+    is_active: bool = False
+    config_json: str  # JSON string
+
+class CornerConfigCreate(CornerConfigBase):
+    pass
+
+class CornerConfigUpdate(BaseModel):
+    template_name: Optional[str] = None
+    is_active: Optional[bool] = None
+    config_json: Optional[str] = None
+
+class CornerConfig(CornerConfigBase, ORMModel):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None

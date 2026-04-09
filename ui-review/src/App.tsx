@@ -28,6 +28,7 @@ import PerformanceEvaluationScreen from "./screens/PerformanceEvaluationScreen";
 import ServicePlaceholderScreen from "./screens/ServicePlaceholderScreen";
 import QAReportPage from "./features/service/qaReport/QAReportPage";
 import ProtocolManagementScreen from "./screens/ProtocolManagementScreen";
+import CornerInfoPage from "./features/service/cornerInfo/CornerInfoPage";
 
 const HomeRoute = HomeScreen ?? (() => <Navigate to="/patients" replace />);
 const TABLET_WIDTH = 1024;
@@ -124,7 +125,7 @@ export default function App() {
               <Route path="/service/disk" element={<DiskManagementScreen />} />
               <Route path="/service/performance" element={<PerformanceEvaluationScreen />} />
               <Route path="/service/settings/protocol-management" element={<ProtocolManagementScreen />} />
-              <Route path="/service/settings/corner-info" element={<ServicePlaceholderScreen currentRoute="/service/settings/corner-info" title="四角信息" description="用于配置界面四角显示信息、状态字段和显示规则。" />} />
+              <Route path="/service/settings/corner-info" element={<CornerInfoPage />} />
               <Route path="/service/settings/dicom" element={<ServicePlaceholderScreen currentRoute="/service/settings/dicom" title="DICOM" description="用于配置 DICOM 节点、传输、发送接收策略和连接参数。" />} />
               <Route path="/service/settings/user-management" element={<ServicePlaceholderScreen currentRoute="/service/settings/user-management" title="用户管理" description="用于维护用户、角色、权限和登录访问控制。" />} />
               <Route path="/service/settings/system-settings" element={<ServicePlaceholderScreen currentRoute="/service/settings/system-settings" title="系统设置" description="用于设置系统级参数、时间网络、设备偏好和基础配置。" />} />

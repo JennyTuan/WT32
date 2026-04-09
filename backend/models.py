@@ -452,3 +452,14 @@ class ScanSessionBreathingTrainingParam(Base):
     tolerance_range = Column(Float, nullable=False)
 
     fourd_config = relationship("ScanSessionFourDConfig", back_populates="breathing_training_param")
+
+
+class CornerConfig(Base):
+    __tablename__ = "corner_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_name = Column(String(100), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=False)
+    config_json = Column(Text, nullable=False)  # Stores the JSON representation of the configuration
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
