@@ -9,20 +9,19 @@
 这是一款 **CT 扫描仪控制与管理系统**原型，模拟真实 CT 机的操作界面，涵盖：
 
 - 患者管理（登记、查询）
-- 扫描协议管理（100+ 预置协议，支持头部/颈部/胸部/脊柱/腹部等）
+- 扫描协议管理（54+ 预置协议，支持头部/颈部/胸部/脊柱/腹部等）
 - 完整扫描工作流（定位像 → 螺旋扫描 → 图像重建）
-- 4D 呼吸门控扫描
+- 4D 呼吸门控扫描、增强扫描
 - DICOM 图像查看
-- 设备服务功能（球管预热、空气校准、日检）
+- 设备服务功能（球管预热、空气校准、日检等）
 
-**目标用户**：产品经理主导，用于 UI/UX 设计验证，非临床使用。
+**目标用户**：产品经理主导，用于研发和内部需求快速验证，非临床使用。
 
 ---
 
 ## 技术栈
 
 | 层级 | 技术 |
-|------|------|
 | 后端框架 | FastAPI 0.115.12 |
 | 后端服务器 | Uvicorn 0.34.0 |
 | 数据库 | SQLite + SQLAlchemy 2.0.39 |
@@ -83,32 +82,38 @@ CT-Prototype/
 ## 本地开发启动
 
 ### 前置要求
+
 - Python 3.13+
 - Node.js 18+
 - 已安装 uvicorn（`pip install -r backend/requirements.txt`）
 
 ### 启动后端
+
 ```bash
 cd C:\CT-Prototype-backup\CT-Prototype
 uvicorn backend.main:app --reload --port 8000
 ```
 
 ### 启动前端
+
 ```bash
 cd C:\CT-Prototype-backup\CT-Prototype\ui-review
 npm run dev
 ```
 
 ### 访问地址
+
 | 服务 | 地址 |
 |------|------|
-| 前端页面 | http://localhost:5175 |
-| 后端 API | http://localhost:8000 |
-| API 文档（自动生成） | http://localhost:8000/docs |
+| 前端页面 | <http://localhost:5175> |
+| 后端 API | <http://localhost:8000> |
+| API 文档（自动生成） | <http://localhost:8000/docs> |
 
 ### ⚠️ 已知问题：CORS 配置与实际端口不匹配
+
 `backend/main.py` 中 CORS 白名单为 `localhost:3000` 和 `localhost:5173`，
 但前端实际运行在 **5175**。如遇跨域报错，需将 `5175` 加入 `main.py` 的 `allow_origins`：
+
 ```python
 allow_origins=[
     "http://localhost:3000",
@@ -123,6 +128,7 @@ allow_origins=[
 ## 数据库结构
 
 ### 核心表关系
+
 ```
 protocols
   └── series (一对多)
@@ -140,24 +146,29 @@ patients (独立表，与协议无外键关联)
 ### 主要字段说明
 
 **patients**
+
 - `name`, `patient_id`, `gender`, `birth_date`, `height`, `weight`
 
 **protocols**
+
 - `name`, `body_part`（HEAD/NECK/CHEST/SPINE/ABDOMEN/PELVIS/EXTREMITY）
 - `age_group`（adult/child/infant）
 - `scan_mode`（plain/contrast/4d）
 - `position`（head_first/feet_first）
 
 **series**
+
 - `series_type`（topogram/helical/axial/4d）
 - `series_order`（序列顺序，唯一约束）
 
 **helical_params**（螺旋扫描核心参数）
+
 - `kv`（管电压），`auto_ma`（自动毫安），`min_ma`/`max_ma`
 - `pitch`（螺距），`rotation_time`（旋转时间）
 - `scan_length`，`fov`，`slice_thickness`
 
 **recon_series**（图像重建）
+
 - `kernel`（算法：Brain2/Lung2/Bone2/S2/S3）
 - `matrix`，`window_level`，`window_width`
 - `slice_thickness`，`slice_interval`
@@ -206,6 +217,7 @@ WS  /ws/scan-control
 ```
 
 **WebSocket 事件类型：**
+
 - `SCAN_STATUS` — 扫描机状态（Idle/Running/Paused/Stopped）
 - `INJECTOR_STATUS` — 高压注射器进度
 - `BREATHING_WAVE` — 呼吸波形振幅
@@ -253,6 +265,7 @@ WS  /ws/scan-control
 ## 典型操作流程
 
 ### 普通扫描流程
+
 ```
 患者列表 → 选择患者
 → 协议选择（/protocol-select）
@@ -267,6 +280,7 @@ WS  /ws/scan-control
 ```
 
 ### 4D 呼吸门控流程
+
 ```
 选择 4D 协议
 → 呼吸准备（/4d-breathing-prep）
