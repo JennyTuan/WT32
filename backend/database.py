@@ -625,9 +625,32 @@ def get_db():
 
 
 
+def _migrate_protocol_columns() -> None:
+    """Add new Protocol columns to existing SQLite database (idempotent)."""
+    from sqlalchemy import text
+
+    migrations = [
+        "ALTER TABLE protocols ADD COLUMN is_factory BOOLEAN NOT NULL DEFAULT 0",
+        "ALTER TABLE protocols ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT 1",
+        "ALTER TABLE protocols ADD COLUMN updated_at DATETIME",
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                # Column already exists – safe to ignore
+                pass
+        # Mark all existing (seeded) protocols as factory if not already set
+        conn.execute(text("UPDATE protocols SET is_factory = 1 WHERE is_factory = 0"))
+        conn.commit()
+
+
 def init_db() -> None:
     from . import models
 
+    _migrate_protocol_columns()
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
@@ -657,6 +680,8 @@ def init_db() -> None:
                 table_direction=protocol_seed["table_direction"],
                 scan_mode=protocol_seed["scan_mode"],
                 description=protocol_seed["description"],
+                is_factory=True,
+                is_enabled=True,
             )
             db.add(protocol)
             db.flush()

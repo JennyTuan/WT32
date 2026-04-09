@@ -77,7 +77,8 @@ class ProtocolBase(BaseModel):
 
 
 class ProtocolCreate(ProtocolBase):
-    pass
+    is_factory: bool = False
+    is_enabled: bool = True
 
 
 class ProtocolUpdate(BaseModel):
@@ -89,6 +90,7 @@ class ProtocolUpdate(BaseModel):
     table_direction: Optional[Literal["in", "out"]] = None
     scan_mode: Optional[Literal["plain", "contrast", "4d"]] = None
     description: Optional[str] = None
+    is_enabled: Optional[bool] = None
 
 
 class SeriesBase(BaseModel):
@@ -320,14 +322,20 @@ class SeriesDetail(Series, ORMModel):
 
 class ProtocolDetail(ProtocolBase, ORMModel):
     id: int
+    is_factory: bool = False
+    is_enabled: bool = True
     created_at: datetime
+    updated_at: Optional[datetime] = None
     contrast_config: Optional[ContrastConfig] = None
     series: List[SeriesDetail] = Field(default_factory=list)
 
 
 class ProtocolSummary(ProtocolBase, ORMModel):
     id: int
+    is_factory: bool = False
+    is_enabled: bool = True
     created_at: datetime
+    updated_at: Optional[datetime] = None
     series_count: int = 0
     supported_modes: List[str] = Field(default_factory=list)
 

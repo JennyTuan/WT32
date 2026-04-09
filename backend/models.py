@@ -33,7 +33,10 @@ class Protocol(Base):
     table_direction = Column(String(10), nullable=False)
     scan_mode = Column(String(20), nullable=False, index=True)
     description = Column(Text, nullable=True)
+    is_factory = Column(Boolean, nullable=False, default=False)
+    is_enabled = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
 
     contrast_config = relationship(
         "ContrastConfig",

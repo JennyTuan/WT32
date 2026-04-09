@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy.exc import IntegrityError
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
@@ -106,7 +108,10 @@ def _build_protocol_summary(protocol: models.Protocol) -> schemas.ProtocolSummar
             "table_direction": protocol.table_direction,
             "scan_mode": protocol.scan_mode,
             "description": protocol.description,
+            "is_factory": protocol.is_factory,
+            "is_enabled": protocol.is_enabled,
             "created_at": protocol.created_at,
+            "updated_at": protocol.updated_at,
             "series_count": len(protocol.series),
             "supported_modes": supported_modes,
         }
@@ -301,8 +306,23 @@ def create_protocol(payload: schemas.ProtocolCreate, db: Session = Depends(get_d
 @router.put("/{protocol_id}", response_model=schemas.ProtocolDetail)
 def update_protocol(protocol_id: int, payload: schemas.ProtocolUpdate, db: Session = Depends(get_db)):
     protocol = _get_protocol_or_404(protocol_id, db)
+    if protocol.is_factory:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Factory protocols cannot be modified")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(protocol, field, value)
+    protocol.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(protocol)
+    return _get_protocol_or_404(protocol.id, db)
+
+
+@router.patch("/{protocol_id}/toggle-enabled", response_model=schemas.ProtocolDetail)
+def toggle_protocol_enabled(protocol_id: int, db: Session = Depends(get_db)):
+    protocol = _get_protocol_or_404(protocol_id, db)
+    if protocol.is_factory:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Factory protocols cannot be modified")
+    protocol.is_enabled = not protocol.is_enabled
+    protocol.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(protocol)
     return _get_protocol_or_404(protocol.id, db)
@@ -311,5 +331,7 @@ def update_protocol(protocol_id: int, payload: schemas.ProtocolUpdate, db: Sessi
 @router.delete("/{protocol_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_protocol(protocol_id: int, db: Session = Depends(get_db)):
     protocol = _get_protocol_or_404(protocol_id, db)
+    if protocol.is_factory:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Factory protocols cannot be deleted")
     db.delete(protocol)
     db.commit()

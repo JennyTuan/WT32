@@ -27,6 +27,7 @@ import DiskManagementScreen from "./screens/DiskManagementScreen";
 import PerformanceEvaluationScreen from "./screens/PerformanceEvaluationScreen";
 import ServicePlaceholderScreen from "./screens/ServicePlaceholderScreen";
 import QAReportPage from "./features/service/qaReport/QAReportPage";
+import ProtocolManagementScreen from "./screens/ProtocolManagementScreen";
 
 const HomeRoute = HomeScreen ?? (() => <Navigate to="/patients" replace />);
 const TABLET_WIDTH = 1024;
@@ -122,7 +123,7 @@ export default function App() {
               <Route path="/service/battery" element={<BatteryManagementScreen />} />
               <Route path="/service/disk" element={<DiskManagementScreen />} />
               <Route path="/service/performance" element={<PerformanceEvaluationScreen />} />
-              <Route path="/service/settings/protocol-management" element={<ServicePlaceholderScreen currentRoute="/service/settings/protocol-management" title="协议管理" description="用于维护协议模板、分组和协议参数的管理入口。" />} />
+              <Route path="/service/settings/protocol-management" element={<ProtocolManagementScreen />} />
               <Route path="/service/settings/corner-info" element={<ServicePlaceholderScreen currentRoute="/service/settings/corner-info" title="四角信息" description="用于配置界面四角显示信息、状态字段和显示规则。" />} />
               <Route path="/service/settings/dicom" element={<ServicePlaceholderScreen currentRoute="/service/settings/dicom" title="DICOM" description="用于配置 DICOM 节点、传输、发送接收策略和连接参数。" />} />
               <Route path="/service/settings/user-management" element={<ServicePlaceholderScreen currentRoute="/service/settings/user-management" title="用户管理" description="用于维护用户、角色、权限和登录访问控制。" />} />
