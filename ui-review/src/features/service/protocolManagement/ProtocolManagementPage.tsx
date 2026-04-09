@@ -65,19 +65,19 @@ const EMPTY_FORM: ProtocolFormData = {
   patient_position: "HFS", table_direction: "in", scan_mode: "plain", description: "",
 };
 
-const formatDateTime = (iso: string | null | undefined) => {
+const formatDate = (iso: string | null | undefined) => {
   if (!iso) return null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
-  return {
-    date: d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }),
-    time: d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }),
-  };
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 type SortKey = "name" | "id" | "created_at" | "updated_at" | "is_enabled";
 type SortDir = "asc" | "desc";
-type ActiveTab = "custom" | "factory";
+type SourceFilter = "all" | "custom" | "factory";
 type ModalMode = "create" | "edit" | "save-as" | "view";
 type ModalState =
   | { type: "create" }
@@ -109,7 +109,7 @@ function ScanModeBadge({ mode }: { mode: ScanMode }) {
 
 function StatusBadge({ enabled }: { enabled: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${
+    <span className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold ${
       enabled ? "bg-[#E6F4EA] text-[#1B5E20]" : "bg-[#F1F5F9] text-[#78909C]"
     }`}>
       <span className={`inline-block w-1.5 h-1.5 rounded-full ${enabled ? "bg-[#43A047]" : "bg-[#B0BEC5]"}`} />
@@ -403,7 +403,10 @@ export default function ProtocolManagementPage() {
   const [protocols, setProtocols] = useState<ApiProtocolSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("custom");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("custom");
+  const [bodyPartFilter, setBodyPartFilter] = useState("all");
+  const [ageGroupFilter, setAgeGroupFilter] = useState<AgeGroup | "all">("all");
+  const [scanModeFilter, setScanModeFilter] = useState<ScanMode | "all">("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -442,10 +445,15 @@ export default function ProtocolManagementPage() {
   };
 
   const filtered = useMemo(() => {
-    const factory = activeTab === "factory";
     const kw = search.trim().toLowerCase();
     return protocols
-      .filter((p) => p.is_factory === factory)
+      .filter((p) => {
+        if (sourceFilter === "all") return true;
+        return sourceFilter === "factory" ? p.is_factory : !p.is_factory;
+      })
+      .filter((p) => bodyPartFilter === "all" || p.body_part === bodyPartFilter)
+      .filter((p) => ageGroupFilter === "all" || p.age_group === ageGroupFilter)
+      .filter((p) => scanModeFilter === "all" || p.scan_mode === scanModeFilter)
       .filter((p) => !kw || p.name.toLowerCase().includes(kw) || p.body_part.toLowerCase().includes(kw))
       .sort((a, b) => {
         const get = (p: ApiProtocolSummary): string | number => {
@@ -458,7 +466,7 @@ export default function ProtocolManagementPage() {
         const [va, vb] = [get(a), get(b)];
         return (va < vb ? -1 : va > vb ? 1 : 0) * (sortDir === "asc" ? 1 : -1);
       });
-  }, [protocols, activeTab, search, sortKey, sortDir]);
+  }, [protocols, sourceFilter, bodyPartFilter, ageGroupFilter, scanModeFilter, search, sortKey, sortDir]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const curPage = Math.min(page, totalPages);
@@ -466,6 +474,10 @@ export default function ProtocolManagementPage() {
 
   const customCount = protocols.filter((p) => !p.is_factory).length;
   const factoryCount = protocols.filter((p) => p.is_factory).length;
+  const bodyPartOptions = useMemo(
+    () => Array.from(new Set(protocols.map((p) => p.body_part).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [protocols]
+  );
 
   // CRUD
   const createProtocol = async (data: ProtocolFormData) => {
@@ -477,7 +489,7 @@ export default function ProtocolManagementPage() {
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d as { detail?: string }).detail ?? `HTTP ${res.status}`); }
     await fetchProtocols();
     setModal(null);
-    setActiveTab("custom");
+    setSourceFilter("custom");
     showToast("协议创建成功");
   };
 
@@ -544,36 +556,65 @@ export default function ProtocolManagementPage() {
 
         {/* ── Tab + Toolbar ─────────────────────────────────── */}
         <div className="overflow-hidden rounded-xl border border-[#DDEAF8] bg-white shadow-sm">
-          {/* Tabs */}
-          <div className="flex border-b border-[#EEF2F9]">
-            {([["custom", "自设协议", customCount], ["factory", "出厂协议", factoryCount]] as const).map(([key, label, count]) => (
-              <button key={key} type="button"
-                onClick={() => { setActiveTab(key); setPage(1); setSearch(""); }}
-                className={`relative flex-1 flex items-center justify-center gap-2 py-3 text-[13px] font-bold transition-all ${
-                  activeTab === key ? "text-[#1565C0]" : "text-[#78909C] hover:text-[#546E7A] hover:bg-[#F8FBFF]"
-                }`}>
-                {label}
-                <span className={`inline-flex items-center justify-center min-w-[22px] h-5 px-1.5 rounded-full text-[11px] font-black transition-colors ${
-                  activeTab === key ? "bg-[#1E88E5] text-white" : "bg-[#EEF2F9] text-[#78909C]"
-                }`}>
-                  {count}
-                </span>
-                {activeTab === key && (
-                  <span className="absolute inset-x-0 bottom-0 h-[2px] bg-[#1E88E5] rounded-t-full" />
-                )}
-              </button>
-            ))}
-          </div>
+          <div className="flex flex-wrap items-center gap-2.5 border-b border-[#EEF2F9] px-4 py-3">
+            <div className="min-w-[160px]">
+              <select
+                value={sourceFilter}
+                onChange={(e) => { setSourceFilter(e.target.value as SourceFilter); setPage(1); }}
+                className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
+              >
+                <option value="all">全部协议 ({protocols.length})</option>
+                <option value="custom">自设协议 ({customCount})</option>
+                <option value="factory">出厂协议 ({factoryCount})</option>
+              </select>
+            </div>
 
-          {/* Toolbar */}
-          <div className="flex items-center gap-2.5 border-b border-[#EEF2F9] px-4 py-3">
-            <div className="relative flex-1 max-w-[280px]">
+            <div className="min-w-[140px]">
+              <select
+                value={bodyPartFilter}
+                onChange={(e) => { setBodyPartFilter(e.target.value); setPage(1); }}
+                className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
+              >
+                <option value="all">全部部位</option>
+                {bodyPartOptions.map((part) => (
+                  <option key={part} value={part}>{part}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="min-w-[120px]">
+              <select
+                value={ageGroupFilter}
+                onChange={(e) => { setAgeGroupFilter(e.target.value as AgeGroup | "all"); setPage(1); }}
+                className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
+              >
+                <option value="all">全年龄</option>
+                <option value="adult">{AGE_GROUP_LABELS.adult}</option>
+                <option value="child">{AGE_GROUP_LABELS.child}</option>
+                <option value="infant">{AGE_GROUP_LABELS.infant}</option>
+              </select>
+            </div>
+
+            <div className="min-w-[120px]">
+              <select
+                value={scanModeFilter}
+                onChange={(e) => { setScanModeFilter(e.target.value as ScanMode | "all"); setPage(1); }}
+                className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
+              >
+                <option value="all">全部模式</option>
+                <option value="plain">{SCAN_MODE_LABELS.plain}</option>
+                <option value="contrast">{SCAN_MODE_LABELS.contrast}</option>
+                <option value="4d">{SCAN_MODE_LABELS["4d"]}</option>
+              </select>
+            </div>
+
+            <div className="relative min-w-[220px] flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B0BEC5]" size={14} />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                placeholder="搜索协议名称、部位…"
+                placeholder="搜索协议名称、部位"
                 className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-[#F8FBFF] pl-9 pr-3 text-[13px] outline-none transition-all focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15 placeholder:text-[#B0BEC5]"
               />
             </div>
@@ -584,7 +625,7 @@ export default function ProtocolManagementPage() {
                 <RefreshCcw size={14} />
               </button>
 
-              {activeTab === "custom" && (
+              {sourceFilter !== "factory" && (
                 <button type="button" onClick={() => setModal({ type: "create" })}
                   className="flex h-9 items-center gap-1.5 rounded-lg bg-[#1E88E5] px-4 text-[13px] font-bold text-white shadow-sm hover:bg-[#1565C0] transition-all active:scale-95">
                   <Plus size={15} strokeWidth={2.5} />
@@ -594,7 +635,6 @@ export default function ProtocolManagementPage() {
             </div>
           </div>
 
-        {/* ── Toast ─────────────────────────────────────────── */}
         {toast && (
           <div className={`flex items-center gap-2.5 rounded-xl px-4 py-3 text-[13px] font-semibold shadow-sm border transition-all ${
             toast.ok
@@ -628,9 +668,15 @@ export default function ProtocolManagementPage() {
                 {search ? <Search size={18} /> : <Plus size={18} />}
               </div>
               <p className="text-[13px] font-semibold text-[#546E7A]">
-                {search ? `未找到包含"${search}"的协议` : activeTab === "custom" ? "暂无自设协议" : "暂无出厂协议"}
+                {search
+                  ? `未找到包含"${search}"的协议`
+                  : sourceFilter === "custom"
+                    ? "暂无自设协议"
+                    : sourceFilter === "factory"
+                      ? "暂无出厂协议"
+                      : "暂无协议"}
               </p>
-              {!search && activeTab === "custom" && (
+              {!search && sourceFilter !== "factory" && (
                 <button type="button" onClick={() => setModal({ type: "create" })}
                   className="mt-1 h-8 px-4 rounded-lg bg-[#1E88E5] text-[12px] font-bold text-white hover:bg-[#1565C0] transition-colors active:scale-95">
                   + 新建协议
@@ -639,37 +685,36 @@ export default function ProtocolManagementPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full table-fixed min-w-[700px]">
+              <table className="w-full table-fixed min-w-[760px]">
                 <colgroup>
+                  <col style={{ width: "56px" }} />
                   <col style={{ width: "28%" }} />
                   <col style={{ width: "72px" }} />
-                  <col style={{ width: "72px" }} />
-                  <col style={{ width: "116px" }} />
-                  <col style={{ width: "116px" }} />
-                  <col style={{ width: "72px" }} />
+                  <col style={{ width: "112px" }} />
+                  <col style={{ width: "92px" }} />
                   <col />
-                  <col style={{ width: activeTab === "custom" ? "120px" : "140px" }} />
+                  <col style={{ width: sourceFilter === "factory" ? "140px" : "120px" }} />
                 </colgroup>
                 <thead className="border-b border-[#EEF2F9] bg-[#F8FBFF]">
                   <tr>
+                    <th className="px-3 py-3 text-center text-[11px] font-black uppercase tracking-wide text-[#78909C]">序号</th>
                     <Th col="name">协议名称</Th>
-                    <Th col="id">编号</Th>
                     <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wide text-[#78909C]">模式</th>
                     <Th col="created_at">创建时间</Th>
-                    <Th col="updated_at">最后修改</Th>
                     <Th col="is_enabled">状态</Th>
-                    <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wide text-[#78909C]">备注</th>
                     <th className="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wide text-[#78909C]">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F1F5F9]">
-                  {pageRows.map((p) => {
-                    const created = formatDateTime(p.created_at);
-                    const updated = formatDateTime(p.updated_at);
+                  {pageRows.map((p, index) => {
+                    const created = formatDate(p.created_at);
                     return (
                       <tr key={p.id}
                         className={`group transition-colors hover:bg-[#F5F9FF] ${!p.is_enabled ? "opacity-60" : ""}`}>
-                        {/* Name */}
+                        <td className="px-3 py-3.5 text-center text-[12px] font-semibold text-[#90A4AE]">
+                          {(curPage - 1) * pageSize + index + 1}
+                        </td>
+
                         <td className="px-4 py-3.5">
                           <div className="flex flex-col gap-0.5">
                             <span className="text-[13px] font-bold text-[#1A2332] truncate leading-tight" title={p.name}>
@@ -681,48 +726,19 @@ export default function ProtocolManagementPage() {
                           </div>
                         </td>
 
-                        {/* ID */}
-                        <td className="px-4 py-3.5 text-[12px] font-mono text-[#78909C]">
-                          #{String(p.id).padStart(4, "0")}
-                        </td>
-
-                        {/* Mode */}
                         <td className="px-4 py-3.5"><ScanModeBadge mode={p.scan_mode} /></td>
 
-                        {/* Created */}
-                        <td className="px-4 py-3.5">
+                        <td className="px-3 py-3.5 whitespace-nowrap">
                           {created ? (
-                            <div className="flex flex-col gap-0.5">
-                              <span className="text-[12px] text-[#546E7A] font-medium">{created.date}</span>
-                              <span className="text-[11px] text-[#90A4AE]">{created.time}</span>
-                            </div>
+                            <span className="text-[12px] text-[#546E7A] font-medium">{created}</span>
                           ) : <span className="text-[12px] text-[#CFD8DC]">—</span>}
                         </td>
 
-                        {/* Updated */}
-                        <td className="px-4 py-3.5">
-                          {updated ? (
-                            <div className="flex flex-col gap-0.5">
-                              <span className="text-[12px] text-[#546E7A] font-medium">{updated.date}</span>
-                              <span className="text-[11px] text-[#90A4AE]">{updated.time}</span>
-                            </div>
-                          ) : <span className="text-[12px] text-[#CFD8DC]">—</span>}
-                        </td>
+                        <td className="px-3 py-3.5 whitespace-nowrap"><StatusBadge enabled={p.is_enabled} /></td>
 
-                        {/* Status */}
-                        <td className="px-4 py-3.5"><StatusBadge enabled={p.is_enabled} /></td>
-
-                        {/* Notes */}
-                        <td className="px-4 py-3.5">
-                          <span className="block truncate text-[12px] text-[#90A4AE]" title={p.description ?? ""}>
-                            {p.description || "—"}
-                          </span>
-                        </td>
-
-                        {/* Actions */}
                         <td className="px-3 py-3.5">
                           <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            {activeTab === "custom" ? (
+                            {!p.is_factory ? (
                               <>
                                 <IconBtn icon={Pencil} label="编辑" variant="primary"
                                   onClick={() => setModal({ type: "edit", protocol: p })} />
@@ -754,8 +770,6 @@ export default function ProtocolManagementPage() {
             </div>
           )}
         </div>
-
-        {/* ── Pagination ────────────────────────────────────── */}
         {!loading && !error && filtered.length > 0 && (
           <div className="flex items-center justify-between px-4 py-2.5">
             <div className="flex items-center gap-2 text-[12px] text-[#78909C]">
