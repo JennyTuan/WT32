@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import date
 
@@ -633,6 +633,36 @@ def _migrate_protocol_columns() -> None:
         "ALTER TABLE protocols ADD COLUMN is_factory BOOLEAN NOT NULL DEFAULT 0",
         "ALTER TABLE protocols ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT 1",
         "ALTER TABLE protocols ADD COLUMN updated_at DATETIME",
+        # Topogram Param additions
+        "ALTER TABLE topogram_params ADD COLUMN collimator VARCHAR(50)",
+        "ALTER TABLE topogram_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE topogram_params ADD COLUMN dom VARCHAR(20)",
+        # Helical Param additions
+        "ALTER TABLE helical_params ADD COLUMN collimator VARCHAR(50)",
+        "ALTER TABLE helical_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE helical_params ADD COLUMN dom VARCHAR(20)",
+        # Axial Param additions
+        "ALTER TABLE axial_params ADD COLUMN collimator VARCHAR(50)",
+        "ALTER TABLE axial_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE axial_params ADD COLUMN dom VARCHAR(20)",
+        # Scan Session additions
+        "ALTER TABLE scan_session_topogram_params ADD COLUMN collimator VARCHAR(50)",
+        "ALTER TABLE scan_session_topogram_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE scan_session_topogram_params ADD COLUMN dom VARCHAR(20)",
+        "ALTER TABLE scan_session_helical_params ADD COLUMN collimator VARCHAR(50)",
+        "ALTER TABLE scan_session_helical_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE scan_session_helical_params ADD COLUMN dom VARCHAR(20)",
+        "ALTER TABLE scan_session_axial_params ADD COLUMN collimator VARCHAR(50)",
+        "ALTER TABLE scan_session_axial_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE scan_session_axial_params ADD COLUMN dom VARCHAR(20)",
+        # Recon Series additions
+        "ALTER TABLE recon_series ADD COLUMN recon_fov FLOAT",
+        "ALTER TABLE recon_series ADD COLUMN center_x FLOAT",
+        "ALTER TABLE recon_series ADD COLUMN center_y FLOAT",
+        # Scan Session Recon Series additions
+        "ALTER TABLE scan_session_recon_series ADD COLUMN recon_fov FLOAT",
+        "ALTER TABLE scan_session_recon_series ADD COLUMN center_x FLOAT",
+        "ALTER TABLE scan_session_recon_series ADD COLUMN center_y FLOAT",
     ]
     with engine.connect() as conn:
         for sql in migrations:
@@ -642,8 +672,16 @@ def _migrate_protocol_columns() -> None:
             except Exception:
                 # Column already exists – safe to ignore
                 pass
-        # Mark all existing (seeded) protocols as factory if not already set
-        conn.execute(text("UPDATE protocols SET is_factory = 1 WHERE is_factory = 0"))
+        # Fix: reset user-created protocols that were wrongly marked as factory
+        # Seeded protocols are created with is_factory=True in init_db,
+        # so we only need to fix protocols that have updated_at set (user-edited)
+        # or were created after the initial seed batch.
+        # Simple heuristic: protocols with description NOT ending in "seeded protocol"
+        # are user-created and should not be factory.
+        conn.execute(text(
+            "UPDATE protocols SET is_factory = 0 "
+            "WHERE description IS NULL OR description NOT LIKE '%seeded protocol'"
+        ))
         conn.commit()
 
 

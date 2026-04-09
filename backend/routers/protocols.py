@@ -345,15 +345,15 @@ def create_protocol_full(payload: schemas.ProtocolCreateWithSeries, db: Session 
 
         # Add single params
         if s_data.topogram_param:
-            db.add(models.TopogramParam(**s_data.topogram_param.model_dump(), series_id=series.id))
+            db.add(models.TopogramParam(**s_data.topogram_param.model_dump(exclude={"series_id"}), series_id=series.id))
         if s_data.helical_param:
-            db.add(models.HelicalParam(**s_data.helical_param.model_dump(), series_id=series.id))
+            db.add(models.HelicalParam(**s_data.helical_param.model_dump(exclude={"series_id"}), series_id=series.id))
         if s_data.axial_param:
-            db.add(models.AxialParam(**s_data.axial_param.model_dump(), series_id=series.id))
+            db.add(models.AxialParam(**s_data.axial_param.model_dump(exclude={"series_id"}), series_id=series.id))
         
         # Add recons
         for r_data in s_data.recon_series:
-            db.add(models.ReconSeries(**r_data.model_dump(), series_id=series.id))
+            db.add(models.ReconSeries(**r_data.model_dump(exclude={"series_id"}), series_id=series.id))
 
     db.commit()
     db.refresh(protocol)
@@ -373,8 +373,11 @@ def update_protocol_full(protocol_id: int, payload: schemas.ProtocolCreateWithSe
     protocol.updated_at = datetime.now(timezone.utc)
 
     # 2. Replace series (Simplest for prototype: delete and recreate)
-    # Alternatively: update in place. For simplicity, we clear and add.
-    db.query(models.Series).filter(models.Series.protocol_id == protocol.id).delete()
+    # Use ORM delete to ensure cascade is triggered for SQLite without PRAGMA foreign_keys=ON
+    existing_series = db.query(models.Series).filter(models.Series.protocol_id == protocol.id).all()
+    for es in existing_series:
+        db.delete(es)
+    db.flush()
     
     for s_data in payload.series:
         s_dict = s_data.model_dump(exclude={"topogram_param", "helical_param", "axial_param", "recon_series"})
@@ -383,14 +386,14 @@ def update_protocol_full(protocol_id: int, payload: schemas.ProtocolCreateWithSe
         db.flush()
 
         if s_data.topogram_param:
-            db.add(models.TopogramParam(**s_data.topogram_param.model_dump(), series_id=series.id))
+            db.add(models.TopogramParam(**s_data.topogram_param.model_dump(exclude={"series_id"}), series_id=series.id))
         if s_data.helical_param:
-            db.add(models.HelicalParam(**s_data.helical_param.model_dump(), series_id=series.id))
+            db.add(models.HelicalParam(**s_data.helical_param.model_dump(exclude={"series_id"}), series_id=series.id))
         if s_data.axial_param:
-            db.add(models.AxialParam(**s_data.axial_param.model_dump(), series_id=series.id))
+            db.add(models.AxialParam(**s_data.axial_param.model_dump(exclude={"series_id"}), series_id=series.id))
         
         for r_data in s_data.recon_series:
-            db.add(models.ReconSeries(**r_data.model_dump(), series_id=series.id))
+            db.add(models.ReconSeries(**r_data.model_dump(exclude={"series_id"}), series_id=series.id))
 
     db.commit()
     db.refresh(protocol)

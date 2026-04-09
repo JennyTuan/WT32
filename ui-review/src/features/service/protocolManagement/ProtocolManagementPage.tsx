@@ -92,9 +92,8 @@ function ScanModeBadge({ mode }: { mode: ScanMode }) {
 
 function StatusBadge({ enabled }: { enabled: boolean }) {
   return (
-    <span className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold ${
-      enabled ? "bg-[#E6F4EA] text-[#1B5E20]" : "bg-[#F1F5F9] text-[#78909C]"
-    }`}>
+    <span className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold ${enabled ? "bg-[#E6F4EA] text-[#1B5E20]" : "bg-[#F1F5F9] text-[#78909C]"
+      }`}>
       <span className={`inline-block w-1.5 h-1.5 rounded-full ${enabled ? "bg-[#43A047]" : "bg-[#B0BEC5]"}`} />
       {enabled ? "启用" : "禁用"}
     </span>
@@ -282,7 +281,7 @@ export default function ProtocolManagementPage() {
     showToast("协议已删除");
   };
 
-// handleModalSubmit and toForm removed
+  // handleModalSubmit and toForm removed
 
   // Sort header
   const Th = ({ col, children, width }: { col: SortKey; children: React.ReactNode; width?: string }) => (
@@ -386,185 +385,183 @@ export default function ProtocolManagementPage() {
             </div>
           </div>
 
-        {toast && (
-          <div className={`flex items-center gap-2.5 rounded-xl px-4 py-3 text-[13px] font-semibold shadow-sm border transition-all ${
-            toast.ok
-              ? "bg-[#E8F5E9] border-[#C8E6C9] text-[#1B5E20]"
-              : "bg-[#FFEBEE] border-[#FFCDD2] text-[#C62828]"
-          }`}>
-            <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${toast.ok ? "bg-[#43A047]" : "bg-[#EF5350]"}`} />
-            {toast.msg}
-          </div>
-        )}
-
-        {/* ── Table ─────────────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar border-b border-[#EEF2F9]">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-14 gap-3 text-[#B0BEC5]">
-              <RefreshCcw size={22} className="animate-spin" />
-              <span className="text-[13px]">正在加载协议数据…</span>
-            </div>
-          ) : error ? (
-            <div className="py-14 text-center">
-              <p className="text-[13px] font-semibold text-[#EF5350]">加载失败</p>
-              <p className="mt-1 text-[12px] text-[#90A4AE]">{error}</p>
-              <button type="button" onClick={fetchProtocols}
-                className="mt-4 h-8 px-4 rounded-lg border border-[#CFD8DC] text-[12px] font-bold text-[#546E7A] hover:bg-[#F5F8FF] transition-colors">
-                重试
-              </button>
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-14 gap-2">
-              <div className="w-10 h-10 rounded-full bg-[#EEF2F9] flex items-center justify-center text-[#B0BEC5]">
-                {search ? <Search size={18} /> : <Plus size={18} />}
-              </div>
-              <p className="text-[13px] font-semibold text-[#546E7A]">
-                {search
-                  ? `未找到包含"${search}"的协议`
-                  : sourceFilter === "custom"
-                    ? "暂无自设协议"
-                    : sourceFilter === "factory"
-                      ? "暂无出厂协议"
-                      : "暂无协议"}
-              </p>
-              {!search && sourceFilter !== "factory" && (
-                <button type="button" onClick={() => navigate("/protocol-detail?mode=new&source=catalog")}
-                  className="mt-1 h-8 px-4 rounded-lg bg-[#1E88E5] text-[12px] font-bold text-white hover:bg-[#1565C0] transition-colors active:scale-95">
-                  + 新建协议
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full table-fixed min-w-[760px]">
-                <colgroup>
-                  <col style={{ width: "56px" }} />
-                  <col />
-                  <col style={{ width: "72px" }} />
-                  <col style={{ width: "112px" }} />
-                  <col style={{ width: "92px" }} />
-                  <col style={{ width: sourceFilter === "factory" ? "140px" : "120px" }} />
-                </colgroup>
-                <thead className="border-b border-[#EEF2F9] bg-[#F8FBFF] sticky top-0 z-10 shadow-sm">
-                  <tr>
-                    <th className="px-3 py-3 text-center text-[11px] font-black uppercase tracking-wide text-[#78909C]">序号</th>
-                    <Th col="name">协议名称</Th>
-                    <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wide text-[#78909C]">模式</th>
-                    <Th col="created_at">创建时间</Th>
-                    <Th col="is_enabled">状态</Th>
-                    <th className="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wide text-[#78909C]">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#F1F5F9]">
-                  {pageRows.map((p, index) => {
-                    const created = formatDate(p.created_at);
-                    return (
-                      <tr key={p.id}
-                        className={`group transition-colors hover:bg-[#F5F9FF] ${!p.is_enabled ? "opacity-60" : ""}`}>
-                        <td className="px-3 py-3.5 text-center text-[12px] font-semibold text-[#90A4AE]">
-                          {(curPage - 1) * pageSize + index + 1}
-                        </td>
-
-                        <td className="px-4 py-3.5">
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-[13px] font-bold text-[#1A2332] truncate leading-tight" title={p.name}>
-                              {p.name}
-                            </span>
-                            <span className="text-[11px] text-[#90A4AE]">
-                              {AGE_GROUP_LABELS[p.age_group]} · {p.body_part}
-                            </span>
-                          </div>
-                        </td>
-
-                        <td className="px-4 py-3.5"><ScanModeBadge mode={p.scan_mode} /></td>
-
-                        <td className="px-3 py-3.5 whitespace-nowrap">
-                          {created ? (
-                            <span className="text-[12px] text-[#546E7A] font-medium">{created}</span>
-                          ) : <span className="text-[12px] text-[#CFD8DC]">—</span>}
-                        </td>
-
-                        <td className="px-3 py-3.5 whitespace-nowrap"><StatusBadge enabled={p.is_enabled} /></td>
-
-                        <td className="px-3 py-3.5">
-                          <div className="flex items-center justify-end gap-1">
-                            {!p.is_factory ? (
-                              <>
-                                <IconBtn icon={Pencil} label="编辑" variant="primary"
-                                  onClick={() => navigate(`/protocol-detail?mode=edit&id=${p.id}&source=catalog`)} />
-                                <IconBtn icon={Power} label={p.is_enabled ? "禁用" : "启用"}
-                                  variant={p.is_enabled ? "warning" : "default"}
-                                  onClick={() => toggleEnabled(p)} />
-                                <IconBtn icon={Trash2} label="删除" variant="danger"
-                                  onClick={() => setModal({ type: "delete", protocol: p })} />
-                              </>
-                            ) : (
-                              <>
-                                <IconBtn icon={Eye} label="查看详情"
-                                  onClick={() => navigate(`/protocol-detail?mode=view&id=${p.id}&source=catalog`)} />
-                                <button type="button"
-                                  onClick={() => navigate(`/protocol-detail?mode=new&id=${p.id}&source=catalog`)}
-                                  className="flex h-8 items-center gap-1 rounded-lg px-2.5 text-[11px] font-bold text-[#1565C0] hover:bg-[#E3F2FD] transition-all active:scale-90 whitespace-nowrap">
-                                  <BookCopy size={13} strokeWidth={1.8} />
-                                  另存为
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          {toast && (
+            <div className={`flex items-center gap-2.5 rounded-xl px-4 py-3 text-[13px] font-semibold shadow-sm border transition-all ${toast.ok
+                ? "bg-[#E8F5E9] border-[#C8E6C9] text-[#1B5E20]"
+                : "bg-[#FFEBEE] border-[#FFCDD2] text-[#C62828]"
+              }`}>
+              <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${toast.ok ? "bg-[#43A047]" : "bg-[#EF5350]"}`} />
+              {toast.msg}
             </div>
           )}
-        </div>
 
-        {!loading && !error && filtered.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-2.5 shrink-0 bg-[#F8FBFF] border-t border-[#EEF2F9]">
-            <div className="flex items-center gap-2 text-[12px] text-[#78909C]">
-              每页
-              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-                className="h-7 rounded-md border border-[#CFD8DC] px-1.5 text-[12px] font-bold text-[#546E7A] outline-none focus:border-[#1E88E5] bg-white">
-                {PAGE_SIZE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-              条 &nbsp;·&nbsp; 共 <span className="font-bold text-[#546E7A]">{filtered.length}</span> 条
-            </div>
-
-            <div className="flex items-center gap-1">
-              <button type="button" disabled={curPage <= 1} onClick={() => setPage((p) => p - 1)}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-[#CFD8DC] text-[#78909C] hover:bg-[#F5F8FF] disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm">
-                ‹
-              </button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1)
-                .filter((n) => n === 1 || n === totalPages || Math.abs(n - curPage) <= 1)
-                .reduce<(number | "…")[]>((acc, n, i, arr) => {
-                  if (i > 0 && n - (arr[i - 1] as number) > 1) acc.push("…");
-                  acc.push(n);
-                  return acc;
-                }, [])
-                .map((n, i) =>
-                  n === "…" ? (
-                    <span key={`e${i}`} className="px-1 text-[12px] text-[#B0BEC5]">…</span>
-                  ) : (
-                    <button key={n} type="button" onClick={() => setPage(n as number)}
-                      className={`flex h-7 w-7 items-center justify-center rounded-md border text-[12px] font-bold transition-all active:scale-90 ${
-                        curPage === n
-                          ? "bg-[#1E88E5] border-[#1E88E5] text-white shadow-sm"
-                          : "border-[#CFD8DC] text-[#546E7A] hover:bg-[#F5F8FF] hover:border-[#90CAF9]"
-                      }`}>
-                      {n}
-                    </button>
-                  )
+          {/* ── Table ─────────────────────────────────────────── */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar border-b border-[#EEF2F9]">
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-14 gap-3 text-[#B0BEC5]">
+                <RefreshCcw size={22} className="animate-spin" />
+                <span className="text-[13px]">正在加载协议数据…</span>
+              </div>
+            ) : error ? (
+              <div className="py-14 text-center">
+                <p className="text-[13px] font-semibold text-[#EF5350]">加载失败</p>
+                <p className="mt-1 text-[12px] text-[#90A4AE]">{error}</p>
+                <button type="button" onClick={fetchProtocols}
+                  className="mt-4 h-8 px-4 rounded-lg border border-[#CFD8DC] text-[12px] font-bold text-[#546E7A] hover:bg-[#F5F8FF] transition-colors">
+                  重试
+                </button>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-14 gap-2">
+                <div className="w-10 h-10 rounded-full bg-[#EEF2F9] flex items-center justify-center text-[#B0BEC5]">
+                  {search ? <Search size={18} /> : <Plus size={18} />}
+                </div>
+                <p className="text-[13px] font-semibold text-[#546E7A]">
+                  {search
+                    ? `未找到包含"${search}"的协议`
+                    : sourceFilter === "custom"
+                      ? "暂无自设协议"
+                      : sourceFilter === "factory"
+                        ? "暂无出厂协议"
+                        : "暂无协议"}
+                </p>
+                {!search && sourceFilter !== "factory" && (
+                  <button type="button" onClick={() => navigate("/protocol-detail?mode=new&source=catalog")}
+                    className="mt-1 h-8 px-4 rounded-lg bg-[#1E88E5] text-[12px] font-bold text-white hover:bg-[#1565C0] transition-colors active:scale-95">
+                    + 新建协议
+                  </button>
                 )}
-              <button type="button" disabled={curPage >= totalPages} onClick={() => setPage((p) => p + 1)}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-[#CFD8DC] text-[#78909C] hover:bg-[#F5F8FF] disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm">
-                ›
-              </button>
-            </div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full table-fixed min-w-[760px]">
+                  <colgroup>
+                    <col style={{ width: "56px" }} />
+                    <col />
+                    <col style={{ width: "72px" }} />
+                    <col style={{ width: "112px" }} />
+                    <col style={{ width: "92px" }} />
+                    <col style={{ width: sourceFilter === "factory" ? "140px" : "120px" }} />
+                  </colgroup>
+                  <thead className="border-b border-[#EEF2F9] bg-[#F8FBFF] sticky top-0 z-10 shadow-sm">
+                    <tr>
+                      <th className="px-3 py-3 text-center text-[11px] font-black uppercase tracking-wide text-[#78909C]">序号</th>
+                      <Th col="name">协议名称</Th>
+                      <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wide text-[#78909C]">模式</th>
+                      <Th col="created_at">创建时间</Th>
+                      <Th col="is_enabled">状态</Th>
+                      <th className="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wide text-[#78909C]">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#F1F5F9]">
+                    {pageRows.map((p, index) => {
+                      const created = formatDate(p.created_at);
+                      return (
+                        <tr key={p.id}
+                          className={`group transition-colors hover:bg-[#F5F9FF] ${!p.is_enabled ? "opacity-60" : ""}`}>
+                          <td className="px-3 py-3.5 text-center text-[12px] font-semibold text-[#90A4AE]">
+                            {(curPage - 1) * pageSize + index + 1}
+                          </td>
+
+                          <td className="px-4 py-3.5">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[13px] font-bold text-[#1A2332] truncate leading-tight" title={p.name}>
+                                {p.name}
+                              </span>
+                              <span className="text-[11px] text-[#90A4AE]">
+                                {AGE_GROUP_LABELS[p.age_group]} · {p.body_part}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-3.5"><ScanModeBadge mode={p.scan_mode} /></td>
+
+                          <td className="px-3 py-3.5 whitespace-nowrap">
+                            {created ? (
+                              <span className="text-[12px] text-[#546E7A] font-medium">{created}</span>
+                            ) : <span className="text-[12px] text-[#CFD8DC]">—</span>}
+                          </td>
+
+                          <td className="px-3 py-3.5 whitespace-nowrap"><StatusBadge enabled={p.is_enabled} /></td>
+
+                          <td className="px-3 py-3.5">
+                            <div className="flex items-center justify-end gap-1">
+                              {!p.is_factory ? (
+                                <>
+                                  <IconBtn icon={Pencil} label="编辑" variant="primary"
+                                    onClick={() => navigate(`/protocol-detail?mode=edit&id=${p.id}&source=catalog`)} />
+                                  <IconBtn icon={Power} label={p.is_enabled ? "禁用" : "启用"}
+                                    variant={p.is_enabled ? "warning" : "default"}
+                                    onClick={() => toggleEnabled(p)} />
+                                  <IconBtn icon={Trash2} label="删除" variant="danger"
+                                    onClick={() => setModal({ type: "delete", protocol: p })} />
+                                </>
+                              ) : (
+                                <>
+                                  <IconBtn icon={Eye} label="查看详情"
+                                    onClick={() => navigate(`/protocol-detail?mode=view&id=${p.id}&source=catalog`)} />
+                                  <button type="button"
+                                    onClick={() => navigate(`/protocol-detail?mode=new&id=${p.id}&source=catalog`)}
+                                    className="flex h-8 items-center gap-1 rounded-lg px-2.5 text-[11px] font-bold text-[#1565C0] hover:bg-[#E3F2FD] transition-all active:scale-90 whitespace-nowrap">
+                                    <BookCopy size={13} strokeWidth={1.8} />
+                                    另存为
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        )}
+
+          {!loading && !error && filtered.length > 0 && (
+            <div className="flex items-center justify-between px-4 py-2.5 shrink-0 bg-[#F8FBFF] border-t border-[#EEF2F9]">
+              <div className="flex items-center gap-2 text-[12px] text-[#78909C]">
+                每页
+                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                  className="h-7 rounded-md border border-[#CFD8DC] px-1.5 text-[12px] font-bold text-[#546E7A] outline-none focus:border-[#1E88E5] bg-white">
+                  {PAGE_SIZE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                条 &nbsp;·&nbsp; 共 <span className="font-bold text-[#546E7A]">{filtered.length}</span> 条
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button type="button" disabled={curPage <= 1} onClick={() => setPage((p) => p - 1)}
+                  className="flex h-7 w-7 items-center justify-center rounded-md border border-[#CFD8DC] text-[#78909C] hover:bg-[#F5F8FF] disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm">
+                  ‹
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((n) => n === 1 || n === totalPages || Math.abs(n - curPage) <= 1)
+                  .reduce<(number | "…")[]>((acc, n, i, arr) => {
+                    if (i > 0 && n - (arr[i - 1] as number) > 1) acc.push("…");
+                    acc.push(n);
+                    return acc;
+                  }, [])
+                  .map((n, i) =>
+                    n === "…" ? (
+                      <span key={`e${i}`} className="px-1 text-[12px] text-[#B0BEC5]">…</span>
+                    ) : (
+                      <button key={n} type="button" onClick={() => setPage(n as number)}
+                        className={`flex h-7 w-7 items-center justify-center rounded-md border text-[12px] font-bold transition-all active:scale-90 ${curPage === n
+                            ? "bg-[#1E88E5] border-[#1E88E5] text-white shadow-sm"
+                            : "border-[#CFD8DC] text-[#546E7A] hover:bg-[#F5F8FF] hover:border-[#90CAF9]"
+                          }`}>
+                        {n}
+                      </button>
+                    )
+                  )}
+                <button type="button" disabled={curPage >= totalPages} onClick={() => setPage((p) => p + 1)}
+                  className="flex h-7 w-7 items-center justify-center rounded-md border border-[#CFD8DC] text-[#78909C] hover:bg-[#F5F8FF] disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-sm">
+                  ›
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

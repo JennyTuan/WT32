@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
@@ -124,6 +124,9 @@ class TopogramParam(Base):
     scan_length = Column(Float, nullable=False, default=80.0)
     tube_angle = Column(Float, nullable=False, default=270.0)
     fov = Column(Float, nullable=False, default=500.0)
+    collimator = Column(String(50), nullable=True)
+    scan_direction = Column(String(10), nullable=True, default="OUT")
+    dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
 
@@ -142,6 +145,9 @@ class HelicalParam(Base):
     rotation_time = Column(Float, nullable=False)
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
+    collimator = Column(String(50), nullable=True)
+    scan_direction = Column(String(10), nullable=True, default="OUT")
+    dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
     auto_ma = Column(Boolean, nullable=False, default=False)
@@ -163,6 +169,9 @@ class AxialParam(Base):
     rotation_time = Column(Float, nullable=False)
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
+    collimator = Column(String(50), nullable=True)
+    scan_direction = Column(String(10), nullable=True, default="OUT")
+    dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
     auto_ma = Column(Boolean, nullable=False, default=False)
@@ -186,6 +195,9 @@ class ReconSeries(Base):
     window_level = Column(Integer, nullable=False)
     slice_thickness = Column(Float, nullable=False)
     increment = Column(Float, nullable=True)
+    recon_fov = Column(Float, nullable=True)
+    center_x = Column(Float, nullable=True)
+    center_y = Column(Float, nullable=True)
 
     series = relationship("Series", back_populates="recon_series")
 
@@ -331,6 +343,9 @@ class ScanSessionTopogramParam(Base):
     scan_length = Column(Float, nullable=False, default=80.0)
     tube_angle = Column(Float, nullable=False, default=270.0)
     fov = Column(Float, nullable=False, default=500.0)
+    collimator = Column(String(50), nullable=True)
+    scan_direction = Column(String(10), nullable=True, default="OUT")
+    dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
 
@@ -350,6 +365,9 @@ class ScanSessionHelicalParam(Base):
     rotation_time = Column(Float, nullable=False)
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
+    collimator = Column(String(50), nullable=True)
+    scan_direction = Column(String(10), nullable=True, default="OUT")
+    dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
     auto_ma = Column(Boolean, nullable=False, default=False)
@@ -372,6 +390,9 @@ class ScanSessionAxialParam(Base):
     rotation_time = Column(Float, nullable=False)
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
+    collimator = Column(String(50), nullable=True)
+    scan_direction = Column(String(10), nullable=True, default="OUT")
+    dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
     auto_ma = Column(Boolean, nullable=False, default=False)

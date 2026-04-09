@@ -31,6 +31,9 @@ type ApiReconSeries = {
     window_level: number;
     slice_thickness: number;
     increment?: number | null;
+    recon_fov?: number | null;
+    center_x?: number | null;
+    center_y?: number | null;
 };
 
 type ApiSeriesDetail = {
@@ -40,18 +43,21 @@ type ApiSeriesDetail = {
     topogram_param?: {
         id?: number;
         kv: number; ma: number; scan_length: number; tube_angle: number; fov: number;
+        collimator?: string | null; scan_direction?: string | null; dom?: string | null;
         ctdi_vol?: number | null; dlp?: number | null;
     } | null;
     helical_param?: {
         id?: number;
         kv: number; ma: number; slice_thickness: number; pitch: number;
         rotation_time: number; scan_length: number; fov: number; auto_ma?: boolean;
+        collimator?: string | null; scan_direction?: string | null; dom?: string | null;
         ctdi_vol?: number | null; dlp?: number | null;
     } | null;
     axial_param?: {
         id?: number;
         kv: number; ma: number; slice_thickness: number; slice_interval: number;
         rotation_time: number; scan_length: number; fov: number; step_count?: number | null;
+        collimator?: string | null; scan_direction?: string | null; dom?: string | null;
         ctdi_vol?: number | null; dlp?: number | null;
     } | null;
     recon_series: ApiReconSeries[];
@@ -127,6 +133,9 @@ const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["series_type"
                 scan_length: 80,
                 tube_angle: 270,
                 fov: 500,
+                collimator: "32x0.6",
+                scan_direction: "OUT",
+                dom: "0",
             },
             helical_param: null,
             axial_param: null,
@@ -150,6 +159,9 @@ const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["series_type"
                 scan_length: 120,
                 fov: 350,
                 step_count: 24,
+                collimator: "32x0.6",
+                scan_direction: "OUT",
+                dom: "0",
             },
             recon_series: [],
         };
@@ -169,6 +181,9 @@ const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["series_type"
             scan_length: 120,
             fov: 350,
             auto_ma: false,
+            collimator: "32x0.6",
+            scan_direction: "OUT",
+            dom: "0",
         },
         axial_param: null,
         recon_series: [],
@@ -200,6 +215,9 @@ const mapScanSessionToProtocolDetail = (scanSession: Awaited<ReturnType<typeof f
                     scan_length: series.topogram_param.scan_length,
                     tube_angle: series.topogram_param.tube_angle,
                     fov: series.topogram_param.fov,
+                    collimator: series.topogram_param.collimator,
+                    scan_direction: series.topogram_param.scan_direction,
+                    dom: series.topogram_param.dom,
                     ctdi_vol: series.topogram_param.ctdi_vol,
                     dlp: series.topogram_param.dlp,
                 }
@@ -213,6 +231,9 @@ const mapScanSessionToProtocolDetail = (scanSession: Awaited<ReturnType<typeof f
                     rotation_time: series.helical_param.rotation_time,
                     scan_length: series.helical_param.scan_length,
                     fov: series.helical_param.fov,
+                    collimator: series.helical_param.collimator,
+                    scan_direction: series.helical_param.scan_direction,
+                    dom: series.helical_param.dom,
                     auto_ma: series.helical_param.auto_ma,
                     ctdi_vol: series.helical_param.ctdi_vol,
                     dlp: series.helical_param.dlp,
@@ -227,6 +248,9 @@ const mapScanSessionToProtocolDetail = (scanSession: Awaited<ReturnType<typeof f
                     rotation_time: series.axial_param.rotation_time,
                     scan_length: series.axial_param.scan_length,
                     fov: series.axial_param.fov,
+                    collimator: series.axial_param.collimator,
+                    scan_direction: series.axial_param.scan_direction,
+                    dom: series.axial_param.dom,
                     step_count: series.axial_param.step_count,
                     ctdi_vol: series.axial_param.ctdi_vol,
                     dlp: series.axial_param.dlp,
@@ -367,6 +391,9 @@ type SeriesDraft = {
     pitch: string;
     sliceThickness: string;
     sliceInterval: string;
+    collimator: string;
+    scanDirection: string;
+    dom: string;
 };
 
 type ReconDraft = {
@@ -377,6 +404,9 @@ type ReconDraft = {
     matrix: string;
     windowLevel: string;
     windowWidth: string;
+    reconFov: string;
+    centerX: string;
+    centerY: string;
 };
 
 // ── Right panels ───────────────────────────────────────────────────────────
@@ -476,11 +506,11 @@ function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, onDraftC
                     <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
                     <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
                     <FieldSelect label="旋转时间 (S)" value="1" options={["1", "0.5", "1.5"]} required />
-                    <FieldInput label="准直器" placeholder="例如: 320.6" />
+                    <FieldInput label="准直器" value={draft.collimator} placeholder="例如: 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
                     <FieldInput label="扫描长度 (MM)" value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
-                    <FieldSelect label="扫描方向" value="OUT" options={["OUT", "IN"]} required />
+                    <FieldSelect label="扫描方向" value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
                     <FieldInput label="FOV" value={draft.fov} required onChange={(value) => onDraftChange({ fov: value })} />
-                    <FieldInput label="DOM" placeholder="0 或 1" />
+                    <FieldInput label="DOM" value={draft.dom} placeholder="0 或 1" onChange={(value) => onDraftChange({ dom: value })} />
                     <FieldInput label="床角度 (ANGLE)" value={draft.tubeAngle} required onChange={(value) => onDraftChange({ tubeAngle: value })} />
                 </div>
             </div>
@@ -517,11 +547,11 @@ function HelicalParamsPanel({ series, draft, canEditMode, onModeChange, onDelete
                     <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
                     <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
                     <FieldSelect label="旋转时间 (S)" value={draft.rotationTime || "1"} options={[draft.rotationTime || "1", "0.5", "1.5"]} required onChange={(value) => onDraftChange({ rotationTime: value })} />
-                    <FieldInput label="准直器" placeholder="例如: 32x0.6" required />
+                    <FieldInput label="准直器" value={draft.collimator} placeholder="例如: 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
                     <FieldInput label="扫描长度 (MM)" value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
-                    <FieldSelect label="扫描方向" value="OUT" options={["OUT", "IN"]} required />
+                    <FieldSelect label="扫描方向" value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
                     <FieldInput label="FOV" value={draft.fov} required onChange={(value) => onDraftChange({ fov: value })} />
-                    <FieldInput label="DOM" value="0" required />
+                    <FieldInput label="DOM" value={draft.dom} placeholder="0 或 1" onChange={(value) => onDraftChange({ dom: value })} />
                     {series.series_type === "helical" && (
                         <FieldInput label="PITCH" value={draft.pitch} required onChange={(value) => onDraftChange({ pitch: value })} />
                     )}
@@ -561,12 +591,12 @@ function ReconParamsPanel({ series, draft, onDelete, onDraftChange }: {
                     <FieldInput label="KERNEL" value={draft.kernel} onChange={(value) => onDraftChange({ kernel: value })} />
                     <FieldSpinner label="层厚 (MM)" value={draft.sliceThickness} onChange={(value) => onDraftChange({ sliceThickness: value })} />
                     <FieldSpinner label="重建增量 (MM)" value={draft.increment} onChange={(value) => onDraftChange({ increment: value })} />
-                    <FieldSpinner label="重建 FOV (MM)" value={250} />
+                    <FieldSpinner label="重建 FOV (MM)" value={draft.reconFov} onChange={(value) => onDraftChange({ reconFov: value })} />
                     <FieldSpinner label="MATRIX" value={draft.matrix} onChange={(value) => onDraftChange({ matrix: value })} />
                     <FieldSpinner label="窗位 (WL)" value={draft.windowLevel} onChange={(value) => onDraftChange({ windowLevel: value })} />
                     <FieldSpinner label="窗宽 (WW)" value={draft.windowWidth} onChange={(value) => onDraftChange({ windowWidth: value })} />
-                    <FieldSpinner label="中心 X" value={0} />
-                    <FieldSpinner label="中心 Y" value={0} />
+                    <FieldSpinner label="中心 X" value={draft.centerX} onChange={(value) => onDraftChange({ centerX: value })} />
+                    <FieldSpinner label="中心 Y" value={draft.centerY} onChange={(value) => onDraftChange({ centerY: value })} />
                     <div className="flex flex-col gap-2 col-span-2 mt-2">
                         <label className="text-[10px] font-black text-[#90A4AE] ml-1 uppercase tracking-tight">金属伪影抑制</label>
                         <button className="w-full h-[44px] bg-white border border-[#B0C4DE] rounded-md text-[14px] font-bold text-[#37474F] hover:bg-gray-50 transition-all shadow-sm">
@@ -701,6 +731,9 @@ export default function WT32ProtocolDetailScreen() {
         pitch: "",
         sliceThickness: "",
         sliceInterval: "",
+        collimator: "",
+        scanDirection: "OUT",
+        dom: "0",
     });
     const [reconDraft, setReconDraft] = useState<ReconDraft>({
         reconName: "",
@@ -710,6 +743,9 @@ export default function WT32ProtocolDetailScreen() {
         matrix: "",
         windowLevel: "",
         windowWidth: "",
+        reconFov: "250",
+        centerX: "0",
+        centerY: "0",
     });
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -848,23 +884,19 @@ export default function WT32ProtocolDetailScreen() {
         localStorage.removeItem(DETAIL_TARGET_STORAGE_KEY);
     }, [protocol, series]);
 
+    // Only reset basicDraft when the actual protocol object/ID changes (initial load or source change)
     useEffect(() => {
+        if (!protocol) return;
         setBasicDraft({
-            name: protocol?.name ?? "",
-            bodyPart: protocol?.body_part || bodyPartOptions[0] || "",
-            ageGroup: (protocol?.age_group ?? ageGroupOptions[0] ?? "adult") as BasicDraft["ageGroup"],
-            patientWeight: protocol?.patient_weight ?? "",
-            patientPosition: protocol?.patient_position ?? selectedPos,
+            name: protocol.name ?? "",
+            bodyPart: protocol.body_part || bodyPartOptions[0] || "",
+            ageGroup: (protocol.age_group ?? ageGroupOptions[0] ?? "adult") as BasicDraft["ageGroup"],
+            patientWeight: protocol.patient_weight ?? "",
+            patientPosition: protocol.patient_position ?? selectedPos,
         });
-    }, [protocol?.id, protocol?.name, protocol?.body_part, protocol?.age_group, protocol?.patient_weight, protocol?.patient_position, bodyPartOptions, ageGroupOptions, selectedPos]);
+    }, [protocol?.id]);
 
-    useEffect(() => {
-        setBasicDraft((current) => (
-            current.patientPosition === selectedPos
-                ? current
-                : { ...current, patientPosition: selectedPos }
-        ));
-    }, [selectedPos, setBasicDraft]);
+    // REMOVED destructive reset: useEffect that was overwriting basicDraft on selectedPos change
 
     useEffect(() => {
         if (!activeSeries || selection.type !== "series") return;
@@ -879,6 +911,9 @@ export default function WT32ProtocolDetailScreen() {
             pitch: String(activeSeries.helical_param?.pitch ?? ""),
             sliceThickness: String(activeSeries.helical_param?.slice_thickness ?? activeSeries.axial_param?.slice_thickness ?? ""),
             sliceInterval: String(activeSeries.axial_param?.slice_interval ?? ""),
+            collimator: String(activeSeries.topogram_param?.collimator ?? activeSeries.helical_param?.collimator ?? activeSeries.axial_param?.collimator ?? ""),
+            scanDirection: String(activeSeries.topogram_param?.scan_direction ?? activeSeries.helical_param?.scan_direction ?? activeSeries.axial_param?.scan_direction ?? "OUT"),
+            dom: String(activeSeries.topogram_param?.dom ?? activeSeries.helical_param?.dom ?? activeSeries.axial_param?.dom ?? "0"),
         });
     }, [activeSeries, selection.type]);
 
@@ -892,6 +927,9 @@ export default function WT32ProtocolDetailScreen() {
             matrix: String(activeRecon.matrix ?? ""),
             windowLevel: String(activeRecon.window_level ?? ""),
             windowWidth: String(activeRecon.window_width ?? ""),
+            reconFov: String(activeRecon.recon_fov ?? "250"),
+            centerX: String(activeRecon.center_x ?? "0"),
+            centerY: String(activeRecon.center_y ?? "0"),
         });
     }, [activeRecon, selection.type]);
 
@@ -1058,6 +1096,72 @@ export default function WT32ProtocolDetailScreen() {
 
         try {
             // Collect full protocol payload for nested persistence
+            const finalSeries = series.map((s, idx) => {
+                const isSeriesActive = (selection.type === "series" || selection.type === "recon") && s.id === selection.seriesId;
+                const activeRId = selection.type === "recon" ? selection.reconId : undefined;
+                
+                // If it's the active series, use seriesDraft, otherwise use existing series data
+                const sLabel = (isSeriesActive && selection.type === "series") ? seriesDraft.seriesLabel.trim() : s.series_label;
+                
+                return {
+                    series_order: idx + 1,
+                    series_type: s.series_type,
+                    series_label: sLabel || s.series_label,
+                    topogram_param: s.topogram_param ? {
+                        kv: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.kv) ?? s.topogram_param.kv) : s.topogram_param.kv,
+                        ma: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.topogram_param.ma) : s.topogram_param.ma,
+                        scan_length: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.topogram_param.scan_length) : s.topogram_param.scan_length,
+                        tube_angle: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.tubeAngle) ?? s.topogram_param.tube_angle) : s.topogram_param.tube_angle,
+                        fov: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.topogram_param.fov) : s.topogram_param.fov,
+                        collimator: (isSeriesActive && selection.type === "series") ? (seriesDraft.collimator || s.topogram_param.collimator) : s.topogram_param.collimator,
+                        scan_direction: (isSeriesActive && selection.type === "series") ? (seriesDraft.scanDirection || s.topogram_param.scan_direction) : s.topogram_param.scan_direction,
+                        dom: (isSeriesActive && selection.type === "series") ? (seriesDraft.dom || s.topogram_param.dom) : s.topogram_param.dom,
+                    } : null,
+                    helical_param: s.helical_param ? {
+                        kv: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.kv) ?? s.helical_param.kv) : s.helical_param.kv,
+                        ma: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.helical_param.ma) : s.helical_param.ma,
+                        slice_thickness: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.sliceThickness) ?? s.helical_param.slice_thickness) : s.helical_param.slice_thickness,
+                        pitch: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.pitch) ?? s.helical_param.pitch) : s.helical_param.pitch,
+                        rotation_time: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.rotationTime) ?? s.helical_param.rotation_time) : s.helical_param.rotation_time,
+                        scan_length: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.helical_param.scan_length) : s.helical_param.scan_length,
+                        fov: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.helical_param.fov) : s.helical_param.fov,
+                        auto_ma: s.helical_param.auto_ma,
+                        collimator: (isSeriesActive && selection.type === "series") ? (seriesDraft.collimator || s.helical_param.collimator) : s.helical_param.collimator,
+                        scan_direction: (isSeriesActive && selection.type === "series") ? (seriesDraft.scanDirection || s.helical_param.scan_direction) : s.helical_param.scan_direction,
+                        dom: (isSeriesActive && selection.type === "series") ? (seriesDraft.dom || s.helical_param.dom) : s.helical_param.dom,
+                    } : null,
+                    axial_param: s.axial_param ? {
+                        kv: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.kv) ?? s.axial_param.kv) : s.axial_param.kv,
+                        ma: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.axial_param.ma) : s.axial_param.ma,
+                        slice_thickness: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.sliceThickness) ?? s.axial_param.slice_thickness) : s.axial_param.slice_thickness,
+                        slice_interval: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.sliceInterval) ?? s.axial_param.slice_interval) : s.axial_param.slice_interval,
+                        rotation_time: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.rotationTime) ?? s.axial_param.rotation_time) : s.axial_param.rotation_time,
+                        scan_length: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.axial_param.scan_length) : s.axial_param.scan_length,
+                        fov: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.axial_param.fov) : s.axial_param.fov,
+                        step_count: s.axial_param.step_count,
+                        collimator: (isSeriesActive && selection.type === "series") ? (seriesDraft.collimator || s.axial_param.collimator) : s.axial_param.collimator,
+                        scan_direction: (isSeriesActive && selection.type === "series") ? (seriesDraft.scanDirection || s.axial_param.scan_direction) : s.axial_param.scan_direction,
+                        dom: (isSeriesActive && selection.type === "series") ? (seriesDraft.dom || s.axial_param.dom) : s.axial_param.dom,
+                    } : null,
+                    recon_series: s.recon_series.map(r => {
+                        const isReconActive = isSeriesActive && selection.type === "recon" && r.id === activeRId;
+                        return {
+                            recon_name: isReconActive ? (reconDraft.reconName.trim() || r.recon_name) : r.recon_name,
+                            recon_type: "soft",
+                            kernel: isReconActive ? (reconDraft.kernel.trim() || r.kernel) : r.kernel,
+                            matrix: isReconActive ? (parseNumber(reconDraft.matrix) ?? r.matrix) : r.matrix,
+                            window_width: isReconActive ? (parseNumber(reconDraft.windowWidth) ?? r.window_width) : r.window_width,
+                            window_level: isReconActive ? (parseNumber(reconDraft.windowLevel) ?? r.window_level) : r.window_level,
+                            slice_thickness: isReconActive ? (parseNumber(reconDraft.sliceThickness) ?? r.slice_thickness) : r.slice_thickness,
+                            increment: isReconActive ? (parseNumber(reconDraft.increment) ?? r.increment) : r.increment,
+                            recon_fov: isReconActive ? (parseNumber(reconDraft.reconFov) ?? r.recon_fov ?? 250) : (r.recon_fov ?? 250),
+                            center_x: isReconActive ? (parseNumber(reconDraft.centerX) ?? r.center_x ?? 0) : (r.center_x ?? 0),
+                            center_y: isReconActive ? (parseNumber(reconDraft.centerY) ?? r.center_y ?? 0) : (r.center_y ?? 0),
+                        };
+                    })
+                };
+            });
+
             const payload = {
                 name: basicDraft.name.trim() || protocol.name,
                 body_part: basicDraft.bodyPart,
@@ -1067,60 +1171,7 @@ export default function WT32ProtocolDetailScreen() {
                 table_direction: protocol.table_direction || "in",
                 scan_mode: protocol.scan_mode || "plain",
                 description: protocol.description || "",
-                series: series.map((s, idx) => {
-                    const sel = selection;
-                    const sId = (sel.type === "series" || sel.type === "recon") ? sel.seriesId : undefined;
-                    const rId = (sel.type === "recon") ? sel.reconId : undefined;
-                    
-                    const isActive = s.id === sId;
-                    const sLabel = (isActive && sel.type === "series") ? seriesDraft.seriesLabel.trim() : s.series_label;
-                    
-                    return {
-                        series_order: idx + 1,
-                        series_type: s.series_type,
-                        series_label: sLabel,
-                        topogram_param: s.topogram_param ? {
-                            kv: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.kv) ?? s.topogram_param.kv) : s.topogram_param.kv,
-                            ma: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.topogram_param.ma) : s.topogram_param.ma,
-                            scan_length: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.topogram_param.scan_length) : s.topogram_param.scan_length,
-                            tube_angle: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.tubeAngle) ?? s.topogram_param.tube_angle) : s.topogram_param.tube_angle,
-                            fov: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.topogram_param.fov) : s.topogram_param.fov,
-                        } : null,
-                        helical_param: s.helical_param ? {
-                            kv: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.kv) ?? s.helical_param.kv) : s.helical_param.kv,
-                            ma: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.helical_param.ma) : s.helical_param.ma,
-                            slice_thickness: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.sliceThickness) ?? s.helical_param.slice_thickness) : s.helical_param.slice_thickness,
-                            pitch: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.pitch) ?? s.helical_param.pitch) : s.helical_param.pitch,
-                            rotation_time: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.rotationTime) ?? s.helical_param.rotation_time) : s.helical_param.rotation_time,
-                            scan_length: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.helical_param.scan_length) : s.helical_param.scan_length,
-                            fov: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.helical_param.fov) : s.helical_param.fov,
-                            auto_ma: s.helical_param.auto_ma,
-                        } : null,
-                        axial_param: s.axial_param ? {
-                            kv: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.kv) ?? s.axial_param.kv) : s.axial_param.kv,
-                            ma: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.axial_param.ma) : s.axial_param.ma,
-                            slice_thickness: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.sliceThickness) ?? s.axial_param.slice_thickness) : s.axial_param.slice_thickness,
-                            slice_interval: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.sliceInterval) ?? s.axial_param.slice_interval) : s.axial_param.slice_interval,
-                            rotation_time: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.rotationTime) ?? s.axial_param.rotation_time) : s.axial_param.rotation_time,
-                            scan_length: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.axial_param.scan_length) : s.axial_param.scan_length,
-                            fov: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.axial_param.fov) : s.axial_param.fov,
-                            step_count: s.axial_param.step_count,
-                        } : null,
-                        recon_series: s.recon_series.map(r => {
-                            const isReconActive = isActive && sel.type === "recon" && r.id === rId;
-                            return {
-                                recon_name: isReconActive ? (reconDraft.reconName.trim() || r.recon_name) : r.recon_name,
-                                recon_type: "soft",
-                                kernel: isReconActive ? (reconDraft.kernel.trim() || r.kernel) : r.kernel,
-                                matrix: isReconActive ? (parseNumber(reconDraft.matrix) ?? r.matrix) : r.matrix,
-                                window_width: isReconActive ? (parseNumber(reconDraft.windowWidth) ?? r.window_width) : r.window_width,
-                                window_level: isReconActive ? (parseNumber(reconDraft.windowLevel) ?? r.window_level) : r.window_level,
-                                slice_thickness: isReconActive ? (parseNumber(reconDraft.sliceThickness) ?? r.slice_thickness) : r.slice_thickness,
-                                increment: isReconActive ? (parseNumber(reconDraft.increment) ?? r.increment) : r.increment,
-                            };
-                        })
-                    };
-                })
+                series: finalSeries
             };
 
             const url = isNewMode
@@ -1186,6 +1237,9 @@ export default function WT32ProtocolDetailScreen() {
                                         scan_length: parseNumber(seriesDraft.scanLength) ?? seriesItem.topogram_param?.scan_length ?? 80,
                                         fov: parseNumber(seriesDraft.fov) ?? seriesItem.topogram_param?.fov ?? 500,
                                         tube_angle: parseNumber(seriesDraft.tubeAngle) ?? seriesItem.topogram_param?.tube_angle ?? 270,
+                                        collimator: seriesDraft.collimator || seriesItem.topogram_param?.collimator,
+                                        scan_direction: seriesDraft.scanDirection || seriesItem.topogram_param?.scan_direction,
+                                        dom: seriesDraft.dom || seriesItem.topogram_param?.dom,
                                     }
                                     : seriesItem.topogram_param,
                                 helical_param: seriesItem.series_type === "helical"
@@ -1198,6 +1252,9 @@ export default function WT32ProtocolDetailScreen() {
                                         rotation_time: parseNumber(seriesDraft.rotationTime) ?? seriesItem.helical_param?.rotation_time ?? 1,
                                         pitch: parseNumber(seriesDraft.pitch) ?? seriesItem.helical_param?.pitch ?? 1,
                                         slice_thickness: parseNumber(seriesDraft.sliceThickness) ?? seriesItem.helical_param?.slice_thickness ?? 1,
+                                        collimator: seriesDraft.collimator || seriesItem.helical_param?.collimator,
+                                        scan_direction: seriesDraft.scanDirection || seriesItem.helical_param?.scan_direction,
+                                        dom: seriesDraft.dom || seriesItem.helical_param?.dom,
                                     }
                                     : seriesItem.helical_param,
                                 axial_param: seriesItem.series_type === "axial"
@@ -1210,6 +1267,9 @@ export default function WT32ProtocolDetailScreen() {
                                         rotation_time: parseNumber(seriesDraft.rotationTime) ?? seriesItem.axial_param?.rotation_time ?? 1,
                                         slice_interval: parseNumber(seriesDraft.sliceInterval) ?? seriesItem.axial_param?.slice_interval ?? 5,
                                         slice_thickness: parseNumber(seriesDraft.sliceThickness) ?? seriesItem.axial_param?.slice_thickness ?? 5,
+                                        collimator: seriesDraft.collimator || seriesItem.axial_param?.collimator,
+                                        scan_direction: seriesDraft.scanDirection || seriesItem.axial_param?.scan_direction,
+                                        dom: seriesDraft.dom || seriesItem.axial_param?.dom,
                                     }
                                     : seriesItem.axial_param,
                             };
@@ -1234,6 +1294,9 @@ export default function WT32ProtocolDetailScreen() {
                                             matrix: parseNumber(reconDraft.matrix) ?? reconItem.matrix,
                                             window_level: parseNumber(reconDraft.windowLevel) ?? reconItem.window_level,
                                             window_width: parseNumber(reconDraft.windowWidth) ?? reconItem.window_width,
+                                            recon_fov: parseNumber(reconDraft.reconFov) ?? (reconItem as any).recon_fov ?? 250,
+                                            center_x: parseNumber(reconDraft.centerX) ?? (reconItem as any).center_x ?? 0,
+                                            center_y: parseNumber(reconDraft.centerY) ?? (reconItem as any).center_y ?? 0,
                                         }
                                 )),
                             };
@@ -1274,6 +1337,9 @@ export default function WT32ProtocolDetailScreen() {
                                 scan_length: seriesItem.topogram_param.scan_length,
                                 tube_angle: seriesItem.topogram_param.tube_angle,
                                 fov: seriesItem.topogram_param.fov,
+                                collimator: seriesItem.topogram_param.collimator,
+                                scan_direction: seriesItem.topogram_param.scan_direction,
+                                dom: seriesItem.topogram_param.dom,
                                 ctdi_vol: seriesItem.topogram_param.ctdi_vol ?? null,
                                 dlp: seriesItem.topogram_param.dlp ?? null,
                             }
@@ -1287,6 +1353,9 @@ export default function WT32ProtocolDetailScreen() {
                                 rotation_time: seriesItem.helical_param.rotation_time,
                                 scan_length: seriesItem.helical_param.scan_length,
                                 fov: seriesItem.helical_param.fov,
+                                collimator: seriesItem.helical_param.collimator,
+                                scan_direction: seriesItem.helical_param.scan_direction,
+                                dom: seriesItem.helical_param.dom,
                                 auto_ma: seriesItem.helical_param.auto_ma ?? false,
                                 ctdi_vol: seriesItem.helical_param.ctdi_vol ?? null,
                                 dlp: seriesItem.helical_param.dlp ?? null,
@@ -1301,6 +1370,9 @@ export default function WT32ProtocolDetailScreen() {
                                 rotation_time: seriesItem.axial_param.rotation_time,
                                 scan_length: seriesItem.axial_param.scan_length,
                                 fov: seriesItem.axial_param.fov,
+                                collimator: seriesItem.axial_param.collimator,
+                                scan_direction: seriesItem.axial_param.scan_direction,
+                                dom: seriesItem.axial_param.dom,
                                 step_count: seriesItem.axial_param.step_count ?? null,
                                 auto_ma: false,
                                 ctdi_vol: seriesItem.axial_param.ctdi_vol ?? null,
@@ -1316,6 +1388,9 @@ export default function WT32ProtocolDetailScreen() {
                             window_level: reconItem.window_level,
                             slice_thickness: reconItem.slice_thickness,
                             increment: reconItem.increment ?? null,
+                            recon_fov: (reconItem as any).recon_fov ?? 250,
+                            center_x: (reconItem as any).center_x ?? 0,
+                            center_y: (reconItem as any).center_y ?? 0,
                         })),
                     });
                 }
@@ -1327,13 +1402,16 @@ export default function WT32ProtocolDetailScreen() {
                 return;
             }
 
-            if (selection.type === "basic") {
-                await updateSelectedScanSession({
-                    name: basicDraft.name.trim() || protocol.name,
-                    patient_weight: basicDraft.patientWeight.trim(),
-                    patient_position: basicDraft.patientPosition,
-                });
-            } else if (selection.type === "series" && activeSeries) {
+            // Robust handleSave: ensure basic info is ALWAYS saved alongside specific series/recon changes
+            await updateSelectedScanSession({
+                name: basicDraft.name.trim() || protocol.name,
+                body_part: basicDraft.bodyPart,
+                age_group: basicDraft.ageGroup,
+                patient_weight: basicDraft.patientWeight.trim(),
+                patient_position: basicDraft.patientPosition,
+            });
+
+            if (selection.type === "series" && activeSeries) {
                 await updateSelectedScanSessionSeries(activeSeries.id, {
                     series_label: seriesDraft.seriesLabel.trim() || activeSeries.series_label,
                 });
@@ -1345,6 +1423,9 @@ export default function WT32ProtocolDetailScreen() {
                         scan_length: parseNumber(seriesDraft.scanLength) ?? activeSeries.topogram_param.scan_length,
                         fov: parseNumber(seriesDraft.fov) ?? activeSeries.topogram_param.fov,
                         tube_angle: parseNumber(seriesDraft.tubeAngle) ?? activeSeries.topogram_param.tube_angle,
+                        collimator: seriesDraft.collimator || activeSeries.topogram_param.collimator || null,
+                        scan_direction: seriesDraft.scanDirection || activeSeries.topogram_param.scan_direction || null,
+                        dom: seriesDraft.dom || activeSeries.topogram_param.dom || null,
                     });
                 }
 
@@ -1357,6 +1438,9 @@ export default function WT32ProtocolDetailScreen() {
                         rotation_time: parseNumber(seriesDraft.rotationTime) ?? activeSeries.helical_param.rotation_time,
                         pitch: parseNumber(seriesDraft.pitch) ?? activeSeries.helical_param.pitch,
                         slice_thickness: parseNumber(seriesDraft.sliceThickness) ?? activeSeries.helical_param.slice_thickness,
+                        collimator: seriesDraft.collimator || activeSeries.helical_param.collimator || null,
+                        scan_direction: seriesDraft.scanDirection || activeSeries.helical_param.scan_direction || null,
+                        dom: seriesDraft.dom || activeSeries.helical_param.dom || null,
                     });
                 }
 
@@ -1367,8 +1451,11 @@ export default function WT32ProtocolDetailScreen() {
                         scan_length: parseNumber(seriesDraft.scanLength) ?? activeSeries.axial_param.scan_length,
                         fov: parseNumber(seriesDraft.fov) ?? activeSeries.axial_param.fov,
                         rotation_time: parseNumber(seriesDraft.rotationTime) ?? activeSeries.axial_param.rotation_time,
-                        slice_interval: parseNumber(seriesDraft.sliceInterval) ?? { from_attributes: true, value: activeSeries.axial_param.slice_interval }.value, // fallback logic
-                        slice_thickness: { from_attributes: true, value: activeSeries.axial_param.slice_thickness }.value,
+                        slice_interval: parseNumber(seriesDraft.sliceInterval) ?? activeSeries.axial_param.slice_interval,
+                        slice_thickness: parseNumber(seriesDraft.sliceThickness) ?? activeSeries.axial_param.slice_thickness,
+                        collimator: seriesDraft.collimator || activeSeries.axial_param.collimator || null,
+                        scan_direction: seriesDraft.scanDirection || activeSeries.axial_param.scan_direction || null,
+                        dom: seriesDraft.dom || activeSeries.axial_param.dom || null,
                     });
                 }
             } else if (selection.type === "recon" && activeRecon) {
@@ -1380,6 +1467,9 @@ export default function WT32ProtocolDetailScreen() {
                     matrix: parseNumber(reconDraft.matrix) ?? activeRecon.matrix,
                     window_level: parseNumber(reconDraft.windowLevel) ?? activeRecon.window_level,
                     window_width: parseNumber(reconDraft.windowWidth) ?? activeRecon.window_width,
+                    recon_fov: parseNumber(reconDraft.reconFov) ?? activeRecon.recon_fov ?? 250,
+                    center_x: parseNumber(reconDraft.centerX) ?? activeRecon.center_x ?? 0,
+                    center_y: parseNumber(reconDraft.centerY) ?? activeRecon.center_y ?? 0,
                 });
             }
 

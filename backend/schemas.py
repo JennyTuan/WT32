@@ -141,6 +141,9 @@ class TopogramParamBase(BaseModel):
     scan_length: float = 80.0
     tube_angle: float = 270.0
     fov: float = 500.0
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = "OUT"
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
 
@@ -156,6 +159,9 @@ class TopogramParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     tube_angle: Optional[float] = None
     fov: Optional[float] = None
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = None
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
 
@@ -173,6 +179,9 @@ class HelicalParamBase(BaseModel):
     rotation_time: float
     scan_length: float
     fov: float
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = "OUT"
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
     auto_ma: bool = False
@@ -193,6 +202,9 @@ class HelicalParamUpdate(BaseModel):
     rotation_time: Optional[float] = None
     scan_length: Optional[float] = None
     fov: Optional[float] = None
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = None
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
     auto_ma: Optional[bool] = None
@@ -213,6 +225,9 @@ class AxialParamBase(BaseModel):
     rotation_time: float
     scan_length: float
     fov: float
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = "OUT"
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
     auto_ma: bool = False
@@ -234,6 +249,9 @@ class AxialParamUpdate(BaseModel):
     rotation_time: Optional[float] = None
     scan_length: Optional[float] = None
     fov: Optional[float] = None
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = None
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
     auto_ma: Optional[bool] = None
@@ -256,6 +274,9 @@ class ReconSeriesBase(BaseModel):
     window_level: int
     slice_thickness: float
     increment: Optional[float] = None
+    recon_fov: Optional[float] = None
+    center_x: Optional[float] = None
+    center_y: Optional[float] = None
 
 
 class ReconSeriesCreate(ReconSeriesBase):
@@ -272,6 +293,9 @@ class ReconSeriesUpdate(BaseModel):
     window_level: Optional[int] = None
     slice_thickness: Optional[float] = None
     increment: Optional[float] = None
+    recon_fov: Optional[float] = None
+    center_x: Optional[float] = None
+    center_y: Optional[float] = None
 
 
 class ReconSeries(ReconSeriesBase, ORMModel):
@@ -445,6 +469,9 @@ class ScanSessionTopogramParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     tube_angle: Optional[float] = None
     fov: Optional[float] = None
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = None
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
 
@@ -458,6 +485,9 @@ class ScanSessionTopogramParam(ORMModel):
     scan_length: float
     tube_angle: float
     fov: float
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = "OUT"
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
 
@@ -470,6 +500,9 @@ class ScanSessionHelicalParamUpdate(BaseModel):
     rotation_time: Optional[float] = None
     scan_length: Optional[float] = None
     fov: Optional[float] = None
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = None
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
     auto_ma: Optional[bool] = None
@@ -488,6 +521,9 @@ class ScanSessionHelicalParam(ORMModel):
     rotation_time: float
     scan_length: float
     fov: float
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = "OUT"
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
     auto_ma: bool
@@ -503,6 +539,9 @@ class ScanSessionAxialParamUpdate(BaseModel):
     rotation_time: Optional[float] = None
     scan_length: Optional[float] = None
     fov: Optional[float] = None
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = None
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
     auto_ma: Optional[bool] = None
@@ -522,6 +561,9 @@ class ScanSessionAxialParam(ORMModel):
     rotation_time: float
     scan_length: float
     fov: float
+    collimator: Optional[str] = None
+    scan_direction: Optional[str] = "OUT"
+    dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
     auto_ma: bool
@@ -539,6 +581,9 @@ class ScanSessionReconSeriesUpdate(BaseModel):
     window_level: Optional[int] = None
     slice_thickness: Optional[float] = None
     increment: Optional[float] = None
+    recon_fov: Optional[float] = None
+    center_x: Optional[float] = None
+    center_y: Optional[float] = None
 
 
 class ScanSessionReconSeries(ORMModel):
@@ -553,6 +598,9 @@ class ScanSessionReconSeries(ORMModel):
     window_level: int
     slice_thickness: float
     increment: Optional[float] = None
+    recon_fov: Optional[float] = None
+    center_x: Optional[float] = None
+    center_y: Optional[float] = None
 
 
 class ScanSessionBreathingTrainingParamUpdate(BaseModel):

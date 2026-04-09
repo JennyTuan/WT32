@@ -26,6 +26,9 @@ export type ApiScanSessionTopogramParam = {
     scan_length: number;
     tube_angle: number;
     fov: number;
+    collimator?: string | null;
+    scan_direction?: string | null;
+    dom?: string | null;
     ctdi_vol?: number | null;
     dlp?: number | null;
 };
@@ -39,6 +42,9 @@ export type ApiScanSessionHelicalParam = {
     rotation_time: number;
     scan_length: number;
     fov: number;
+    collimator?: string | null;
+    scan_direction?: string | null;
+    dom?: string | null;
     ctdi_vol?: number | null;
     dlp?: number | null;
     auto_ma?: boolean;
@@ -55,6 +61,9 @@ export type ApiScanSessionAxialParam = {
     rotation_time: number;
     scan_length: number;
     fov: number;
+    collimator?: string | null;
+    scan_direction?: string | null;
+    dom?: string | null;
     ctdi_vol?: number | null;
     dlp?: number | null;
     auto_ma?: boolean;
@@ -73,6 +82,9 @@ export type ApiScanSessionReconSeries = {
     window_level: number;
     slice_thickness: number;
     increment?: number | null;
+    recon_fov?: number | null;
+    center_x?: number | null;
+    center_y?: number | null;
 };
 
 export type ApiScanSessionFourDConfig = {
