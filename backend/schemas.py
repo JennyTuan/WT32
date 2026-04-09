@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import date, datetime
 from typing import List, Literal, Optional
@@ -81,6 +81,10 @@ class ProtocolCreate(ProtocolBase):
     is_enabled: bool = True
 
 
+class ProtocolCreateWithSeries(ProtocolCreate):
+    series: List[SeriesCreateWithParams] = Field(default_factory=list)
+
+
 class ProtocolUpdate(BaseModel):
     name: Optional[str] = None
     body_part: Optional[str] = None
@@ -115,6 +119,19 @@ class SeriesUpdate(BaseModel):
     contrast_delay: Optional[float] = None
     trigger_mode: Optional[Literal["manual", "auto_timing", "bolus_tracking"]] = None
     tracking_threshold: Optional[float] = None
+
+
+class SeriesCreateWithParams(BaseModel):
+    series_order: int
+    series_type: Literal["topogram", "helical", "axial", "4d"]
+    series_label: str
+    contrast_delay: Optional[float] = None
+    trigger_mode: Optional[Literal["manual", "auto_timing", "bolus_tracking"]] = None
+    tracking_threshold: Optional[float] = None
+    topogram_param: Optional[TopogramParamUpdate] = None
+    helical_param: Optional[HelicalParamUpdate] = None
+    axial_param: Optional[AxialParamUpdate] = None
+    recon_series: List[ReconSeriesUpdate] = Field(default_factory=list)
 
 
 class TopogramParamBase(BaseModel):

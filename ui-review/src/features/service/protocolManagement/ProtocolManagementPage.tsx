@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ChevronUp,
@@ -10,7 +11,6 @@ import {
   Search,
   Trash2,
   Power,
-  X,
   ArrowUpDown,
 } from "lucide-react";
 
@@ -41,16 +41,7 @@ type ApiProtocolSummary = {
   supported_modes: string[];
 };
 
-type ProtocolFormData = {
-  name: string;
-  body_part: string;
-  age_group: AgeGroup;
-  patient_weight: string;
-  patient_position: PatientPosition;
-  table_direction: TableDirection;
-  scan_mode: ScanMode;
-  description: string;
-};
+// Removed ProtocolFormData as it is now handled in WT32ProtocolDetailScreen
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -60,10 +51,7 @@ const buildApiUrl = (path: string) => `${API_BASE_URL}${path}`;
 const AGE_GROUP_LABELS: Record<AgeGroup, string> = { adult: "成人", child: "儿童", infant: "婴幼儿" };
 const SCAN_MODE_LABELS: Record<ScanMode, string> = { plain: "平扫", contrast: "增强", "4d": "4D" };
 
-const EMPTY_FORM: ProtocolFormData = {
-  name: "", body_part: "", age_group: "adult", patient_weight: "50-90kg",
-  patient_position: "HFS", table_direction: "in", scan_mode: "plain", description: "",
-};
+// Removed EMPTY_FORM
 
 const formatDate = (iso: string | null | undefined) => {
   if (!iso) return null;
@@ -78,12 +66,7 @@ const formatDate = (iso: string | null | undefined) => {
 type SortKey = "name" | "id" | "created_at" | "updated_at" | "is_enabled";
 type SortDir = "asc" | "desc";
 type SourceFilter = "all" | "custom" | "factory";
-type ModalMode = "create" | "edit" | "save-as" | "view";
 type ModalState =
-  | { type: "create" }
-  | { type: "edit"; protocol: ApiProtocolSummary }
-  | { type: "save-as"; protocol: ApiProtocolSummary }
-  | { type: "view"; protocol: ApiProtocolSummary }
   | { type: "delete"; protocol: ApiProtocolSummary }
   | null;
 
@@ -152,205 +135,7 @@ function IconBtn({
   );
 }
 
-// ── Form Modal ─────────────────────────────────────────────────────────────
-
-function FormModal({
-  mode,
-  initial,
-  onClose,
-  onSubmit,
-}: {
-  mode: ModalMode;
-  initial: ProtocolFormData;
-  onClose: () => void;
-  onSubmit: (data: ProtocolFormData) => Promise<void>;
-}) {
-  const [form, setForm] = useState<ProtocolFormData>(initial);
-  const [errors, setErrors] = useState<Partial<Record<keyof ProtocolFormData, string>>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [apiError, setApiError] = useState<string | null>(null);
-
-  const isReadOnly = mode === "view";
-
-  const titles: Record<ModalMode, string> = {
-    create: "新建协议",
-    edit: "编辑协议",
-    "save-as": "另存为自设协议",
-    view: "协议详情",
-  };
-
-  const set = <K extends keyof ProtocolFormData>(k: K, v: ProtocolFormData[K]) =>
-    setForm((p) => ({ ...p, [k]: v }));
-
-  const validate = () => {
-    const e: Partial<Record<keyof ProtocolFormData, string>> = {};
-    if (!form.name.trim()) e.name = "请填写协议名称";
-    if (!form.body_part.trim()) e.body_part = "请填写扫描部位";
-    if (!form.patient_weight.trim()) e.patient_weight = "请填写体重范围";
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
-
-  const handleSubmit = async () => {
-    if (!validate()) return;
-    setSubmitting(true);
-    setApiError(null);
-    try {
-      await onSubmit(form);
-    } catch (err: unknown) {
-      setApiError(err instanceof Error ? err.message : "提交失败，请重试");
-      setSubmitting(false);
-    }
-  };
-
-  const inputCls = (err?: string) =>
-    `h-9 w-full rounded-lg border px-3 text-[13px] text-[#263238] bg-white outline-none transition-all
-     focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15
-     disabled:bg-[#F8FAFC] disabled:text-[#90A4AE] disabled:cursor-not-allowed
-     ${err ? "border-[#EF5350] bg-[#FFF8F8]" : "border-[#CFD8DC] hover:border-[#90A4AE]"}`;
-
-  return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#0F172A]/40 backdrop-blur-[2px]">
-      <div className="w-[540px] flex flex-col rounded-xl bg-white shadow-2xl border border-[#E0E8F2] overflow-hidden max-h-[660px]">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#EEF2F9] bg-gradient-to-r from-[#F8FBFF] to-[#EEF4FF]">
-          <div>
-            <h2 className="text-[15px] font-black text-[#1A2332]">{titles[mode]}</h2>
-            {mode === "save-as" && (
-              <p className="mt-0.5 text-[11px] text-[#546E7A]">将出厂协议复制为自设协议，可修改后保存</p>
-            )}
-          </div>
-          <button type="button" onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[#90A4AE] hover:bg-[#EEF2F9] hover:text-[#546E7A] transition-colors">
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {apiError && (
-            <div className="rounded-lg bg-[#FFF3F3] border border-[#FFCDD2] px-4 py-3 text-[12px] text-[#C62828] font-medium">
-              {apiError}
-            </div>
-          )}
-
-          {/* Name */}
-          <div className="space-y-1.5">
-            <label className="block text-[12px] font-bold text-[#37474F]">
-              协议名称{!isReadOnly && <span className="ml-0.5 text-[#EF5350]">*</span>}
-            </label>
-            <input type="text" disabled={isReadOnly} value={form.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="例：脑部螺旋扫描"
-              className={inputCls(errors.name)} />
-            {errors.name && <p className="text-[11px] text-[#EF5350]">{errors.name}</p>}
-          </div>
-
-          {/* Body part */}
-          <div className="space-y-1.5">
-            <label className="block text-[12px] font-bold text-[#37474F]">
-              扫描部位{!isReadOnly && <span className="ml-0.5 text-[#EF5350]">*</span>}
-            </label>
-            <input type="text" disabled={isReadOnly} value={form.body_part}
-              onChange={(e) => set("body_part", e.target.value)}
-              placeholder="例：HEAD、CHEST、ABDOMEN"
-              className={inputCls(errors.body_part)} />
-            {errors.body_part && <p className="text-[11px] text-[#EF5350]">{errors.body_part}</p>}
-          </div>
-
-          {/* Row: age + weight */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="block text-[12px] font-bold text-[#37474F]">年龄组</label>
-              <select disabled={isReadOnly} value={form.age_group}
-                onChange={(e) => set("age_group", e.target.value as AgeGroup)}
-                className={inputCls()}>
-                <option value="adult">成人</option>
-                <option value="child">儿童</option>
-                <option value="infant">婴幼儿</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-[12px] font-bold text-[#37474F]">
-                体重范围{!isReadOnly && <span className="ml-0.5 text-[#EF5350]">*</span>}
-              </label>
-              <input type="text" disabled={isReadOnly} value={form.patient_weight}
-                onChange={(e) => set("patient_weight", e.target.value)}
-                placeholder="例：50-90kg"
-                className={inputCls(errors.patient_weight)} />
-              {errors.patient_weight && <p className="text-[11px] text-[#EF5350]">{errors.patient_weight}</p>}
-            </div>
-          </div>
-
-          {/* Row: position + direction */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="block text-[12px] font-bold text-[#37474F]">患者体位</label>
-              <select disabled={isReadOnly} value={form.patient_position}
-                onChange={(e) => set("patient_position", e.target.value as PatientPosition)}
-                className={inputCls()}>
-                <option value="HFS">HFS · 头先进仰卧</option>
-                <option value="FFS">FFS · 脚先进仰卧</option>
-                <option value="HFP">HFP · 头先进俯卧</option>
-                <option value="FFP">FFP · 脚先进俯卧</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-[12px] font-bold text-[#37474F]">进床方向</label>
-              <select disabled={isReadOnly} value={form.table_direction}
-                onChange={(e) => set("table_direction", e.target.value as TableDirection)}
-                className={inputCls()}>
-                <option value="in">进床</option>
-                <option value="out">出床</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Scan mode */}
-          <div className="space-y-1.5">
-            <label className="block text-[12px] font-bold text-[#37474F]">扫描模式</label>
-            <div className="flex gap-2">
-              {(["plain", "contrast", "4d"] as ScanMode[]).map((m) => (
-                <button key={m} type="button" disabled={isReadOnly}
-                  onClick={() => !isReadOnly && set("scan_mode", m)}
-                  className={`flex-1 h-9 rounded-lg border text-[13px] font-bold transition-all active:scale-95 ${
-                    form.scan_mode === m
-                      ? "bg-[#1E88E5] border-[#1E88E5] text-white shadow-sm"
-                      : "border-[#CFD8DC] text-[#546E7A] hover:border-[#90A4AE] hover:bg-[#F5F8FF] disabled:opacity-60"
-                  }`}>
-                  {SCAN_MODE_LABELS[m]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <label className="block text-[12px] font-bold text-[#37474F]">备注</label>
-            <textarea disabled={isReadOnly} value={form.description}
-              onChange={(e) => set("description", e.target.value)}
-              rows={3} placeholder="可选：协议说明或适应症"
-              className="w-full rounded-lg border border-[#CFD8DC] px-3 py-2 text-[13px] text-[#263238] bg-white outline-none resize-none transition-all focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15 hover:border-[#90A4AE] disabled:bg-[#F8FAFC] disabled:text-[#90A4AE] disabled:cursor-not-allowed" />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2.5 px-6 py-4 border-t border-[#EEF2F9] bg-[#F8FBFF]">
-          <button type="button" onClick={onClose}
-            className="h-9 px-5 rounded-lg border border-[#CFD8DC] text-[13px] font-bold text-[#546E7A] hover:bg-[#EEF2F9] transition-colors active:scale-95">
-            {isReadOnly ? "关闭" : "取消"}
-          </button>
-          {!isReadOnly && (
-            <button type="button" onClick={handleSubmit} disabled={submitting}
-              className="h-9 px-6 rounded-lg bg-[#1E88E5] text-[13px] font-bold text-white hover:bg-[#1565C0] disabled:opacity-50 transition-all active:scale-95 shadow-sm">
-              {submitting ? "保存中…" : "保存"}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+// Removed FormModal component
 
 // ── Delete Confirm ─────────────────────────────────────────────────────────
 
@@ -400,6 +185,7 @@ function DeleteConfirm({
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 export default function ProtocolManagementPage() {
+  const navigate = useNavigate();
   const [protocols, setProtocols] = useState<ApiProtocolSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -479,31 +265,7 @@ export default function ProtocolManagementPage() {
     [protocols]
   );
 
-  // CRUD
-  const createProtocol = async (data: ProtocolFormData) => {
-    const res = await fetch(buildApiUrl("/api/protocols/"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...data, is_factory: false, is_enabled: true }),
-    });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d as { detail?: string }).detail ?? `HTTP ${res.status}`); }
-    await fetchProtocols();
-    setModal(null);
-    setSourceFilter("custom");
-    showToast("协议创建成功");
-  };
-
-  const updateProtocol = async (id: number, data: ProtocolFormData) => {
-    const res = await fetch(buildApiUrl(`/api/protocols/${id}`), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d as { detail?: string }).detail ?? `HTTP ${res.status}`); }
-    await fetchProtocols();
-    setModal(null);
-    showToast("协议已保存");
-  };
+  // createProtocol and updateProtocol moved to WT32ProtocolDetailScreen
 
   const toggleEnabled = async (p: ApiProtocolSummary) => {
     const res = await fetch(buildApiUrl(`/api/protocols/${p.id}/toggle-enabled`), { method: "PATCH" });
@@ -520,18 +282,7 @@ export default function ProtocolManagementPage() {
     showToast("协议已删除");
   };
 
-  const handleModalSubmit = async (data: ProtocolFormData) => {
-    if (!modal) return;
-    if (modal.type === "create") await createProtocol(data);
-    else if (modal.type === "edit") await updateProtocol(modal.protocol.id, data);
-    else if (modal.type === "save-as") await createProtocol(data);
-  };
-
-  const toForm = (p: ApiProtocolSummary): ProtocolFormData => ({
-    name: p.name, body_part: p.body_part, age_group: p.age_group,
-    patient_weight: p.patient_weight, patient_position: p.patient_position,
-    table_direction: p.table_direction, scan_mode: p.scan_mode, description: p.description ?? "",
-  });
+// handleModalSubmit and toForm removed
 
   // Sort header
   const Th = ({ col, children, width }: { col: SortKey; children: React.ReactNode; width?: string }) => (
@@ -552,10 +303,10 @@ export default function ProtocolManagementPage() {
 
   return (
     <ServiceModeShell currentRoute="/service/settings/protocol-management">
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5 custom-scrollbar">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 pr-0.5">
 
         {/* ── Tab + Toolbar ─────────────────────────────────── */}
-        <div className="overflow-hidden rounded-xl border border-[#DDEAF8] bg-white shadow-sm">
+        <div className="flex flex-1 flex-col min-h-0 overflow-hidden rounded-xl border border-[#DDEAF8] bg-white shadow-sm">
           <div className="flex flex-wrap items-center gap-2.5 border-b border-[#EEF2F9] px-4 py-3">
             <div className="min-w-[160px]">
               <select
@@ -626,7 +377,7 @@ export default function ProtocolManagementPage() {
               </button>
 
               {sourceFilter !== "factory" && (
-                <button type="button" onClick={() => setModal({ type: "create" })}
+                <button type="button" onClick={() => navigate("/protocol-detail?mode=new&source=catalog")}
                   className="flex h-9 items-center gap-1.5 rounded-lg bg-[#1E88E5] px-4 text-[13px] font-bold text-white shadow-sm hover:bg-[#1565C0] transition-all active:scale-95">
                   <Plus size={15} strokeWidth={2.5} />
                   新建协议
@@ -647,7 +398,7 @@ export default function ProtocolManagementPage() {
         )}
 
         {/* ── Table ─────────────────────────────────────────── */}
-        <div className="border-b border-[#EEF2F9]">
+        <div className="flex-1 overflow-y-auto custom-scrollbar border-b border-[#EEF2F9]">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-14 gap-3 text-[#B0BEC5]">
               <RefreshCcw size={22} className="animate-spin" />
@@ -677,7 +428,7 @@ export default function ProtocolManagementPage() {
                       : "暂无协议"}
               </p>
               {!search && sourceFilter !== "factory" && (
-                <button type="button" onClick={() => setModal({ type: "create" })}
+                <button type="button" onClick={() => navigate("/protocol-detail?mode=new&source=catalog")}
                   className="mt-1 h-8 px-4 rounded-lg bg-[#1E88E5] text-[12px] font-bold text-white hover:bg-[#1565C0] transition-colors active:scale-95">
                   + 新建协议
                 </button>
@@ -688,14 +439,13 @@ export default function ProtocolManagementPage() {
               <table className="w-full table-fixed min-w-[760px]">
                 <colgroup>
                   <col style={{ width: "56px" }} />
-                  <col style={{ width: "28%" }} />
+                  <col />
                   <col style={{ width: "72px" }} />
                   <col style={{ width: "112px" }} />
                   <col style={{ width: "92px" }} />
-                  <col />
                   <col style={{ width: sourceFilter === "factory" ? "140px" : "120px" }} />
                 </colgroup>
-                <thead className="border-b border-[#EEF2F9] bg-[#F8FBFF]">
+                <thead className="border-b border-[#EEF2F9] bg-[#F8FBFF] sticky top-0 z-10 shadow-sm">
                   <tr>
                     <th className="px-3 py-3 text-center text-[11px] font-black uppercase tracking-wide text-[#78909C]">序号</th>
                     <Th col="name">协议名称</Th>
@@ -737,11 +487,11 @@ export default function ProtocolManagementPage() {
                         <td className="px-3 py-3.5 whitespace-nowrap"><StatusBadge enabled={p.is_enabled} /></td>
 
                         <td className="px-3 py-3.5">
-                          <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center justify-end gap-1">
                             {!p.is_factory ? (
                               <>
                                 <IconBtn icon={Pencil} label="编辑" variant="primary"
-                                  onClick={() => setModal({ type: "edit", protocol: p })} />
+                                  onClick={() => navigate(`/protocol-detail?mode=edit&id=${p.id}&source=catalog`)} />
                                 <IconBtn icon={Power} label={p.is_enabled ? "禁用" : "启用"}
                                   variant={p.is_enabled ? "warning" : "default"}
                                   onClick={() => toggleEnabled(p)} />
@@ -751,9 +501,9 @@ export default function ProtocolManagementPage() {
                             ) : (
                               <>
                                 <IconBtn icon={Eye} label="查看详情"
-                                  onClick={() => setModal({ type: "view", protocol: p })} />
+                                  onClick={() => navigate(`/protocol-detail?mode=view&id=${p.id}&source=catalog`)} />
                                 <button type="button"
-                                  onClick={() => setModal({ type: "save-as", protocol: p })}
+                                  onClick={() => navigate(`/protocol-detail?mode=new&id=${p.id}&source=catalog`)}
                                   className="flex h-8 items-center gap-1 rounded-lg px-2.5 text-[11px] font-bold text-[#1565C0] hover:bg-[#E3F2FD] transition-all active:scale-90 whitespace-nowrap">
                                   <BookCopy size={13} strokeWidth={1.8} />
                                   另存为
@@ -770,8 +520,9 @@ export default function ProtocolManagementPage() {
             </div>
           )}
         </div>
+
         {!loading && !error && filtered.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-2.5">
+          <div className="flex items-center justify-between px-4 py-2.5 shrink-0 bg-[#F8FBFF] border-t border-[#EEF2F9]">
             <div className="flex items-center gap-2 text-[12px] text-[#78909C]">
               每页
               <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
@@ -818,18 +569,6 @@ export default function ProtocolManagementPage() {
       </div>
 
       {/* ── Overlays ──────────────────────────────────────────── */}
-      {modal && modal.type !== "delete" && (
-        <FormModal
-          mode={modal.type}
-          initial={
-            modal.type === "create" ? EMPTY_FORM
-            : modal.type === "save-as" ? { ...toForm(modal.protocol), name: `${modal.protocol.name}（副本）` }
-            : toForm(modal.protocol)
-          }
-          onClose={() => setModal(null)}
-          onSubmit={handleModalSubmit}
-        />
-      )}
       {modal?.type === "delete" && (
         <DeleteConfirm
           protocol={modal.protocol}

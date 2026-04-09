@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timezone
 
@@ -328,10 +328,70 @@ def toggle_protocol_enabled(protocol_id: int, db: Session = Depends(get_db)):
     return _get_protocol_or_404(protocol.id, db)
 
 
-@router.delete("/{protocol_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_protocol(protocol_id: int, db: Session = Depends(get_db)):
+@router.post("/full", response_model=schemas.ProtocolDetail, status_code=status.HTTP_201_CREATED)
+def create_protocol_full(payload: schemas.ProtocolCreateWithSeries, db: Session = Depends(get_db)):
+    # 1. Create Protocol
+    protocol_data = payload.model_dump(exclude={"series"})
+    protocol = models.Protocol(**protocol_data)
+    db.add(protocol)
+    db.flush()  # Get protocol.id
+
+    # 2. Add Series
+    for s_data in payload.series:
+        s_dict = s_data.model_dump(exclude={"topogram_param", "helical_param", "axial_param", "recon_series"})
+        series = models.Series(**s_dict, protocol_id=protocol.id)
+        db.add(series)
+        db.flush()
+
+        # Add single params
+        if s_data.topogram_param:
+            db.add(models.TopogramParam(**s_data.topogram_param.model_dump(), series_id=series.id))
+        if s_data.helical_param:
+            db.add(models.HelicalParam(**s_data.helical_param.model_dump(), series_id=series.id))
+        if s_data.axial_param:
+            db.add(models.AxialParam(**s_data.axial_param.model_dump(), series_id=series.id))
+        
+        # Add recons
+        for r_data in s_data.recon_series:
+            db.add(models.ReconSeries(**r_data.model_dump(), series_id=series.id))
+
+    db.commit()
+    db.refresh(protocol)
+    return _get_protocol_or_404(protocol.id, db)
+
+
+@router.put("/{protocol_id}/full", response_model=schemas.ProtocolDetail)
+def update_protocol_full(protocol_id: int, payload: schemas.ProtocolCreateWithSeries, db: Session = Depends(get_db)):
     protocol = _get_protocol_or_404(protocol_id, db)
     if protocol.is_factory:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Factory protocols cannot be deleted")
-    db.delete(protocol)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Factory protocols cannot be modified")
+
+    # 1. Update basic fields
+    protocol_data = payload.model_dump(exclude={"series"}, exclude_unset=True)
+    for field, value in protocol_data.items():
+        setattr(protocol, field, value)
+    protocol.updated_at = datetime.now(timezone.utc)
+
+    # 2. Replace series (Simplest for prototype: delete and recreate)
+    # Alternatively: update in place. For simplicity, we clear and add.
+    db.query(models.Series).filter(models.Series.protocol_id == protocol.id).delete()
+    
+    for s_data in payload.series:
+        s_dict = s_data.model_dump(exclude={"topogram_param", "helical_param", "axial_param", "recon_series"})
+        series = models.Series(**s_dict, protocol_id=protocol.id)
+        db.add(series)
+        db.flush()
+
+        if s_data.topogram_param:
+            db.add(models.TopogramParam(**s_data.topogram_param.model_dump(), series_id=series.id))
+        if s_data.helical_param:
+            db.add(models.HelicalParam(**s_data.helical_param.model_dump(), series_id=series.id))
+        if s_data.axial_param:
+            db.add(models.AxialParam(**s_data.axial_param.model_dump(), series_id=series.id))
+        
+        for r_data in s_data.recon_series:
+            db.add(models.ReconSeries(**r_data.model_dump(), series_id=series.id))
+
     db.commit()
+    db.refresh(protocol)
+    return _get_protocol_or_404(protocol.id, db)

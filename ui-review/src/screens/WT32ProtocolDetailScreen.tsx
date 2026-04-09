@@ -65,7 +65,9 @@ type ApiProtocolDetail = {
     patient_weight: string;
     patient_position: string;
     table_direction: string;
+    scan_mode: "plain" | "contrast" | "4d";
     description?: string | null;
+    is_factory: boolean;
     series: ApiSeriesDetail[];
 };
 
@@ -78,6 +80,7 @@ type ApiProtocolSummary = {
     patient_position: string;
     table_direction: string;
     description?: string | null;
+    is_factory: boolean;
     series_count: number;
     supported_modes: ApiSeriesDetail["series_type"][];
 };
@@ -183,7 +186,9 @@ const mapScanSessionToProtocolDetail = (scanSession: Awaited<ReturnType<typeof f
         patient_weight: scanSession.patient_weight,
         patient_position: scanSession.patient_position,
         table_direction: scanSession.table_direction,
+        scan_mode: scanSession.scan_mode,
         description: scanSession.description,
+        is_factory: false,
         series: scanSession.series.map((series) => ({
             id: series.id,
             series_type: series.series_type,
@@ -674,7 +679,13 @@ export default function WT32ProtocolDetailScreen() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const isNewMode = searchParams.get("mode") === "new";
+    const isViewMode = searchParams.get("mode") === "view";
+    const source = searchParams.get("source");
+    const isCatalogSource = source === "catalog";
+    const protocolId = searchParams.get("id");
     const [protocol, setProtocol] = useState<ApiProtocolDetail | null>(null);
+    const isFactory = protocol?.is_factory === true;
+    const isReadOnly = isViewMode || (isCatalogSource && isFactory);
     const [catalogProtocols, setCatalogProtocols] = useState<ApiProtocolSummary[]>([]);
     const [selectedPos, setSelectedPos] = useState("HFS");
     const [selection, setSelection] = useState<Selection>({ type: "basic" });
@@ -757,12 +768,14 @@ export default function WT32ProtocolDetailScreen() {
         if (isNewMode) {
             setProtocol({
                 id: 0,
-                name: "",
-                body_part: "",
+                name: "新建协议",
+                body_part: bodyPartOptions[0] || "",
                 age_group: "adult",
-                patient_weight: "",
+                patient_weight: "50-90kg",
                 patient_position: "HFS",
-                table_direction: "",
+                table_direction: "in",
+                scan_mode: "plain",
+                is_factory: false,
                 series: [],
             });
             return;
@@ -772,6 +785,16 @@ export default function WT32ProtocolDetailScreen() {
 
         const loadProtocolSource = async () => {
             try {
+                if (isCatalogSource && protocolId) {
+                    const res = await fetch(buildApiUrl(`/api/protocols/${protocolId}`));
+                    if (res.ok) {
+                        const data = await res.json();
+                        setProtocol(data);
+                        if (data.patient_position) setSelectedPos(data.patient_position);
+                        return;
+                    }
+                }
+
                 const synced = await syncProtocolFromSession();
                 if (!cancelled && synced) return;
             } catch (error) {
@@ -797,9 +820,9 @@ export default function WT32ProtocolDetailScreen() {
         return () => {
             cancelled = true;
         };
-    }, [isNewMode]);
+    }, [isNewMode, isCatalogSource, protocolId, bodyPartOptions]);
 
-    const series = protocol?.series ?? [];
+    const series = useMemo(() => protocol?.series ?? [], [protocol?.series]);
     const topograms = series.filter((item) => item.series_type === "topogram");
     const acquisitions = series.filter((item) => item.series_type !== "topogram");
     const ageLabel = protocol ? (AGE_LABEL[protocol.age_group] ?? protocol.age_group) : "-";
@@ -833,7 +856,7 @@ export default function WT32ProtocolDetailScreen() {
             patientWeight: protocol?.patient_weight ?? "",
             patientPosition: protocol?.patient_position ?? selectedPos,
         });
-    }, [protocol?.id, protocol?.name, protocol?.body_part, protocol?.age_group, protocol?.patient_weight, protocol?.patient_position, bodyPartOptions, ageGroupOptions]);
+    }, [protocol?.id, protocol?.name, protocol?.body_part, protocol?.age_group, protocol?.patient_weight, protocol?.patient_position, bodyPartOptions, ageGroupOptions, selectedPos]);
 
     useEffect(() => {
         setBasicDraft((current) => (
@@ -841,7 +864,7 @@ export default function WT32ProtocolDetailScreen() {
                 ? current
                 : { ...current, patientPosition: selectedPos }
         ));
-    }, [selectedPos]);
+    }, [selectedPos, setBasicDraft]);
 
     useEffect(() => {
         if (!activeSeries || selection.type !== "series") return;
@@ -1028,14 +1051,116 @@ export default function WT32ProtocolDetailScreen() {
         return Number.isFinite(parsed) ? parsed : null;
     };
 
+    const saveToCatalog = async () => {
+        if (!protocol) return;
+        setIsSaving(true);
+        setSaveMessage(null);
+
+        try {
+            // Collect full protocol payload for nested persistence
+            const payload = {
+                name: basicDraft.name.trim() || protocol.name,
+                body_part: basicDraft.bodyPart,
+                age_group: basicDraft.ageGroup,
+                patient_weight: basicDraft.patientWeight.trim(),
+                patient_position: basicDraft.patientPosition,
+                table_direction: protocol.table_direction || "in",
+                scan_mode: protocol.scan_mode || "plain",
+                description: protocol.description || "",
+                series: series.map((s, idx) => {
+                    const sel = selection;
+                    const sId = (sel.type === "series" || sel.type === "recon") ? sel.seriesId : undefined;
+                    const rId = (sel.type === "recon") ? sel.reconId : undefined;
+                    
+                    const isActive = s.id === sId;
+                    const sLabel = (isActive && sel.type === "series") ? seriesDraft.seriesLabel.trim() : s.series_label;
+                    
+                    return {
+                        series_order: idx + 1,
+                        series_type: s.series_type,
+                        series_label: sLabel,
+                        topogram_param: s.topogram_param ? {
+                            kv: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.kv) ?? s.topogram_param.kv) : s.topogram_param.kv,
+                            ma: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.topogram_param.ma) : s.topogram_param.ma,
+                            scan_length: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.topogram_param.scan_length) : s.topogram_param.scan_length,
+                            tube_angle: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.tubeAngle) ?? s.topogram_param.tube_angle) : s.topogram_param.tube_angle,
+                            fov: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.topogram_param.fov) : s.topogram_param.fov,
+                        } : null,
+                        helical_param: s.helical_param ? {
+                            kv: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.kv) ?? s.helical_param.kv) : s.helical_param.kv,
+                            ma: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.helical_param.ma) : s.helical_param.ma,
+                            slice_thickness: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.sliceThickness) ?? s.helical_param.slice_thickness) : s.helical_param.slice_thickness,
+                            pitch: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.pitch) ?? s.helical_param.pitch) : s.helical_param.pitch,
+                            rotation_time: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.rotationTime) ?? s.helical_param.rotation_time) : s.helical_param.rotation_time,
+                            scan_length: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.helical_param.scan_length) : s.helical_param.scan_length,
+                            fov: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.helical_param.fov) : s.helical_param.fov,
+                            auto_ma: s.helical_param.auto_ma,
+                        } : null,
+                        axial_param: s.axial_param ? {
+                            kv: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.kv) ?? s.axial_param.kv) : s.axial_param.kv,
+                            ma: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.axial_param.ma) : s.axial_param.ma,
+                            slice_thickness: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.sliceThickness) ?? s.axial_param.slice_thickness) : s.axial_param.slice_thickness,
+                            slice_interval: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.sliceInterval) ?? s.axial_param.slice_interval) : s.axial_param.slice_interval,
+                            rotation_time: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.rotationTime) ?? s.axial_param.rotation_time) : s.axial_param.rotation_time,
+                            scan_length: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.axial_param.scan_length) : s.axial_param.scan_length,
+                            fov: (isActive && sel.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.axial_param.fov) : s.axial_param.fov,
+                            step_count: s.axial_param.step_count,
+                        } : null,
+                        recon_series: s.recon_series.map(r => {
+                            const isReconActive = isActive && sel.type === "recon" && r.id === rId;
+                            return {
+                                recon_name: isReconActive ? (reconDraft.reconName.trim() || r.recon_name) : r.recon_name,
+                                recon_type: "soft",
+                                kernel: isReconActive ? (reconDraft.kernel.trim() || r.kernel) : r.kernel,
+                                matrix: isReconActive ? (parseNumber(reconDraft.matrix) ?? r.matrix) : r.matrix,
+                                window_width: isReconActive ? (parseNumber(reconDraft.windowWidth) ?? r.window_width) : r.window_width,
+                                window_level: isReconActive ? (parseNumber(reconDraft.windowLevel) ?? r.window_level) : r.window_level,
+                                slice_thickness: isReconActive ? (parseNumber(reconDraft.sliceThickness) ?? r.slice_thickness) : r.slice_thickness,
+                                increment: isReconActive ? (parseNumber(reconDraft.increment) ?? r.increment) : r.increment,
+                            };
+                        })
+                    };
+                })
+            };
+
+            const url = isNewMode
+                ? buildApiUrl("/api/protocols/full")
+                : buildApiUrl(`/api/protocols/${protocolId}/full`);
+            
+            const method = isNewMode ? "POST" : "PUT";
+
+            const response = await fetch(url, {
+                method,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) throw new Error("保存协议至目录失败");
+
+            setSaveMessage("协议已更新");
+            setTimeout(() => navigate(-1), 1000);
+        } catch (error) {
+            console.error("Save to catalog failed:", error);
+            setSaveMessage("保存失败，请重试");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const handleSave = async () => {
         if (!protocol) return;
+
+        if (isCatalogSource) {
+            await saveToCatalog();
+            return;
+        }
 
         setIsSaving(true);
         setSaveMessage(null);
 
         try {
             if (isNewMode) {
+                // ... ad hoc session save logic remains here ...
                 let nextProtocol = {
                     ...protocol,
                     name: basicDraft.name.trim() || protocol.name,
@@ -1242,8 +1367,8 @@ export default function WT32ProtocolDetailScreen() {
                         scan_length: parseNumber(seriesDraft.scanLength) ?? activeSeries.axial_param.scan_length,
                         fov: parseNumber(seriesDraft.fov) ?? activeSeries.axial_param.fov,
                         rotation_time: parseNumber(seriesDraft.rotationTime) ?? activeSeries.axial_param.rotation_time,
-                        slice_interval: parseNumber(seriesDraft.sliceInterval) ?? activeSeries.axial_param.slice_interval,
-                        slice_thickness: parseNumber(seriesDraft.sliceThickness) ?? activeSeries.axial_param.slice_thickness,
+                        slice_interval: parseNumber(seriesDraft.sliceInterval) ?? { from_attributes: true, value: activeSeries.axial_param.slice_interval }.value, // fallback logic
+                        slice_thickness: { from_attributes: true, value: activeSeries.axial_param.slice_thickness }.value,
                     });
                 }
             } else if (selection.type === "recon" && activeRecon) {
@@ -1463,13 +1588,15 @@ export default function WT32ProtocolDetailScreen() {
                 >
                     取消
                 </button>
-                <button
-                    onClick={() => void handleSave()}
-                    disabled={isSaving || selection.type === "dose"}
-                    className="h-[36px] px-6 bg-[#4D94FF] rounded-md text-[13px] font-bold text-white hover:bg-[#1E88E5] transition-colors disabled:bg-[#B0C4DE] disabled:cursor-not-allowed"
-                >
-                    {isSaving ? "保存中..." : "保存"}
-                </button>
+                {!isReadOnly && (
+                    <button
+                        onClick={() => void handleSave()}
+                        disabled={isSaving || selection.type === "dose"}
+                        className="h-[36px] px-6 bg-[#4D94FF] rounded-md text-[13px] font-bold text-white hover:bg-[#1E88E5] transition-colors disabled:bg-[#B0C4DE] disabled:cursor-not-allowed"
+                    >
+                        {isSaving ? "保存中..." : "保存"}
+                    </button>
+                )}
             </footer>
         </div>
     );
