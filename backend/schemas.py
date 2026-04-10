@@ -73,6 +73,8 @@ class ProtocolBase(BaseModel):
     patient_position: Literal["HFS", "FFS", "HFP", "FFP"]
     table_direction: Literal["in", "out"]
     scan_mode: Literal["plain", "contrast", "4d"]
+    is_4d: bool = False
+    is_enhance: bool = False
     description: Optional[str] = None
 
 
@@ -93,6 +95,8 @@ class ProtocolUpdate(BaseModel):
     patient_position: Optional[Literal["HFS", "FFS", "HFP", "FFP"]] = None
     table_direction: Optional[Literal["in", "out"]] = None
     scan_mode: Optional[Literal["plain", "contrast", "4d"]] = None
+    is_4d: Optional[bool] = None
+    is_enhance: Optional[bool] = None
     description: Optional[str] = None
     is_enabled: Optional[bool] = None
 

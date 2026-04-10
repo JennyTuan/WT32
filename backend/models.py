@@ -32,6 +32,8 @@ class Protocol(Base):
     patient_position = Column(String(10), nullable=False)
     table_direction = Column(String(10), nullable=False)
     scan_mode = Column(String(20), nullable=False, index=True)
+    is_4d = Column(Boolean, nullable=False, default=False)
+    is_enhance = Column(Boolean, nullable=False, default=False)
     description = Column(Text, nullable=True)
     is_factory = Column(Boolean, nullable=False, default=False)
     is_enabled = Column(Boolean, nullable=False, default=True)

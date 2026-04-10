@@ -634,6 +634,8 @@ def _migrate_protocol_columns() -> None:
         "ALTER TABLE protocols ADD COLUMN is_factory BOOLEAN NOT NULL DEFAULT 0",
         "ALTER TABLE protocols ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT 1",
         "ALTER TABLE protocols ADD COLUMN updated_at DATETIME",
+        "ALTER TABLE protocols ADD COLUMN is_4d BOOLEAN NOT NULL DEFAULT 0",
+        "ALTER TABLE protocols ADD COLUMN is_enhance BOOLEAN NOT NULL DEFAULT 0",
         # Topogram Param additions
         "ALTER TABLE topogram_params ADD COLUMN collimator VARCHAR(50)",
         "ALTER TABLE topogram_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
@@ -683,6 +685,12 @@ def _migrate_protocol_columns() -> None:
             "UPDATE protocols SET is_factory = 0 "
             "WHERE description IS NULL OR description NOT LIKE '%seeded protocol'"
         ))
+        conn.execute(text(
+            "UPDATE protocols SET is_4d = 1 WHERE scan_mode = '4d'"
+        ))
+        conn.execute(text(
+            "UPDATE protocols SET is_enhance = 1 WHERE scan_mode = 'contrast'"
+        ))
         conn.commit()
 
 
@@ -718,6 +726,8 @@ def init_db() -> None:
                 patient_position=protocol_seed["patient_position"],
                 table_direction=protocol_seed["table_direction"],
                 scan_mode=protocol_seed["scan_mode"],
+                is_4d=protocol_seed["scan_mode"] == "4d",
+                is_enhance=protocol_seed["scan_mode"] == "contrast",
                 description=protocol_seed["description"],
                 is_factory=True,
                 is_enabled=True,

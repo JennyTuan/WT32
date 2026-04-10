@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+﻿import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -153,6 +153,8 @@ type ApiProtocolDetail = {
     patient_position: "HFS" | "FFS" | "HFP" | "FFP";
     table_direction: "in" | "out";
     scan_mode: "plain" | "contrast" | "4d";
+    is_4d: boolean;
+    is_enhance: boolean;
     description?: string | null;
     series: ApiSeriesDetail[];
 };
@@ -166,6 +168,8 @@ type ApiProtocolSummary = {
     patient_position: "HFS" | "FFS" | "HFP" | "FFP";
     table_direction: "in" | "out";
     scan_mode: "plain" | "contrast" | "4d";
+    is_4d: boolean;
+    is_enhance: boolean;
     description?: string | null;
     series_count: number;
     supported_modes: ApiSeriesDetail["series_type"][];
@@ -211,12 +215,12 @@ type BodyRegion = typeof bodyRegions[number];
 const normalizeRegion = (value: string | undefined): BodyRegion | "" => {
     if (!value) return "";
     const region = value.trim().toLowerCase();
-    if (region.includes("头") || region === "head") return "头部";
-    if (region.includes("颈") || region === "neck") return "颈部";
-    if (region.includes("胸") || region === "chest") return "胸腔";
-    if (region.includes("脊") || region === "spine") return "脊柱";
-    if (region.includes("腹") || region === "abdomen") return "腹部";
-    if (region.includes("肢") || region === "extremity") return "四肢";
+    if (region.includes("�?) || region === "head") return "头部";
+    if (region.includes("�?) || region === "neck") return "颈部";
+    if (region.includes("�?) || region === "chest") return "胸腔";
+    if (region.includes("�?) || region === "spine") return "脊柱";
+    if (region.includes("�?) || region === "abdomen") return "腹部";
+    if (region.includes("�?) || region === "extremity") return "四肢";
     return "";
 };
 
@@ -442,14 +446,14 @@ export const protocolCaseData: RawProtocolCase[] = [
             patientType: "adult",
             scanLocationLabel: "脑部",
             supportedPositions: ["HFS"],
-            supportedModes: ["定位像", "螺旋扫描"],
+            supportedModes: ["定位�?, "螺旋扫描"],
         },
         sequences: [
             {
                 id: "q-scout",
-                name: "定位像",
+                name: "定位�?,
                 sequenceType: "localizer",
-                mode: "定位像",
+                mode: "定位�?,
                 scanParams: {
                     scanLength: 450,
                     scanningDirection: "OUT",
@@ -480,7 +484,7 @@ export const protocolCaseData: RawProtocolCase[] = [
                 reconstructionParams: [
                     {
                         id: "seq-1",
-                        name: "软组织",
+                        name: "软组�?,
                         params: {
                             sliceThickness: 5,
                             interval: 5,
@@ -522,14 +526,14 @@ export const protocolCaseData: RawProtocolCase[] = [
             patientType: "adult",
             scanLocationLabel: "脑部",
             supportedPositions: ["HFS"],
-            supportedModes: ["定位像", "断层扫描"],
+            supportedModes: ["定位�?, "断层扫描"],
         },
         sequences: [
             {
                 id: "q-scout",
-                name: "定位像",
+                name: "定位�?,
                 sequenceType: "localizer",
-                mode: "定位像",
+                mode: "定位�?,
                 scanParams: {
                     scanLength: 450,
                     scanningDirection: "OUT",
@@ -561,7 +565,7 @@ export const protocolCaseData: RawProtocolCase[] = [
                 reconstructionParams: [
                     {
                         id: "seq-1",
-                        name: "软组织",
+                        name: "软组�?,
                         params: {
                             sliceThickness: 2.4,
                             interval: 2.4,
@@ -764,11 +768,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const [patientType, setPatientType] = useState<"adult" | "child">("adult");
     const [selectedPlanId, setSelectedPlanId] = useState(() => loadStoredSelectedPlanId());
 
-    // 选中序列 ID 和重建方案索引
+    // 选中序列 ID 和重建方案索�?
     const [selectedSeqId, setSelectedSeqId] = useState(() => loadStoredSelectedSeqId());
     const [selectedReconIndex, setSelectedReconIndex] = useState(0);
 
-    // 多选删除相关
+    // 多选删除相�?
     const [checkedPlanIds, setCheckedPlanIds] = useState<string[]>([]);
     const [checkedSeqIds, setCheckedSeqIds] = useState<string[]>([]);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -831,15 +835,17 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         () => protocolSummaries
             .filter((protocol) => {
                 const normalizedPatientType = mapAgeGroupToPatientType(protocol.age_group);
-                const supportedModes = normalizeModeTags(protocol.supported_modes);
-                const hasSpiral = supportedModes.some((mode) => mode === "helical");
-                const hasAxial = supportedModes.some((mode) => mode === "axial");
+                const isSpiralProtocol = protocol.supported_modes.some((mode) => mode === "helical");
+                const isAxialProtocol = protocol.supported_modes.some((mode) => mode === "axial");
+                const is4DProtocol = protocol.is_4d;
 
                 const normalizedRegion = normalizeRegion(protocol.body_part);
                 const regionMatch = normalizedRegion === selectedBodyRegion || protocol.body_part === selectedBodyRegion;
 
+                const modeMatch = libraryTab === "spiral" ? (isSpiralProtocol || is4DProtocol) : isAxialProtocol;
+
                 return normalizedPatientType === patientType
-                    && (libraryTab === "spiral" ? hasSpiral : hasAxial)
+                    && modeMatch
                     && regionMatch;
             })
             .sort((left, right) => {
@@ -1024,10 +1030,10 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
     const [scanPlans, setScanPlans] = useState<UiPlan[]>(() => buildPlansFromIds(selectedProtocolIds));
 
-    // 本地修改追踪（复制/删除），不受 useEffect 重建覆盖
+    // 本地修改追踪（复�?删除），不受 useEffect 重建覆盖
     const localEditsRef = useRef<{
-        copiesBySourceSeqId: Record<string, UiSequence[]>;  // 源序列ID → 副本列表
-        copiedPlans: UiPlan[];                               // 整计划副本
+        copiesBySourceSeqId: Record<string, UiSequence[]>;  // 源序列ID �?副本列表
+        copiedPlans: UiPlan[];                               // 整计划副�?
         excludedSeqIds: Set<string>;                         // 被删除的原始序列 ID
     }>({ copiesBySourceSeqId: {}, copiedPlans: [], excludedSeqIds: new Set() });
     const [localEditsTrigger, setLocalEditsTrigger] = useState(0);
@@ -1134,7 +1140,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             navigate(route);
         } catch (error) {
             console.error(error);
-            setSessionActionError("无法创建本次扫描会话，请检查患者和后端服务。");
+            setSessionActionError("无法创建本次扫描会话，请检查患者和后端服务�?);
         } finally {
             setIsCreatingSession(false);
         }
@@ -1149,7 +1155,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 await ensureProtocolDetailLoaded(protocolId);
             } catch (error) {
                 console.error(error);
-                setSessionActionError("协议详情加载失败，请检查后端服务。");
+                setSessionActionError("协议详情加载失败，请检查后端服务�?);
                 return;
             }
         }
@@ -1157,7 +1163,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         const nextIds = isSelected
             ? selectedProtocolIds.filter((id) => id !== protocolId)
             : [...selectedProtocolIds, protocolId];
-        // 新选时清除该协议的 session 缓存，确保 buildPlansFromIds 使用出厂协议数据
+        // 新选时清除该协议的 session 缓存，确�?buildPlansFromIds 使用出厂协议数据
         if (!isSelected) {
             setScanSessionsByProtocolId((prev) => {
                 const next = { ...prev };
@@ -1179,7 +1185,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         setSelectedSeqId(nextPlans.flatMap((p) => p.sequences)[0]?.id || "");
     };
 
-    const handleLibraryTabChange = (tab: "spiral" | "axial") => {
+    const handleLibraryTabChange = (tab: "spiral" | "axial" | "4d") => {
         setLibraryTab(tab);
         setCheckedPlanIds([]);
         setCheckedSeqIds([]);
@@ -1213,7 +1219,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             if (plan.sourceSessionId) return; // session 型走后端逻辑
 
             if (checkedPlanIds.includes(plan.id)) {
-                // 整个计划复制 → 独立新计划
+                // 整个计划复制 �?独立新计�?
                 const newPlanId = `copy-${Date.now()}-${Math.random().toString(36).slice(2)}`;
                 edits.copiedPlans.push({
                     ...plan,
@@ -1228,7 +1234,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 });
                 handled = true;
             } else {
-                // 序列粒度复制 → 插入源序列正下方
+                // 序列粒度复制 �?插入源序列正下方
                 const seqsToCopy = plan.sequences.filter((seq) => checkedSeqIds.includes(seq.id));
                 for (const seq of seqsToCopy) {
                     const copy: UiSequence = {
@@ -1297,7 +1303,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         const edits = localEditsRef.current;
         let editsChanged = false;
 
-        // 1. 删除被勾选的「复制的整个计划」
+        // 1. 删除被勾选的「复制的整个计划�?
         const copiedPlanIdsToRemove = new Set<string>();
         edits.copiedPlans.forEach((plan) => {
             if (checkedPlanIds.includes(plan.id)) copiedPlanIdsToRemove.add(plan.id);
@@ -1307,9 +1313,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             editsChanged = true;
         }
 
-        // 2. 删除被勾选的序列（区分复制序列 vs 原始序列）
+        // 2. 删除被勾选的序列（区分复制序�?vs 原始序列�?
         for (const seqId of checkedSeqIds) {
-            // 检查是否是复制的序列（存在于 copiesBySourceSeqId 值中）
+            // 检查是否是复制的序列（存在�?copiesBySourceSeqId 值中�?
             let foundInCopies = false;
             for (const sourceId of Object.keys(edits.copiesBySourceSeqId)) {
                 const copies = edits.copiesBySourceSeqId[sourceId];
@@ -1322,14 +1328,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                     break;
                 }
             }
-            // 如果不是复制的序列，则是原始序列 → 标记为排除
+            // 如果不是复制的序列，则是原始序列 �?标记为排�?
             if (!foundInCopies) {
                 edits.excludedSeqIds.add(seqId);
                 editsChanged = true;
             }
         }
 
-        // 3. 收集 catalog 型被勾选的整个 plan（通过 checkedPlanIds，非复制）
+        // 3. 收集 catalog 型被勾选的整个 plan（通过 checkedPlanIds，非复制�?
         const catalogProtocolIdsToRemove = new Set<number>();
         scanPlans.forEach((plan) => {
             if (plan.sourceSessionId || plan.id.startsWith("copy-")) return;
@@ -1737,15 +1743,15 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             <User size={24} />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[16px] font-bold tracking-tight">{selectedPatient?.name ?? "未选择患者"}</span>
+                            <span className="text-[16px] font-bold tracking-tight">{selectedPatient?.name ?? "未选择患�?}</span>
                             <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5 opacity-80">
                                 {formatPatientCardSubtitle(selectedPatient)}
                             </span>
                         </div>
                     </div>
                     <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-                        <div className="text-[9px] font-bold italic">⊥ 0</div>
-                        <div className="text-[9px] font-bold">∠ 0</div>
+                        <div className="text-[9px] font-bold italic">�?0</div>
+                        <div className="text-[9px] font-bold">�?0</div>
                         <div className="flex items-center gap-1 text-[11px] font-bold">
                             <Flame size={14} />
                             <span>0%</span>
@@ -1756,7 +1762,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 <div className="text-center">
                     <div className="text-[28px] font-bold tracking-tight text-[#37474F] leading-none">13:52</div>
                     <div className="text-[12px] text-[#546E7A] font-medium mt-1 uppercase opacity-80">
-                        2月26日 周四
+                        2�?6�?周四
                     </div>
                 </div>
 
@@ -1832,7 +1838,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 </button>
                                 {/* 删除序列 */}
                                 <button
-                                    title="删除已选序列"
+                                    title="删除已选序�?
                                     onClick={handleDeleteClick}
                                     className={`w-[44px] h-[44px] flex items-center justify-center rounded-md transition-colors ${checkedSeqIds.length > 0 || checkedPlanIds.length > 0
                                         ? 'text-[#D32F2F] hover:bg-[#FFEBEE] active:bg-[#FFCDD2]'
@@ -1853,7 +1859,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             <div className="flex-1 overflow-y-auto bg-white">
                                 {scanPlans.map((plan) => (
                                     <div key={plan.id} className="border-b border-gray-100/50">
-                                        {/* 计划标题行 */}
+                                        {/* 计划标题�?*/}
                                         <div
                                             onClick={() => {
                                                 setSelectedPlanId(plan.id);
@@ -2192,7 +2198,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 {/* Right */}
                 <aside className="w-[360px] flex flex-col overflow-hidden shrink-0">
                     <div className="flex-1 flex flex-col overflow-hidden">
-                        {/* 协议库 tabs */}
+                        {/* 协议�?tabs */}
                         <div className="flex h-[48px] bg-[#F8FAFC] border-b border-[#EEF2F9] p-1.5 gap-1.5 shrink-0">
                             <button
                                 onClick={() => handleLibraryTabChange("spiral")}
@@ -2212,6 +2218,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             >
                                 断层协议
                             </button>
+                            
                         </div>
 
                         {/* 协议列表 */}
@@ -2299,7 +2306,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 </span>
                                 <button
                                     onClick={() => setPositionGroupIndex((prev) => (prev === 0 ? 1 : 0))}
-                                    title="切换摆位组"
+                                    title="切换摆位�?
                                     className="ml-auto w-[24px] h-[24px] rounded border border-[#B0C4DE] bg-white text-[#4D94FF] flex items-center justify-center hover:bg-blue-50 transition-colors"
                                 >
                                     <ArrowLeftRight size={12} />
@@ -2339,7 +2346,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                         onClick={() => navigate(-1)}
                         className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 transition-all uppercase text-[13px] shadow-sm active:scale-95"
                     >
-                        <ChevronLeft size={20} /> 上一步
+                        <ChevronLeft size={20} /> 上一�?
                     </button>
                 </div>
                 <div className="flex-1 flex justify-end">
@@ -2348,7 +2355,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                         disabled={isCreatingSession}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md uppercase text-[13px] transition-all ${isCreatingSession ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
                     >
-                        {isCreatingSession ? "创建中..." : "下一步"} <ChevronRight size={20} />
+                        {isCreatingSession ? "创建�?.." : "下一�?} <ChevronRight size={20} />
                     </button>
                 </div>
             </footer >
@@ -2364,7 +2371,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             </div>
                             <div>
                                 <div className="text-[14px] font-black text-[#37474F]">确认删除序列</div>
-                                <div className="text-[11px] text-[#78909C] mt-0.5">此操作不可恢复</div>
+                                <div className="text-[11px] text-[#78909C] mt-0.5">此操作不可恢�?/div>
                             </div>
                         </div>
                         {/* Dialog Body */}
@@ -2482,4 +2489,7 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
 
 
 export default ProtocolSetupScreen;
+
+
+
 
