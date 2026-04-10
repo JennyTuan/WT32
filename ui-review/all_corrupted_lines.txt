@@ -1,0 +1,26 @@
+771:     // 选中序列 ID 和重建方案索??
+775:     // 多选删除相??
+1033:     // 本地修改追踪（复??删除），不受 useEffect 重建覆盖
+1035:         copiesBySourceSeqId: Record<string, UiSequence[]>;  // 源序列ID ??副本列表
+1036:         copiedPlans: UiPlan[];                               // 整计划副??
+1143:             setSessionActionError("无法创建本次扫描会话，请检查患者和后端服务??);
+1158:                 setSessionActionError("协议详情加载失败，请检查后端服务??);
+1166:         // 新选时清除该协议的 session 缓存，确??buildPlansFromIds 使用出厂协议数据
+1222:                 // 整个计划复制 ??独立新计??
+1237:                 // 序列粒度复制 ??插入源序列正下方
+1306:         // 1. 删除被勾选的「复制的整个计划??
+1316:         // 2. 删除被勾选的序列（区分复制序??vs 原始序列??
+1318:             // 检查是否是复制的序列（存在??copiesBySourceSeqId 值中??
+1331:             // 如果不是复制的序列，则是原始序列 ??标记为排??
+1338:         // 3. 收集 catalog 型被勾选的整个 plan（通过 checkedPlanIds，非复制??
+1746:                             <span className="text-[16px] font-bold tracking-tight">{selectedPatient?.name ?? "未选择患??}</span>
+1753:                         <div className="text-[9px] font-bold italic">??0</div>
+1754:                         <div className="text-[9px] font-bold">??0</div>
+1765:                         2??6??周四
+1841:                                     title="删除已选序??
+1862:                                         {/* 计划标题??*/}
+2201:                         {/* 协议??tabs */}
+2309:                                     title="切换摆位??
+2349:                         <ChevronLeft size={20} /> 上一??
+2358:                         {isCreatingSession ? "创建??.." : "下一??} <ChevronRight size={20} />
+2374:                                 <div className="text-[11px] text-[#78909C] mt-0.5">此操作不可恢??/div>
