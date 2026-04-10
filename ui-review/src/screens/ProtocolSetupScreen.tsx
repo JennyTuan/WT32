@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -156,6 +156,7 @@ type ApiProtocolDetail = {
     is_4d: boolean;
     is_enhance: boolean;
     description?: string | null;
+    is_factory: boolean;
     series: ApiSeriesDetail[];
 };
 
@@ -171,6 +172,7 @@ type ApiProtocolSummary = {
     is_4d: boolean;
     is_enhance: boolean;
     description?: string | null;
+    is_factory: boolean;
     series_count: number;
     supported_modes: ApiSeriesDetail["series_type"][];
 };
@@ -224,10 +226,6 @@ const normalizeRegion = (value: string | undefined): BodyRegion | "" => {
     return "";
 };
 
-const normalizeModeTags = (modes: string[] | undefined): string[] => {
-    if (!modes) return [];
-    return modes.map((mode) => mode.trim());
-};
 
 const mapAgeGroupToPatientType = (ageGroup: ApiProtocolDetail["age_group"] | ApiProtocolSummary["age_group"]): "adult" | "child" =>
     ageGroup === "adult" ? "adult" : "child";
@@ -420,6 +418,9 @@ const mapScanSessionToRawCase = (scanSession: ApiScanSessionDetail): RawProtocol
                 patient_position: scanSession.patient_position as ApiProtocolDetail["patient_position"],
                 table_direction: scanSession.table_direction as ApiProtocolDetail["table_direction"],
                 scan_mode: scanSession.scan_mode,
+                is_4d: scanSession.scan_mode === "4d",
+                is_enhance: scanSession.scan_mode === "contrast",
+                is_factory: false,
                 description: scanSession.description,
                 series: [],
             },
@@ -842,7 +843,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 const normalizedRegion = normalizeRegion(protocol.body_part);
                 const regionMatch = normalizedRegion === selectedBodyRegion || protocol.body_part === selectedBodyRegion;
 
-                const modeMatch = libraryTab === "spiral" ? (isSpiralProtocol || is4DProtocol) : isAxialProtocol;
+                const modeMatch = libraryTab === "spiral" ? isSpiralProtocol : (isAxialProtocol || is4DProtocol);
 
                 return normalizedPatientType === patientType
                     && modeMatch
@@ -1185,7 +1186,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         setSelectedSeqId(nextPlans.flatMap((p) => p.sequences)[0]?.id || "");
     };
 
-    const handleLibraryTabChange = (tab: "spiral" | "axial" | "4d") => {
+    const handleLibraryTabChange = (tab: "spiral" | "axial") => {
         setLibraryTab(tab);
         setCheckedPlanIds([]);
         setCheckedSeqIds([]);

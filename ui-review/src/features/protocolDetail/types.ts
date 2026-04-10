@@ -45,9 +45,11 @@ export type ApiProtocolDetail = {
     body_part: string;
     age_group: "adult" | "child" | "infant";
     patient_weight: string;
-    patient_position: string;
-    table_direction: string;
+    patient_position: "HFS" | "FFS" | "HFP" | "FFP";
+    table_direction: "in" | "out";
     scan_mode: "plain" | "contrast" | "4d";
+    is_4d: boolean;
+    is_enhance: boolean;
     description?: string | null;
     is_factory: boolean;
     series: ApiSeriesDetail[];
@@ -59,8 +61,11 @@ export type ApiProtocolSummary = {
     body_part: string;
     age_group: "adult" | "child" | "infant";
     patient_weight: string;
-    patient_position: string;
-    table_direction: string;
+    patient_position: "HFS" | "FFS" | "HFP" | "FFP";
+    table_direction: "in" | "out";
+    scan_mode: "plain" | "contrast" | "4d";
+    is_4d: boolean;
+    is_enhance: boolean;
     description?: string | null;
     is_factory: boolean;
     series_count: number;

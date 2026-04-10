@@ -112,6 +112,8 @@ def _build_protocol_summary(protocol: models.Protocol) -> schemas.ProtocolSummar
             "is_enabled": protocol.is_enabled,
             "created_at": protocol.created_at,
             "updated_at": protocol.updated_at,
+            "is_4d": protocol.is_4d,
+            "is_enhance": protocol.is_enhance,
             "series_count": len(protocol.series),
             "supported_modes": supported_modes,
         }
