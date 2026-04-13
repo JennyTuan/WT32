@@ -265,16 +265,22 @@ function FourDScoutViewport({ onCropBoxChange, onRectChange }: FourDScoutViewpor
 // ---------------------------------------------------------------------------
 interface HelicalScanPreviewViewportProps {
     isScanning: boolean;
+    active?: boolean;
     cropRect: { x: number; y: number; width: number; height: number };
+    onBedProgress?: (bedIndex: number) => void;
     onComplete?: () => void;
 }
 
-function HelicalScanPreviewViewport({ isScanning, cropRect, onComplete }: HelicalScanPreviewViewportProps) {
+function HelicalScanPreviewViewport({ isScanning, active = false, cropRect, onBedProgress, onComplete }: HelicalScanPreviewViewportProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const slicesRef = useRef<FourDLoadedSlice[]>([]);
+    const renderedSliceCanvas = useRef<HTMLCanvasElement | null>(null); // cached full slice render
     const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
-    const [currentIndex, setCurrentIndex] = useState(0);
+    const [currentBedIndex, setCurrentBedIndex] = useState(0);
+    const [revealRows, setRevealRows] = useState(0);
+    const currentBedRef = useRef(0);
+    const revealRowsRef = useRef(0);
     const [windowWidth] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowWidth);
     const [windowLevel] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowLevel);
 
@@ -325,98 +331,152 @@ function HelicalScanPreviewViewport({ isScanning, cropRect, onComplete }: Helica
         return () => { cancelled = true; };
     }, []);
 
-    // Animation loop
+    // Pre-render slice to offscreen canvas when bed index changes
     useEffect(() => {
-        if (!isScanning || loadState !== "ready" || slicesRef.current.length === 0) {
-            if (!isScanning) setCurrentIndex(0);
-            return;
-        }
+        if (loadState !== "ready" || slicesRef.current.length === 0) return;
+        const total = slicesRef.current.length;
+        const startIdx = Math.floor(cropRect.y * total);
+        const endIdx = Math.floor((cropRect.y + cropRect.height) * total);
+        const range = Math.max(1, endIdx - startIdx);
+        const sliceIdx = startIdx + Math.floor((currentBedIndex / BREATHING_BED_POSITION_COUNT) * range);
+        const slice = slicesRef.current[Math.min(sliceIdx, total - 1)];
 
-        const count = slicesRef.current.length;
-        const startIdx = Math.floor(cropRect.y * count);
-        const endIdx = Math.floor((cropRect.y + cropRect.height) * count);
-        
-        // Initial set if we just started
-        setCurrentIndex(startIdx);
-
-        const interval = setInterval(() => {
-            setCurrentIndex((prev) => {
-                const next = prev + 1;
-                if (next >= endIdx) {
-                    clearInterval(interval);
-                    if (onComplete) onComplete();
-                    return prev;
-                }
-                return next;
-            });
-        }, 80); // ~12.5 fps for smoother feel
-        return () => clearInterval(interval);
-    }, [isScanning, loadState, cropRect, onComplete]);
-
-    // Render current slice
-    useEffect(() => {
-        const canvas = canvasRef.current, viewport = viewportRef.current;
-        if (!canvas || !viewport || loadState !== "ready" || slicesRef.current.length === 0) return;
-        const slice = slicesRef.current[currentIndex];
-        const ctx = canvas.getContext("2d"); if (!ctx) return;
-        const viewW = viewport.clientWidth, viewH = viewport.clientHeight;
-        if (canvas.width !== viewW || canvas.height !== viewH) { canvas.width = viewW; canvas.height = viewH; }
-
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = slice.cols; tempCanvas.height = slice.rows;
-        const tCtx = tempCanvas.getContext("2d")!;
+        const tc = document.createElement("canvas");
+        tc.width = slice.cols; tc.height = slice.rows;
+        const tCtx = tc.getContext("2d")!;
         const imgData = tCtx.createImageData(slice.cols, slice.rows);
         const data = imgData.data;
-        const minVal = windowLevel - windowWidth / 2, maxVal = windowLevel + windowWidth / 2, range = maxVal - minVal;
-
+        const minVal = windowLevel - windowWidth / 2, maxVal = windowLevel + windowWidth / 2, range2 = maxVal - minVal;
         for (let i = 0; i < slice.hu.length; i++) {
-            const val = clamp01((slice.hu[i] - minVal) / range) * 255;
+            const val = clamp01((slice.hu[i] - minVal) / range2) * 255;
             const j = i * 4;
             data[j] = val; data[j + 1] = val; data[j + 2] = val; data[j + 3] = 255;
         }
         tCtx.putImageData(imgData, 0, 0);
+        renderedSliceCanvas.current = tc;
+    }, [currentBedIndex, loadState, cropRect, windowWidth, windowLevel]);
 
+    // Progressive reveal animation: rows top→bottom per bed position
+    useEffect(() => {
+        if (!isScanning || loadState !== "ready" || slicesRef.current.length === 0) {
+            if (!isScanning) {
+                currentBedRef.current = 0;
+                revealRowsRef.current = 0;
+                setCurrentBedIndex(0);
+                setRevealRows(0);
+            }
+            return;
+        }
+
+        const totalRows = slicesRef.current[0]?.rows ?? 512;
+        // Target ~1.5s per bed at 30fps → 45 frames → rowsPerFrame = totalRows/45
+        const rowsPerFrame = Math.max(1, Math.ceil(totalRows / 45));
+
+        const timer = setInterval(() => {
+            revealRowsRef.current += rowsPerFrame;
+            if (revealRowsRef.current >= totalRows) {
+                const nextBed = currentBedRef.current + 1;
+                if (nextBed >= BREATHING_BED_POSITION_COUNT) {
+                    // All beds done — keep last slice fully visible
+                    revealRowsRef.current = totalRows;
+                    setRevealRows(totalRows);
+                    clearInterval(timer);
+                    if (onComplete) onComplete();
+                    return;
+                }
+                currentBedRef.current = nextBed;
+                revealRowsRef.current = 0;
+                setCurrentBedIndex(nextBed);
+                setRevealRows(0);
+                if (onBedProgress) onBedProgress(nextBed);
+            } else {
+                setRevealRows(revealRowsRef.current);
+            }
+        }, 30);
+
+        return () => clearInterval(timer);
+    }, [isScanning, loadState, onBedProgress, onComplete]);
+
+    // Draw current slice with partial row reveal onto viewport canvas
+    useEffect(() => {
+        const canvas = canvasRef.current, viewport = viewportRef.current;
+        if (!canvas || !viewport || !active || !renderedSliceCanvas.current) return;
+        const ctx = canvas.getContext("2d"); if (!ctx) return;
+        const viewW = viewport.clientWidth, viewH = viewport.clientHeight;
+        if (canvas.width !== viewW || canvas.height !== viewH) { canvas.width = viewW; canvas.height = viewH; }
+
+        const tc = renderedSliceCanvas.current;
+        const sliceRows = tc.height, sliceCols = tc.width;
         ctx.fillStyle = "#000"; ctx.fillRect(0, 0, viewW, viewH);
-        const scale = Math.min(viewW / slice.cols, viewH / slice.rows) * 0.9;
-        const dw = slice.cols * scale, dh = slice.rows * scale;
-        ctx.drawImage(tempCanvas, (viewW - dw) / 2, (viewH - dh) / 2, dw, dh);
-    }, [currentIndex, loadState, windowWidth, windowLevel]);
+        const scale = Math.min(viewW / sliceCols, viewH / sliceRows) * 0.9;
+        const dw = sliceCols * scale, dh = sliceRows * scale;
+        const dx = (viewW - dw) / 2, dy = (viewH - dh) / 2;
+
+        // Clip to revealed rows only; show full when not actively scanning (completed)
+        const drawRows = isScanning ? Math.min(revealRows, sliceRows) : sliceRows;
+        if (drawRows > 0) {
+            const srcH = drawRows;
+            const destH = dh * (drawRows / sliceRows);
+            ctx.drawImage(tc, 0, 0, sliceCols, srcH, dx, dy, dw, destH);
+        }
+    }, [revealRows, currentBedIndex, active, isScanning]);
+
+    // Compute display info for overlay
+    const currentSliceInfo = loadState === "ready" && slicesRef.current.length > 0
+        ? (() => {
+            const total = slicesRef.current.length;
+            const startIdx = Math.floor(cropRect.y * total);
+            const endIdx = Math.floor((cropRect.y + cropRect.height) * total);
+            const range = Math.max(1, endIdx - startIdx);
+            const idx = startIdx + Math.floor((currentBedIndex / BREATHING_BED_POSITION_COUNT) * range);
+            return slicesRef.current[Math.min(idx, total - 1)];
+        })()
+        : null;
 
     return (
         <div ref={viewportRef} className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden">
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
-            
-            {/* Visual Overlays */}
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/60 to-transparent" />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/65 to-transparent" />
-            
-            <div className="pointer-events-none absolute left-3 top-3 text-[10px] font-mono leading-[1.35] text-[#CFD8DC]">
-                <div className={`flex items-center gap-1.5 font-bold uppercase tracking-wider ${isScanning ? "text-[#34D399]" : "text-[#7EAAFF]"}`}>
-                    {isScanning && <div className="w-1.5 h-1.5 rounded-full bg-[#34D399] animate-pulse" />}
-                    Scan Preview
-                </div>
-                <div className="opacity-80">Helical Acquisition</div>
-            </div>
 
-            {loadState === "loading" && <div className="text-[11px] text-white/40 animate-pulse">Initializing Recon Buffer...</div>}
-            
-            {loadState === "ready" && (
+            {!active && (
+                <div className="pointer-events-none text-[11px] font-mono text-white/20 tracking-widest uppercase">
+                    等待扫描启动
+                </div>
+            )}
+
+            {active && (
                 <>
-                    <div className="pointer-events-none absolute right-3 top-3 text-right text-[10px] font-mono leading-[1.35] text-[#CFD8DC]">
-                        <div className={`font-bold uppercase ${isScanning ? "text-[#34D399]" : "text-[#F59E0B]"}`}>
-                            {isScanning ? "Scanning..." : "Ready"}
+                    <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/60 to-transparent" />
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/65 to-transparent" />
+
+                    <div className="pointer-events-none absolute left-3 top-3 text-[10px] font-mono leading-[1.35] text-[#CFD8DC]">
+                        <div className={`flex items-center gap-1.5 font-bold uppercase tracking-wider ${isScanning ? "text-[#34D399]" : "text-[#7EAAFF]"}`}>
+                            {isScanning && <div className="w-1.5 h-1.5 rounded-full bg-[#34D399] animate-pulse" />}
+                            Scan Preview
                         </div>
-                        <div className="opacity-80">Slice: {currentIndex + 1} / {slicesRef.current.length}</div>
+                        <div className="opacity-80">Helical Acquisition</div>
                     </div>
-                    {isScanning && (
-                        <div className="pointer-events-none absolute bottom-4 left-4 flex flex-col gap-0.5">
-                            <div className="px-1.5 py-0.5 bg-[#34D399]/20 border border-[#34D399]/40 rounded text-[9px] font-black text-[#34D399] uppercase tracking-widest">
-                                Real-time Reconstruction
+
+                    {loadState === "loading" && <div className="text-[11px] text-white/40 animate-pulse">Initializing Recon Buffer...</div>}
+
+                    {loadState === "ready" && (
+                        <>
+                            <div className="pointer-events-none absolute right-3 top-3 text-right text-[10px] font-mono leading-[1.35] text-[#CFD8DC]">
+                                <div className={`font-bold uppercase ${isScanning ? "text-[#34D399]" : "text-[#F59E0B]"}`}>
+                                    {isScanning ? "SCANNING..." : "READY"}
+                                </div>
+                                <div className="opacity-80">Slice: {currentBedIndex + 1} / {BREATHING_BED_POSITION_COUNT}</div>
                             </div>
-                            <div className="text-[10px] font-mono text-white/50">
-                                Pos: {slicesRef.current[currentIndex].positionZ.toFixed(1)} mm
-                            </div>
-                        </div>
+                            {isScanning && currentSliceInfo && (
+                                <div className="pointer-events-none absolute bottom-4 left-4 flex flex-col gap-0.5">
+                                    <div className="px-1.5 py-0.5 bg-[#34D399]/20 border border-[#34D399]/40 rounded text-[9px] font-black text-[#34D399] uppercase tracking-widest">
+                                        Real-time Reconstruction
+                                    </div>
+                                    <div className="text-[10px] font-mono text-white/50">
+                                        Pos: {currentSliceInfo.positionZ.toFixed(1)} mm
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     )}
                 </>
             )}
@@ -616,13 +676,10 @@ const FourDHelicalConfirmScreen = () => {
         });
     };
 
-    // Simulate bed progress
+    // Bed progress is now driven by HelicalScanPreviewViewport via onBedProgress callback
     useEffect(() => {
-        const interval = setInterval(() => {
-            setBreathingBedIndex((prev) => (prev < BREATHING_BED_POSITION_COUNT - 1 ? prev + 1 : prev));
-        }, 4000);
-        return () => clearInterval(interval);
-    }, []);
+        if (!scanStarted) setBreathingBedIndex(0);
+    }, [scanStarted]);
 
     // Waveform animation
     useEffect(() => {
@@ -794,7 +851,7 @@ const FourDHelicalConfirmScreen = () => {
 
                 {/* Right: Integrated Dual Viewer Window */}
                 <section className="flex-1 flex flex-col overflow-hidden bg-white rounded-lg border border-[#B0C4DE] shadow-md">
-                    {/* Viewport Row (Dual View) */}
+                    {/* Viewport Row */}
                     <div className="flex-1 flex bg-black relative">
                         {/* Left: Scout Projection */}
                         <div className="flex-1 relative overflow-hidden">
@@ -802,14 +859,17 @@ const FourDHelicalConfirmScreen = () => {
                         </div>
                         {/* Middle Divider */}
                         <div className="w-[1px] bg-white/10 z-10" />
-                        {/* Right: Scan Preview */}
+                        {/* Right: Scan Preview — black until scan starts */}
                         <div className="flex-1 relative overflow-hidden">
-                            <HelicalScanPreviewViewport 
-                                isScanning={scanStarted} 
+                            <HelicalScanPreviewViewport
+                                isScanning={scanStarted}
+                                active={scanStarted || scanCompleted}
                                 cropRect={cropRect}
+                                onBedProgress={(idx) => setBreathingBedIndex(idx)}
                                 onComplete={() => {
                                     setScanStarted(false);
                                     setScanCompleted(true);
+                                    setBreathingBedIndex(BREATHING_BED_POSITION_COUNT);
                                 }}
                             />
                         </div>
@@ -884,19 +944,19 @@ const FourDHelicalConfirmScreen = () => {
                                     {Array.from({ length: BREATHING_BED_POSITION_COUNT }, (_, index) => (
                                         <div key={`bed-pos-${index}`} className="flex-1 flex flex-col gap-0.5">
                                             <div className={`h-2.5 w-full rounded-sm transition-all duration-500 ${
-                                                index < breathingBedIndex
+                                                scanCompleted || index < breathingBedIndex
                                                     ? "bg-[#3B82F6]"
-                                                    : index === breathingBedIndex
+                                                    : !scanCompleted && index === breathingBedIndex
                                                         ? "bg-[#93C5FD] animate-pulse"
                                                         : "bg-[#E2E8F0]"
                                             }`} />
-                                            <span className={`text-[7px] text-center font-bold font-mono ${index === breathingBedIndex ? "text-[#3B82F6]" : "text-[#94A3B8]"}`}>{index + 1}</span>
+                                            <span className={`text-[7px] text-center font-bold font-mono ${!scanCompleted && index === breathingBedIndex ? "text-[#3B82F6]" : "text-[#94A3B8]"}`}>{index + 1}</span>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                             <div className="px-2 py-0.5 rounded bg-[#F1F5F9] border border-[#E2E8F0] text-[9px] font-mono font-bold text-[#475569]">
-                                PROGRESS: {breathingBedIndex}/{BREATHING_BED_POSITION_COUNT}
+                                PROGRESS: {scanCompleted ? BREATHING_BED_POSITION_COUNT : breathingBedIndex}/{BREATHING_BED_POSITION_COUNT}
                             </div>
                         </div>
                     </div>
