@@ -129,7 +129,9 @@ export function useProtocolDetail() {
             setProtocol({
                 id: 0, name: "新建协议", body_part: bodyPartOptions[0] || "",
                 age_group: "adult", patient_weight: "50-90kg", patient_position: "HFS",
-                table_direction: "in", scan_mode: "plain", is_factory: false,
+                table_direction: "in", scan_mode: "plain", 
+                is_4d: false, is_enhance: false,
+                is_factory: false,
                 series: [],
             });
             return;

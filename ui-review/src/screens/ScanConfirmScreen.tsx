@@ -1329,7 +1329,7 @@ const InfoItem = ({ label, value, icon: Icon }: { label: string; value: string |
     </div>
 );
 
-const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> = ({
+export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> = ({
     isOpen,
     onClose,
     onConfirm,

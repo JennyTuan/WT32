@@ -59,9 +59,11 @@ function getHandleCursor(toolMode: "crop" | "pan", handle: DragHandle) {
 export function TomographicScoutViewport({
     onMeasurementChange,
     initialMeasurements,
+    hideTools = false,
 }: {
     onMeasurementChange: (values: { scanLength: string; scoutFov: string }) => void;
     initialMeasurements?: { scanLength?: string; scoutFov?: string };
+    hideTools?: boolean;
 }) {
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -478,50 +480,52 @@ export function TomographicScoutViewport({
                 )}
             </section>
 
-            <aside className="flex w-[72px] shrink-0 flex-col overflow-hidden rounded-r-lg border-l border-white/10 bg-[#111827] shadow-sm">
-                <div className="flex h-[44px] items-center justify-center border-b border-white/10 bg-[#0F172A]">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-[#CBD5E1]">Tools</span>
-                </div>
-                <div className="flex flex-1 flex-col gap-1 p-2" onPointerDown={(event) => event.stopPropagation()}>
-                    <button
-                        type="button"
-                        title="Pan"
-                        onClick={() => setToolMode((current) => (current === "pan" ? "crop" : "pan"))}
-                        className={`flex h-[44px] w-[44px] items-center justify-center rounded-[10px] border transition-all ${
-                            toolMode === "pan"
-                                ? "border-[#60A5FA] bg-[#1D4ED8]/30 text-[#BFDBFE]"
-                                : "border-white/10 bg-white/[0.04] text-[#CBD5E1] hover:bg-white/[0.08]"
-                        }`}
-                    >
-                        <Hand size={20} strokeWidth={1.5} />
-                    </button>
-                    <div className="mx-1 my-1 h-px bg-white/[0.07]" />
-                    <button
-                        type="button"
-                        title="Zoom In"
-                        onClick={() => adjustZoom(0.2)}
-                        className="flex h-[44px] w-[44px] items-center justify-center rounded-[10px] border border-white/10 bg-white/[0.04] text-[#CBD5E1] transition-all hover:bg-white/[0.08]"
-                    >
-                        <ZoomIn size={20} strokeWidth={1.5} />
-                    </button>
-                    <button
-                        type="button"
-                        title="Zoom Out"
-                        onClick={() => adjustZoom(-0.2)}
-                        className="flex h-[44px] w-[44px] items-center justify-center rounded-[10px] border border-white/10 bg-white/[0.04] text-[#CBD5E1] transition-all hover:bg-white/[0.08]"
-                    >
-                        <ZoomOut size={20} strokeWidth={1.5} />
-                    </button>
-                    <button
-                        type="button"
-                        title="Reset"
-                        onClick={resetView}
-                        className="flex h-[44px] w-[44px] items-center justify-center rounded-[10px] border border-white/10 bg-white/[0.04] text-[#CBD5E1] transition-all hover:bg-white/[0.08]"
-                    >
-                        <RotateCcw size={20} strokeWidth={1.5} />
-                    </button>
-                </div>
-            </aside>
+            {!hideTools && (
+                <aside className="flex w-[72px] shrink-0 flex-col overflow-hidden rounded-r-lg border-l border-white/10 bg-[#111827] shadow-sm">
+                    <div className="flex h-[44px] items-center justify-center border-b border-white/10 bg-[#0F172A]">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-[#CBD5E1]">Tools</span>
+                    </div>
+                    <div className="flex flex-1 flex-col gap-1 p-2" onPointerDown={(event) => event.stopPropagation()}>
+                        <button
+                            type="button"
+                            title="Pan"
+                            onClick={() => setToolMode((current) => (current === "pan" ? "crop" : "pan"))}
+                            className={`flex h-[44px] w-[44px] items-center justify-center rounded-[10px] border transition-all ${
+                                toolMode === "pan"
+                                    ? "border-[#60A5FA] bg-[#1D4ED8]/30 text-[#BFDBFE]"
+                                    : "border-white/10 bg-white/[0.04] text-[#CBD5E1] hover:bg-white/[0.08]"
+                            }`}
+                        >
+                            <Hand size={20} strokeWidth={1.5} />
+                        </button>
+                        <div className="mx-1 my-1 h-px bg-white/[0.07]" />
+                        <button
+                            type="button"
+                            title="Zoom In"
+                            onClick={() => adjustZoom(0.2)}
+                            className="flex h-[44px] w-[44px] items-center justify-center rounded-[10px] border border-white/10 bg-white/[0.04] text-[#CBD5E1] transition-all hover:bg-white/[0.08]"
+                        >
+                            <ZoomIn size={20} strokeWidth={1.5} />
+                        </button>
+                        <button
+                            type="button"
+                            title="Zoom Out"
+                            onClick={() => adjustZoom(-0.2)}
+                            className="flex h-[44px] w-[44px] items-center justify-center rounded-[10px] border border-white/10 bg-white/[0.04] text-[#CBD5E1] transition-all hover:bg-white/[0.08]"
+                        >
+                            <ZoomOut size={20} strokeWidth={1.5} />
+                        </button>
+                        <button
+                            type="button"
+                            title="Reset"
+                            onClick={resetView}
+                            className="flex h-[44px] w-[44px] items-center justify-center rounded-[10px] border border-white/10 bg-white/[0.04] text-[#CBD5E1] transition-all hover:bg-white/[0.08]"
+                        >
+                            <RotateCcw size={20} strokeWidth={1.5} />
+                        </button>
+                    </div>
+                </aside>
+            )}
         </div>
     );
 }

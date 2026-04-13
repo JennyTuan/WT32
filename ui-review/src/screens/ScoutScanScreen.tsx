@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import * as dicomParser from "dicom-parser";
 import { useCallback, useMemo } from "react";
 import {
@@ -11,12 +11,10 @@ import {
     ChevronsUp,
     FilePlus,
     Trash2,
-    Circle,
     ArrowUpDown,
     AlertTriangle,
     Activity,
     TrendingUp,
-    AlertCircle,
     Check,
     CheckCircle,
     Flame,
@@ -599,6 +597,14 @@ const ScoutScanScreen = ({
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const navigate = useNavigate();
+
+    // 4D workflow detection - drives all 4D-specific UI without touching regular scan logic
+    const is4DWorkflow = useMemo(() =>
+        workflowPlans.some(p => p.sequences.some(s => s.type === '4d' || p.title.includes('4D'))),
+    [workflowPlans]);
+    const [activeStepIdx, setActiveStepIdx] = useState(0);
+    const isBreathingAcquisitionStep = is4DWorkflow && activeStepIdx === 0;
+
     const isBreathingTraining = bottomPanelMode === "breathing" && breathingWorkflowVariant === "training";
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
     const [startPos, setStartPos] = useState("472.95");
@@ -613,16 +619,15 @@ const ScoutScanScreen = ({
     });
 
     const [breathingPhase, setBreathingPhase] = useState<"training" | "stable">("training");
-    const [trainingTimer, setTrainingTimer] = useState(30);
+    const [trainingTimer, setTrainingTimer] = useState(10);
 
     useEffect(() => {
-        if (bottomPanelMode !== 'breathing' || breathingPhase !== 'training' || trainingTimer <= 0) return;
+        if (!isBreathingAcquisitionStep || breathingPhase !== 'training' || trainingTimer <= 0) return;
 
         const interval = setInterval(() => {
             setTrainingTimer(prev => {
                 const next = prev - 1;
                 if (next === 0) {
-                    // Defer state update to avoid cascading render lint error
                     setTimeout(() => setBreathingPhase('stable'), 0);
                 }
                 return next;
@@ -630,7 +635,7 @@ const ScoutScanScreen = ({
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [bottomPanelMode, breathingPhase, trainingTimer]);
+    }, [isBreathingAcquisitionStep, breathingPhase, trainingTimer]);
 
     const handleSwap = () => {
         setStartPos(endPos);
@@ -651,7 +656,8 @@ const ScoutScanScreen = ({
     );
 
     useEffect(() => {
-        if (bottomPanelMode !== 'breathing' || !isBreathingSignalEnabled) return;
+        if (!isBreathingAcquisitionStep && bottomPanelMode !== 'breathing') return;
+        if (!isBreathingSignalEnabled) return;
 
         const update = () => {
             tRef.current += 0.05; // Standard speed for ~15 bpm breaths
@@ -697,7 +703,7 @@ const ScoutScanScreen = ({
         return () => {
             if (timerRef.current !== null) cancelAnimationFrame(timerRef.current);
         };
-    }, [bottomPanelMode, isBreathingSignalEnabled]); // Removed wave states from dependencies to stop re-running/resetting
+    }, [bottomPanelMode, isBreathingAcquisitionStep, isBreathingSignalEnabled]);
 
     useEffect(() => {
         if (bottomPanelMode !== "breathing") return;
@@ -709,20 +715,24 @@ const ScoutScanScreen = ({
     }, [bottomPanelMode]);
 
     const buildSequenceSteps = useCallback((type: WorkflowSequenceType) => {
+        // 4D workflows get their own 4-step sequence
+        if (is4DWorkflow) {
+            if (type === 'scout') return ["呼吸采集", "激光灯定位", "参数确认", "执行扫描"];
+            return ["参数确认", "执行扫描"];
+        }
+        // Regular scan: existing logic unchanged
         if (type === "scout") {
             return isBreathingAcquisition
                 ? [firstStepLabel, "激光灯定位", "参数确认", "执行扫描"]
                 : [firstStepLabel, "参数确认", "执行扫描"];
         }
-
         if (type === "helical" || type === "axial" || type === "4d") {
             return bottomPanelMode === "breathing"
                 ? ["呼吸训练", "参数确认", "执行扫描"]
                 : ["参数确认", "执行扫描"];
         }
-
         return ["参数确认", "执行扫描"];
-    }, [bottomPanelMode, firstStepLabel, isBreathingAcquisition]);
+    }, [bottomPanelMode, firstStepLabel, isBreathingAcquisition, is4DWorkflow]);
 
     const buildGroupsFromWorkflowPlans = useCallback((): ProtocolGroup[] => {
         if (workflowPlans.length === 0) {
@@ -758,7 +768,6 @@ const ScoutScanScreen = ({
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
     const [laserActive, setLaserActive] = useState(false);
     const [selectedPosition, setSelectedPosition] = useState<"start" | "end" | null>(null);
-    const [activeStepIdx, setActiveStepIdx] = useState(0); // Add state for active step tracking
     const [expandedSeqId, setExpandedSeqId] = useState<string | null>(() => buildGroupsFromWorkflowPlans()[0]?.sequences[0]?.id ?? null);
 
     useEffect(() => {
@@ -1112,58 +1121,52 @@ const ScoutScanScreen = ({
                                 </button>
                             </div>
                         </div>
-                    ) : bottomPanelMode === "breathing" ? (
+                    ) : isBreathingAcquisitionStep ? (
                         <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] p-4 flex-1 flex flex-col gap-5 overflow-y-auto">
-                            <div className="flex items-center justify-between mb-1">
-                                <div className="text-[16px] font-black text-[#37474F] tracking-wide">呼吸检测</div>
-                                <div className="flex items-center gap-2">
-                                    <div
-                                        onClick={() => {
-                                            if (breathingPhase === 'stable') {
-                                                setBreathingPhase('training');
-                                                setTrainingTimer(30);
-                                            } else {
-                                                setBreathingPhase('stable');
-                                            }
-                                        }}
-                                        className={`h-6 px-2 rounded-sm border cursor-pointer flex items-center gap-1.5 shadow-sm transition-all active:scale-95 ${breathingPhase === 'stable'
-                                            ? 'bg-[#E8F5E9] border-[#A5D6A7]'
-                                            : 'bg-orange-50 border-orange-200'
-                                            }`}
-                                        title="点击模拟状态切换"
-                                    >
-                                        <span className={`w-1.5 h-1.5 rounded-full ${breathingPhase === 'stable' ? 'bg-[#43A047]' : 'bg-orange-400 animate-pulse'
-                                            }`} />
-                                        <span className={`text-[11px] font-bold ${breathingPhase === 'stable' ? 'text-[#2E7D32]' : 'text-orange-700'
-                                            }`}>
-                                            {breathingPhase === 'stable' ? '呼吸采集(已就绪)' : '呼吸采集(训练中)'}
-                                        </span>
-                                    </div>
+                            <div className="mb-4 flex items-center justify-between">
+                                <span className="text-[14px] font-black text-[#37474F]">呼吸检测</span>
+                                <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md shadow-sm border ${
+                                    breathingPhase === 'stable' ? 'bg-[#E8F5E9] border-[#A5D6A7]' : 'bg-[#FFF8E1] border-[#FFE082]'
+                                }`}>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${
+                                        breathingPhase === 'stable' ? 'bg-[#43A047]' : 'bg-[#F57C00] animate-pulse'
+                                    }`} />
+                                    <span className={`text-[9px] font-black ${
+                                        breathingPhase === 'stable' ? 'text-[#2E7D32]' : 'text-[#F57C00]'
+                                    }`}>
+                                        {breathingPhase === 'stable' ? '呼吸采集 (已就绪)' : '呼吸采集 (训练中)'}
+                                    </span>
                                 </div>
                             </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <MetricRow
-                                    icon={<Circle size={14} fill="#4D94FF" className="text-[#4D94FF]" />}
-                                    label="原始主频"
-                                    value="15"
-                                />
-                                <MetricRow
-                                    icon={<Activity size={14} />}
-                                    label="呼吸频率"
-                                    value={`${metrics.bpm} BPM`}
-                                    isMain
-                                />
-                                <MetricRow
-                                    icon={<TrendingUp size={14} />}
-                                    label="峰值误差"
-                                    value={`${metrics.peakErr}%`}
-                                />
-                                <MetricRow
-                                    icon={<AlertCircle size={14} />}
-                                    label="频率误差"
-                                    value={`${metrics.freqErr}%`}
-                                />
+                            <div className="grid grid-cols-2 gap-2">
+                                <div className="bg-white border border-[#EEF2F9] rounded-lg p-3 flex flex-col gap-1 shadow-sm">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 rounded-full bg-[#4D94FF]" />
+                                        <span className="text-[10px] font-bold text-[#90A4AE] uppercase tracking-tighter">原始主频</span>
+                                    </div>
+                                    <span className="text-[20px] font-black text-[#37474F] leading-none mt-1">15</span>
+                                </div>
+                                <div className="bg-white border border-[#4D94FF]/30 rounded-lg p-3 flex flex-col gap-1 shadow-[0_4px_12px_rgba(77,148,255,0.08)]">
+                                    <div className="text-[10px] font-bold text-[#4D94FF] uppercase tracking-tighter">呼吸频率</div>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <Activity size={16} className="text-[#4D94FF]" />
+                                        <span className="text-[20px] font-black text-[#4D94FF] leading-none">{metrics.bpm} <span className="text-[10px] font-bold ml-0.5">BPM</span></span>
+                                    </div>
+                                </div>
+                                <div className="bg-white border border-[#EEF2F9] rounded-lg p-3 flex flex-col gap-1 shadow-sm">
+                                    <div className="flex items-center gap-2">
+                                        <TrendingUp size={14} className="text-[#90A4AE]" />
+                                        <span className="text-[10px] font-bold text-[#90A4AE] uppercase tracking-tighter">峰值误差</span>
+                                    </div>
+                                    <span className="text-[18px] font-black text-[#37474F] leading-none mt-1">{metrics.peakErr}%</span>
+                                </div>
+                                <div className="bg-white border border-[#EEF2F9] rounded-lg p-3 flex flex-col gap-1 shadow-sm">
+                                    <div className="flex items-center gap-2">
+                                        <Info size={14} className="text-[#90A4AE]" />
+                                        <span className="text-[10px] font-bold text-[#90A4AE] uppercase tracking-tighter">频率误差</span>
+                                    </div>
+                                    <span className="text-[18px] font-black text-[#37474F] leading-none mt-1">{metrics.freqErr}%</span>
+                                </div>
                             </div>
                         </div>
                     ) : (
@@ -1240,8 +1243,69 @@ const ScoutScanScreen = ({
                 </aside>
 
                 {/* Right Viewport Area */}
-                <section className={`flex-1 ${bottomPanelMode === 'breathing' ? 'bg-transparent border-0 shadow-none' : `${viewportBgClassName} rounded-lg border border-[#B0C4DE] shadow-sm`} flex flex-col overflow-hidden relative`}>
-                    {isBreathingTraining ? (
+                <section className={`flex-1 ${isBreathingAcquisitionStep ? 'bg-transparent border-0 shadow-none' : `${viewportBgClassName} rounded-lg border border-[#B0C4DE] shadow-sm`} flex flex-col overflow-hidden relative`}>
+                    {isBreathingAcquisitionStep ? (
+                        <div className="flex-1 flex flex-col gap-2 bg-transparent">
+                            <div className="shrink-0 rounded-md border border-[#B0C4DE]/40 bg-white p-4 shadow-sm">
+                                <div className="mb-3 flex items-center justify-between">
+                                    <div className="text-[14px] font-black text-[#37474F]">采集参数</div>
+                                    <div className="text-[10px] font-mono text-[#90A4AE]">Acquisition Controls</div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                                    <SliderField label="最小间距" min={0.5} max={5} step={0.1} value={breathingAcquisitionParams.minSpacing} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, minSpacing: v }))} />
+                                    <SliderField label="滤波阈值" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.filterThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, filterThreshold: v }))} />
+                                    <SliderField label="峰值阈值" min={0.5} max={2.5} step={0.05} value={breathingAcquisitionParams.peakThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, peakThreshold: v }))} />
+                                    <SliderField label="谷值阈值" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.valleyThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, valleyThreshold: v }))} />
+                                    <div className="col-span-2">
+                                        <SliderField label="增益" min={0.5} max={3} step={0.1} value={breathingAcquisitionParams.gain} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, gain: v }))} />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="min-h-0 flex-1 bg-white rounded-md border border-[#B0C4DE]/40 shadow-inner p-3 relative overflow-hidden">
+                                <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded border border-[#C8E6C9] bg-[#E8F5E9] px-2 py-1">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-[#4CAF50] animate-pulse"></div>
+                                    <span className="text-[10px] font-bold text-[#2E7D32]">实时波形</span>
+                                </div>
+                                <div className="absolute right-3 top-3 bg-white border border-[#EEF2F9] rounded px-2 py-1 shadow-sm flex flex-col items-center">
+                                    <span className="text-[8px] font-black text-[#90A4AE] uppercase tracking-tighter">实时数据</span>
+                                    <div className="flex items-center gap-1">
+                                        <span className="text-[9px] font-bold text-[#546E7A]">采样值:</span>
+                                        <span className="text-[11px] font-black text-[#4D94FF] tabular-nums">{(filteredWaveData[filteredWaveData.length - 1] ?? 0).toFixed(1)}</span>
+                                    </div>
+                                </div>
+                                <div className="absolute inset-x-8 top-7 bottom-7 flex flex-col justify-between pointer-events-none opacity-20">
+                                    {[1100, 1000, 800, 600, 400, 200, 0].map(val => (
+                                        <div key={val} className="flex items-center gap-2">
+                                            <span className="text-[10px] w-6 text-right font-mono text-[#90A4AE]">{val}</span>
+                                            <div className="flex-1 h-[1px] bg-[#B0C4DE]"></div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="absolute inset-x-0 inset-y-5 flex flex-col justify-end px-14">
+                                    <svg viewBox="0 0 800 160" className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                                        <defs>
+                                            <linearGradient id="acq-wave-fill" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stopColor="#7EAAFF" stopOpacity="0.22" />
+                                                <stop offset="100%" stopColor="#7EAAFF" stopOpacity="0.02" />
+                                            </linearGradient>
+                                        </defs>
+                                        <line x1="0" y1="80" x2="800" y2="80" stroke="#7FA1C5" strokeWidth="1.2" strokeDasharray="4 4" opacity="0.55" />
+                                        <path d={`M ${rawWaveData.map((v,i)=>`${(i/(rawWaveData.length-1))*800},${160-(v/1100)*160}`).join(' L ')}`} fill="none" stroke="#8FA3B8" strokeWidth="1.4" className="opacity-55" />
+                                        <path d={`M 0,160 L ${filteredWaveData.map((v,i)=>`${(i/(filteredWaveData.length-1))*800},${160-(v/1100)*160}`).join(' L ')} L 800,160 Z`} fill="url(#acq-wave-fill)" />
+                                        <path d={`M ${filteredWaveData.map((v,i)=>`${(i/(filteredWaveData.length-1))*800},${160-(v/1100)*160}`).join(' L ')}`} fill="none" stroke="#2F80FF" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 4px rgba(77,148,255,0.28))" }} />
+                                        {filteredWaveData.map((v, i) => {
+                                            if (i < 10 || i > filteredWaveData.length - 10) return null;
+                                            const mx = v > filteredWaveData[i-1] && v > filteredWaveData[i+1] && v > filteredWaveData[i-2] && v > filteredWaveData[i+2] && v > filteredWaveData[i-3] && v > filteredWaveData[i+3];
+                                            const mn = v < filteredWaveData[i-1] && v < filteredWaveData[i+1] && v < filteredWaveData[i-2] && v < filteredWaveData[i+2] && v < filteredWaveData[i-3] && v < filteredWaveData[i+3];
+                                            if (mx && v >= 650) return <circle key={`pk-${i}`} cx={(i/(filteredWaveData.length-1))*800} cy={160-(v/1100)*160} r="4.5" fill="#FF1744" stroke="#FFF" strokeWidth="1.5" />;
+                                            if (mn && v <= 380) return <circle key={`vl-${i}`} cx={(i/(filteredWaveData.length-1))*800} cy={160-(v/1100)*160} r="4" fill="#FFD600" stroke="#FFF" strokeWidth="1.2" />;
+                                            return null;
+                                        })}
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+                    ) : isBreathingTraining ? (
                         <div className="flex-1 flex flex-col gap-2 bg-transparent">
                             <div className="min-h-0 flex-[1.2] overflow-hidden rounded-md border border-[#B0C4DE]/30 bg-[#16202B]">
                                 <div className="grid h-full grid-cols-2 gap-[2px] bg-[#16202B]">
@@ -1549,23 +1613,24 @@ const ScoutScanScreen = ({
 
                 <div className="flex-1 flex justify-end">
                     <button
-                        disabled={bottomPanelMode === 'breathing' && breathingPhase !== 'stable'}
+                        disabled={isBreathingAcquisitionStep && breathingPhase !== 'stable'}
                         onClick={async () => {
+                            if (isBreathingAcquisitionStep) {
+                                setActiveStepIdx(idx => idx + 1);
+                                return;
+                            }
                             if (bottomPanelMode !== 'breathing') {
-                                try {
-                                    await persistPositioningToSession();
-                                } catch (error) {
-                                    console.error("Failed to persist scout positioning before navigation.", error);
-                                }
+                                try { await persistPositioningToSession(); } catch (error) { console.error(error); }
                                 navigate('/scan-confirm');
                             }
                         }}
-                        className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md shadow-lg transition-all uppercase text-[13px] active:scale-95 ${(bottomPanelMode === 'breathing' && breathingPhase !== 'stable')
-                            ? 'bg-gray-300 text-white cursor-not-allowed shadow-none active:scale-100'
-                            : (bottomPanelMode === 'breathing' ? 'bg-[#7EAAFF] text-white hover:bg-[#6FA0FF]' : 'bg-[#4D94FF] text-white hover:bg-blue-600')
-                            }`}
+                        className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md shadow-lg transition-all uppercase text-[13px] active:scale-95 ${
+                            (isBreathingAcquisitionStep && breathingPhase !== 'stable')
+                                ? 'bg-gray-300 text-white cursor-not-allowed shadow-none active:scale-100'
+                                : (isBreathingAcquisitionStep ? 'bg-[#4D94FF] text-white hover:bg-blue-600' : (bottomPanelMode === 'breathing' ? 'bg-[#7EAAFF] text-white hover:bg-[#6FA0FF]' : 'bg-[#4D94FF] text-white hover:bg-blue-600'))
+                        }`}
                     >
-                        {bottomPanelMode === 'breathing' ? '断层扫描' : '下一步'} <ChevronRight size={20} />
+                        {isBreathingAcquisitionStep ? '定位像' : (bottomPanelMode === 'breathing' ? '断层扫描' : '下一步')} <ChevronRight size={20} />
                     </button>
                 </div>
             </footer>
@@ -1643,42 +1708,8 @@ const ScoutScanScreen = ({
     );
 };
 
-const MetricRow = ({ icon, label, value, isMain }: {
-    icon: React.ReactNode,
-    label: string,
-    value: string,
-    isMain?: boolean
-}) => {
-    const parts = String(value).split(' ');
-    const numValue = parts[0];
-    const unit = parts.slice(1).join(' ');
+// MetricRow removed
 
-    return (
-        <div className={`group flex flex-col gap-1.5 p-3 rounded-lg border transition-all ${isMain
-            ? 'bg-white border-[#4D94FF] shadow-md ring-1 ring-[#4D94FF]/10'
-            : 'bg-white border-[#B0C4DE]/40 shadow-sm'
-            }`}>
-            <div className="flex items-center gap-1.5 min-w-0">
-                <span className={`shrink-0 ${isMain ? 'text-[#4D94FF]' : 'text-[#90A4AE]'}`}>
-                    {icon}
-                </span>
-                <span className={`text-[11px] font-bold ${isMain ? 'text-[#4D94FF]' : 'text-[#90A4AE]'} uppercase truncate`}>
-                    {label}
-                </span>
-            </div>
-            <div className="flex items-baseline gap-1 whitespace-nowrap overflow-hidden">
-                <span className={`text-[18px] font-black ${isMain ? 'text-[#4D94FF]' : 'text-[#37474F]'} leading-tight`}>
-                    {numValue}
-                </span>
-                {unit && (
-                    <span className={`text-[10px] font-bold ${isMain ? 'text-[#4D94FF]/80' : 'text-[#90A4AE]'} uppercase`}>
-                        {unit}
-                    </span>
-                )}
-            </div>
-        </div>
-    );
-};
 
 const SliderField = ({ label, value, min, max, step, onChange }: {
     label: string,

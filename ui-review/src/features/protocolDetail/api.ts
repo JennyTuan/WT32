@@ -113,9 +113,11 @@ export const mapScanSessionToProtocolDetail = (scanSession: Awaited<ReturnType<t
         body_part: scanSession.body_part,
         age_group: scanSession.age_group,
         patient_weight: scanSession.patient_weight,
-        patient_position: scanSession.patient_position,
-        table_direction: scanSession.table_direction,
+        patient_position: scanSession.patient_position as ApiProtocolDetail["patient_position"],
+        table_direction: scanSession.table_direction as ApiProtocolDetail["table_direction"],
         scan_mode: scanSession.scan_mode,
+        is_4d: scanSession.scan_mode === "4d",
+        is_enhance: scanSession.scan_mode === "contrast",
         description: scanSession.description,
         is_factory: false,
         series: scanSession.series.map((series) => ({
