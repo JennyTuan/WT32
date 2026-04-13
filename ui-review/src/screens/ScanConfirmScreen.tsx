@@ -149,8 +149,11 @@ const DEFAULT_SCOUT_DOSE_PARAMS: ScoutDoseDisplayParams = {
     notifyDlp: "--",
 };
 
-const buildSequenceSteps = (type: WorkflowSequenceType) => {
+const buildSequenceSteps = (type: WorkflowSequenceType, is4DWorkflow = false) => {
     if (type === "scout") {
+        if (is4DWorkflow) {
+            return ["呼吸采集", "激光灯定位", "参数确认", "执行扫描"];
+        }
         return ["激光灯定位", "参数确认", "执行扫描"];
     }
 
@@ -372,6 +375,10 @@ const ScanConfirmScreen = ({
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
+    const is4DWorkflow = useMemo(
+        () => workflowPlans.some((plan) => plan.sequences.some((seq) => seq.type === "4d")),
+        [workflowPlans]
+    );
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [bedMode, setBedMode] = useState<"in" | "out">("in");
@@ -404,8 +411,8 @@ const ScanConfirmScreen = ({
                     id: "g1",
                     name: "Head_FacialBoneVolume",
                     sequences: [
-                        { id: "s1", name: "Scout", type: "scout", steps: buildSequenceSteps("scout") },
-                        { id: "s2", name: "Helical Scan", type: "helical", steps: buildSequenceSteps("helical") },
+                        { id: "s1", name: "Scout", type: "scout", steps: buildSequenceSteps("scout", is4DWorkflow) },
+                        { id: "s2", name: "Helical Scan", type: "helical", steps: buildSequenceSteps("helical", is4DWorkflow) },
                     ],
                 },
             ];
@@ -418,10 +425,10 @@ const ScanConfirmScreen = ({
                 id: `group-${plan.id}-seq-${sequence.id}`,
                 name: sequence.name,
                 type: sequence.type,
-                steps: buildSequenceSteps(sequence.type),
+                steps: buildSequenceSteps(sequence.type, is4DWorkflow),
             })),
         }));
-    }, [workflowPlans]);
+    }, [workflowPlans, is4DWorkflow]);
 
     useEffect(() => {
         if (workflowPlans.length === 0) return;
@@ -758,7 +765,7 @@ const ScanConfirmScreen = ({
                                                         {seq.steps.map((step, idx) => {
                                                             const isActiveSequence = seq.id === resolvedActiveSequenceId;
                                                             const resolvedStepIndex = inferSequenceType(seq) === "scout"
-                                                                ? activeScoutStepIndex
+                                                                ? (is4DWorkflow ? activeScoutStepIndex + 1 : activeScoutStepIndex)
                                                                 : (activeSequenceStepIndex ?? 0);
                                                             const isStepCompleted = isActiveSequence && idx < resolvedStepIndex;
                                                             const isStepInProgress = isActiveSequence && idx === resolvedStepIndex;
