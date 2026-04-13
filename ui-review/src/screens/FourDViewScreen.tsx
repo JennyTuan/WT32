@@ -1,153 +1,629 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    ChevronDown,
-    ChevronLeft,
-    ChevronRight,
-    Columns2,
-    Flame,
-    Grid2x2,
+    SlidersHorizontal,
     Hand,
-    LayoutTemplate,
-    Layers3,
-    Move,
-    Network,
-    Pause,
-    Play,
-    RefreshCw,
     Ruler,
-    Settings,
-    Siren,
-    Sun,
-    User,
+    Pencil,
+    Eraser,
     Waves,
+    Flame,
+    Siren,
+    Network,
+    Sun,
+    Settings,
     ZoomIn,
     ZoomOut,
-} from 'lucide-react';
-import DicomViewer from '../components/DicomViewer';
+    Maximize,
+    RefreshCw,
+    Play,
+    Pause,
+    Trash2,
+    ChevronDown,
+} from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import * as dicomParser from "dicom-parser";
+import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
+import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
+import {
+    fetchSelectedScanSession,
+    type ApiScanSessionDetail,
+} from "../lib/scanSession";
 
-type SeriesId = '4d' | 'scout' | 'h1' | 'h2' | 'h3';
-type LayoutId = 'single' | 'quad' | 'compare';
-type ToolId = 'pan' | 'zoom' | 'zoomout' | 'measure' | 'fit' | 'reset';
+type ImageItem = { id: string; name: string };
+type SeriesType = "topogram" | "helical" | "axial" | "4d" | "static";
+/** A single selectable image series in the viewer sidebar */
+type Series = {
+    id: string;
+    name: string;
+    count: number;
+    kernel: string;
+    thickness: string;
+    kV: string;
+    mAs: string;
+    fov: string;
+    matrix: string;
+    images: ImageItem[];
+    seriesType: SeriesType;
+    /** WW/WL preset applied when this series is selected */
+    defaultWw?: number;
+    defaultWl?: number;
+};
+/** A scan acquisition group (topogram/helical/axial) — may contain multiple recon series */
+type ScanGroup = {
+    id: string;
+    label: string;
+    type: SeriesType;
+    series: Series[];
+};
+type Study = {
+    id: string;
+    name: string;
+    scanGroups: ScanGroup[];
+};
+// (DrawRect removed — unused)
+type VolumeData = {
+    rows: number;
+    cols: number;
+    depth: number;
+    hu: Float32Array;
+    pixelSpacingX: number;
+    pixelSpacingY: number;
+    sliceSpacing: number;
+};
+// (PanelId removed — unused)
+type LayoutSpec = {
+    containerClassName: string;
+    panels: Record<string, string>;
+};
+// (TextAnnotation and PseudoColorMode removed — unused)
 
-const PHASES = [
-    ['p0', 0, '0ms', '/dicom/test/SYNO0001.dcm'],
-    ['p10', 10, '120ms', '/dicom/test/SYNO0033.dcm'],
-    ['p20', 20, '240ms', '/dicom/test/SYNO0067.dcm'],
-    ['p30', 30, '360ms', '/dicom/test/SYNO0100.dcm'],
-    ['p40', 40, '480ms', '/dicom/test/SYNO0134.dcm'],
-    ['p50', 50, '600ms', '/dicom/test/SYNO0168.dcm'],
-    ['p60', 60, '720ms', '/dicom/test/SYNO0201.dcm'],
-    ['p70', 70, '840ms', '/dicom/test/SYNO0235.dcm'],
-    ['p80', 80, '960ms', '/dicom/test/SYNO0269.dcm'],
-    ['p90', 90, '1080ms', '/dicom/test/SYNO0301.dcm'],
-] as const;
+const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
 
-const HELICAL: Record<Exclude<SeriesId, '4d'>, string> = {
-    scout: '/dicom/test/SYNO0160.dcm',
-    h1: '/dicom/test/SYNO0160.dcm',
-    h2: '/dicom/test/SYNO0170.dcm',
-    h3: '/dicom/test/SYNO0180.dcm',
+const formatDicomDate = (value?: string) => {
+    if (!value || value.length < 8) return "N/A";
+    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
 };
 
-const speeds = [0.5, 1, 2] as const;
-const tools: Array<{ id: ToolId; icon: typeof Hand; label: string }> = [
-    { id: 'pan', icon: Hand, label: '平移' },
-    { id: 'zoom', icon: ZoomIn, label: '放大' },
-    { id: 'zoomout', icon: ZoomOut, label: '缩小' },
-    { id: 'measure', icon: Ruler, label: '测量' },
-    { id: 'fit', icon: Move, label: '适配' },
-    { id: 'reset', icon: RefreshCw, label: '重置' },
-];
+const formatDicomTime = (value?: string) => {
+    if (!value || value.length < 6) return "N/A";
+    return `${value.slice(0, 2)}:${value.slice(2, 4)}:${value.slice(4, 6)}`;
+};
 
-const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'] as const;
-const cnDate = (date: Date) => `${date.getMonth() + 1}月${date.getDate()}日 ${weekDays[date.getDay()]}`;
-const cnTime = (date: Date) => `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+const cleanOverlayText = (value?: string) => {
+    if (!value) return "N/A";
+    const normalized = value
+        .replace(/[^\x20-\x7E\u4E00-\u9FFF]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    return normalized || "N/A";
+};
 
-const LayoutButton = ({
-    active,
-    label,
-    children,
-    onClick,
-}: {
-    active: boolean;
-    label: string;
-    children: ReactNode;
-    onClick: () => void;
-}) => (
-    <button
-        className={`flex h-10 w-10 flex-col items-center justify-center rounded-[7px] border transition-all ${active ? 'border-[#1A6EE0] bg-[#E8F0FB]' : 'border-[#D8E2EE] hover:border-[#C2D0E2] hover:bg-[#EEF2F7]'}`}
-        onClick={onClick}
-        title={label}
-    >
-        {children}
-    </button>
-);
+const DEFAULT_PANEL_CLASS = "relative overflow-hidden bg-black";
+const HIDDEN_PANEL_CLASS = "hidden";
+// (Pseudo-color options removed — unused)
 
-const ParamCard = ({
-    label,
-    value,
-    accent = false,
-}: {
-    label: string;
-    value: ReactNode;
-    accent?: boolean;
-}) => (
-    <div className={`rounded-md border px-2 py-1.5 ${accent ? 'border-[#C5D8F8] bg-[#EEF5FF]' : 'border-[#D8E2EE] bg-[#F4F7FB]'}`}>
-        <div className={`mb-1 text-[9px] uppercase tracking-[0.05em] ${accent ? 'text-[#1A6EE0]' : 'text-[#9AAABB]'}`}>{label}</div>
-        <div className={`text-[12px] font-medium ${accent ? 'text-[#1A6EE0]' : 'text-[#1A2438]'}`}>{value}</div>
-    </div>
-);
+// (Pseudo-color logic removed)
 
-export default function FourDViewScreen() {
-    const [phaseIdx, setPhaseIdx] = useState(0);
-    const [playing, setPlaying] = useState(false);
-    const [speed, setSpeed] = useState<(typeof speeds)[number]>(1);
-    const [layout, setLayout] = useState<LayoutId>('single');
-    const [series, setSeries] = useState<SeriesId>('4d');
-    const [tool, setTool] = useState<ToolId>('pan');
-    const [now, setNow] = useState(() => new Date());
-    const [studyOpen, setStudyOpen] = useState(true);
+const LAYOUT_SPECS: Record<string, LayoutSpec> = {
+    "多平面重建": {
+        containerClassName: "flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]",
+        panels: {
+            axial: DEFAULT_PANEL_CLASS,
+            coronal: DEFAULT_PANEL_CLASS,
+            sagittal: DEFAULT_PANEL_CLASS,
+            volume: DEFAULT_PANEL_CLASS,
+        },
+    },
+    "三维四窗": {
+        containerClassName: "flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]",
+        panels: {
+            axial: DEFAULT_PANEL_CLASS,
+            coronal: DEFAULT_PANEL_CLASS,
+            sagittal: DEFAULT_PANEL_CLASS,
+            volume: DEFAULT_PANEL_CLASS,
+        },
+    },
+    "三维主视图 (顶)": {
+        containerClassName: "flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]",
+        panels: {
+            axial: `${DEFAULT_PANEL_CLASS} hidden`,
+            coronal: DEFAULT_PANEL_CLASS,
+            sagittal: DEFAULT_PANEL_CLASS,
+            volume: `${DEFAULT_PANEL_CLASS} col-span-2`,
+        },
+    },
+    "轴状面主视图": {
+        containerClassName: "flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]",
+        panels: {
+            axial: `${DEFAULT_PANEL_CLASS} row-span-2`,
+            coronal: DEFAULT_PANEL_CLASS,
+            sagittal: DEFAULT_PANEL_CLASS,
+            volume: HIDDEN_PANEL_CLASS,
+        },
+    },
+    "仅三维视图": {
+        containerClassName: "flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]",
+        panels: {
+            axial: HIDDEN_PANEL_CLASS,
+            coronal: HIDDEN_PANEL_CLASS,
+            sagittal: HIDDEN_PANEL_CLASS,
+            volume: `${DEFAULT_PANEL_CLASS} col-span-2 row-span-2`,
+        },
+    },
+    "三维主视图 (右)": {
+        containerClassName: "flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]",
+        panels: {
+            axial: DEFAULT_PANEL_CLASS,
+            coronal: DEFAULT_PANEL_CLASS,
+            sagittal: HIDDEN_PANEL_CLASS,
+            volume: `${DEFAULT_PANEL_CLASS} row-span-2 col-start-2 row-start-1`,
+        },
+    },
+};
 
-    const is4d = series === '4d';
-    const phase = PHASES[phaseIdx];
-    const viewerUrl = is4d ? phase[3] : HELICAL[series];
-    const fillWidth = `${(phaseIdx / (PHASES.length - 1)) * 100}%`;
-    const layoutGrid = layout === 'single' ? 'grid-cols-1 grid-rows-1' : layout === 'quad' ? 'grid-cols-2 grid-rows-2' : 'grid-cols-2 grid-rows-1';
-    const treeRow = 'flex min-h-7 w-full items-center gap-[5px] rounded-md px-2 py-[5px] text-left transition-colors hover:bg-[#EEF2F7]';
+const WINDOW_PRESETS: Record<string, { ww: number, wl: number }> = {
+    "纵隔": { ww: 350, wl: 50 },
+    "肺窗": { ww: 1500, wl: -600 },
+    "骨窗": { ww: 2000, wl: 500 },
+    "血管": { ww: 600, wl: 150 },
+};
+
+const REAL_LUNG_SERIES = {
+    studyName: "QIN LUNG CT",
+    studyId: "study-qin-lung",
+    seriesId: "series-qin-lung-soft",
+    seriesName: "THORAX W 3.0 B41 Soft Tissue",
+    count: 118,
+    rows: 512,
+    cols: 512,
+    thickness: "3.0 mm",
+    kV: "120",
+    mAs: "Auto",
+    fov: "402.0 mm",
+    matrix: "512",
+    kernel: "B41 Soft Tissue",
+    basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
+};
+
+const getSeriesDicomUrl = (sliceIndex: number) =>
+    `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
+
+const mapCornerstoneTool = (toolMode: "pan" | "wl" | "measure" | "annotate" | "eraser") => {
+    if (toolMode === "wl") return "window";
+    if (toolMode === "measure") return "ruler";
+    if (toolMode === "eraser") return "eraser";
+    if (toolMode === "annotate") return "annotate";
+    return "pan";
+};
+
+const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count / 2));
+
+const FourDViewScreen = () => {
+    const navigate = useNavigate();
+    // Will be updated to the first session series when session loads
+    const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
+    const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
+    const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
+    const [toolMode, setToolMode] = useState<"pan" | "wl" | "measure" | "annotate" | "eraser">("pan");
+    const [ww, setWw] = useState(350);
+    const [wl, setWl] = useState(45);
+    const [isPlaying, setIsPlaying] = useState(false);
+    // Displayed WW/WL — updated both from DICOM tags and from Cornerstone WL tool feedback
+    const [displayWw, setDisplayWw] = useState(350);
+    const [displayWl, setDisplayWl] = useState(45);
+    // Scan session loaded from localStorage
+    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    // Ref for imperative control of the Cornerstone viewport
+    const dicomViewerRef = useRef<DicomViewerHandle>(null);
+    const mprRef = useRef<CornerstoneMPRHandle>(null);
+
+    // ─── Live clock ───────────────────────────────────────────────────────────
+    const buildClock = () => {
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, "0");
+        const mm = String(now.getMinutes()).padStart(2, "0");
+        return `${hh}:${mm}`;
+    };
+    const buildDate = () => {
+        const now = new Date();
+        const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+        return `${now.getMonth() + 1}月${now.getDate()}日 ${weekdays[now.getDay()]}`;
+    };
+    const [clockStr, setClockStr] = useState(buildClock);
+    const [dateStr, setDateStr] = useState(buildDate);
+
+    const viewportRef = useRef<HTMLElement | null>(null);
+    const dragRef = useRef<{ dragging: boolean; x: number; y: number }>({ dragging: false, x: 0, y: 0 });
+    const measureStartRef = useRef<{ x: number; y: number } | null>(null);
+    const volumeDataRef = useRef<VolumeData | null>(null);
+    const defaultWindowRef = useRef({ ww: 350, wl: 45 });
+    const [meta, setMeta] = useState({
+        patientName: "N/A",
+        patientId: "N/A",
+        patientSex: "N/A",
+        patientAge: "N/A",
+        modality: "CT",
+        studyDate: "N/A",
+        studyTime: "N/A",
+        institution: "N/A",
+        manufacturer: "N/A",
+        seriesDescription: "N/A",
+        seriesNumber: "N/A",
+        instanceNumber: "N/A",
+        pixelSpacing: "N/A",
+        sliceLocation: "N/A",
+        kvp: "N/A",
+        mas: "N/A",
+        ww: 350,
+        wl: 45,
+        thickness: "N/A",
+        rows: 0,
+        cols: 0,
+        count: 320,
+    });
+
+    const [selectedLayout, setSelectedLayout] = useState("三维四窗");
+    const [selectedRenderMode, setSelectedRenderMode] = useState("MPR");
+    const [selectedWindowPreset, setSelectedWindowPreset] = useState("纵隔");
+    const [isLayoutOpen, setIsLayoutOpen] = useState(false);
+    const [isRenderModeOpen, setIsRenderModeOpen] = useState(false);
+    const [isWindowPresetOpen, setIsWindowPresetOpen] = useState(false);
+
+    const studyTree = useMemo<Study[]>(() => {
+        const makeImages = (count: number, prefix: string): ImageItem[] =>
+            Array.from({ length: count }, (_, i) => ({ id: `${prefix}-img-${i + 1}`, name: `Image ${i + 1}` }));
+
+        const getTissuePreset = (type: string) => {
+            if (type === "lung") return WINDOW_PRESETS["肺窗"];
+            if (type === "bone") return WINDOW_PRESETS["骨窗"];
+            if (type === "vascular") return WINDOW_PRESETS["血管"];
+            return WINDOW_PRESETS["纵隔"];
+        };
+
+        if (!scanSession) {
+            return [{
+                id: REAL_LUNG_SERIES.studyId,
+                name: REAL_LUNG_SERIES.studyName,
+                scanGroups: [{
+                    id: "static-group",
+                    label: REAL_LUNG_SERIES.seriesName,
+                    type: "static" as SeriesType,
+                    series: [{
+                        id: REAL_LUNG_SERIES.seriesId,
+                        name: REAL_LUNG_SERIES.seriesName,
+                        count: REAL_LUNG_SERIES.count,
+                        kernel: REAL_LUNG_SERIES.kernel,
+                        thickness: REAL_LUNG_SERIES.thickness,
+                        kV: REAL_LUNG_SERIES.kV,
+                        mAs: REAL_LUNG_SERIES.mAs,
+                        fov: REAL_LUNG_SERIES.fov,
+                        matrix: REAL_LUNG_SERIES.matrix,
+                        seriesType: "static" as SeriesType,
+                        images: makeImages(REAL_LUNG_SERIES.count, "qin"),
+                    }],
+                }],
+            }];
+        }
+
+        const scanGroups: ScanGroup[] = [];
+        const sorted = [...scanSession.series].sort((a, b) => a.series_order - b.series_order);
+
+        for (const s of sorted) {
+            const type = s.series_type as SeriesType;
+            const prefix = `sess${scanSession.id}-ser${s.id}`;
+
+            if (s.series_type === "topogram") {
+                const p = s.topogram_param;
+                scanGroups.push({
+                    id: `group-${s.id}`,
+                    label: s.series_label || "定位像",
+                    type,
+                    series: [{
+                        id: `${prefix}-topo`,
+                        name: s.series_label || "定位像",
+                        count: REAL_LUNG_SERIES.count,
+                        kernel: "—",
+                        thickness: p ? `${p.scan_length} mm` : "—",
+                        kV: p ? String(p.kv) : "—",
+                        mAs: p ? String(p.ma) : "—",
+                        fov: p ? `${p.fov} mm` : "—",
+                        matrix: "512",
+                        seriesType: type,
+                        images: makeImages(REAL_LUNG_SERIES.count, `${prefix}-topo`),
+                        defaultWw: 1500,
+                        defaultWl: -600,
+                    }],
+                });
+            } else {
+                const p = s.helical_param ?? s.axial_param;
+                const leafSeries: Series[] = s.recon_series.map((r) => {
+                    const preset = getTissuePreset(r.recon_type);
+                    return {
+                        id: `${prefix}-recon${r.id}`,
+                        name: r.recon_name,
+                        count: REAL_LUNG_SERIES.count,
+                        kernel: r.kernel,
+                        thickness: `${r.slice_thickness} mm`,
+                        kV: p ? String(p.kv) : "—",
+                        mAs: p ? ((p as { auto_ma?: boolean }).auto_ma ? "Auto" : String(p.ma)) : "—",
+                        fov: p ? `${p.fov} mm` : "—",
+                        matrix: String(r.matrix),
+                        seriesType: type,
+                        images: makeImages(REAL_LUNG_SERIES.count, `${prefix}-recon${r.id}`),
+                        defaultWw: r.window_width || preset.ww,
+                        defaultWl: r.window_level || preset.wl,
+                        reconType: r.recon_type,
+                    };
+                });
+
+                if (leafSeries.length === 0) {
+                    leafSeries.push({
+                        id: `${prefix}-scan`,
+                        name: s.series_label,
+                        count: REAL_LUNG_SERIES.count,
+                        kernel: "—",
+                        thickness: p ? `${(p as { slice_thickness?: number }).slice_thickness ?? "—"} mm` : "—",
+                        kV: p ? String(p.kv) : "—",
+                        mAs: p ? ((p as { auto_ma?: boolean }).auto_ma ? "Auto" : String(p.ma)) : "—",
+                        fov: p ? `${p.fov} mm` : "—",
+                        matrix: "512",
+                        seriesType: type,
+                        images: makeImages(REAL_LUNG_SERIES.count, `${prefix}-scan`),
+                    });
+                }
+
+                scanGroups.push({
+                    id: `group-${s.id}`,
+                    label: s.series_label,
+                    type,
+                    series: leafSeries,
+                });
+            }
+        }
+
+        return [{
+            id: `session-${scanSession.id}`,
+            name: scanSession.name || "4D 扫描序列",
+            scanGroups,
+        }];
+    }, [scanSession]);
+
+    const seriesList = studyTree.flatMap((study) => study.scanGroups.flatMap((g) => g.series));
+    const safeSeriesList = seriesList.length > 0 ? seriesList : [{
+        id: REAL_LUNG_SERIES.seriesId,
+        name: REAL_LUNG_SERIES.seriesName,
+        count: REAL_LUNG_SERIES.count,
+        kernel: REAL_LUNG_SERIES.kernel,
+        thickness: REAL_LUNG_SERIES.thickness,
+        kV: REAL_LUNG_SERIES.kV,
+        mAs: REAL_LUNG_SERIES.mAs,
+        fov: REAL_LUNG_SERIES.fov,
+        matrix: REAL_LUNG_SERIES.matrix,
+        seriesType: "static" as SeriesType,
+        images: Array.from({ length: REAL_LUNG_SERIES.count }, (_, i) => ({ id: `qin-img-${i + 1}`, name: `Image ${i + 1}` })),
+    }];
+    const selectedSeries = safeSeriesList.find((s) => s.id === selectedSeriesId) ?? safeSeriesList[0];
+    const totalSlices = selectedSeries.count;
+
+    const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
 
     useEffect(() => {
-        const timer = window.setInterval(() => setNow(new Date()), 1000);
-        return () => window.clearInterval(timer);
+        const first = safeSeriesList[0];
+        if (!first) return;
+        setSelectedSeriesId((prev) => {
+            if (prev === REAL_LUNG_SERIES.seriesId && scanSession) return first.id;
+            if (!safeSeriesList.find((s) => s.id === prev)) return first.id;
+            return prev;
+        });
+        if (scanSession && first.defaultWw != null && first.defaultWl != null) {
+            setWw(first.defaultWw);
+            setWl(first.defaultWl);
+            setDisplayWw(first.defaultWw);
+            setDisplayWl(first.defaultWl);
+            defaultWindowRef.current = { ww: first.defaultWw, wl: first.defaultWl };
+        }
+    }, [scanSession, safeSeriesList]);
+
+    const seriesImageUrls = useMemo(
+        () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index)),
+        [totalSlices]
+    );
+
+    const handleSeriesSelect = useCallback((seriesId: string) => {
+        const nextSeries = safeSeriesList.find((series) => series.id === seriesId);
+        setSelectedSeriesId(seriesId);
+        setSliceIndex(getSeriesMidSliceIndex(nextSeries?.count ?? REAL_LUNG_SERIES.count));
+        measureStartRef.current = null;
+        dragRef.current = { dragging: false, x: 0, y: 0 };
+        if (nextSeries?.defaultWw != null && nextSeries?.defaultWl != null) {
+            setWw(nextSeries.defaultWw);
+            setWl(nextSeries.defaultWl);
+            setDisplayWw(nextSeries.defaultWw);
+            setDisplayWl(nextSeries.defaultWl);
+            defaultWindowRef.current = { ww: nextSeries.defaultWw, wl: nextSeries.defaultWl };
+            
+            // Auto-select template name
+            const foundPreset = Object.entries(WINDOW_PRESETS).find(
+                ([_, val]) => val.ww === nextSeries.defaultWw && val.wl === nextSeries.defaultWl
+            );
+            if (foundPreset) setSelectedWindowPreset(foundPreset[0]);
+        }
+    }, [safeSeriesList]);
+
+    const handleClearAllAnnotations = useCallback(() => {
+        // Clearing annotations logic can be added here if needed
     }, []);
 
     useEffect(() => {
-        if (!playing || !is4d) return;
-        const timer = window.setInterval(() => setPhaseIdx((value) => (value + 1) % PHASES.length), 360 / speed);
+        const tick = () => {
+            setClockStr(buildClock());
+            setDateStr(buildDate());
+        };
+        const id = window.setInterval(tick, 30_000);
+        return () => window.clearInterval(id);
+    }, []);
+
+    useEffect(() => {
+        fetchSelectedScanSession({ preferCache: true })
+            .then((session) => {
+                if (!session) return;
+                setScanSession(session);
+            })
+            .catch(() => {});
+    }, []);
+
+    useEffect(() => {
+        const loadVolume = async () => {
+            try {
+                const slices: Array<{
+                    instanceNumber: number;
+                    positionZ: number;
+                    hu: Float32Array;
+                    rows: number;
+                    cols: number;
+                    pixelSpacingX: number;
+                    pixelSpacingY: number;
+                    sliceThickness: number;
+                }> = [];
+
+                for (let i = 1; i <= REAL_LUNG_SERIES.count; i += 1) {
+                    const fileName = `1-${String(i).padStart(3, "0")}.dcm`;
+                    const response = await fetch(`${REAL_LUNG_SERIES.basePath}/${fileName}`);
+                    if (!response.ok) continue;
+                    const arrayBuffer = await response.arrayBuffer();
+                    const byteArray = new Uint8Array(arrayBuffer);
+                    const dataSet = dicomParser.parseDicom(byteArray);
+
+                    const rows = dataSet.uint16("x00280010") ?? 0;
+                    const cols = dataSet.uint16("x00280011") ?? 0;
+                    const intercept = Number(dataSet.string("x00281052") ?? "0");
+                    const slope = Number(dataSet.string("x00281053") ?? "1");
+                    const positionZ = Number((dataSet.string("x00200032") ?? "0\\0\\0").split("\\")[2] ?? 0);
+                    const pixelSpacing = (dataSet.string("x00280030") ?? "1\\1").split("\\").map(Number);
+                    const sliceThickness = Number(dataSet.string("x00180050") ?? "1");
+                    const pixelDataElement = dataSet.elements.x7fe00010;
+                    if (!pixelDataElement || rows === 0 || cols === 0) continue;
+
+                    const pixelData = byteArray.slice(pixelDataElement.dataOffset, pixelDataElement.dataOffset + pixelDataElement.length);
+                    const pixelBuffer = pixelData.buffer.slice(pixelData.byteOffset, pixelData.byteOffset + pixelData.byteLength);
+
+                    const values = new Int16Array(pixelBuffer);
+                    const hu = new Float32Array(values.length);
+                    for (let j = 0; j < values.length; j += 1) {
+                        hu[j] = values[j] * slope + intercept;
+                    }
+
+                    slices.push({
+                        instanceNumber: Number(dataSet.string("x00200013") ?? i),
+                        positionZ,
+                        hu,
+                        rows,
+                        cols,
+                        pixelSpacingX: pixelSpacing[1] || 1,
+                        pixelSpacingY: pixelSpacing[0] || 1,
+                        sliceThickness,
+                    });
+                }
+
+                if (slices.length === 0) return;
+                slices.sort((a, b) => b.positionZ - a.positionZ);
+                
+                const rows = slices[0].rows;
+                const cols = slices[0].cols;
+                const depth = slices.length;
+                const hu = new Float32Array(rows * cols * depth);
+                slices.forEach((s, idx) => hu.set(s.hu, idx * rows * cols));
+
+                volumeDataRef.current = {
+                    rows,
+                    cols,
+                    depth,
+                    hu,
+                    pixelSpacingX: slices[0].pixelSpacingX,
+                    pixelSpacingY: slices[0].pixelSpacingY,
+                    sliceSpacing: depth > 1 ? Math.abs(slices[0].positionZ - slices[1].positionZ) : slices[0].sliceThickness,
+                };
+            } catch (e) {
+                console.error(e);
+            }
+        };
+        loadVolume();
+    }, []);
+
+    useEffect(() => {
+        const loadSlice = async () => {
+            try {
+                const fileName = `1-${String(clampSliceIndex(sliceIndex) + 1).padStart(3, "0")}.dcm`;
+                const url = `${REAL_LUNG_SERIES.basePath}/${fileName}`;
+                const response = await fetch(url);
+                if (!response.ok) return;
+                const arrayBuffer = await response.arrayBuffer();
+                const byteArray = new Uint8Array(arrayBuffer);
+                const dataSet = dicomParser.parseDicom(byteArray);
+
+                setMeta({
+                    patientName: cleanOverlayText(formatPersonName(dataSet.string("x00100010"))),
+                    patientId: cleanOverlayText(dataSet.string("x00100020")),
+                    patientSex: cleanOverlayText(dataSet.string("x00100040")),
+                    patientAge: cleanOverlayText(dataSet.string("x00101010")),
+                    modality: "CT",
+                    studyDate: formatDicomDate(dataSet.string("x00080020")),
+                    studyTime: formatDicomTime(dataSet.string("x00080030")),
+                    institution: cleanOverlayText(dataSet.string("x00080080")),
+                    manufacturer: cleanOverlayText(dataSet.string("x00080070")),
+                    seriesDescription: cleanOverlayText(dataSet.string("x0008103e") ?? selectedSeries.name),
+                    seriesNumber: cleanOverlayText(dataSet.string("x00200011")),
+                    instanceNumber: cleanOverlayText(dataSet.string("x00200013") ?? String(sliceIndex + 1)),
+                    pixelSpacing: cleanOverlayText((dataSet.string("x00280030") ?? "N/A").replace("\\", " / ")),
+                    sliceLocation: cleanOverlayText(dataSet.string("x00201041")),
+                    kvp: cleanOverlayText(dataSet.string("x00180060")),
+                    mas: cleanOverlayText(dataSet.string("x00181152")),
+                    ww: Number(dataSet.string("x00281051") ?? 350),
+                    wl: Number(dataSet.string("x00281050") ?? 45),
+                    thickness: `${dataSet.string("x00180050") ?? "N/A"} mm`,
+                    rows: dataSet.uint16("x00280010") ?? 0,
+                    cols: dataSet.uint16("x00280011") ?? 0,
+                    count: selectedSeries.count,
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        };
+        loadSlice();
+    }, [sliceIndex, selectedSeriesId, safeSeriesList]);
+
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "ArrowUp") setSliceIndex((p) => Math.min(totalSlices - 1, p + 1));
+            if (e.key === "ArrowDown") setSliceIndex((p) => Math.max(0, p - 1));
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [totalSlices]);
+
+    useEffect(() => {
+        if (!isPlaying) return;
+        const timer = window.setInterval(() => {
+            setSliceIndex((p) => (p >= totalSlices - 1 ? 0 : p + 1));
+        }, 200);
         return () => window.clearInterval(timer);
-    }, [is4d, playing, speed]);
-
-    useEffect(() => {
-        if (!is4d) setPlaying(false);
-    }, [is4d]);
-
-    useEffect(() => {
-        if (tool === 'fit' || tool === 'reset') {
-            const timer = window.setTimeout(() => setTool('pan'), 80);
-            return () => window.clearTimeout(timer);
-        }
-    }, [tool]);
+    }, [isPlaying, totalSlices]);
 
     return (
-        <div className="flex h-[768px] w-[1024px] flex-col overflow-hidden rounded-md border border-[#B0C4DE] bg-[#EEF2F9] shadow-2xl">
-            <header className="flex h-[80px] shrink-0 items-center justify-between border-b border-[#B0C4DE] bg-[#E8EAF1] px-4 z-10">
+        <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl">
+            <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
                 <div className="flex items-center gap-3">
-                    <div className="flex min-w-[210px] items-center gap-3 rounded-sm border border-[#B0C4DE] bg-[#DCE6F2] px-4 py-1.5">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-sm bg-[#4A6982] text-white opacity-90">
-                            <User size={24} />
+                    <div className="flex items-center gap-3 py-1.5 px-4 bg-[#DCE6F2] border border-[#B0C4DE] rounded-sm min-w-[210px]">
+                        <div className="w-10 h-10 rounded-sm bg-[#1A6EE0] flex items-center justify-center text-white">
+                            <Waves size={24} />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[16px] font-bold text-[#37474F]">Roky Zhang</span>
-                            <span className="mt-0.5 text-[12px] font-medium leading-none text-[#546E7A]">ID: 67890</span>
+                            <span className="text-[16px] font-bold text-[#37474F]">
+                                {meta.patientName !== "N/A" ? meta.patientName : "4D Patient"}
+                            </span>
+                            <span className="text-[12px] text-[#1A6EE0] font-bold leading-none mt-0.5 uppercase tracking-wider">
+                                4D Review Mode
+                            </span>
                         </div>
                     </div>
                     <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
@@ -161,275 +637,293 @@ export default function FourDViewScreen() {
                 </div>
 
                 <div className="text-center">
-                    <div className="text-[28px] font-bold leading-none tracking-tight text-[#37474F]">{cnTime(now)}</div>
-                    <div className="mt-1 text-[12px] font-medium uppercase text-[#546E7A] opacity-80">{cnDate(now)}</div>
+                    <div className="text-[28px] font-bold tracking-tight text-[#37474F] leading-none">{clockStr}</div>
+                    <div className="text-[12px] text-[#546E7A] font-medium mt-1 uppercase opacity-80">{dateStr}</div>
                 </div>
 
                 <div className="flex items-center gap-5 pr-2">
-                    <button className="cursor-pointer p-1 text-[#D32F2F] hover:opacity-70"><Siren size={30} strokeWidth={1.8} /></button>
-                    <button className="relative cursor-pointer p-1 text-[#546E7A] hover:opacity-70">
+                    <div className="p-1 text-[#D32F2F] cursor-pointer hover:opacity-70"><Siren size={30} strokeWidth={1.8} /></div>
+                    <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
                         <Network size={24} />
-                        <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-[#D32F2F] text-[9px] font-bold text-white">5</span>
-                    </button>
-                    <button className="cursor-pointer p-1 text-[#546E7A] hover:opacity-70"><Sun size={24} /></button>
-                    <button className="relative cursor-pointer p-1 text-[#546E7A] hover:opacity-70">
+                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">5</span>
+                    </div>
+                    <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70"><Sun size={24} /></div>
+                    <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
                         <Settings size={24} />
-                        <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-[#D32F2F] text-[9px] font-bold text-white">10</span>
-                    </button>
+                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">10</span>
+                    </div>
                 </div>
             </header>
 
-            <main className="flex flex-1 overflow-hidden p-2 gap-2">
-                <aside className="flex w-[224px] shrink-0 flex-col overflow-hidden rounded-lg border border-[#B0C4DE] bg-white shadow-sm">
-                    <div className="flex h-[44px] shrink-0 items-center gap-2 border-b border-[#EEF2F9] bg-[#F8FAFC] px-3">
-                        <Layers3 size={14} className="text-[#4D94FF]" />
-                        <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">图像序列</span>
+            <main className="flex-1 flex overflow-hidden p-2 gap-2">
+                <aside className="w-[240px] bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden shrink-0">
+                    <div className="h-[44px] bg-[#F3F8FF] border-b border-[#DCE6F2] px-3 flex items-center gap-2">
+                        <Waves size={14} className="text-[#1A6EE0]" />
+                        <span className="text-[11px] font-black uppercase tracking-wider text-[#1A6EE0]">4D 图像序列</span>
                     </div>
 
-                    <div className="min-h-0 flex-1 overflow-y-auto border-b border-[#EEF2F9] px-2 py-1.5">
-                        <button className={treeRow} onClick={() => setStudyOpen((value) => !value)}>
-                            <ChevronRight size={11} className={`text-[#9AAABB] transition-transform ${studyOpen ? 'rotate-90' : ''}`} />
-                            <Waves size={12} className="text-[#1A6EE0]" />
-                            <div className="min-w-0 flex-1">
-                                <div className="truncate text-[12px] font-semibold text-[#37474F]">THORAX CT</div>
-                                <div className="text-[10px] text-[#9AAABB]">2024-03-09</div>
+                    <div className="h-[220px] overflow-y-auto p-2 border-b border-[#EEF2F9]">
+                        {studyTree.map((study) => (
+                            <div key={study.id} className="mb-1">
+                                <div className="px-2 py-1.5 flex items-center gap-1.5">
+                                    <span className="text-[10px] font-black text-[#546E7A] uppercase tracking-wide">{study.name}</span>
+                                </div>
+                                {study.scanGroups.map((group) => (
+                                    <div key={group.id} className="mb-1.5">
+                                        <div className="flex items-center gap-1.5 px-2 py-1">
+                                            <span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-black uppercase bg-orange-100 text-orange-700">4D</span>
+                                            <span className="text-[11px] font-bold text-[#37474F] truncate">{group.label}</span>
+                                        </div>
+                                        <div className="ml-3 pl-2 border-l-2 border-[#DCE6F2] flex flex-col gap-1">
+                                            {group.series.map((s) => (
+                                                <button
+                                                    key={s.id}
+                                                    onClick={() => handleSeriesSelect(s.id)}
+                                                    className={`w-full text-left rounded-md border px-2.5 py-1.5 transition-all ${s.id === selectedSeriesId ? "bg-[#E3F2FD] border-[#90CAF9]" : "bg-white border-[#DCE6F2] hover:bg-[#F8FAFC]"}`}
+                                                >
+                                                    <div className={`text-[11px] font-bold ${s.id === selectedSeriesId ? "text-[#1565C0]" : "text-[#37474F]"}`}>{s.name}</div>
+                                                    <div className="text-[9px] text-[#78909C] mt-0.5">{s.thickness}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
+                        ))}
+                    </div>
+
+                    <div className="h-[44px] bg-[#F8FAFC] border-b border-t border-[#EEF2F9] px-3 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <SlidersHorizontal size={14} className="text-[#4D94FF]" />
+                            <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">PARAMS</span>
+                        </div>
+                        <div className="flex items-center gap-1 rounded-full border border-[#DCE6F2] bg-[#F1F5F9] p-[3px]">
+                            {(["2D", "3D"] as const).map((mode) => (
+                                <button
+                                    key={mode}
+                                    onClick={() => setImageMode(mode)}
+                                    className={`min-w-[40px] h-[24px] px-2 rounded-full text-[10px] font-black ${imageMode === mode ? "bg-white text-[#4D94FF] shadow-sm border border-[#DCE6F2]/50" : "text-[#94A3B8]"}`}
+                                >
+                                    {mode}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="flex-1 bg-[#F8FAFC] p-3 overflow-y-auto">
+                        <div className="grid grid-cols-2 gap-2">
+                            {imageMode === "2D" ? (
+                                <>
+                                    <Param label="Kernel" value={selectedSeries.kernel} />
+                                    <Param label="Thick" value={selectedSeries.thickness} />
+                                    <Param label="FOV" value={selectedSeries.fov} />
+                                    <Param label="Matrix" value={selectedSeries.matrix} />
+                                    <Param label="WW" value={String(Math.round(displayWw))} />
+                                    <Param label="WL" value={String(Math.round(displayWl))} />
+                                </>
+                            ) : (
+                                <div className="col-span-2 flex flex-col gap-2">
+                                    {/* Layout Dropdown */}
+                                    <div className="flex items-center gap-2 relative">
+                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[40px] shrink-0">布局</span>
+                                        <div
+                                            onClick={() => setIsLayoutOpen(!isLayoutOpen)}
+                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isLayoutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                        >
+                                            <span className="text-[12px] font-medium text-[#37474F] truncate">{selectedLayout}</span>
+                                            <ChevronDown size={13} className={`text-[#4D94FF] transition-transform shrink-0 ml-1 ${isLayoutOpen ? 'rotate-180' : ''}`} />
+                                        </div>
+                                        {isLayoutOpen && (
+                                            <div className="absolute top-[calc(100%+3px)] left-[48px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                {Object.keys(LAYOUT_SPECS).map((opt) => (
+                                                    <div
+                                                        key={opt}
+                                                        onClick={() => { setSelectedLayout(opt); setIsLayoutOpen(false); }}
+                                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedLayout === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                    >
+                                                        {opt}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Render Mode Dropdown */}
+                                    <div className="flex items-center gap-2 relative">
+                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[40px] shrink-0">渲染</span>
+                                        <div
+                                            onClick={() => { setIsRenderModeOpen(!isRenderModeOpen); setIsLayoutOpen(false); setIsWindowPresetOpen(false); }}
+                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                        >
+                                            <span className="text-[12px] font-medium text-[#37474F]">{selectedRenderMode}</span>
+                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                        </div>
+                                        {isRenderModeOpen && (
+                                            <div className="absolute top-[calc(100%+3px)] left-[48px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                {["MIP", "MPR", "VR", "MinIP"].map((opt) => (
+                                                    <div
+                                                        key={opt}
+                                                        onClick={() => { setSelectedRenderMode(opt); setIsRenderModeOpen(false); }}
+                                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedRenderMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                    >
+                                                        {opt}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Window Preset Dropdown */}
+                                    <div className="flex items-center gap-2 relative">
+                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[40px] shrink-0">窗位</span>
+                                        <div
+                                            onClick={() => { setIsWindowPresetOpen(!isWindowPresetOpen); setIsLayoutOpen(false); setIsRenderModeOpen(false); }}
+                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isWindowPresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                        >
+                                            <span className="text-[12px] font-medium text-[#37474F]">{selectedWindowPreset}</span>
+                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                        </div>
+                                        {isWindowPresetOpen && (
+                                            <div className="absolute top-[calc(100%+3px)] left-[48px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                {Object.entries(WINDOW_PRESETS).map(([name, val]) => (
+                                                    <div
+                                                        key={name}
+                                                        onClick={() => { 
+                                                            setSelectedWindowPreset(name); 
+                                                            setIsWindowPresetOpen(false);
+                                                            setWw(val.ww);
+                                                            setWl(val.wl);
+                                                            setDisplayWw(val.ww);
+                                                            setDisplayWl(val.wl);
+                                                        }}
+                                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedWindowPreset === name ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                    >
+                                                        {name}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        {scanSession?.series.find(s => s.series_type === "4d")?.fourd_config && (
+                            <div className="mt-4 p-2 bg-blue-50/50 rounded border border-blue-100/50">
+                                <div className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-2">4D Configuration</div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <Param label="Phases" value={String(scanSession.series.find(s => s.series_type === "4d")?.fourd_config?.phase_count)} />
+                                    <Param label="Mode" value={scanSession.series.find(s => s.series_type === "4d")?.fourd_config?.breathing_mode === "free_breathing" ? "Free" : "Gated"} />
+                                </div>
+                            </div>
+                        )}
+                        <button className="h-[32px] w-full mt-4 bg-white border border-[#B0C4DE] rounded-md text-[10px] font-bold text-[#4D94FF]">
+                            4D 分析详情
                         </button>
-
-                        {studyOpen && (
-                            <div className="ml-3 mt-1 border-l border-[#DCE6F2] pl-2">
-                                <button
-                                    className={`flex min-h-7 w-full items-center gap-[5px] border-l-2 px-2 py-[5px] text-left transition-colors ${series === 'scout' ? 'border-[#1A6EE0] bg-[#F3F8FF]' : 'border-transparent hover:bg-[#F8FAFC]'}`}
-                                    onClick={() => setSeries('scout')}
-                                >
-                                    <span className="w-[11px]" />
-                                    <span className="w-4 text-center text-[10px] text-[#C2D0E2]">·</span>
-                                    <div className="min-w-0 flex-1">
-                                        <div className={`truncate text-[12px] ${series === 'scout' ? 'font-semibold text-[#1565C0]' : 'font-medium text-[#37474F]'}`}>Scout</div>
-                                        <div className="text-[10px] text-[#9AAABB]">定位像</div>
-                                    </div>
-                                </button>
-
-                                <button
-                                    className={`flex min-h-7 w-full items-center gap-[5px] border-l-2 px-2 py-[5px] text-left transition-colors ${series === '4d' ? 'border-[#1A6EE0] bg-[#F3F8FF]' : 'border-transparent hover:bg-[#F8FAFC]'}`}
-                                    onClick={() => setSeries('4d')}
-                                >
-                                    <span className="w-[11px]" />
-                                    <Waves size={12} className="shrink-0 text-[#1A6EE0]" />
-                                    <div className="min-w-0 flex-1">
-                                        <div className={`truncate text-[12px] ${series === '4d' ? 'font-semibold text-[#1565C0]' : 'font-medium text-[#37474F]'}`}>4D Free Scan</div>
-                                        <div className="text-[10px] text-[#9AAABB]">10 phases Phase-based</div>
-                                    </div>
-                                    <span className="font-mono text-[10px] text-[#1A6EE0]">4D</span>
-                                </button>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="mx-3 my-1.5 h-px bg-[#D8E2EE]" />
-                    <div className="px-3.5 pt-1 text-[10px] uppercase tracking-[0.08em] text-[#9AAABB]">布局模板</div>
-                    <div className="flex gap-2 px-3.5 py-2">
-                        <LayoutButton active={layout === 'single'} label="CT 平片" onClick={() => setLayout('single')}>
-                            <LayoutTemplate size={14} className={layout === 'single' ? 'text-[#1A6EE0]' : 'text-[#C2D0E2]'} />
-                        </LayoutButton>
-                        <LayoutButton active={layout === 'quad'} label="四分屏" onClick={() => setLayout('quad')}>
-                            <Grid2x2 size={14} className={layout === 'quad' ? 'text-[#1A6EE0]' : 'text-[#C2D0E2]'} />
-                        </LayoutButton>
-                        <LayoutButton active={layout === 'compare'} label="对比" onClick={() => setLayout('compare')}>
-                            <Columns2 size={14} className={layout === 'compare' ? 'text-[#1A6EE0]' : 'text-[#C2D0E2]'} />
-                        </LayoutButton>
-                    </div>
-                    <div className="flex gap-2 px-3.5 pb-3 text-[9px] text-[#5A6A80]">
-                        <span className="w-10 text-center">CT 平片</span>
-                        <span className="w-10 text-center">四分屏</span>
-                        <span className="w-10 text-center">对比</span>
-                    </div>
-
-                    <div className="mx-3 my-1.5 h-px bg-[#D8E2EE]" />
-                    <div className="px-3.5 pt-1 text-[10px] uppercase tracking-[0.08em] text-[#9AAABB]">图像参数</div>
-                    <div className="grid grid-cols-2 gap-2 px-3.5 py-3">
-                        <ParamCard label="图框" value={<div className="flex items-center justify-between text-[11px]"><span>肺窗</span><ChevronDown size={12} /></div>} />
-                        <ParamCard label="层厚" value="3.0 mm" />
-                        <ParamCard label="窗位" value="40" />
-                        <ParamCard label="窗宽" value="350" />
-                        {is4d && (
-                            <>
-                                <ParamCard label="相位数" value="10" accent />
-                                <ParamCard label="排序" value="Phase-based" accent />
-                            </>
-                        )}
                     </div>
                 </aside>
 
-                <div className="flex flex-1 min-w-0 overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A] shadow-sm">
-                    <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                        <div className={`grid min-h-0 flex-1 ${layoutGrid} bg-black`}>
-                            <div className="relative min-h-0 overflow-hidden bg-black">
-                                <DicomViewer dicomUrl={viewerUrl} activeTool={tool} windowCenter={40} windowWidth={350} />
-                                <div className="pointer-events-none absolute left-1/2 top-[10px] -translate-x-1/2 font-mono text-[11px] text-white/20">A</div>
-                                <div className="pointer-events-none absolute bottom-[68px] left-1/2 -translate-x-1/2 font-mono text-[11px] text-white/20">P</div>
-                                <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-[11px] text-white/20">L</div>
-                                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[11px] text-white/20">R</div>
-                                <div className="pointer-events-none absolute left-3 top-3 text-[10px] text-[#CFD8DC] font-mono leading-[1.35]">
-                                    <div className="font-bold">Patient ID</div>
-                                    <div>2024-03-09</div>
-                                    <div>HFS</div>
-                                </div>
-                                <div className="pointer-events-none absolute right-3 top-3 text-right text-[10px] text-[#CFD8DC] font-mono leading-[1.35]">
-                                    <div className="font-bold">4D Thorax</div>
-                                    <div>Image 60/120</div>
-                                    <div>KV 120 | mAs 200</div>
-                                    {is4d && (
-                                        <div className="mt-1 inline-flex rounded-full border border-[#1A6EE0]/40 bg-[#1A6EE0]/20 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.16em] text-[#93C5FD]">
-                                            Phase {phase[1]}%
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="pointer-events-none absolute bottom-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35]">
-                                    <div>WW/WL 350 / 40</div>
-                                    <div>Spacing 0.98 / 0.98</div>
-                                    <div>512 x 512 | Zoom 1.00x</div>
-                                </div>
-                                <div className="pointer-events-none absolute bottom-2 right-2 text-right text-[10px] text-[#CFD8DC] font-mono leading-[1.35]">
-                                    <div>Slice 60/120 | Thick 3.0 mm</div>
-                                    <div>Location 0.0</div>
-                                    <div>STN-CT | Demo Viewer</div>
-                                </div>
+                <div className="flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE]">
+                    {imageMode === "3D" ? (
+                        <CornerstoneMPRViewport
+                            ref={mprRef}
+                            imageUrls={seriesImageUrls}
+                            windowCenter={wl}
+                            windowWidth={ww}
+                            activeTool={mapCornerstoneTool(toolMode)}
+                            renderMode={selectedRenderMode as any}
+                            currentSliceIndex={clampSliceIndex(sliceIndex)}
+                            onWindowLevelChange={(wc, ww) => { setDisplayWl(wc); setDisplayWw(ww); }}
+                            className="flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden bg-[#0F172A]"
+                        />
+                    ) : (
+                        <section ref={viewportRef} className="flex-1 min-w-0 bg-black relative">
+                            <DicomViewer
+                                ref={dicomViewerRef}
+                                imageUrls={seriesImageUrls}
+                                currentImageIndex={clampSliceIndex(sliceIndex)}
+                                onImageIndexChange={setSliceIndex}
+                                activeTool={mapCornerstoneTool(toolMode)}
+                                windowCenter={wl}
+                                windowWidth={ww}
+                                onWindowLevelChange={(wc, ww) => { setDisplayWl(wc); setDisplayWw(ww); }}
+                            />
+                            <div className="absolute top-2 left-2 text-[10px] text-[#CFD8DC] font-mono pointer-events-none">
+                                <div className="font-bold">{meta.patientName} (4D)</div>
+                                <div>Image {sliceIndex + 1}/{selectedSeries.count}</div>
                             </div>
-
-                            {layout !== 'single' && (
-                                <>
-                                    <div className={`relative min-h-0 overflow-hidden bg-[#06090e] ${layout === 'compare' ? '' : 'border-b border-black'}`}>
-                                        <div className="absolute left-3 top-3 rounded-md border border-white/10 bg-black/40 px-2 py-1 font-mono text-[10px] text-white/55">Coronal</div>
-                                        <div className="flex h-full items-center justify-center"><div className="h-px w-[68%] bg-[#1A6EE0]/20" /></div>
-                                    </div>
-                                    {layout === 'quad' && (
-                                        <>
-                                            <div className="relative min-h-0 overflow-hidden bg-[#06090e]">
-                                                <div className="absolute left-3 top-3 rounded-md border border-white/10 bg-black/40 px-2 py-1 font-mono text-[10px] text-white/55">Sagittal</div>
-                                                <div className="flex h-full items-center justify-center"><div className="h-[68%] w-px bg-[#1A6EE0]/20" /></div>
-                                            </div>
-                                            <div className="min-h-0 overflow-hidden bg-[linear-gradient(180deg,#08111a_0%,#06090e_100%)] p-4 text-white/85">
-                                                <div className="mb-3 flex items-center gap-2">
-                                                    <Waves size={14} className="text-[#1A6EE0]" />
-                                                    <span className="text-[11px] uppercase tracking-[0.15em]">Dynamic Analysis</span>
-                                                </div>
-                                                <div className="space-y-3">
-                                                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                                                        <div className="mb-1 text-[10px] uppercase text-white/45">Max Inhalation Depth</div>
-                                                        <div className="text-[24px] font-semibold leading-none text-[#1A6EE0]">24.8 <span className="text-[12px]">mm</span></div>
-                                                    </div>
-                                                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                                                        <div className="mb-1 text-[10px] uppercase text-white/45">Cycle Regularity</div>
-                                                        <div className="text-[24px] font-semibold leading-none text-[#9BE38C]">98.2 <span className="text-[12px]">%</span></div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </>
-                                    )}
-                                </>
-                            )}
-                        </div>
-
-                        {is4d && (
-                            <div className="flex h-[56px] shrink-0 items-center border-t border-[#D8E2EE] bg-white px-4">
-                                <div className="relative flex h-12 flex-1 items-center px-1">
-                                    <div className="absolute left-1 right-1 top-1/2 h-0.5 -translate-y-1/2 rounded bg-[#D8E2EE]" />
-                                    <div className="absolute left-1 top-1/2 h-0.5 -translate-y-1/2 rounded bg-[#1A6EE0]" style={{ width: `calc(${fillWidth} - 2px)` }} />
-                                    <div className="absolute left-1 right-1 flex items-center justify-between">
-                                        {PHASES.map((item, index) => {
-                                            const active = index === phaseIdx;
-                                            return (
-                                                <button
-                                                    key={item[0]}
-                                                    className={`relative flex h-8 w-8 items-center justify-center rounded-full border-[1.5px] font-mono text-[9px] shadow-[0_1px_3px_rgba(0,0,0,0.08)] ${active ? 'z-10 scale-[1.18] border-[#1A6EE0] bg-[#1A6EE0] text-white shadow-[0_2px_10px_rgba(26,110,224,0.36)]' : 'border-[#C2D0E2] bg-white text-[#9AAABB] hover:border-[#1A6EE0] hover:bg-[#E8F0FB] hover:text-[#1A6EE0]'}`}
-                                                    onClick={() => {
-                                                        setPhaseIdx(index);
-                                                        setPlaying(false);
-                                                    }}
-                                                >
-                                                    {item[1]}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
+                            <div className="absolute bottom-2 right-2 text-[10px] text-[#CFD8DC] font-mono pointer-events-none text-right">
+                                <div>{meta.institution}</div>
+                                <div>4D-MODE ENABLED</div>
                             </div>
-                        )}
-                    </section>
-
+                        </section>
+                    )}
                     <aside className="w-[72px] bg-[#111827] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
+
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3">
-                            {is4d && (
-                                <>
-                                    <button
-                                        className={`flex h-[44px] w-[44px] items-center justify-center rounded-[10px] transition-all ${playing ? 'bg-[#3B82F6] text-white shadow-[0_0_15px_rgba(59,130,246,0.55)]' : 'text-[#94A3B8] hover:bg-white/[0.06] hover:text-white'}`}
-                                        title={playing ? 'Pause' : 'Play'}
-                                        onClick={() => setPlaying((value) => !value)}
-                                    >
-                                        {playing ? <Pause size={20} strokeWidth={1.5} /> : <Play size={20} strokeWidth={1.5} />}
-                                    </button>
-
-                                    {speeds.map((value) => (
-                                        <button
-                                            key={value}
-                                            className={`flex h-[30px] w-[44px] items-center justify-center rounded-[10px] border text-[10px] font-black transition-all ${speed === value ? 'border-[#3B82F6] bg-[#172554] text-[#BFDBFE]' : 'border-white/10 bg-white/[0.03] text-[#94A3B8] hover:border-white/20 hover:bg-white/[0.08] hover:text-white'}`}
-                                            onClick={() => setSpeed(value)}
-                                        >
-                                            {value}x
-                                        </button>
-                                    ))}
-
-                                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '4px 4px' }} />
-                                </>
-                            )}
-
-                            {tools.map((item, index) => {
-                                const Icon = item.icon;
-                                const active = tool === item.id;
-                                return (
-                                    <div key={item.id} className="contents">
-                                        {index === 4 && <div style={{ height: '1px', background: 'rgba(255,255,255,0.07)', margin: '4px 4px' }} />}
-                                        <button
-                                            title={item.label}
-                                            onClick={() => setTool(item.id)}
-                                            style={{
-                                                width: '44px',
-                                                height: '44px',
-                                                borderRadius: '10px',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                border: 'none',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.15s ease',
-                                                background: active ? '#3B82F6' : 'transparent',
-                                                color: active ? '#ffffff' : '#94A3B8',
-                                                boxShadow: active ? '0 0 15px rgba(59,130,246,0.55)' : 'none',
-                                            }}
-                                        >
-                                            <Icon size={20} strokeWidth={1.5} />
-                                        </button>
-                                    </div>
-                                );
-                            })}
+                            {(["pan", "wl", "measure", "annotate", "eraser"] as const).map((mode) => (
+                                <button
+                                    key={mode}
+                                    onClick={() => setToolMode(mode)}
+                                    className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all ${toolMode === mode ? "bg-[#3B82F6] text-white shadow-lg" : "text-[#94A3B8] hover:bg-white/5"}`}
+                                >
+                                    {mode === "pan" && <Hand size={20} />}
+                                    {mode === "wl" && <SlidersHorizontal size={20} />}
+                                    {mode === "measure" && <Ruler size={20} />}
+                                    {mode === "annotate" && <Pencil size={20} />}
+                                    {mode === "eraser" && <Eraser size={20} />}
+                                </button>
+                            ))}
+                            <div className="h-px bg-white/10 my-1 mx-2" />
+                            {[
+                                { title: "Zoom In", icon: <ZoomIn size={20} />, action: () => dicomViewerRef.current?.zoomIn() },
+                                { title: "Zoom Out", icon: <ZoomOut size={20} />, action: () => dicomViewerRef.current?.zoomOut() },
+                                { title: "Fit", icon: <Maximize size={20} />, action: () => dicomViewerRef.current?.fit() },
+                                { title: "Reset", icon: <RefreshCw size={20} />, action: () => { dicomViewerRef.current?.reset(); setDisplayWw(defaultWindowRef.current.ww); setDisplayWl(defaultWindowRef.current.wl); } },
+                                { title: isPlaying ? "Pause" : "Play", icon: isPlaying ? <Pause size={20} /> : <Play size={20} />, action: () => setIsPlaying(!isPlaying), active: isPlaying },
+                            ].map((tool) => (
+                                <button
+                                    key={tool.title}
+                                    title={tool.title}
+                                    onClick={tool.action}
+                                    className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all ${tool.active ? "bg-[#3B82F6] text-white" : "text-[#94A3B8] hover:bg-white/5"}`}
+                                >
+                                    {tool.icon}
+                                </button>
+                            ))}
+                            <div className="h-px bg-white/10 my-1 mx-2" />
+                            <button
+                                title="Clear All"
+                                onClick={handleClearAllAnnotations}
+                                className="w-11 h-11 rounded-lg flex items-center justify-center text-[#FCA5A5] hover:bg-red-500/10 transition-all"
+                            >
+                                <Trash2 size={20} />
+                            </button>
                         </div>
                     </aside>
                 </div>
             </main>
 
-            <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
+            <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8">
                 <div className="flex-1">
-                    <button className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95">
-                        <ChevronLeft size={20} /> 高级处理
+                    <button className="px-10 h-13 bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] text-[13px]">
+                        4D 处理
                     </button>
                 </div>
                 <div className="flex-1 flex justify-end">
-                    <button className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95">
-                        结束检查 <ChevronRight size={20} />
+                    <button onClick={() => navigate("/patients")} className="px-10 h-13 bg-[#4D94FF] text-white font-bold rounded-md shadow-lg text-[13px]">
+                        结束 4D 检查 
                     </button>
                 </div>
             </footer>
         </div>
     );
-}
+};
+
+const Param = ({ label, value }: { label: string; value: string }) => (
+    <div className="p-2 bg-white border border-[#B0C4DE]/30 rounded-md flex flex-col items-center justify-center min-h-[56px]">
+        <span className="text-[8px] font-black uppercase text-[#90A4AE]">{label}</span>
+        <span className="text-[13px] font-black text-[#37474F] mt-1">{value}</span>
+    </div>
+);
+
+export default FourDViewScreen;

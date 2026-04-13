@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import {
@@ -85,9 +85,11 @@ type FourDDragHandle = "move" | "top" | "bottom" | "left" | "right";
 interface FourDScoutViewportProps {
     onCropBoxChange?: (box: { width: number; height: number }) => void;
     onRectChange?: (rect: { x: number; y: number; width: number; height: number }) => void;
+    isScanning?: boolean;
+    revealY?: number; // 0 to 1
 }
 
-function FourDScoutViewport({ onCropBoxChange, onRectChange }: FourDScoutViewportProps) {
+function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, revealY = 1 }: FourDScoutViewportProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const projectionRef = useRef<Float32Array | null>(null);
@@ -206,9 +208,31 @@ function FourDScoutViewport({ onCropBoxChange, onRectChange }: FourDScoutViewpor
         }
         offCtx.putImageData(imageData, 0, 0);
         ctx.fillStyle = "#000"; ctx.fillRect(0, 0, viewW, viewH);
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;
+        ctx.filter = "contrast(1.12) brightness(0.94)";
         const fitScale = Math.min(viewW / size.width, viewH / size.height), drawScale = fitScale * 0.98, drawW = size.width * drawScale, drawH = size.height * drawScale, x = (viewW - drawW) / 2, y = (viewH - drawH) / 2;
-        ctx.save(); ctx.imageSmoothingEnabled = true; ctx.filter = "contrast(1.12) brightness(0.94)"; ctx.drawImage(offscreen, x, y, drawW, drawH); ctx.restore();
-    }, [loadState, windowLevel, windowWidth]);
+        
+        ctx.drawImage(offscreen, x, y, drawW, drawH);
+        
+        if (isScanning && revealY < 1) {
+            const drawClipH = drawH * revealY;
+            
+            // Draw Scan Line
+            ctx.beginPath();
+            ctx.moveTo(x, y + drawClipH);
+            ctx.lineTo(x + drawW, y + drawClipH);
+            ctx.strokeStyle = "#34D399";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.stroke();
+            // Glow effect
+            ctx.strokeStyle = "rgba(52, 211, 153, 0.4)";
+            ctx.lineWidth = 4;
+            ctx.stroke();
+        }
+        ctx.restore();
+    }, [loadState, windowLevel, windowWidth, isScanning, revealY]);
 
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
@@ -265,24 +289,19 @@ function FourDScoutViewport({ onCropBoxChange, onRectChange }: FourDScoutViewpor
 // ---------------------------------------------------------------------------
 interface HelicalScanPreviewViewportProps {
     isScanning: boolean;
-    active?: boolean;
-    cropRect: { x: number; y: number; width: number; height: number };
-    onBedProgress?: (bedIndex: number) => void;
-    onComplete?: () => void;
+    active: boolean;
+    revealY?: number;
 }
 
-function HelicalScanPreviewViewport({ isScanning, active = false, cropRect, onBedProgress, onComplete }: HelicalScanPreviewViewportProps) {
+function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: HelicalScanPreviewViewportProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const slicesRef = useRef<FourDLoadedSlice[]>([]);
-    const renderedSliceCanvas = useRef<HTMLCanvasElement | null>(null); // cached full slice render
+    const coronalProjectionRef = useRef<HTMLCanvasElement | null>(null);
     const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
-    const [currentBedIndex, setCurrentBedIndex] = useState(0);
-    const [revealRows, setRevealRows] = useState(0);
-    const currentBedRef = useRef(0);
-    const revealRowsRef = useRef(0);
     const [windowWidth] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowWidth);
     const [windowLevel] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowLevel);
+    const [forceRender, setForceRender] = useState(0);
 
     // Load slices once
     useEffect(() => {
@@ -331,106 +350,77 @@ function HelicalScanPreviewViewport({ isScanning, active = false, cropRect, onBe
         return () => { cancelled = true; };
     }, []);
 
-    // Pre-render slice to offscreen canvas when bed index changes
+    // Determine current slice index for metadata overlay based on revealY
+    const currentSliceIdx = useMemo(() => {
+        if (loadState !== "ready" || slicesRef.current.length === 0) return 0;
+        const total = slicesRef.current.length;
+        return Math.min(Math.floor(revealY * total), total - 1);
+    }, [revealY, loadState]);
+
+    // Build Coronal projection once slices ready
     useEffect(() => {
         if (loadState !== "ready" || slicesRef.current.length === 0) return;
-        const total = slicesRef.current.length;
-        const startIdx = Math.floor(cropRect.y * total);
-        const endIdx = Math.floor((cropRect.y + cropRect.height) * total);
-        const range = Math.max(1, endIdx - startIdx);
-        const sliceIdx = startIdx + Math.floor((currentBedIndex / BREATHING_BED_POSITION_COUNT) * range);
-        const slice = slicesRef.current[Math.min(sliceIdx, total - 1)];
+        
+        const slices = slicesRef.current;
+        const totalSlices = slices.length;
+        const rows = slices[0].rows;
+        const cols = slices[0].cols;
 
-        const tc = document.createElement("canvas");
-        tc.width = slice.cols; tc.height = slice.rows;
-        const tCtx = tc.getContext("2d")!;
-        const imgData = tCtx.createImageData(slice.cols, slice.rows);
-        const data = imgData.data;
-        const minVal = windowLevel - windowWidth / 2, maxVal = windowLevel + windowWidth / 2, range2 = maxVal - minVal;
-        for (let i = 0; i < slice.hu.length; i++) {
-            const val = clamp01((slice.hu[i] - minVal) / range2) * 255;
-            const j = i * 4;
-            data[j] = val; data[j + 1] = val; data[j + 2] = val; data[j + 3] = 255;
-        }
-        tCtx.putImageData(imgData, 0, 0);
-        renderedSliceCanvas.current = tc;
-    }, [currentBedIndex, loadState, cropRect, windowWidth, windowLevel]);
+        // Generate a Coronal projection (using a middle row across all slices)
+        const projectionCanvas = document.createElement("canvas");
+        projectionCanvas.width = cols;
+        projectionCanvas.height = totalSlices;
+        const pCtx = projectionCanvas.getContext("2d")!;
+        const pImgData = pCtx.createImageData(cols, totalSlices);
+        const pData = pImgData.data;
 
-    // Progressive reveal animation: rows top→bottom per bed position
-    useEffect(() => {
-        if (!isScanning || loadState !== "ready" || slicesRef.current.length === 0) {
-            if (!isScanning) {
-                currentBedRef.current = 0;
-                revealRowsRef.current = 0;
-                setCurrentBedIndex(0);
-                setRevealRows(0);
+        const minVal = windowLevel - windowWidth / 2, maxVal = windowLevel + windowWidth / 2, range = maxVal - minVal;
+        
+        // Take a middle Coronal slice (Y=256) across the volume
+        const yCoord = Math.floor(rows / 2);
+        
+        for (let z = 0; z < totalSlices; z++) {
+            const slice = slices[z];
+            for (let x = 0; x < cols; x++) {
+                const hu = slice.hu[yCoord * cols + x];
+                const val = clamp01((hu - minVal) / range) * 255;
+                const offset = (z * cols + x) * 4;
+                pData[offset] = val; pData[offset+1] = val; pData[offset+2] = val; pData[offset+3] = 255;
             }
-            return;
         }
+        pCtx.putImageData(pImgData, 0, 0);
+        coronalProjectionRef.current = projectionCanvas;
+        setForceRender(f => f + 1);
+    }, [loadState, windowWidth, windowLevel]);
 
-        const totalRows = slicesRef.current[0]?.rows ?? 512;
-        // Target ~1.5s per bed at 30fps → 45 frames → rowsPerFrame = totalRows/45
-        const rowsPerFrame = Math.max(1, Math.ceil(totalRows / 45));
-
-        const timer = setInterval(() => {
-            revealRowsRef.current += rowsPerFrame;
-            if (revealRowsRef.current >= totalRows) {
-                const nextBed = currentBedRef.current + 1;
-                if (nextBed >= BREATHING_BED_POSITION_COUNT) {
-                    // All beds done — keep last slice fully visible
-                    revealRowsRef.current = totalRows;
-                    setRevealRows(totalRows);
-                    clearInterval(timer);
-                    if (onComplete) onComplete();
-                    return;
-                }
-                currentBedRef.current = nextBed;
-                revealRowsRef.current = 0;
-                setCurrentBedIndex(nextBed);
-                setRevealRows(0);
-                if (onBedProgress) onBedProgress(nextBed);
-            } else {
-                setRevealRows(revealRowsRef.current);
-            }
-        }, 30);
-
-        return () => clearInterval(timer);
-    }, [isScanning, loadState, onBedProgress, onComplete]);
-
-    // Draw current slice with partial row reveal onto viewport canvas
+    // Draw Coronal Reconstruction with vertical reveal
     useEffect(() => {
         const canvas = canvasRef.current, viewport = viewportRef.current;
-        if (!canvas || !viewport || !active || !renderedSliceCanvas.current) return;
+        const coronal = coronalProjectionRef.current;
+        if (!canvas || !viewport || !active || !coronal) return;
         const ctx = canvas.getContext("2d"); if (!ctx) return;
         const viewW = viewport.clientWidth, viewH = viewport.clientHeight;
         if (canvas.width !== viewW || canvas.height !== viewH) { canvas.width = viewW; canvas.height = viewH; }
 
-        const tc = renderedSliceCanvas.current;
-        const sliceRows = tc.height, sliceCols = tc.width;
         ctx.fillStyle = "#000"; ctx.fillRect(0, 0, viewW, viewH);
-        const scale = Math.min(viewW / sliceCols, viewH / sliceRows) * 0.9;
-        const dw = sliceCols * scale, dh = sliceRows * scale;
+        
+        const cw = coronal.width, ch = coronal.height;
+        // Fit keeping aspect ratio (Coronal images are often tall/skinny depending on Z coverage)
+        const scale = Math.min(viewW / cw, viewH / ch) * 0.95;
+        const dw = cw * scale, dh = ch * scale;
         const dx = (viewW - dw) / 2, dy = (viewH - dh) / 2;
 
-        // Clip to revealed rows only; show full when not actively scanning (completed)
-        const drawRows = isScanning ? Math.min(revealRows, sliceRows) : sliceRows;
-        if (drawRows > 0) {
-            const srcH = drawRows;
-            const destH = dh * (drawRows / sliceRows);
-            ctx.drawImage(tc, 0, 0, sliceCols, srcH, dx, dy, dw, destH);
+        // "No Scan, No Image": Only reveal up to revealY
+        const revealFactor = isScanning ? revealY : 1;
+        if (revealFactor > 0) {
+            const srcH = ch * revealFactor;
+            const destH = dh * revealFactor;
+            ctx.drawImage(coronal, 0, 0, cw, srcH, dx, dy, dw, destH);
         }
-    }, [revealRows, currentBedIndex, active, isScanning]);
+    }, [forceRender, active, isScanning, revealY]);
 
-    // Compute display info for overlay
     const currentSliceInfo = loadState === "ready" && slicesRef.current.length > 0
-        ? (() => {
-            const total = slicesRef.current.length;
-            const startIdx = Math.floor(cropRect.y * total);
-            const endIdx = Math.floor((cropRect.y + cropRect.height) * total);
-            const range = Math.max(1, endIdx - startIdx);
-            const idx = startIdx + Math.floor((currentBedIndex / BREATHING_BED_POSITION_COUNT) * range);
-            return slicesRef.current[Math.min(idx, total - 1)];
-        })()
+        ? slicesRef.current[currentSliceIdx]
         : null;
 
     return (
@@ -464,7 +454,6 @@ function HelicalScanPreviewViewport({ isScanning, active = false, cropRect, onBe
                                 <div className={`font-bold uppercase ${isScanning ? "text-[#34D399]" : "text-[#F59E0B]"}`}>
                                     {isScanning ? "SCANNING..." : "READY"}
                                 </div>
-                                <div className="opacity-80">Slice: {currentBedIndex + 1} / {BREATHING_BED_POSITION_COUNT}</div>
                             </div>
                             {isScanning && currentSliceInfo && (
                                 <div className="pointer-events-none absolute bottom-4 left-4 flex flex-col gap-0.5">
@@ -562,13 +551,13 @@ const FourDHelicalConfirmScreen = () => {
     const [showPatientConfirm, setShowPatientConfirm] = useState(false);
     const [scanStarted, setScanStarted] = useState(false);
     const [scanCompleted, setScanCompleted] = useState(false);
-    const [cropRect, setCropRect] = useState({ x: 0.2, y: 0.18, width: 0.56, height: 0.48 });
     const [sessionData, setSessionData] = useState<ApiScanSessionDetail | null>(null);
 
     // Physical Button states
     const [showPhysicalButton, setShowPhysicalButton] = useState(false);
     const [scanStage, setScanStage] = useState<ScanStage>("idle");
     const [holdProgress, setHoldProgress] = useState(0);
+    const [scanProgress, setScanProgress] = useState(1); // 1 when idle/complete, 0-1 when scanning
 
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
@@ -594,8 +583,39 @@ const FourDHelicalConfirmScreen = () => {
             setScanCompleted(false);
             setScanStage("completed");
             setShowPhysicalButton(false);
+            
+            // Start progress timer
+            setScanProgress(0);
         }, 1500); // Exposure duration
     };
+
+    // Drive scan progress
+    useEffect(() => {
+        if (!scanStarted) return;
+        
+        let startTs: number | null = null;
+        const duration = 12000; // 12 seconds for the whole scan
+        
+        const tick = (ts: number) => {
+            if (!startTs) startTs = ts;
+            const elapsed = ts - startTs;
+            const p = Math.min(elapsed / duration, 1);
+            setScanProgress(p);
+            
+            // Sync breathing bed index (0-9)
+            setBreathingBedIndex(Math.floor(p * 10));
+            
+            if (p >= 1) {
+                handleScanComplete();
+                return;
+            }
+            rafRef.current = requestAnimationFrame(tick);
+        };
+        rafRef.current = requestAnimationFrame(tick);
+        return () => {
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        };
+    }, [scanStarted]);
 
     const startHold = () => {
         if (scanStage === "exposing" || scanStage === "completed") return;
@@ -675,6 +695,12 @@ const FourDHelicalConfirmScreen = () => {
             fov: Math.round(width * 892.86),
         });
     };
+
+    const handleScanComplete = useCallback(() => {
+        setScanStarted(false);
+        setScanCompleted(true);
+        setBreathingBedIndex(BREATHING_BED_POSITION_COUNT);
+    }, []);
 
     // Bed progress is now driven by HelicalScanPreviewViewport via onBedProgress callback
     useEffect(() => {
@@ -797,8 +823,8 @@ const FourDHelicalConfirmScreen = () => {
                                                         className={`flex items-center gap-1.5 py-1.5 px-2 rounded-md cursor-pointer transition-all ${isActive ? "bg-[#4D94FF] text-white shadow-md" : "hover:bg-[#EEF2F9]"}`}
                                                     >
                                                         <ChevronDown size={12} className={isActive ? "text-white/80" : "text-[#90A4AE]"} />
-                                                        <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center ${isScout ? "border-[#4CAF50] bg-[#E8F5E9]" : "border-[#B0C4DE] bg-white"}`}>
-                                                            {isScout && <Check size={10} className="text-[#4CAF50]" />}
+                                                        <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center ${(isScout || (isActive && scanCompleted)) ? "border-[#4CAF50] bg-[#E8F5E9]" : "border-[#B0C4DE] bg-white"}`}>
+                                                            {(isScout || (isActive && scanCompleted)) && <Check size={10} className="text-[#4CAF50]" />}
                                                         </div>
                                                         <span className={`font-bold text-[12px] truncate ${isActive ? "text-white" : "text-[#37474F]"}`}>{seq.name}</span>
                                                     </div>
@@ -806,8 +832,33 @@ const FourDHelicalConfirmScreen = () => {
                                                         <div className="ml-7 mt-0.5 mb-1">
                                                             {seq.steps.map((step, idx) => (
                                                                 <div key={step} className="flex items-center gap-2 py-0.5">
-                                                                    <div className={`w-2.5 h-2.5 rounded-full border ${idx === 0 && isActive ? "border-[#4D94FF] bg-[#4D94FF]" : "border-[#B0C4DE] bg-white"}`} />
-                                                                    <span className="text-[11px] text-[#546E7A]">{step}</span>
+                                                                    <div className={`w-3 h-3 flex items-center justify-center`}>
+                                                                        {isActive && (
+                                                                            (() => {
+                                                                                const isStep0Completed = scanStarted || scanCompleted;
+                                                                                const isStep1Active = scanStarted && !scanCompleted;
+                                                                                const isStep1Completed = scanCompleted;
+
+                                                                                if (idx === 0) {
+                                                                                    return isStep0Completed ? (
+                                                                                        <Check size={12} className="text-[#4CAF50] font-bold" />
+                                                                                    ) : (
+                                                                                        <div className="w-2.5 h-2.5 rounded-full border border-[#4D94FF] bg-[#4D94FF]" />
+                                                                                    );
+                                                                                }
+                                                                                if (idx === 1) {
+                                                                                    if (isStep1Completed) return <Check size={12} className="text-[#4CAF50] font-bold" />;
+                                                                                    if (isStep1Active) return <div className="w-2.5 h-2.5 rounded-full border border-[#4D94FF] bg-[#4D94FF]" />;
+                                                                                    return <div className="w-2.5 h-2.5 rounded-full border border-[#B0C4DE] bg-white" />;
+                                                                                }
+                                                                                return <div className="w-2.5 h-2.5 rounded-full border border-[#B0C4DE] bg-white" />;
+                                                                            })()
+                                                                        )}
+                                                                        {!isActive && <div className="w-2.5 h-2.5 rounded-full border border-[#B0C4DE] bg-white" />}
+                                                                    </div>
+                                                                    <span className={`text-[11px] ${isActive && ((idx === 0 && !scanStarted && !scanCompleted) || (idx === 1 && scanStarted && !scanCompleted)) ? "text-[#4D94FF] font-bold" : "text-[#546E7A]"}`}>
+                                                                        {step}
+                                                                    </span>
                                                                 </div>
                                                             ))}
                                                         </div>
@@ -855,7 +906,11 @@ const FourDHelicalConfirmScreen = () => {
                     <div className="flex-1 flex bg-black relative">
                         {/* Left: Scout Projection */}
                         <div className="flex-1 relative overflow-hidden">
-                            <FourDScoutViewport onRectChange={setCropRect} onCropBoxChange={handleCropBoxChange} />
+                            <FourDScoutViewport 
+                                onCropBoxChange={handleCropBoxChange} 
+                                isScanning={scanStarted}
+                                revealY={scanProgress}
+                            />
                         </div>
                         {/* Middle Divider */}
                         <div className="w-[1px] bg-white/10 z-10" />
@@ -864,13 +919,7 @@ const FourDHelicalConfirmScreen = () => {
                             <HelicalScanPreviewViewport
                                 isScanning={scanStarted}
                                 active={scanStarted || scanCompleted}
-                                cropRect={cropRect}
-                                onBedProgress={(idx) => setBreathingBedIndex(idx)}
-                                onComplete={() => {
-                                    setScanStarted(false);
-                                    setScanCompleted(true);
-                                    setBreathingBedIndex(BREATHING_BED_POSITION_COUNT);
-                                }}
+                                revealY={scanProgress}
                             />
                         </div>
                     </div>
@@ -978,7 +1027,7 @@ const FourDHelicalConfirmScreen = () => {
                     <button
                         onClick={() => {
                             if (scanCompleted) {
-                                navigate("/image-viewer");
+                                navigate("/image-viewer-4d");
                             } else {
                                 setShowPatientConfirm(true);
                             }

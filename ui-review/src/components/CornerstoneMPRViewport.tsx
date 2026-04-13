@@ -5,7 +5,7 @@ import {
   Enums,
   RenderingEngine,
   setVolumesForViewports,
-  type IVolumeViewport,
+  type Types,
   volumeLoader,
 } from '@cornerstonejs/core';
 
@@ -30,12 +30,13 @@ interface CornerstoneMPRViewportProps {
   activeTool?: string;
   renderMode?: 'MPR' | 'MIP' | 'VR' | 'MinIP';
   className?: string;
+  currentSliceIndex?: number;
 }
 
 let volumeLoaderRegistered = false;
 function registerVolumeLoader() {
   if (volumeLoaderRegistered) return;
-  volumeLoader.registerVolumeLoader('streaming-wado-image-volume', cornerstoneStreamingImageVolumeLoader);
+  volumeLoader.registerVolumeLoader('streaming-wado-image-volume', cornerstoneStreamingImageVolumeLoader as any);
   volumeLoaderRegistered = true;
 }
 
@@ -55,6 +56,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       activeTool = 'pan',
       renderMode = 'MPR',
       className,
+      currentSliceIndex,
     },
     ref
   ) {
@@ -85,7 +87,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         const engine = engineRef.current;
         if (!engine) return;
         allVpIds.forEach((id) => {
-          const vp = engine.getViewport(id) as IVolumeViewport;
+          const vp = engine.getViewport(id) as Types.IVolumeViewport;
           if (!vp) return;
           vp.resetCamera();
           vp.render();
@@ -155,7 +157,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
             if (disposed) return;
             vol.load(); // streaming — don't await
           } else {
-            cache.getVolume(volId)?.load?.();
+            (cache.getVolume(volId) as any)?.load();
           }
 
           if (disposed) return;
@@ -169,11 +171,11 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           const upper = windowCenter + windowWidth / 2;
           lastVoiRef.current = { lower, upper };
           allVpIds.forEach((id) => {
-            (engine.getViewport(id) as IVolumeViewport)?.setProperties({ voiRange: { lower, upper } });
+            (engine.getViewport(id) as Types.IVolumeViewport)?.setProperties({ voiRange: { lower, upper } });
           });
 
           // Apply initial slab mode to 4th panel
-          const slabVp = engine.getViewport(vpSlab) as IVolumeViewport | undefined;
+          const slabVp = engine.getViewport(vpSlab) as Types.IVolumeViewport | undefined;
           if (slabVp) {
             slabVp.setBlendMode(Enums.BlendModes.MAXIMUM_INTENSITY_BLEND);
             slabVp.setProperties({ slabThickness: SLAB_THICKNESS_MM });
@@ -197,7 +199,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
               if (disposed || !engineRef.current) return;
               engineRef.current.resize(true, false);
               allVpIds.forEach((id) => {
-                const vp = engineRef.current?.getViewport(id) as IVolumeViewport | undefined;
+                const vp = engineRef.current?.getViewport(id) as Types.IVolumeViewport | undefined;
                 vp?.resetCamera();
               });
               engineRef.current.renderViewports(allVpIds);
@@ -240,7 +242,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
       lastVoiRef.current = { lower, upper };
       allVpIds.forEach((id) => {
-        const vp = engine.getViewport(id) as IVolumeViewport;
+        const vp = engineRef.current?.getViewport(id) as Types.IVolumeViewport | undefined;
         vp?.setProperties({ voiRange: { lower, upper } });
         vp?.render();
       });
@@ -252,7 +254,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       if (!el || status !== 'ready' || !onWindowLevelChange) return;
 
       const handleRendered = () => {
-        const vp = engineRef.current?.getViewport(vpAxial) as IVolumeViewport | undefined;
+        const vp = engineRef.current?.getViewport(vpAxial) as Types.IVolumeViewport | undefined;
         if (!vp) return;
         try {
           const props = vp.getProperties();
@@ -295,7 +297,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     // ─── Render mode: adjust 4th panel slab blend ────────────────────────────
     useEffect(() => {
       if (status !== 'ready') return;
-      const vp = engineRef.current?.getViewport(vpSlab) as IVolumeViewport | undefined;
+      const vp = engineRef.current?.getViewport(vpSlab) as Types.IVolumeViewport | undefined;
       if (!vp) return;
 
       // All render modes use ORTHOGRAPHIC with slab thickness.
@@ -315,6 +317,25 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       }
       vp.render();
     }, [renderMode, status]);
+ 
+    // ─── Cine / Slice sync ───────────────────────────────────────────────────
+    useEffect(() => {
+      const engine = engineRef.current;
+      if (!engine || status !== 'ready' || currentSliceIndex === undefined) return;
+ 
+      const vp = engine.getViewport(vpAxial) as Types.IVolumeViewport | undefined;
+      if (!vp) return;
+ 
+      try {
+        // Only set if different to avoid redundant renders
+        if (vp.getSliceIndex() !== currentSliceIndex) {
+          (vp as any).setSliceIndex(currentSliceIndex);
+          vp.render();
+        }
+      } catch (e) {
+        console.warn('Failed to set axial slice index:', e);
+      }
+    }, [currentSliceIndex, status]);
 
     // ─── Render ───────────────────────────────────────────────────────────────
     const panelBase = 'relative overflow-hidden bg-black';

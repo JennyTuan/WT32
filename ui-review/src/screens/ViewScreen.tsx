@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     User,
     Settings,
@@ -15,7 +15,6 @@ import {
     Pencil,
     Eraser,
     Trash2,
-    CircleDot,
     Maximize,
     RefreshCw,
     Play,
@@ -64,15 +63,8 @@ type Study = {
     name: string;
     scanGroups: ScanGroup[];
 };
-type DrawRect = { x: number; y: number; w: number; h: number };
-type ScreenMeasure = {
-    id: string;
-    slice: number;
-    sx1: number;
-    sy1: number;
-    sx2: number;
-    sy2: number;
-};
+// (DrawRect removed — unused)
+// (ScreenMeasure removed — unused)
 type TextAnnotation = {
     id: string;
     kind: "text";
@@ -100,7 +92,6 @@ type LayoutSpec = {
     panels: Record<PanelId, string>;
 };
 type PseudoColorMode = "灰阶" | "Hot Iron" | "PET" | "Spectrum" | "Bone" | "Rainbow" | "Blue-Orange";
-type ProjectionAxis = "axial" | "coronal" | "sagittal";
 
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
 
@@ -127,75 +118,7 @@ const DEFAULT_PANEL_CLASS = "relative overflow-hidden bg-black";
 const HIDDEN_PANEL_CLASS = "hidden";
 const PSEUDO_COLOR_OPTIONS: PseudoColorMode[] = ["灰阶", "Hot Iron", "PET", "Spectrum", "Bone", "Rainbow", "Blue-Orange"];
 
-const applyPseudoColor = (mode: PseudoColorMode, normalized: number) => {
-    const t = Math.min(1, Math.max(0, normalized));
-    if (mode === "灰阶") {
-        const value = Math.round(t * 255);
-        return [value, value, value] as const;
-    }
-    if (mode === "Hot Iron") {
-        const r = Math.round(255 * Math.min(1, t * 1.35));
-        const g = Math.round(255 * Math.min(1, Math.max(0, (t - 0.28) / 0.55)));
-        const b = Math.round(255 * Math.min(1, Math.max(0, (t - 0.72) / 0.28)));
-        return [r, g, b] as const;
-    }
-    if (mode === "PET") {
-        const r = Math.round(255 * Math.min(1, Math.max(0, (t - 0.18) / 0.62)));
-        const g = Math.round(255 * Math.sin(Math.PI * Math.min(1, t)) ** 1.1);
-        const b = Math.round(255 * Math.min(1, Math.max(0, 1.15 - t * 1.55)));
-        return [r, g, b] as const;
-    }
-    if (mode === "Bone") {
-        const lifted = t ** 0.72;
-        const r = Math.round(255 * Math.min(1, 0.2 + lifted * 0.95));
-        const g = Math.round(255 * Math.min(1, 0.18 + lifted * 0.9));
-        const b = Math.round(255 * Math.min(1, 0.12 + lifted * 0.78));
-        return [r, g, b] as const;
-    }
-    if (mode === "Rainbow") {
-        const hue = (1 - t) * 240;
-        const saturation = 0.95;
-        const lightness = 0.52;
-        const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
-        const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
-        const m = lightness - c / 2;
-        let rPrime = 0;
-        let gPrime = 0;
-        let bPrime = 0;
-        if (hue < 60) {
-            rPrime = c;
-            gPrime = x;
-        } else if (hue < 120) {
-            rPrime = x;
-            gPrime = c;
-        } else if (hue < 180) {
-            gPrime = c;
-            bPrime = x;
-        } else {
-            gPrime = x;
-            bPrime = c;
-        }
-        return [
-            Math.round((rPrime + m) * 255),
-            Math.round((gPrime + m) * 255),
-            Math.round((bPrime + m) * 255),
-        ] as const;
-    }
-    if (mode === "Blue-Orange") {
-        const cool = [30, 78, 170] as const;
-        const warm = [255, 168, 38] as const;
-        const mix = t ** 0.9;
-        return [
-            Math.round(cool[0] + (warm[0] - cool[0]) * mix),
-            Math.round(cool[1] + (warm[1] - cool[1]) * mix),
-            Math.round(cool[2] + (warm[2] - cool[2]) * mix),
-        ] as const;
-    }
-    const r = Math.round(255 * Math.min(1, Math.max(0, 1.5 * t - 0.15)));
-    const g = Math.round(255 * Math.sin(Math.PI * t));
-    const b = Math.round(255 * Math.min(1, Math.max(0, 1.25 - 1.45 * t)));
-    return [r, g, b] as const;
-};
+// (Pseudo-color logic removed)
 
 const LAYOUT_SPECS: Record<string, LayoutSpec> = {
     "多平面重建": {
@@ -291,10 +214,6 @@ const ViewScreen = () => {
     const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
     const [toolMode, setToolMode] = useState<"pan" | "wl" | "measure" | "annotate" | "eraser">("pan");
-    const [zoom, setZoom] = useState(1);
-    const [pan, setPan] = useState({ x: 0, y: 0 });
-    const [rotation, setRotation] = useState(0);
-    const [invert, setInvert] = useState(false);
     const [ww, setWw] = useState(350);
     const [wl, setWl] = useState(45);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -328,12 +247,9 @@ const ViewScreen = () => {
     const dragRef = useRef<{ dragging: boolean; x: number; y: number }>({ dragging: false, x: 0, y: 0 });
     const measureStartRef = useRef<{ x: number; y: number } | null>(null);
     // For 2D canvas-based measures (3D mode canvas removed — now Cornerstone MPR)
-    const huDataRef = useRef<Float32Array | null>(null);
-    const imgSizeRef = useRef({ rows: 0, cols: 0 });
+    const volumeDataRef = useRef<VolumeData | null>(null);
     const defaultWindowRef = useRef({ ww: 350, wl: 45 });
-    const drawRectRef = useRef<DrawRect>({ x: 0, y: 0, w: 1, h: 1 });
     const [annotations, setAnnotations] = useState<Annotation[]>([]);
-    const [measures, setMeasures] = useState<ScreenMeasure[]>([]);
     const [draftMeasure, setDraftMeasure] = useState<{
         sx1: number;
         sy1: number;
@@ -341,7 +257,6 @@ const ViewScreen = () => {
         sy2: number;
         slice: number;
     } | null>(null);
-    const [renderTick, setRenderTick] = useState(0);
     const [meta, setMeta] = useState({
         patientName: "N/A",
         patientId: "N/A",
@@ -376,13 +291,6 @@ const ViewScreen = () => {
     const currentLayoutSpec = useMemo(
         () => LAYOUT_SPECS[selectedLayout] ?? LAYOUT_SPECS["三维四窗"],
         [selectedLayout]
-    );
-    const viewerWorkspaceClassName = useMemo(
-        () =>
-            imageMode === "3D"
-                ? currentLayoutSpec.containerClassName.replace(" rounded-lg border border-[#B0C4DE]", "")
-                : "flex-1 min-w-0 flex",
-        [currentLayoutSpec, imageMode]
     );
 
     // ─── Build study tree from scan session (falls back to static DICOM data) ──
@@ -538,11 +446,9 @@ const ViewScreen = () => {
     }];
     const selectedSeries = safeSeriesList.find((s) => s.id === selectedSeriesId) ?? safeSeriesList[0];
     const totalSlices = selectedSeries.count;
-    const pixelSpacingValue = (() => {
-        const raw = meta.pixelSpacing.split("/")[0]?.trim() ?? "";
-        const parsed = Number(raw);
-        return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-    })();
+
+
+
     const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
 
     // Auto-select first series when session data loads (or series list changes)
@@ -575,9 +481,6 @@ const ViewScreen = () => {
         const nextSeries = safeSeriesList.find((series) => series.id === seriesId);
         setSelectedSeriesId(seriesId);
         setSliceIndex(getSeriesMidSliceIndex(nextSeries?.count ?? REAL_LUNG_SERIES.count));
-        setZoom(1);
-        setPan({ x: 0, y: 0 });
-        setMeasures([]);
         setAnnotations([]);
         setDraftMeasure(null);
         measureStartRef.current = null;
@@ -591,403 +494,11 @@ const ViewScreen = () => {
             defaultWindowRef.current = { ww: nextSeries.defaultWw, wl: nextSeries.defaultWl };
         }
     }, [seriesList]);
-    const buildVolumeProjection = (
-        volume: VolumeData,
-        mode: string,
-        currentSlice: number
-    ) => {
-        const { rows, cols, depth, hu } = volume;
-        const output = new Float32Array(rows * cols);
-        const centerSlice = Math.max(0, Math.min(depth - 1, currentSlice));
-        const slabRadius = mode === "MPR" ? 4 : 0;
-
-        for (let y = 0; y < rows; y += 1) {
-            for (let x = 0; x < cols; x += 1) {
-                const pixelIndex = y * cols + x;
-                if (mode === "MPR") {
-                    let acc = 0;
-                    let count = 0;
-                    for (let z = Math.max(0, centerSlice - slabRadius); z <= Math.min(depth - 1, centerSlice + slabRadius); z += 1) {
-                        acc += hu[z * rows * cols + pixelIndex];
-                        count += 1;
-                    }
-                    output[pixelIndex] = acc / Math.max(count, 1);
-                    continue;
-                }
-
-                if (mode === "VR") {
-                    let composed = -1000;
-                    let alpha = 0;
-                    for (let z = 0; z < depth; z += 1) {
-                        const sample = hu[z * rows * cols + pixelIndex];
-                        const normalized = Math.min(1, Math.max(0, (sample + 1000) / 1800));
-                        const opacity = Math.pow(normalized, 1.8) * 0.12;
-                        composed += (sample - composed) * opacity * (1 - alpha);
-                        alpha = Math.min(0.98, alpha + opacity * (1 - alpha));
-                        if (alpha >= 0.98) break;
-                    }
-                    output[pixelIndex] = composed;
-                    continue;
-                }
-
-                let projected = hu[pixelIndex];
-                for (let z = 1; z < depth; z += 1) {
-                    const sample = hu[z * rows * cols + pixelIndex];
-                    if (mode === "MinIP") {
-                        if (sample < projected) projected = sample;
-                    } else if (sample > projected) {
-                        projected = sample;
-                    }
-                }
-                output[pixelIndex] = projected;
-            }
-        }
-
-        return output;
-    };
-    const buildOrthoProjection = useCallback((
-        volume: VolumeData,
-        axis: ProjectionAxis,
-        mode: string,
-        currentSlice: number
-    ) => {
-        const { rows, cols, depth, hu } = volume;
-
-        const centerY = Math.max(0, Math.min(rows - 1, Math.round((currentSlice / Math.max(depth - 1, 1)) * (rows - 1))));
-        const centerX = Math.max(0, Math.min(cols - 1, Math.round((currentSlice / Math.max(depth - 1, 1)) * (cols - 1))));
-        const slabRadius = mode === "MPR" ? 4 : 0;
-
-        if (axis === "axial") {
-            return {
-                width: cols,
-                height: rows,
-                pixels: buildVolumeProjection(volume, mode, currentSlice),
-            };
-        }
-
-        if (axis === "coronal") {
-            const output = new Float32Array(cols * depth);
-            for (let z = 0; z < depth; z += 1) {
-                for (let x = 0; x < cols; x += 1) {
-                    let value = hu[z * rows * cols + centerY * cols + x];
-                    if (mode === "MPR") {
-                        let acc = 0;
-                        let count = 0;
-                        for (let y = Math.max(0, centerY - slabRadius); y <= Math.min(rows - 1, centerY + slabRadius); y += 1) {
-                            acc += hu[z * rows * cols + y * cols + x];
-                            count += 1;
-                        }
-                        value = acc / Math.max(count, 1);
-                    } else {
-                        for (let y = 1; y < rows; y += 1) {
-                            const sample = hu[z * rows * cols + y * cols + x];
-                            if (mode === "MinIP") {
-                                if (sample < value) value = sample;
-                            } else if (mode === "VR") {
-                                const normalized = Math.min(1, Math.max(0, (sample + 1000) / 1800));
-                                const opacity = Math.pow(normalized, 1.8) * 0.12;
-                                value += (sample - value) * opacity;
-                            } else if (sample > value) {
-                                value = sample;
-                            }
-                        }
-                    }
-                    output[z * cols + x] = value;
-                }
-            }
-            return { width: cols, height: depth, pixels: output };
-        }
-
-        const output = new Float32Array(rows * depth);
-        for (let z = 0; z < depth; z += 1) {
-            for (let y = 0; y < rows; y += 1) {
-                let value = hu[z * rows * cols + y * cols + centerX];
-                if (mode === "MPR") {
-                    let acc = 0;
-                    let count = 0;
-                    for (let x = Math.max(0, centerX - slabRadius); x <= Math.min(cols - 1, centerX + slabRadius); x += 1) {
-                        acc += hu[z * rows * cols + y * cols + x];
-                        count += 1;
-                    }
-                    value = acc / Math.max(count, 1);
-                } else {
-                    for (let x = 1; x < cols; x += 1) {
-                        const sample = hu[z * rows * cols + y * cols + x];
-                        if (mode === "MinIP") {
-                            if (sample < value) value = sample;
-                        } else if (mode === "VR") {
-                            const normalized = Math.min(1, Math.max(0, (sample + 1000) / 1800));
-                            const opacity = Math.pow(normalized, 1.8) * 0.12;
-                            value += (sample - value) * opacity;
-                        } else if (sample > value) {
-                            value = sample;
-                        }
-                    }
-                }
-                output[z * rows + y] = value;
-            }
-        }
-        return { width: rows, height: depth, pixels: output };
-    }, []);
-    const buildCoronalBodyMask = (volume: VolumeData) => {
-        const { rows, cols, depth, hu } = volume;
-        const mask = new Uint8Array(cols * depth);
-        const threshold = -420;
-        const minHits = Math.max(3, Math.round(rows * 0.015));
-
-        for (let z = 0; z < depth; z += 1) {
-            let rowStart = cols;
-            let rowEnd = -1;
-            for (let x = 0; x < cols; x += 1) {
-                let hits = 0;
-                let peak = -1024;
-                for (let y = 0; y < rows; y += 1) {
-                    const value = hu[z * rows * cols + y * cols + x];
-                    if (value > peak) peak = value;
-                    if (value > threshold) hits += 1;
-                }
-                if (hits >= minHits || peak > -180) {
-                    mask[z * cols + x] = 255;
-                    rowStart = Math.min(rowStart, x);
-                    rowEnd = Math.max(rowEnd, x);
-                }
-            }
-
-            if (rowEnd >= rowStart) {
-                const pad = Math.max(2, Math.round((rowEnd - rowStart) * 0.03));
-                const paddedStart = Math.max(0, rowStart - pad);
-                const paddedEnd = Math.min(cols - 1, rowEnd + pad);
-                for (let x = paddedStart; x <= paddedEnd; x += 1) {
-                    mask[z * cols + x] = 255;
-                }
-            }
-        }
-
-        for (let pass = 0; pass < 2; pass += 1) {
-            const refined = new Uint8Array(mask);
-            for (let z = 1; z < depth - 1; z += 1) {
-                for (let x = 1; x < cols - 1; x += 1) {
-                    let neighbors = 0;
-                    for (let dz = -1; dz <= 1; dz += 1) {
-                        for (let dx = -1; dx <= 1; dx += 1) {
-                            if (mask[(z + dz) * cols + (x + dx)] > 0) neighbors += 1;
-                        }
-                    }
-                    if (neighbors >= 4) refined[z * cols + x] = 255;
-                    if (neighbors <= 2) refined[z * cols + x] = 0;
-                }
-            }
-            mask.set(refined);
-        }
-
-        return { width: cols, height: depth, mask };
-    };
-    const handleResetAll = () => {
-        setRotation(0);
-        setZoom(1);
-        setPan({ x: 0, y: 0 });
-        setInvert(false);
-        setWw(defaultWindowRef.current.ww);
-        setWl(defaultWindowRef.current.wl);
-        setDisplayWw(defaultWindowRef.current.ww);
-        setDisplayWl(defaultWindowRef.current.wl);
-        setToolMode("pan");
-        setMeasures([]);
-        setAnnotations([]);
-        setDraftMeasure(null);
-        measureStartRef.current = null;
-        dragRef.current = { dragging: false, x: 0, y: 0 };
-    };
-
     const handleClearAllAnnotations = () => {
         dicomViewerRef.current?.clearAnnotations();
-        setMeasures([]);
         setAnnotations([]);
         setDraftMeasure(null);
         measureStartRef.current = null;
-    };
-
-    // ─── Clock tick (every 30 s is enough for HH:MM display) ─────────────────
-    useEffect(() => {
-        const tick = () => {
-            setClockStr(buildClock());
-            setDateStr(buildDate());
-        };
-        const id = window.setInterval(tick, 30_000);
-        return () => window.clearInterval(id);
-    }, []);
-
-    // ─── Load scan session from localStorage / backend ─────────────────────────
-    useEffect(() => {
-        fetchSelectedScanSession({ preferCache: true })
-            .then((session) => {
-                if (!session) return;
-                setScanSession(session);
-            })
-            .catch(() => { /* fall back to static data */ });
-    }, []);
-
-    const createColorizedCanvas = useCallback((
-        width: number,
-        height: number,
-        pixels: Float32Array,
-        options?: {
-            pseudoColorMode?: PseudoColorMode;
-            invertOverride?: boolean;
-        }
-    ) => {
-        const offscreen = document.createElement("canvas");
-        offscreen.width = width;
-        offscreen.height = height;
-        const offCtx = offscreen.getContext("2d");
-        if (!offCtx) return null;
-
-        const imageData = offCtx.createImageData(width, height);
-        const out = imageData.data;
-        const minVal = wl - ww / 2;
-        const maxVal = wl + ww / 2;
-        const range = Math.max(maxVal - minVal, 1);
-        const pseudoColorMode = options?.pseudoColorMode ?? "灰阶";
-        const invertState = options?.invertOverride ?? invert;
-
-        for (let i = 0; i < pixels.length; i += 1) {
-            const normalized = Math.min(1, Math.max(0, (pixels[i] - minVal) / range));
-            const adjusted = invertState ? 1 - normalized : normalized;
-            const [red, green, blue] = applyPseudoColor(pseudoColorMode, adjusted);
-            const j = i * 4;
-            out[j] = red;
-            out[j + 1] = green;
-            out[j + 2] = blue;
-            out[j + 3] = 255;
-        }
-
-        offCtx.putImageData(imageData, 0, 0);
-        return offscreen;
-    }, [wl, ww, invert]);
-    const createMaskCanvas = (width: number, height: number, mask: Uint8Array) => {
-        const offscreen = document.createElement("canvas");
-        offscreen.width = width;
-        offscreen.height = height;
-        const offCtx = offscreen.getContext("2d");
-        if (!offCtx) return null;
-
-        const imageData = offCtx.createImageData(width, height);
-        const out = imageData.data;
-        for (let i = 0; i < mask.length; i += 1) {
-            const alpha = mask[i];
-            const j = i * 4;
-            out[j] = 255;
-            out[j + 1] = 255;
-            out[j + 2] = 255;
-            out[j + 3] = alpha;
-        }
-        offCtx.putImageData(imageData, 0, 0);
-        return offscreen;
-    };
-
-    const renderGrayscaleToCanvas = useCallback((
-        canvas: HTMLCanvasElement | null,
-        viewport: HTMLElement | null,
-        width: number,
-        height: number,
-        pixels: Float32Array,
-        options?: {
-            overlayTitle?: string;
-            overlayDetail?: string;
-            fitMode?: "contain" | "cover";
-            pseudoColorMode?: PseudoColorMode;
-            physicalWidth?: number;
-            physicalHeight?: number;
-            corners?: {
-                topLeft?: string[];
-                topRight?: string[];
-                bottomLeft?: string[];
-                bottomRight?: string[];
-            };
-        }
-    ) => {
-        if (!canvas || !viewport || width <= 0 || height <= 0 || pixels.length === 0) return;
-        const viewW = Math.max(1, Math.floor(viewport.clientWidth));
-        const viewH = Math.max(1, Math.floor(viewport.clientHeight));
-        if (canvas.width !== viewW || canvas.height !== viewH) {
-            canvas.width = viewW;
-            canvas.height = viewH;
-        }
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        const offscreen = createColorizedCanvas(width, height, pixels, {
-            pseudoColorMode: options?.pseudoColorMode,
-        });
-        if (!offscreen) return;
-        ctx.fillStyle = "#000";
-        ctx.fillRect(0, 0, viewW, viewH);
-
-        const physicalWidth = Math.max(options?.physicalWidth ?? width, 0.001);
-        const physicalHeight = Math.max(options?.physicalHeight ?? height, 0.001);
-        const scale = options?.fitMode === "cover"
-            ? Math.max(viewW / physicalWidth, viewH / physicalHeight)
-            : Math.min(viewW / physicalWidth, viewH / physicalHeight);
-        const drawW = physicalWidth * scale;
-        const drawH = physicalHeight * scale;
-        const x = (viewW - drawW) / 2;
-        const y = (viewH - drawH) / 2;
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(offscreen, x, y, drawW, drawH);
-
-        if (options?.overlayTitle || options?.overlayDetail) {
-            ctx.fillStyle = "rgba(0,0,0,0.55)";
-            ctx.fillRect(8, 8, 112, options.overlayDetail ? 34 : 20);
-            ctx.fillStyle = "#E2E8F0";
-            ctx.font = "700 10px monospace";
-            if (options.overlayTitle) ctx.fillText(options.overlayTitle, 14, 21);
-            if (options.overlayDetail) {
-                ctx.font = "400 10px monospace";
-                ctx.fillText(options.overlayDetail, 14, 34);
-            }
-        }
-
-        const drawCornerBlock = (lines: string[] | undefined, x: number, y: number, align: CanvasTextAlign) => {
-            if (!lines || lines.length === 0) return;
-            ctx.fillStyle = "#CFD8DC";
-            ctx.font = "10px monospace";
-            ctx.textAlign = align;
-            lines.forEach((line, index) => {
-                ctx.fillText(line, x, y + index * 13);
-            });
-        };
-
-        drawCornerBlock(options?.corners?.topLeft, 10, 18, "left");
-        drawCornerBlock(options?.corners?.topRight, viewW - 10, 18, "right");
-        drawCornerBlock(options?.corners?.bottomLeft, 10, viewH - 30, "left");
-        drawCornerBlock(options?.corners?.bottomRight, viewW - 10, viewH - 30, "right");
-    }, [createColorizedCanvas]);
-
-    const screenToImage = (clientX: number, clientY: number) => {
-        const viewport = viewportRef.current;
-        const { rows, cols } = imgSizeRef.current;
-        if (!viewport || rows === 0 || cols === 0) return null;
-        const drawRect = drawRectRef.current;
-        const rect = viewport.getBoundingClientRect();
-        const sx = clientX - rect.left;
-        const sy = clientY - rect.top;
-        const rectW = Math.max(drawRect.w, 1);
-        const rectH = Math.max(drawRect.h, 1);
-        const nx = Math.min(1, Math.max(0, (sx - drawRect.x) / rectW));
-        const ny = Math.min(1, Math.max(0, (sy - drawRect.y) / rectH));
-        return {
-            x: nx * cols,
-            y: ny * rows,
-        };
-    };
-
-    const imageToScreen = (x: number, y: number) => {
-        const { rows, cols } = imgSizeRef.current;
-        if (rows === 0 || cols === 0) return { x: 0, y: 0 };
-        const drawRect = drawRectRef.current;
-        return {
-            x: drawRect.x + (x / cols) * drawRect.w,
-            y: drawRect.y + (y / rows) * drawRect.h,
-        };
     };
 
     const screenPointInViewport = (clientX: number, clientY: number) => {
@@ -999,6 +510,24 @@ const ViewScreen = () => {
             y: clientY - rect.top,
         };
     };
+
+    useEffect(() => {
+        const tick = () => {
+            setClockStr(buildClock());
+            setDateStr(buildDate());
+        };
+        const id = window.setInterval(tick, 30_000);
+        return () => window.clearInterval(id);
+    }, []);
+
+    useEffect(() => {
+        fetchSelectedScanSession({ preferCache: true })
+            .then((session) => {
+                if (!session) return;
+                setScanSession(session);
+            })
+            .catch(() => { /* fall back to static data */ });
+    }, []);
 
     useEffect(() => {
         const loadVolume = async () => {
@@ -1088,7 +617,6 @@ const ViewScreen = () => {
                     sliceSpacing,
                 };
                 setSliceIndex((prev) => clampSliceIndex(prev));
-                setRenderTick((n) => n + 1);
             } catch (error) {
                 console.error(error);
             }
@@ -1112,10 +640,6 @@ const ViewScreen = () => {
 
                 const rows = dataSet.uint16("x00280010") ?? 0;
                 const cols = dataSet.uint16("x00280011") ?? 0;
-                const bitsAllocated = dataSet.uint16("x00280100") ?? 16;
-                const pixelRepresentation = dataSet.uint16("x00280103") ?? 0;
-                const intercept = Number(dataSet.string("x00281052") ?? "0");
-                const slope = Number(dataSet.string("x00281053") ?? "1");
                 const wcFromTag = Number(dataSet.string("x00281050") ?? "45");
                 const wwFromTag = Number(dataSet.string("x00281051") ?? "350");
                 const patientName = cleanOverlayText(formatPersonName(dataSet.string("x00100010")));
@@ -1205,7 +729,6 @@ const ViewScreen = () => {
         }, 250);
         return () => window.clearInterval(timer);
     }, [isPlaying, totalSlices]);
-
     useEffect(() => {
         const onMove = (e: MouseEvent) => {
             if (toolMode !== "measure" || !measureStartRef.current) return;
@@ -1215,22 +738,8 @@ const ViewScreen = () => {
         };
         const onUp = () => {
             if (toolMode !== "measure" || !draftMeasure) return;
-            const distPx = Math.hypot(draftMeasure.sx2 - draftMeasure.sx1, draftMeasure.sy2 - draftMeasure.sy1);
-            const pxPerImagePixel = Math.max(drawRectRef.current.w / Math.max(imgSizeRef.current.cols, 1), 0.0001);
-            const dist = (distPx / pxPerImagePixel) * pixelSpacingValue;
-            if (dist > 1) {
-                setMeasures((prev) => [
-                    ...prev,
-                    {
-                        id: `measure-${Date.now()}-${Math.random()}`,
-                        slice: draftMeasure.slice,
-                        sx1: draftMeasure.sx1,
-                        sy1: draftMeasure.sy1,
-                        sx2: draftMeasure.sx2,
-                        sy2: draftMeasure.sy2,
-                    },
-                ]);
-            }
+            // Native measurement logic removed in favor of Cornerstone tool, 
+            // but we keep the handler to clear the draft state.
             setDraftMeasure(null);
             measureStartRef.current = null;
             dragRef.current.dragging = false;
@@ -1242,7 +751,7 @@ const ViewScreen = () => {
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
         };
-    }, [toolMode, draftMeasure, pixelSpacingValue]);
+    }, [toolMode, draftMeasure]);
 
     // (Canvas-based coronal/sagittal/volume render effects removed — now Cornerstone MPR handles all 3D panels)
 
@@ -1507,7 +1016,7 @@ const ViewScreen = () => {
                     </div>
                 </aside>
 
-                <div className="flex-1 flex min-w-0 rounded-lg border border-[#B0C4DE] bg-[#0F172A] shadow-sm overflow-hidden">
+                <div className={currentLayoutSpec.containerClassName}>
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
                     {imageMode === "3D" && (
                         <CornerstoneMPRViewport
@@ -1759,14 +1268,7 @@ const ViewScreen = () => {
                         <ChevronLeft size={20} /> 高级处理
                     </button>
                 </div>
-                <div className="flex-1 flex justify-center">
-                    <button
-                        onClick={handleClearAllAnnotations}
-                        className="flex items-center gap-2 px-8 h-[52px] bg-white text-[#DC2626] font-bold rounded-md border-2 border-[#FCA5A5] hover:bg-red-50 shadow-sm transition-all uppercase text-[13px] active:scale-95"
-                    >
-                        <Trash2 size={18} /> 清除全部
-                    </button>
-                </div>
+                <div className="flex-1" />
                 <div className="flex-1 flex justify-end">
                     <button
                         onClick={() => navigate("/patients", { replace: true, state: { backRoute: "/" } })}

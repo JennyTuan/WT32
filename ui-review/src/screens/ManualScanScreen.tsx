@@ -22,14 +22,14 @@ const scanModes = [
   { id: "axial", label: "断层扫描", desc: "定点分步曝光" },
 ];
 
-const acquisitionFields = [
+const acquisitionFields: FieldControlProps[] = [
   { label: "管电压 (kV)", value: "120", type: "select", options: ["100", "120", "140"] },
   { label: "管电流 (mA)", value: "200", type: "input" },
   { label: "旋转时间 (s)", value: "1", type: "select", options: ["0.5", "1", "1.5", "2"] },
   { label: "准直器宽度", value: "32*0.6", type: "select", options: ["32*0.6", "16*1.2", "64*0.6"] },
 ];
 
-const reconFields = [
+const reconFields: (FieldControlProps & { fullWidth?: boolean })[] = [
   { label: "层厚 (mm)", value: "5", type: "input" },
   { label: "层间距 (mm)", value: "5", type: "input" },
   { label: "窗位 (WL)", value: "40", type: "input" },
