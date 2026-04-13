@@ -334,3 +334,8 @@ WS  /ws/scan-control
 - **理解扫描参数含义**：kV=管电压，mA=管电流，pitch=螺距，FOV=扫描视野，WL/WC=窗位/窗宽
 - **数据库重置**：运行 `python backend/reset_db.py` 可清空并重新种入种子数据
 - **组件预览**：访问 `/gallery`（Gallery.tsx）可查看所有 UI 组件的静态展示
+
+## Git Rules
+- Always commit directly to the current branch (master)
+- Do NOT create new branches
+- Do NOT push automatically; I will push manually
