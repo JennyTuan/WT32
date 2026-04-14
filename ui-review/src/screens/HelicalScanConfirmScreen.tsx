@@ -1027,7 +1027,7 @@ const FourDHelicalConfirmScreen = () => {
                     <button
                         onClick={() => {
                             if (scanCompleted) {
-                                navigate("/image-viewer-4d");
+                                navigate("/fourd-ecpg-processing");
                             } else {
                                 setShowPatientConfirm(true);
                             }

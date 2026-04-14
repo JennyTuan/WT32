@@ -905,7 +905,10 @@ const FourDViewScreen = () => {
 
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8">
                 <div className="flex-1">
-                    <button className="px-10 h-13 bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] text-[13px]">
+                    <button
+                        onClick={() => navigate("/fourd-ecpg-processing")}
+                        className="px-10 h-13 bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] text-[13px]"
+                    >
                         4D 处理
                     </button>
                 </div>
