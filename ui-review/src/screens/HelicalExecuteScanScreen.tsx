@@ -159,7 +159,7 @@ export default function HelicalExecuteScanScreen() {
     const handleExecuteScanClick = () => {
         if (stage === "completed") {
             const is4D = measurements.scanLength.toLowerCase().includes("4d");
-            navigate(is4D ? "/image-viewer-4d" : "/image-viewer");
+            navigate(is4D ? "/fourd-ecpg-processing" : "/image-viewer");
             return;
         }
 
