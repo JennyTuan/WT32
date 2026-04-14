@@ -12,6 +12,7 @@ interface DicomViewerProps {
     windowCenter?: number;
     windowWidth?: number;
     onWindowLevelChange?: (windowCenter: number, windowWidth: number) => void;
+    windowSyncKey?: number;
 }
 
 const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function DicomViewer(
@@ -24,6 +25,7 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
         windowCenter = 40,
         windowWidth = 400,
         onWindowLevelChange,
+        windowSyncKey,
     },
     ref
 ) {
@@ -48,6 +50,7 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
             windowCenter={windowCenter}
             windowWidth={windowWidth}
             onWindowLevelChange={onWindowLevelChange}
+            windowSyncKey={windowSyncKey}
             className="w-full h-full relative overflow-hidden select-none"
         />
     );

@@ -20,6 +20,7 @@ import {
 
 export type CornerstoneMPRHandle = {
   resetAll: () => void;
+  forceWindowLevel: (wc: number, ww: number) => void;
 };
 
 interface CornerstoneMPRViewportProps {
@@ -31,6 +32,7 @@ interface CornerstoneMPRViewportProps {
   renderMode?: 'MPR' | 'MIP' | 'VR' | 'MinIP';
   className?: string;
   currentSliceIndex?: number;
+  windowSyncKey?: number;
 }
 
 let volumeLoaderRegistered = false;
@@ -57,6 +59,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       renderMode = 'MPR',
       className,
       currentSliceIndex,
+      windowSyncKey,
     },
     ref
   ) {
@@ -67,6 +70,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
     const engineRef      = useRef<RenderingEngine | null>(null);
     const lastVoiRef     = useRef<{ lower: number; upper: number } | null>(null);
+    const lastEmittedVoiRef = useRef<{ lower: number; upper: number } | null>(null);
     const rafRef         = useRef<number | null>(null);
 
     const engineId    = useRef(`mpr-engine-${Math.random().toString(36).slice(2, 9)}`);
@@ -91,6 +95,18 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           if (!vp) return;
           vp.resetCamera();
           vp.render();
+        });
+      },
+      forceWindowLevel: (wc: number, ww: number) => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        const lower = wc - ww / 2;
+        const upper = wc + ww / 2;
+        lastVoiRef.current = { lower, upper };
+        allVpIds.forEach((id) => {
+          const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
+          vp?.setProperties({ voiRange: { lower, upper } });
+          vp?.render();
         });
       },
     }));
@@ -237,16 +253,21 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
       const lower = windowCenter - windowWidth / 2;
       const upper = windowCenter + windowWidth / 2;
-      const last = lastVoiRef.current;
-      if (last && Math.abs(last.lower - lower) < 0.5 && Math.abs(last.upper - upper) < 0.5) return;
-
+      
+      // Force sync if windowSyncKey changed, otherwise check if needed
+      
+      // In a more persistent app we'd track lastSyncKeyRef, but for now
+      // we'll just check if properties match unless we are signaling a force.
+      // (Actually, checking if props match is more reliable than refs).
+      
       lastVoiRef.current = { lower, upper };
+      lastEmittedVoiRef.current = { lower, upper };
       allVpIds.forEach((id) => {
-        const vp = engineRef.current?.getViewport(id) as Types.IVolumeViewport | undefined;
+        const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
         vp?.setProperties({ voiRange: { lower, upper } });
         vp?.render();
       });
-    }, [status, windowCenter, windowWidth]);
+    }, [status, windowCenter, windowWidth, windowSyncKey]);
 
     // ─── WW/WL feedback (axial panel IMAGE_RENDERED) ─────────────────────────
     useEffect(() => {
@@ -259,9 +280,18 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         try {
           const props = vp.getProperties();
           if (props.voiRange) {
-            const ww = props.voiRange.upper - props.voiRange.lower;
-            const wc = (props.voiRange.upper + props.voiRange.lower) / 2;
-            lastVoiRef.current = { lower: props.voiRange.lower, upper: props.voiRange.upper };
+            const { lower, upper } = props.voiRange;
+            const ww = upper - lower;
+            const wc = (upper + lower) / 2;
+            
+            // THRESHOLD GUARD: Only emit if it changed significantly from what we last sent or accepted
+            const last = lastEmittedVoiRef.current;
+            if (last && Math.abs(last.lower - lower) < 1.0 && Math.abs(last.upper - upper) < 1.0) {
+                return;
+            }
+
+            lastVoiRef.current = { lower, upper };
+            lastEmittedVoiRef.current = { lower, upper };
             onWindowLevelChange(wc, ww);
           }
         } catch { /* ignore */ }

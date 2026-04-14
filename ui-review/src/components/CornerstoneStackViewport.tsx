@@ -31,6 +31,7 @@ interface CornerstoneStackViewportProps {
   windowWidth?: number;
   onWindowLevelChange?: (windowCenter: number, windowWidth: number) => void;
   className?: string;
+  windowSyncKey?: number;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -65,6 +66,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       windowWidth = 400,
       onWindowLevelChange,
       className,
+      windowSyncKey,
     },
     ref
   ) {
@@ -77,7 +79,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
     const toolGroupIdRef = useRef(`cs-tools-${Math.random().toString(36).slice(2, 10)}`);
     // Track last WL values sent to Cornerstone to avoid feedback loops
     const lastSentVoiRef = useRef<{ lower: number; upper: number } | null>(null);
-
+    const lastEmittedVoiRef = useRef<{ lower: number; upper: number } | null>(null);
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [errorMsg, setErrorMsg] = useState('');
 
@@ -224,9 +226,10 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       }
 
       lastSentVoiRef.current = { lower: newLower, upper: newUpper };
+      lastEmittedVoiRef.current = { lower: newLower, upper: newUpper };
       viewport.setProperties({ voiRange: { lower: newLower, upper: newUpper } });
       viewport.render();
-    }, [status, windowCenter, windowWidth]);
+    }, [status, windowCenter, windowWidth, windowSyncKey]);
 
     // ─── Active tool switching ───
     useEffect(() => {
@@ -310,10 +313,19 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         try {
           const props = viewport.getProperties();
           if (props.voiRange) {
-            const ww = props.voiRange.upper - props.voiRange.lower;
-            const wc = (props.voiRange.upper + props.voiRange.lower) / 2;
-            // Update the lastSentVoi to reflect what Cornerstone now has, preventing a round-trip
-            lastSentVoiRef.current = { lower: props.voiRange.lower, upper: props.voiRange.upper };
+            const { lower, upper } = props.voiRange;
+            const ww = upper - lower;
+            const wc = (upper + lower) / 2;
+            
+            // THRESHOLD GUARD
+            const lastEmitted = lastEmittedVoiRef.current;
+            if (lastEmitted && Math.abs(lastEmitted.lower - lower) < 1.0 && Math.abs(lastEmitted.upper - upper) < 1.0) {
+                return;
+            }
+
+            // Update both to keep them in sync
+            lastSentVoiRef.current = { lower, upper };
+            lastEmittedVoiRef.current = { lower, upper };
             onWindowLevelChange(wc, ww);
           }
         } catch {
