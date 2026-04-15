@@ -288,7 +288,14 @@ def list_protocols(db: Session = Depends(get_db)):
 @router.get("/catalog", response_model=list[schemas.ProtocolSummary])
 def list_protocol_catalog(db: Session = Depends(get_db)):
     protocols = _protocol_catalog_query(db).order_by(models.Protocol.id.asc()).all()
-    return [_build_protocol_summary(protocol) for protocol in protocols]
+    visible_protocols: list[models.Protocol] = []
+    for protocol in protocols:
+        # Hide a legacy bad seed that was incorrectly stored as plain mode while
+        # sharing the same display name as the real 4D chest protocol.
+        if protocol.body_part == "chest" and protocol.name == "胸腔4D" and protocol.scan_mode == "plain":
+            continue
+        visible_protocols.append(protocol)
+    return [_build_protocol_summary(protocol) for protocol in visible_protocols]
 
 
 @router.get("/{protocol_id}", response_model=schemas.ProtocolDetail)

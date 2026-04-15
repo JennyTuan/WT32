@@ -383,6 +383,42 @@ CHEST_PROTOCOLS = [
         "fourd_config": {"breathing_mode": "free_breathing", "phase_count": 17, "acquisition_time": 1.0, "trigger_threshold": 0.0},
         "recons": [recon("肺窗", "Lung2", 512, 1500, -700, 4.8, 4.8)],
     },
+    {
+        "name": "胸腔深吸气屏息（断层）",
+        "age_group": "adult",
+        "patient_weight": "50-90kg",
+        "scan_mode": "plain",
+        "series_kind": "axial",
+        "params": {"kv": 120, "ma": 180, "slice_thickness": 1.25, "slice_interval": 20.0, "rotation_time": 1.0, "scan_length": 320.0, "fov": 350.0, "ctdi_vol": 7.5, "dlp": 120.0, "step_count": 16, "auto_ma": False},
+        "recons": [
+            recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.25),
+            recon("纵隔窗", "S2", 512, 400, 40, 1.25, 1.25),
+        ],
+    },
+    {
+        "name": "胸腔深吸气屏息（螺旋）",
+        "age_group": "adult",
+        "patient_weight": "50-90kg",
+        "scan_mode": "plain",
+        "series_kind": "helical",
+        "params": {"kv": 120, "ma": 180, "slice_thickness": 1.25, "pitch": 1.2, "rotation_time": 0.5, "scan_length": 350.0, "fov": 350.0, "ctdi_vol": 8.2, "dlp": 287.0, "auto_ma": False},
+        "recons": [
+            recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.0),
+            recon("纵隔窗", "S2", 512, 400, 40, 2.5, 2.0),
+        ],
+    },
+    {
+        "name": "胸腔自由呼吸（轴扫）",
+        "age_group": "adult",
+        "patient_weight": "50-90kg",
+        "scan_mode": "plain",
+        "series_kind": "axial",
+        "params": {"kv": 120, "ma": 120, "slice_thickness": 1.25, "slice_interval": 20.0, "rotation_time": 1.0, "scan_length": 320.0, "fov": 350.0, "ctdi_vol": 5.2, "dlp": 83.2, "step_count": 16, "auto_ma": False},
+        "recons": [
+            recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.25),
+            recon("纵隔窗", "S2", 512, 400, 40, 1.25, 1.25),
+        ],
+    },
 ]
 
 SPINE_PROTOCOLS = [
@@ -616,6 +652,68 @@ def infer_recon_type(recon_name: str) -> str:
     return "soft"
 
 
+def seed_protocol(db, models, protocol_seed: dict) -> None:
+    protocol = models.Protocol(
+        name=protocol_seed["name"],
+        body_part=protocol_seed["body_part"],
+        age_group=protocol_seed["age_group"],
+        patient_weight=protocol_seed["patient_weight"],
+        patient_position=protocol_seed["patient_position"],
+        table_direction=protocol_seed["table_direction"],
+        scan_mode=protocol_seed["scan_mode"],
+        is_4d=protocol_seed["scan_mode"] == "4d",
+        is_enhance=protocol_seed["scan_mode"] == "contrast",
+        description=protocol_seed["description"],
+        is_factory=True,
+        is_enabled=True,
+    )
+    db.add(protocol)
+    db.flush()
+
+    topogram_series = models.Series(
+        protocol_id=protocol.id,
+        series_order=1,
+        series_type="topogram",
+        series_label=f"{protocol.name} Topogram",
+        trigger_mode="manual",
+    )
+    db.add(topogram_series)
+    db.flush()
+
+    db.add(models.TopogramParam(series_id=topogram_series.id, **TOP0GRAM_DEFAULTS))
+
+    diagnostic_series = models.Series(
+        protocol_id=protocol.id,
+        series_order=2,
+        series_type=protocol_seed["series_kind"],
+        series_label=f"{protocol.name} Diagnostic",
+        trigger_mode="manual",
+    )
+    db.add(diagnostic_series)
+    db.flush()
+
+    if protocol_seed["series_kind"] == "helical":
+        db.add(models.HelicalParam(series_id=diagnostic_series.id, **protocol_seed["params"]))
+    elif protocol_seed["series_kind"] == "axial":
+        db.add(models.AxialParam(series_id=diagnostic_series.id, **protocol_seed["params"]))
+    elif protocol_seed["series_kind"] == "4d":
+        db.add(models.FourDConfig(series_id=diagnostic_series.id, **protocol_seed["fourd_config"]))
+
+    for recon_seed in protocol_seed["recons"]:
+        db.add(
+            models.ReconSeries(
+                series_id=diagnostic_series.id,
+                recon_name=recon_seed["name"],
+                recon_type=infer_recon_type(recon_seed["name"]),
+                kernel=recon_seed["kernel"],
+                matrix=recon_seed["matrix"],
+                window_width=recon_seed["window_width"],
+                window_level=recon_seed["window_level"],
+                slice_thickness=recon_seed["slice_thickness"],
+                increment=recon_seed["increment"],
+            )
+        )
+
 
 def get_db():
     db = SessionLocal()
@@ -703,6 +801,35 @@ def init_db() -> None:
     db = SessionLocal()
     try:
         if db.query(models.Protocol).first():
+            existing_keys = {
+                (
+                    protocol.name,
+                    protocol.body_part,
+                    protocol.age_group,
+                    protocol.patient_weight,
+                    protocol.scan_mode,
+                )
+                for protocol in db.query(models.Protocol).all()
+            }
+            missing_protocols = [
+                protocol_seed
+                for protocol_seed in PROTOCOL_SEEDS
+                if (
+                    protocol_seed["name"],
+                    protocol_seed["body_part"],
+                    protocol_seed["age_group"],
+                    protocol_seed["patient_weight"],
+                    protocol_seed["scan_mode"],
+                )
+                not in existing_keys
+            ]
+
+            for protocol_seed in missing_protocols:
+                seed_protocol(db, models, protocol_seed)
+
+            if missing_protocols:
+                db.commit()
+                print(f"Added missing seeded protocols: {len(missing_protocols)}")
             print(f"Seeded protocols: {db.query(models.Protocol).count()}")
             return
 
@@ -718,66 +845,7 @@ def init_db() -> None:
         db.flush()
 
         for protocol_seed in PROTOCOL_SEEDS:
-            protocol = models.Protocol(
-                name=protocol_seed["name"],
-                body_part=protocol_seed["body_part"],
-                age_group=protocol_seed["age_group"],
-                patient_weight=protocol_seed["patient_weight"],
-                patient_position=protocol_seed["patient_position"],
-                table_direction=protocol_seed["table_direction"],
-                scan_mode=protocol_seed["scan_mode"],
-                is_4d=protocol_seed["scan_mode"] == "4d",
-                is_enhance=protocol_seed["scan_mode"] == "contrast",
-                description=protocol_seed["description"],
-                is_factory=True,
-                is_enabled=True,
-            )
-            db.add(protocol)
-            db.flush()
-
-            topogram_series = models.Series(
-                protocol_id=protocol.id,
-                series_order=1,
-                series_type="topogram",
-                series_label=f"{protocol.name} Topogram",
-                trigger_mode="manual",
-            )
-            db.add(topogram_series)
-            db.flush()
-
-            db.add(models.TopogramParam(series_id=topogram_series.id, **TOP0GRAM_DEFAULTS))
-
-            diagnostic_series = models.Series(
-                protocol_id=protocol.id,
-                series_order=2,
-                series_type=protocol_seed["series_kind"],
-                series_label=f"{protocol.name} Diagnostic",
-                trigger_mode="manual",
-            )
-            db.add(diagnostic_series)
-            db.flush()
-
-            if protocol_seed["series_kind"] == "helical":
-                db.add(models.HelicalParam(series_id=diagnostic_series.id, **protocol_seed["params"]))
-            elif protocol_seed["series_kind"] == "axial":
-                db.add(models.AxialParam(series_id=diagnostic_series.id, **protocol_seed["params"]))
-            elif protocol_seed["series_kind"] == "4d":
-                db.add(models.FourDConfig(series_id=diagnostic_series.id, **protocol_seed["fourd_config"]))
-
-            for recon_seed in protocol_seed["recons"]:
-                db.add(
-                    models.ReconSeries(
-                        series_id=diagnostic_series.id,
-                        recon_name=recon_seed["name"],
-                        recon_type=infer_recon_type(recon_seed["name"]),
-                        kernel=recon_seed["kernel"],
-                        matrix=recon_seed["matrix"],
-                        window_width=recon_seed["window_width"],
-                        window_level=recon_seed["window_level"],
-                        slice_thickness=recon_seed["slice_thickness"],
-                        increment=recon_seed["increment"],
-                    )
-                )
+            seed_protocol(db, models, protocol_seed)
 
         # Seed default corner config
         default_corners = {
