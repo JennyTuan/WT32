@@ -868,7 +868,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 const normalizedPatientType = mapAgeGroupToPatientType(protocol.age_group);
                 const isSpiralProtocol = protocol.supported_modes.some((mode) => mode === "helical");
                 const isAxialProtocol = protocol.supported_modes.some((mode) => mode === "axial");
-                const is4DProtocol = protocol.is_4d;
+                const is4DProtocol = protocol.acquisition_type === "four_d";
 
                 const normalizedRegion = normalizeRegion(protocol.body_part);
                 const regionMatch = normalizedRegion === selectedBodyRegion || protocol.body_part === selectedBodyRegion;
@@ -2538,7 +2538,6 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
 
 
 export default ProtocolSetupScreen;
-
 
 
 
