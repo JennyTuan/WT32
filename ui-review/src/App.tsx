@@ -16,8 +16,6 @@ import SequenceScanConfirmScreen from "./screens/SequenceScanConfirmScreen";
 import HelicalScanConfirmScreen from "./screens/HelicalScanConfirmScreen";
 import HelicalExecuteScanScreen from "./screens/HelicalExecuteScanScreen";
 import ViewScreen from "./screens/ViewScreen";
-import GatingViewScreen from "./screens/FourDViewScreen";
-import GatingSignalProcessingScreen from "./screens/FourDECPGProcessingScreen";
 import ManualScanScreen from "./screens/ManualScanScreen";
 import MockScanScreen from "./screens/MockScanScreen";
 import TubeWarmupScreen from "./screens/TubeWarmupScreen";
@@ -114,8 +112,6 @@ export default function App() {
               <Route path="/helical-confirm" element={<HelicalScanConfirmScreen />} />
               <Route path="/helical-execute" element={<HelicalExecuteScanScreen />} />
               <Route path="/image-viewer" element={<ViewScreen />} />
-              <Route path="/image-viewer-gating" element={<GatingViewScreen />} />
-              <Route path="/gating-signal-processing" element={<GatingSignalProcessingScreen />} />
 
               <Route path="/mobile/manual-scan" element={<ManualScanScreen />} />
               <Route path="/mobile/mock-scan" element={<MockScanScreen />} />

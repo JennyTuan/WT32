@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import * as dicomParser from "dicom-parser";
 import { useCallback, useMemo } from "react";
 import {
@@ -26,7 +26,7 @@ import { useNavigate } from "react-router-dom";
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
 import { saveScoutPositioningRange } from "../lib/scoutPositioningSession";
 import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
-import { loadSelectedScanWorkflowPlans, usesLegacy4DScanFlow, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 
 interface Sequence {
     id: string;
@@ -599,10 +599,7 @@ const ScoutScanScreen = ({
     const navigate = useNavigate();
 
     // 4D workflow detection - drives all 4D-specific UI without touching regular scan logic
-    const is4DWorkflow = useMemo(() =>
-        usesLegacy4DScanFlow(workflowPlans) ||
-        workflowPlans.some(p => p.sequences.some(s => s.type === '4d' || p.title.includes('4D'))),
-    [workflowPlans]);
+    const is4DWorkflow = false;
     const [activeStepIdx, setActiveStepIdx] = useState(0);
     const isBreathingAcquisitionStep = is4DWorkflow && activeStepIdx === 0;
     const is4DParamConfirmStep = is4DWorkflow && activeStepIdx === 2;
@@ -1649,7 +1646,7 @@ const ScoutScanScreen = ({
                             }
                             if (bottomPanelMode !== 'breathing') {
                                 try { await persistPositioningToSession(); } catch (error) { console.error(error); }
-                                navigate(is4DWorkflow ? '/helical-confirm' : '/scan-confirm');
+                                navigate('/scan-confirm');
                             }
                         }}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md shadow-lg transition-all uppercase text-[13px] active:scale-95 ${

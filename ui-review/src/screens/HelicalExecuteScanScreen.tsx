@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import DicomViewer from "../components/DicomViewer";
 import { fetchSelectedScanSession } from "../lib/scanSession";
+
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
 type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "rendering" | "completed";
@@ -158,8 +159,7 @@ export default function HelicalExecuteScanScreen() {
 
     const handleExecuteScanClick = () => {
         if (stage === "completed") {
-            const is4D = measurements.scanLength.toLowerCase().includes("4d");
-            navigate(is4D ? "/gating-signal-processing" : "/image-viewer");
+            navigate("/image-viewer");
             return;
         }
 
@@ -299,3 +299,4 @@ export default function HelicalExecuteScanScreen() {
         </div>
     );
 }
+

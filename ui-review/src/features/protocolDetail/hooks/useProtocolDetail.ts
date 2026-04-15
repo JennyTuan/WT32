@@ -437,6 +437,10 @@ export function useProtocolDetail() {
                 // Ad hoc logic...
                 const sourceProtocolId = catalogProtocols.find((item) => item.body_part === basicDraft.bodyPart && item.age_group === basicDraft.ageGroup)?.id ?? catalogProtocols[0]?.id;
                 if (!sourceProtocolId) throw new Error("No protocol catalog available for ad hoc scan session");
+                const sessionScanMode =
+                    protocol.scan_mode === "contrast"
+                        ? "contrast"
+                        : "plain";
 
                 let savedSession = await createAdHocScanSessionForSelectedPatient({
                     source_protocol_id: sourceProtocolId,
@@ -444,7 +448,7 @@ export function useProtocolDetail() {
                     name: basicDraft.name.trim() || protocol.name,
                     body_part: basicDraft.bodyPart, age_group: basicDraft.ageGroup,
                     patient_weight: basicDraft.patientWeight.trim(), patient_position: basicDraft.patientPosition,
-                    table_direction: protocol.table_direction || "in", scan_mode: protocol.series.some((item) => item.series_type === "4d") ? "4d" : "plain",
+                    table_direction: protocol.table_direction || "in", scan_mode: sessionScanMode,
                     description: protocol.description ?? null,
                 });
 

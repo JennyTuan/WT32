@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import {
@@ -22,7 +22,7 @@ import { fetchSelectedScanSession, updateSelectedScanSessionHelicalParam } from 
 import type { ApiScanSessionDetail } from "../lib/scanSession";
 
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
-import { loadSelectedScanWorkflowPlans, usesLegacy4DScanFlow, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
 
@@ -1027,7 +1027,7 @@ const GatingHelicalConfirmScreen = () => {
                     <button
                         onClick={() => {
                             if (scanCompleted) {
-                                navigate("/gating-signal-processing");
+                                navigate("/image-viewer");
                             } else {
                                 setShowPatientConfirm(true);
                             }
@@ -1134,11 +1134,7 @@ const GatingHelicalConfirmScreen = () => {
 // Main HelicalScanConfirmScreen (unchanged for non-4D protocols)
 // ---------------------------------------------------------------------------
 const HelicalScanConfirmScreen = () => {
-    const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
-    const isGatingWorkflow = useMemo(
-        () => usesLegacy4DScanFlow(workflowPlans) || workflowPlans.some((p) => p.sequences.some((s) => s.type === "4d" || p.title.includes("4D"))),
-        [workflowPlans]
-    );
+    const isGatingWorkflow = false;
 
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [helicalParamId, setHelicalParamId] = useState<number | null>(null);
