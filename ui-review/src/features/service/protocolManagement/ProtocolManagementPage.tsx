@@ -21,6 +21,7 @@ import ServiceModeShell from "../shared/ServiceModeShell";
 type AgeGroup = "adult" | "child" | "infant";
 type PatientPosition = "HFS" | "FFS" | "HFP" | "FFP";
 type TableDirection = "in" | "out";
+type AcquisitionType = "regular" | "gating" | "four_d";
 type ScanMode = "plain" | "contrast" | "4d";
 
 type ApiProtocolSummary = {
@@ -31,6 +32,7 @@ type ApiProtocolSummary = {
   patient_weight: string;
   patient_position: PatientPosition;
   table_direction: TableDirection;
+  acquisition_type: AcquisitionType;
   scan_mode: ScanMode;
   description?: string | null;
   is_factory: boolean;
@@ -47,6 +49,8 @@ type ApiProtocolSummary = {
 
 const API_BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "").replace(/\/$/, "");
 const buildApiUrl = (path: string) => `${API_BASE_URL}${path}`;
+
+const ACQUISITION_TYPE_LABELS: Record<AcquisitionType, string> = { regular: "常规", gating: "门控", four_d: "4D" };
 
 const AGE_GROUP_LABELS: Record<AgeGroup, string> = { adult: "成人", child: "儿童", infant: "婴幼儿" };
 const SCAN_MODE_LABELS: Record<ScanMode, string> = { plain: "平扫", contrast: "增强", "4d": "4D" };
@@ -73,6 +77,20 @@ type ModalState =
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
 // ── Scan mode badge ────────────────────────────────────────────────────────
+
+const ACQUISITION_TYPE_STYLE: Record<AcquisitionType, string> = {
+  regular: "bg-[#E8F1FF] text-[#1565C0]",
+  gating: "bg-[#E8F5E9] text-[#2E7D32]",
+  four_d: "bg-[#F3E5F5] text-[#6A1B9A]",
+};
+
+function AcquisitionTypeBadge({ type }: { type: AcquisitionType }) {
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-bold tracking-wide ${ACQUISITION_TYPE_STYLE[type]}`}>
+      {ACQUISITION_TYPE_LABELS[type]}
+    </span>
+  );
+}
 
 const SCAN_MODE_STYLE: Record<ScanMode, string> = {
   plain: "bg-[#E8F1FF] text-[#1565C0]",
@@ -191,6 +209,7 @@ export default function ProtocolManagementPage() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("custom");
   const [bodyPartFilter, setBodyPartFilter] = useState("all");
   const [ageGroupFilter, setAgeGroupFilter] = useState<AgeGroup | "all">("all");
+  const [acquisitionTypeFilter, setAcquisitionTypeFilter] = useState<AcquisitionType | "all">("all");
   const [scanModeFilter, setScanModeFilter] = useState<ScanMode | "all">("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
@@ -238,6 +257,7 @@ export default function ProtocolManagementPage() {
       })
       .filter((p) => bodyPartFilter === "all" || p.body_part === bodyPartFilter)
       .filter((p) => ageGroupFilter === "all" || p.age_group === ageGroupFilter)
+      .filter((p) => acquisitionTypeFilter === "all" || p.acquisition_type === acquisitionTypeFilter)
       .filter((p) => scanModeFilter === "all" || p.scan_mode === scanModeFilter)
       .filter((p) => !kw || p.name.toLowerCase().includes(kw) || p.body_part.toLowerCase().includes(kw))
       .sort((a, b) => {
@@ -251,7 +271,7 @@ export default function ProtocolManagementPage() {
         const [va, vb] = [get(a), get(b)];
         return (va < vb ? -1 : va > vb ? 1 : 0) * (sortDir === "asc" ? 1 : -1);
       });
-  }, [protocols, sourceFilter, bodyPartFilter, ageGroupFilter, scanModeFilter, search, sortKey, sortDir]);
+  }, [protocols, sourceFilter, bodyPartFilter, ageGroupFilter, acquisitionTypeFilter, scanModeFilter, search, sortKey, sortDir]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const curPage = Math.min(page, totalPages);
@@ -342,6 +362,19 @@ export default function ProtocolManagementPage() {
                 <option value="adult">{AGE_GROUP_LABELS.adult}</option>
                 <option value="child">{AGE_GROUP_LABELS.child}</option>
                 <option value="infant">{AGE_GROUP_LABELS.infant}</option>
+              </select>
+            </div>
+
+            <div className="min-w-[120px]">
+              <select
+                value={acquisitionTypeFilter}
+                onChange={(e) => { setAcquisitionTypeFilter(e.target.value as AcquisitionType | "all"); setPage(1); }}
+                className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
+              >
+                <option value="all">全部分类</option>
+                <option value="regular">{ACQUISITION_TYPE_LABELS.regular}</option>
+                <option value="gating">{ACQUISITION_TYPE_LABELS.gating}</option>
+                <option value="four_d">{ACQUISITION_TYPE_LABELS.four_d}</option>
               </select>
             </div>
 
@@ -468,6 +501,7 @@ export default function ProtocolManagementPage() {
                               <span className="text-[13px] font-bold text-[#1A2332] truncate leading-tight" title={p.name}>
                                 {p.name}
                               </span>
+                              <AcquisitionTypeBadge type={p.acquisition_type} />
                               <span className="text-[11px] text-[#90A4AE]">
                                 {AGE_GROUP_LABELS[p.age_group]} · {p.body_part}
                               </span>

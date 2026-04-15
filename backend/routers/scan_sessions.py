@@ -81,6 +81,7 @@ def _clone_session_from_protocol(patient: models.Patient, protocol: models.Proto
         patient_weight=protocol.patient_weight,
         patient_position=protocol.patient_position,
         table_direction=protocol.table_direction,
+        acquisition_type=protocol.acquisition_type,
         scan_mode=protocol.scan_mode,
         description=protocol.description,
     )
@@ -364,6 +365,7 @@ def create_ad_hoc_scan_session(payload: schemas.ScanSessionAdHocCreate, db: Sess
         patient_weight=payload.patient_weight,
         patient_position=payload.patient_position,
         table_direction=payload.table_direction,
+        acquisition_type=payload.acquisition_type,
         scan_mode=payload.scan_mode,
         description=payload.description,
     )

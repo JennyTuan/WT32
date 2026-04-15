@@ -12,6 +12,37 @@ from ..database import get_db
 router = APIRouter(prefix="/protocols", tags=["protocols"])
 
 
+def _normalize_protocol_classification(values: dict) -> dict:
+    acquisition_type = values.get("acquisition_type")
+    scan_mode = values.get("scan_mode")
+    is_4d = values.get("is_4d")
+    is_enhance = values.get("is_enhance")
+
+    if acquisition_type is None:
+        if is_4d is True or scan_mode == "4d":
+            acquisition_type = "four_d"
+        else:
+            acquisition_type = "regular"
+
+    if acquisition_type == "four_d":
+        scan_mode = "4d"
+        is_4d = True
+    else:
+        is_4d = False
+        if is_enhance is True or scan_mode == "contrast":
+            scan_mode = "contrast"
+            is_enhance = True
+        else:
+            scan_mode = "plain"
+            is_enhance = False
+
+    values["acquisition_type"] = acquisition_type
+    values["scan_mode"] = scan_mode
+    values["is_4d"] = is_4d
+    values["is_enhance"] = is_enhance
+    return values
+
+
 def _protocol_query(db: Session):
     return db.query(models.Protocol).options(
         selectinload(models.Protocol.contrast_config),
@@ -106,6 +137,7 @@ def _build_protocol_summary(protocol: models.Protocol) -> schemas.ProtocolSummar
             "patient_weight": protocol.patient_weight,
             "patient_position": protocol.patient_position,
             "table_direction": protocol.table_direction,
+            "acquisition_type": protocol.acquisition_type,
             "scan_mode": protocol.scan_mode,
             "description": protocol.description,
             "is_factory": protocol.is_factory,
@@ -305,7 +337,7 @@ def get_protocol(protocol_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=schemas.ProtocolDetail, status_code=status.HTTP_201_CREATED)
 def create_protocol(payload: schemas.ProtocolCreate, db: Session = Depends(get_db)):
-    protocol = models.Protocol(**payload.model_dump())
+    protocol = models.Protocol(**_normalize_protocol_classification(payload.model_dump()))
     db.add(protocol)
     db.commit()
     db.refresh(protocol)
@@ -317,7 +349,16 @@ def update_protocol(protocol_id: int, payload: schemas.ProtocolUpdate, db: Sessi
     protocol = _get_protocol_or_404(protocol_id, db)
     if protocol.is_factory:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Factory protocols cannot be modified")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = _normalize_protocol_classification(
+        {
+            "acquisition_type": protocol.acquisition_type,
+            "scan_mode": protocol.scan_mode,
+            "is_4d": protocol.is_4d,
+            "is_enhance": protocol.is_enhance,
+            **payload.model_dump(exclude_unset=True),
+        }
+    )
+    for field, value in updates.items():
         setattr(protocol, field, value)
     protocol.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -341,7 +382,7 @@ def toggle_protocol_enabled(protocol_id: int, db: Session = Depends(get_db)):
 def create_protocol_full(payload: schemas.ProtocolCreateWithSeries, db: Session = Depends(get_db)):
     # 1. Create Protocol
     protocol_data = payload.model_dump(exclude={"series"})
-    protocol = models.Protocol(**protocol_data)
+    protocol = models.Protocol(**_normalize_protocol_classification(protocol_data))
     db.add(protocol)
     db.flush()  # Get protocol.id
 
@@ -376,7 +417,15 @@ def update_protocol_full(protocol_id: int, payload: schemas.ProtocolCreateWithSe
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Factory protocols cannot be modified")
 
     # 1. Update basic fields
-    protocol_data = payload.model_dump(exclude={"series"}, exclude_unset=True)
+    protocol_data = _normalize_protocol_classification(
+        {
+            "acquisition_type": protocol.acquisition_type,
+            "scan_mode": protocol.scan_mode,
+            "is_4d": protocol.is_4d,
+            "is_enhance": protocol.is_enhance,
+            **payload.model_dump(exclude={"series"}, exclude_unset=True),
+        }
+    )
     for field, value in protocol_data.items():
         setattr(protocol, field, value)
     protocol.updated_at = datetime.now(timezone.utc)

@@ -446,10 +446,26 @@ const ViewScreen = () => {
     }];
     const selectedSeries = safeSeriesList.find((s) => s.id === selectedSeriesId) ?? safeSeriesList[0];
     const totalSlices = selectedSeries.count;
+    const viewportContainerClassName =
+        imageMode === "2D"
+            ? "flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]"
+            : currentLayoutSpec.containerClassName;
 
 
 
     const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
+
+    useEffect(() => {
+        if (imageMode !== "2D") return;
+
+        const frameId = window.requestAnimationFrame(() => {
+            dicomViewerRef.current?.fit();
+        });
+
+        return () => {
+            window.cancelAnimationFrame(frameId);
+        };
+    }, [imageMode, selectedSeriesId]);
 
     // Auto-select first series when session data loads (or series list changes)
     useEffect(() => {
@@ -1016,7 +1032,7 @@ const ViewScreen = () => {
                     </div>
                 </aside>
 
-                <div className={currentLayoutSpec.containerClassName}>
+                <div className={viewportContainerClassName}>
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
                     {imageMode === "3D" && (
                         <CornerstoneMPRViewport

@@ -129,7 +129,8 @@ export function useProtocolDetail() {
             setProtocol({
                 id: 0, name: "新建协议", body_part: bodyPartOptions[0] || "",
                 age_group: "adult", patient_weight: "50-90kg", patient_position: "HFS",
-                table_direction: "in", scan_mode: "plain", 
+                table_direction: "in", scan_mode: "plain",
+                acquisition_type: "regular",
                 is_4d: false, is_enhance: false,
                 is_factory: false,
                 series: [],
@@ -410,6 +411,7 @@ export function useProtocolDetail() {
                 body_part: basicDraft.bodyPart, age_group: basicDraft.ageGroup,
                 patient_weight: basicDraft.patientWeight.trim(), patient_position: basicDraft.patientPosition,
                 table_direction: protocol.table_direction || "in", scan_mode: protocol.scan_mode || "plain",
+                acquisition_type: protocol.acquisition_type || "regular",
                 description: protocol.description || "", series: finalSeries
             };
 
@@ -438,9 +440,11 @@ export function useProtocolDetail() {
                 const sourceProtocolId = catalogProtocols.find((item) => item.body_part === basicDraft.bodyPart && item.age_group === basicDraft.ageGroup)?.id ?? catalogProtocols[0]?.id;
                 if (!sourceProtocolId) throw new Error("No protocol catalog available for ad hoc scan session");
                 const sessionScanMode =
-                    protocol.scan_mode === "contrast"
-                        ? "contrast"
-                        : "plain";
+                    protocol.acquisition_type === "four_d"
+                        ? "4d"
+                        : protocol.scan_mode === "contrast"
+                            ? "contrast"
+                            : "plain";
 
                 let savedSession = await createAdHocScanSessionForSelectedPatient({
                     source_protocol_id: sourceProtocolId,
@@ -449,6 +453,7 @@ export function useProtocolDetail() {
                     body_part: basicDraft.bodyPart, age_group: basicDraft.ageGroup,
                     patient_weight: basicDraft.patientWeight.trim(), patient_position: basicDraft.patientPosition,
                     table_direction: protocol.table_direction || "in", scan_mode: sessionScanMode,
+                    acquisition_type: protocol.acquisition_type || "regular",
                     description: protocol.description ?? null,
                 });
 

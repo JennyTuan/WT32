@@ -47,6 +47,7 @@ export type ApiProtocolDetail = {
     patient_weight: string;
     patient_position: "HFS" | "FFS" | "HFP" | "FFP";
     table_direction: "in" | "out";
+    acquisition_type: "regular" | "gating" | "four_d";
     scan_mode: "plain" | "contrast" | "4d";
     is_4d: boolean;
     is_enhance: boolean;
@@ -63,6 +64,7 @@ export type ApiProtocolSummary = {
     patient_weight: string;
     patient_position: "HFS" | "FFS" | "HFP" | "FFP";
     table_direction: "in" | "out";
+    acquisition_type: "regular" | "gating" | "four_d";
     scan_mode: "plain" | "contrast" | "4d";
     is_4d: boolean;
     is_enhance: boolean;

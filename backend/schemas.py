@@ -72,6 +72,7 @@ class ProtocolBase(BaseModel):
     patient_weight: str
     patient_position: Literal["HFS", "FFS", "HFP", "FFP"]
     table_direction: Literal["in", "out"]
+    acquisition_type: Literal["regular", "gating", "four_d"] = "regular"
     scan_mode: Literal["plain", "contrast", "4d"]
     is_4d: bool = False
     is_enhance: bool = False
@@ -94,6 +95,7 @@ class ProtocolUpdate(BaseModel):
     patient_weight: Optional[str] = None
     patient_position: Optional[Literal["HFS", "FFS", "HFP", "FFP"]] = None
     table_direction: Optional[Literal["in", "out"]] = None
+    acquisition_type: Optional[Literal["regular", "gating", "four_d"]] = None
     scan_mode: Optional[Literal["plain", "contrast", "4d"]] = None
     is_4d: Optional[bool] = None
     is_enhance: Optional[bool] = None
@@ -409,6 +411,7 @@ class ScanSessionAdHocCreate(BaseModel):
     patient_weight: str
     patient_position: str
     table_direction: str
+    acquisition_type: Literal["regular", "gating", "four_d"] = "regular"
     scan_mode: Literal["plain", "contrast", "4d"] = "plain"
     description: Optional[str] = None
 
@@ -669,6 +672,7 @@ class ScanSessionDetail(ORMModel):
     patient_weight: str
     patient_position: str
     table_direction: str
+    acquisition_type: Literal["regular", "gating", "four_d"]
     scan_mode: Literal["plain", "contrast", "4d"]
     description: Optional[str] = None
     created_at: datetime
@@ -686,6 +690,7 @@ class ScanSessionSummary(ORMModel):
     session_name: Optional[str] = None
     name: str
     body_part: str
+    acquisition_type: Literal["regular", "gating", "four_d"]
     scan_mode: Literal["plain", "contrast", "4d"]
     created_at: datetime
     started_at: Optional[datetime] = None

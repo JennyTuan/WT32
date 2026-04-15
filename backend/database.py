@@ -25,6 +25,12 @@ TOP0GRAM_DEFAULTS = {
     "dlp": None,
 }
 
+GATING_PROTOCOL_NAMES = {
+    "鑳歌厰娣卞惛姘斿睆鎭紙鏂眰锛?",
+    "鑳歌厰娣卞惛姘斿睆鎭紙铻烘棆锛?",
+    "鑳歌厰鑷敱鍛煎惛锛堣酱鎵級",
+}
+
 
 def recon(
     name: str,
@@ -632,6 +638,14 @@ def build_protocols(body_part: str, patient_position: str, table_direction: str,
     return protocols
 
 
+def infer_protocol_acquisition_type(name: str, scan_mode: str) -> str:
+    if scan_mode == "4d":
+        return "four_d"
+    if name in GATING_PROTOCOL_NAMES:
+        return "gating"
+    return "regular"
+
+
 PROTOCOL_SEEDS = [
     *build_protocols("head", "HFS", "in", HEAD_PROTOCOLS),
     *build_protocols("neck", "HFS", "in", NECK_PROTOCOLS),
@@ -653,6 +667,10 @@ def infer_recon_type(recon_name: str) -> str:
 
 
 def seed_protocol(db, models, protocol_seed: dict) -> None:
+    acquisition_type = protocol_seed.get(
+        "acquisition_type",
+        infer_protocol_acquisition_type(protocol_seed["name"], protocol_seed["scan_mode"]),
+    )
     protocol = models.Protocol(
         name=protocol_seed["name"],
         body_part=protocol_seed["body_part"],
@@ -660,8 +678,9 @@ def seed_protocol(db, models, protocol_seed: dict) -> None:
         patient_weight=protocol_seed["patient_weight"],
         patient_position=protocol_seed["patient_position"],
         table_direction=protocol_seed["table_direction"],
+        acquisition_type=acquisition_type,
         scan_mode=protocol_seed["scan_mode"],
-        is_4d=protocol_seed["scan_mode"] == "4d",
+        is_4d=acquisition_type == "four_d",
         is_enhance=protocol_seed["scan_mode"] == "contrast",
         description=protocol_seed["description"],
         is_factory=True,
@@ -732,6 +751,7 @@ def _migrate_protocol_columns() -> None:
         "ALTER TABLE protocols ADD COLUMN is_factory BOOLEAN NOT NULL DEFAULT 0",
         "ALTER TABLE protocols ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT 1",
         "ALTER TABLE protocols ADD COLUMN updated_at DATETIME",
+        "ALTER TABLE protocols ADD COLUMN acquisition_type VARCHAR(20) NOT NULL DEFAULT 'regular'",
         "ALTER TABLE protocols ADD COLUMN is_4d BOOLEAN NOT NULL DEFAULT 0",
         "ALTER TABLE protocols ADD COLUMN is_enhance BOOLEAN NOT NULL DEFAULT 0",
         # Topogram Param additions
@@ -756,6 +776,7 @@ def _migrate_protocol_columns() -> None:
         "ALTER TABLE scan_session_axial_params ADD COLUMN collimator VARCHAR(50)",
         "ALTER TABLE scan_session_axial_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
         "ALTER TABLE scan_session_axial_params ADD COLUMN dom VARCHAR(20)",
+        "ALTER TABLE scan_sessions ADD COLUMN acquisition_type VARCHAR(20) NOT NULL DEFAULT 'regular'",
         # Recon Series additions
         "ALTER TABLE recon_series ADD COLUMN recon_fov FLOAT",
         "ALTER TABLE recon_series ADD COLUMN center_x FLOAT",
@@ -780,14 +801,37 @@ def _migrate_protocol_columns() -> None:
         # Simple heuristic: protocols with description NOT ending in "seeded protocol"
         # are user-created and should not be factory.
         conn.execute(text(
+            "UPDATE protocols SET acquisition_type = 'four_d' "
+            "WHERE scan_mode = '4d'"
+        ))
+        conn.execute(text(
+            "UPDATE protocols SET acquisition_type = 'gating' "
+            "WHERE name IN ('鑳歌厰娣卞惛姘斿睆鎭紙鏂眰锛?','鑳歌厰娣卞惛姘斿睆鎭紙铻烘棆锛?','鑳歌厰鑷敱鍛煎惛锛堣酱鎵級')"
+        ))
+        conn.execute(text(
+            "UPDATE protocols SET acquisition_type = 'regular' "
+            "WHERE acquisition_type IS NULL OR acquisition_type = ''"
+        ))
+        conn.execute(text(
             "UPDATE protocols SET is_factory = 0 "
             "WHERE description IS NULL OR description NOT LIKE '%seeded protocol'"
         ))
         conn.execute(text(
-            "UPDATE protocols SET is_4d = 1 WHERE scan_mode = '4d'"
+            "UPDATE protocols SET is_4d = 1 WHERE acquisition_type = 'four_d' OR scan_mode = '4d'"
+        ))
+        conn.execute(text(
+            "UPDATE protocols SET is_4d = 0 WHERE acquisition_type != 'four_d' AND scan_mode != '4d'"
         ))
         conn.execute(text(
             "UPDATE protocols SET is_enhance = 1 WHERE scan_mode = 'contrast'"
+        ))
+        conn.execute(text(
+            "UPDATE protocols SET is_enhance = 0 WHERE scan_mode != 'contrast'"
+        ))
+        conn.execute(text(
+            "UPDATE scan_sessions SET acquisition_type = COALESCE(("
+            "SELECT acquisition_type FROM protocols WHERE protocols.id = scan_sessions.protocol_id"
+            "), CASE WHEN scan_mode = '4d' THEN 'four_d' ELSE 'regular' END)"
         ))
         conn.commit()
 

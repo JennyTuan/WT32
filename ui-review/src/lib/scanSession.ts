@@ -130,6 +130,7 @@ export type ApiScanSessionDetail = {
     patient_weight: string;
     patient_position: string;
     table_direction: string;
+    acquisition_type: "regular" | "gating" | "four_d";
     scan_mode: "plain" | "contrast" | "4d";
     description?: string | null;
     series: ApiScanSessionSeries[];
@@ -144,6 +145,7 @@ export type CreateAdHocScanSessionPayload = {
     patient_weight: string;
     patient_position: string;
     table_direction: string;
+    acquisition_type?: "regular" | "gating" | "four_d";
     scan_mode?: "plain" | "contrast" | "4d";
     description?: string | null;
 };

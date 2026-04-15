@@ -3,7 +3,7 @@ import Dexie, { type Table } from "dexie";
 export type RawProtocol = {
     id: string;
     name: string;
-    region: string;
+    acquisitionType: "regular" | "gating" | "four_d";
     patientType: "adult" | "child";
     scanLocationLabel: string;
     supportedPositions: string[];
@@ -73,6 +73,7 @@ type BusinessProtocolRow = {
     id: string;
     name: string;
     region: string;
+    acquisitionType?: string;
     ageGroup?: string | null;
     scanLocationLabel: string;
     supportedPositions: string;
@@ -177,6 +178,11 @@ export const mapAgeGroupToPatientType = (ageGroup?: string | null): "adult" | "c
     return "adult";
 };
 
+const normalizeAcquisitionType = (value?: string | null): RawProtocol["acquisitionType"] => {
+    if (value === "gating" || value === "four_d") return value;
+    return "regular";
+};
+
 export const convertBusinessSnapshotToProtocolCases = (snapshot: BusinessProtocolSnapshot): RawProtocolCase[] => {
     const protocols = [...snapshot.tables.protocol.rows].sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
     const sequences = snapshot.tables.protocol_queue.rows;
@@ -206,7 +212,7 @@ export const convertBusinessSnapshotToProtocolCases = (snapshot: BusinessProtoco
             protocol: {
                 id: protocolRow.id,
                 name: protocolRow.name,
-                region: protocolRow.region,
+                acquisitionType: normalizeAcquisitionType(protocolRow.acquisitionType ?? protocolRow.region),
                 patientType: mapAgeGroupToPatientType(protocolRow.ageGroup),
                 scanLocationLabel: protocolRow.scanLocationLabel,
                 supportedPositions: toStringArray(protocolRow.supportedPositions),
@@ -226,7 +232,7 @@ const saveProtocolCases = async (cases: RawProtocolCase[]): Promise<void> => {
         const protocolRows: ProtocolRow[] = cases.map(({ protocol }) => ({
             protocolId: protocol.id,
             name: protocol.name,
-            region: protocol.region,
+            region: protocol.acquisitionType,
             patientType: protocol.patientType,
             scanLocationLabel: protocol.scanLocationLabel,
             supportedPositionsJson: JSON.stringify(protocol.supportedPositions),
@@ -299,7 +305,7 @@ export const ensureBusinessSnapshotImported = async (snapshot: BusinessProtocolS
             const protocolRows: ProtocolRow[] = protocolCases.map(({ protocol }) => ({
                 protocolId: protocol.id,
                 name: protocol.name,
-                region: protocol.region,
+                region: protocol.acquisitionType,
                 patientType: protocol.patientType,
                 scanLocationLabel: protocol.scanLocationLabel,
                 supportedPositionsJson: JSON.stringify(protocol.supportedPositions),
@@ -384,7 +390,7 @@ export const loadProtocolCasesFromDb = async (): Promise<RawProtocolCase[]> => {
             protocol: {
                 id: protocolRow.protocolId,
                 name: protocolRow.name,
-                region: protocolRow.region,
+                acquisitionType: normalizeAcquisitionType(protocolRow.region),
                 patientType: protocolRow.patientType || "adult",
                 scanLocationLabel: protocolRow.scanLocationLabel,
                 supportedPositions: JSON.parse(protocolRow.supportedPositionsJson) as string[],
@@ -400,7 +406,7 @@ export const createProtocolCase = async (protocolCase: RawProtocolCase): Promise
         await protocolDb.protocols.add({
             protocolId: protocolCase.protocol.id,
             name: protocolCase.protocol.name,
-            region: protocolCase.protocol.region,
+            region: protocolCase.protocol.acquisitionType,
             patientType: protocolCase.protocol.patientType,
             scanLocationLabel: protocolCase.protocol.scanLocationLabel,
             supportedPositionsJson: JSON.stringify(protocolCase.protocol.supportedPositions),
@@ -440,14 +446,14 @@ export const createProtocolCase = async (protocolCase: RawProtocolCase): Promise
 
 export const updateProtocolMeta = async (
     protocolId: string,
-    patch: Partial<Pick<RawProtocol, "name" | "region" | "patientType" | "scanLocationLabel" | "supportedPositions" | "supportedModes">>
+    patch: Partial<Pick<RawProtocol, "name" | "acquisitionType" | "patientType" | "scanLocationLabel" | "supportedPositions" | "supportedModes">>
 ): Promise<void> => {
     const row = await protocolDb.protocols.where("protocolId").equals(protocolId).first();
     if (!row || row.id === undefined) return;
 
     await protocolDb.protocols.update(row.id, {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.region !== undefined ? { region: patch.region } : {}),
+        ...(patch.acquisitionType !== undefined ? { region: patch.acquisitionType } : {}),
         ...(patch.patientType !== undefined ? { patientType: patch.patientType } : {}),
         ...(patch.scanLocationLabel !== undefined ? { scanLocationLabel: patch.scanLocationLabel } : {}),
         ...(patch.supportedPositions !== undefined ? { supportedPositionsJson: JSON.stringify(patch.supportedPositions) } : {}),

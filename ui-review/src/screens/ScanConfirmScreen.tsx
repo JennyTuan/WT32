@@ -180,7 +180,7 @@ const mapScanSessionToProtocolCases = (scanSession: ApiScanSessionDetail | null)
         protocol: {
             id: String(scanSession.id),
             name: scanSession.name,
-            region: scanSession.body_part,
+            acquisitionType: scanSession.acquisition_type,
             patientType: scanSession.age_group === "adult" ? "adult" : "child",
             scanLocationLabel: scanSession.body_part,
             supportedPositions: [scanSession.patient_position],

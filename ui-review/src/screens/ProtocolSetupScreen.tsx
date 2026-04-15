@@ -153,6 +153,7 @@ type ApiProtocolDetail = {
     patient_position: "HFS" | "FFS" | "HFP" | "FFP";
     table_direction: "in" | "out";
     scan_mode: "plain" | "contrast" | "4d";
+    acquisition_type: "regular" | "gating" | "four_d";
     is_4d: boolean;
     is_enhance: boolean;
     description?: string | null;
@@ -169,6 +170,7 @@ type ApiProtocolSummary = {
     patient_position: "HFS" | "FFS" | "HFP" | "FFP";
     table_direction: "in" | "out";
     scan_mode: "plain" | "contrast" | "4d";
+    acquisition_type: "regular" | "gating" | "four_d";
     is_4d: boolean;
     is_enhance: boolean;
     description?: string | null;
@@ -213,6 +215,33 @@ type UiPlan = {
 
 const bodyRegions = ["头部", "颈部", "胸腔", "脊柱", "腹部", "四肢"] as const;
 type BodyRegion = typeof bodyRegions[number];
+
+const getAcquisitionTypeLabel = (type: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]) => {
+    switch (type) {
+        case "gating":
+            return "门控";
+        case "four_d":
+            return "4D";
+        default:
+            return "常规";
+    }
+};
+
+const getScanFlowStartRoute = (
+    acquisitionType: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]
+): "/scout-scan" | null => {
+    if (acquisitionType === "four_d") return null;
+    return "/scout-scan";
+};
+
+const getScanFlowUnavailableMessage = (
+    acquisitionType: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]
+) => {
+    if (acquisitionType === "four_d") {
+        return "4D鎵弿娴佺▼姝ｅ湪閲嶆柊姊崇悊锛屾殏鏃朵笉鍙粠杩欎釜鍏ュ彛鍚姩";
+    }
+    return "";
+};
 
 const normalizeRegion = (value: string | undefined): BodyRegion | "" => {
     if (!value) return "";
@@ -319,7 +348,7 @@ const mapApiProtocolToRawCase = (protocol: ApiProtocolDetail): RawProtocolCase =
     protocol: {
         id: String(protocol.id),
         name: protocol.name,
-        region: protocol.body_part,
+        region: protocol.acquisition_type,
         patientType: mapAgeGroupToPatientType(protocol.age_group),
         scanLocationLabel: protocol.body_part,
         supportedPositions: [protocol.patient_position],
@@ -401,7 +430,7 @@ const mapScanSessionToRawCase = (scanSession: ApiScanSessionDetail): RawProtocol
     protocol: {
         id: String(scanSession.protocol_id),
         name: scanSession.name,
-        region: scanSession.body_part,
+        region: scanSession.acquisition_type,
         patientType: mapAgeGroupToPatientType(scanSession.age_group),
         scanLocationLabel: scanSession.body_part,
         supportedPositions: [scanSession.patient_position],
@@ -418,7 +447,8 @@ const mapScanSessionToRawCase = (scanSession: ApiScanSessionDetail): RawProtocol
                 patient_position: scanSession.patient_position as ApiProtocolDetail["patient_position"],
                 table_direction: scanSession.table_direction as ApiProtocolDetail["table_direction"],
                 scan_mode: scanSession.scan_mode,
-                is_4d: scanSession.scan_mode === "4d",
+                acquisition_type: scanSession.acquisition_type,
+                is_4d: scanSession.acquisition_type === "four_d",
                 is_enhance: scanSession.scan_mode === "contrast",
                 is_factory: false,
                 description: scanSession.description,
@@ -443,7 +473,7 @@ export const protocolCaseData: RawProtocolCase[] = [
         protocol: {
             id: "origin-1",
             name: "脑部轴位",
-            region: "头部",
+            region: "regular",
             patientType: "adult",
             scanLocationLabel: "脑部",
             supportedPositions: ["HFS"],
@@ -523,7 +553,7 @@ export const protocolCaseData: RawProtocolCase[] = [
         protocol: {
             id: "origin-2",
             name: "脑部轴位2D",
-            region: "头部",
+            region: "regular",
             patientType: "adult",
             scanLocationLabel: "脑部",
             supportedPositions: ["HFS"],
@@ -864,7 +894,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             .map((protocol) => ({
                 id: protocol.id,
                 name: protocol.name,
-                region: normalizeRegion(protocol.body_part) || protocol.body_part,
+                region: getAcquisitionTypeLabel(protocol.acquisition_type),
                 protocol: protocolDetailsById[protocol.id] ?? null,
             })),
         [protocolDetailsById, protocolSummaries, libraryTab, selectedBodyRegion, patientType]
@@ -1420,6 +1450,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const activeProtocolId = activePlanId && !isDraftActivePlan && !activePlan?.sourceSessionId
         ? Number(activePlanId)
         : selectedProtocolIds[0];
+    const activeProtocolSummary = activeProtocolId ? protocolSummaryMap[activeProtocolId] ?? null : null;
     const activeScanSession = activePlan?.sourceSessionId
         ? adHocScanSessions.find((session) => session.id === activePlan.sourceSessionId)
             ?? Object.values(scanSessionsByProtocolId).find((session) => session.id === activePlan.sourceSessionId)
@@ -1589,6 +1620,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             return;
         }
         if (activeScanSession && activePlan?.sourceSessionId) {
+            const startRoute = getScanFlowStartRoute(activeScanSession.acquisition_type);
+            if (!startRoute) {
+                setSessionActionError(getScanFlowUnavailableMessage(activeScanSession.acquisition_type));
+                return;
+            }
             saveSelectedScanSessionId(activeScanSession.id);
             localStorage.removeItem("selectedProtocol");
             if (typeof window !== "undefined") {
@@ -1646,6 +1682,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             return;
         }
         if (activeScanSession && activePlan?.sourceSessionId) {
+            const startRoute = getScanFlowStartRoute(activeScanSession.acquisition_type);
+            if (!startRoute) {
+                setSessionActionError(getScanFlowUnavailableMessage(activeScanSession.acquisition_type));
+                return;
+            }
             saveSelectedScanSessionId(activeScanSession.id);
             localStorage.removeItem("selectedProtocol");
             if (typeof window !== "undefined") {
@@ -1656,12 +1697,19 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 });
                 sessionStorage.setItem(PROTOCOL_SELECT_RESUME_KEY, "1");
             }
-            navigate("/scout-scan");
+            navigate(startRoute);
             return;
         }
 
         if (!activeProtocolId) return;
-        await openScanSession(activeProtocolId, "/scout-scan");
+        if (!activeProtocolSummary) return;
+
+        const startRoute = getScanFlowStartRoute(activeProtocolSummary.acquisition_type);
+        if (!startRoute) {
+            setSessionActionError(getScanFlowUnavailableMessage(activeProtocolSummary.acquisition_type));
+            return;
+        }
+        await openScanSession(activeProtocolId, startRoute);
     };
 
     useEffect(() => {
@@ -2249,7 +2297,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                             No protocols match the current filters
                                         </div>
                                         <div className="mt-2 text-[10px] leading-5 text-[#90A4AE]">
-                                            Try switching the patient type, body region, or scan mode.
+                                            Try switching the patient type, body region, or protocol type.
                                         </div>
                                     </div>
                                 </div>
@@ -2259,7 +2307,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                         <tr>
                                             <th className="w-[50px] text-center border-r border-white/10">Select</th>
                                             <th className="px-4 border-r border-white/10">Protocol Name</th>
-                                            <th className="w-[80px] text-center px-2">Region</th>
+                                            <th className="w-[80px] text-center px-2">Type</th>
                                         </tr>
                                     </thead>
                                     {groupedLibraryData.map((group) => (
