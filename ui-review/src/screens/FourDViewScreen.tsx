@@ -126,7 +126,7 @@ const mapCornerstoneTool = (toolMode: "pan" | "wl" | "measure" | "annotate" | "e
 
 const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count / 2));
 
-const FourDViewScreen = () => {
+const GatingViewScreen = () => {
     const navigate = useNavigate();
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
     const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
@@ -307,7 +307,7 @@ const FourDViewScreen = () => {
 
         return [{
             id: `session-${scanSession.id}`,
-            name: scanSession.name || "4D 扫描序列",
+            name: scanSession.name || "门控扫描序列",
             scanGroups,
         }];
     }, [scanSession]);
@@ -520,8 +520,8 @@ const FourDViewScreen = () => {
                             <Waves size={24} />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[16px] font-bold text-[#37474F]">{meta.patientName !== "N/A" ? meta.patientName : "4D Patient"}</span>
-                            <span className="text-[12px] text-[#1A6EE0] font-bold leading-none mt-0.5 uppercase tracking-wider">4D Review Mode</span>
+                            <span className="text-[16px] font-bold text-[#37474F]">{meta.patientName !== "N/A" ? meta.patientName : "门控患者"}</span>
+                            <span className="text-[12px] text-[#1A6EE0] font-bold leading-none mt-0.5 uppercase tracking-wider">Gating Review Mode</span>
                         </div>
                     </div>
                     <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
@@ -545,7 +545,7 @@ const FourDViewScreen = () => {
             <main className="flex-1 flex overflow-hidden p-2 gap-2">
                 <aside className="w-[240px] bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden shrink-0">
                     <div className="h-[44px] bg-[#F3F8FF] border-b border-[#DCE6F2] px-3 flex items-center gap-2">
-                        <Waves size={14} className="text-[#1A6EE0]" /><span className="text-[11px] font-black uppercase tracking-wider text-[#1A6EE0]">4D 图像序列</span>
+                        <Waves size={14} className="text-[#1A6EE0]" /><span className="text-[11px] font-black uppercase tracking-wider text-[#1A6EE0]">门控图像序列</span>
                     </div>
                     <div className="h-[220px] overflow-y-auto p-2 border-b border-[#EEF2F9]">
                         {studyTree.map((study) => (
@@ -553,7 +553,7 @@ const FourDViewScreen = () => {
                                 <div className="px-2 py-1.5 flex items-center gap-1.5"><span className="text-[10px] font-black text-[#546E7A] uppercase tracking-wide">{study.name}</span></div>
                                 {study.scanGroups.map((group) => (
                                     <div key={group.id} className="mb-1.5">
-                                        <div className="flex items-center gap-1.5 px-2 py-1"><span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-black uppercase bg-orange-100 text-orange-700">4D</span><span className="text-[11px] font-bold text-[#37474F] truncate">{group.label}</span></div>
+                                        <div className="flex items-center gap-1.5 px-2 py-1"><span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-black uppercase bg-orange-100 text-orange-700">门控</span><span className="text-[11px] font-bold text-[#37474F] truncate">{group.label}</span></div>
                                         <div className="ml-3 pl-2 border-l-2 border-[#DCE6F2] flex flex-col gap-1">
                                             {group.series.map((s) => (
                                                 <button key={s.id} onClick={() => handleSeriesSelect(s.id)} className={`w-full text-left rounded-md border px-2.5 py-1.5 transition-all ${s.id === selectedSeriesId ? "bg-[#E3F2FD] border-[#90CAF9]" : "bg-white border-[#DCE6F2] hover:bg-[#F8FAFC]"}`}>
@@ -641,7 +641,7 @@ const FourDViewScreen = () => {
                             </div>
                         </div>
                         <div className="mt-4 p-2 bg-blue-50/50 rounded border border-blue-100/50">
-                            <div className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-2">4D 呼吸相位</div>
+                            <div className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-2">门控呼吸相位</div>
                             <div className="grid grid-cols-5 gap-1.5">
                                 {Array.from({ length: 10 }, (_, i) => {
                                     const phasePercent = i * 10;
@@ -670,8 +670,8 @@ const FourDViewScreen = () => {
                     ) : (
                         <section ref={viewportRef} className="flex-1 min-w-0 bg-black relative">
                             <DicomViewer ref={dicomViewerRef} imageUrls={seriesImageUrls} currentImageIndex={clampSliceIndex(sliceIndex)} onImageIndexChange={setSliceIndex} activeTool={mapCornerstoneTool(toolMode)} windowCenter={displayWl} windowWidth={displayWw} windowSyncKey={windowSyncKey} onWindowLevelChange={handleWindowLevelChange} />
-                            <div className="absolute top-2 left-2 text-[10px] text-[#CFD8DC] font-mono pointer-events-none"><div className="font-bold">{meta.patientName} (4D)</div><div>Image {sliceIndex + 1}/{selectedSeries.count}</div></div>
-                            <div className="absolute bottom-2 right-2 text-[10px] text-[#CFD8DC] font-mono pointer-events-none text-right"><div>{meta.institution}</div><div>4D-MODE ENABLED</div></div>
+                            <div className="absolute top-2 left-2 text-[10px] text-[#CFD8DC] font-mono pointer-events-none"><div className="font-bold">{meta.patientName} (门控)</div><div>Image {sliceIndex + 1}/{selectedSeries.count}</div></div>
+                            <div className="absolute bottom-2 right-2 text-[10px] text-[#CFD8DC] font-mono pointer-events-none text-right"><div>{meta.institution}</div><div>GATING MODE ENABLED</div></div>
                         </section>
                     )}
                     <aside className="w-[72px] bg-[#111827] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
@@ -702,8 +702,8 @@ const FourDViewScreen = () => {
                 </div>
             </main>
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8">
-                <div className="flex-1"><button onClick={() => navigate("/fourd-ecpg-processing")} className="px-10 h-13 bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] text-[13px]">4D 处理</button></div>
-                <div className="flex-1 flex justify-end"><button onClick={() => navigate("/patients")} className="px-10 h-13 bg-[#4D94FF] text-white font-bold rounded-md shadow-lg text-[13px]">结束 4D 检查 </button></div>
+                <div className="flex-1"><button onClick={() => navigate("/gating-signal-processing")} className="px-10 h-13 bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] text-[13px]">门控处理</button></div>
+                <div className="flex-1 flex justify-end"><button onClick={() => navigate("/patients")} className="px-10 h-13 bg-[#4D94FF] text-white font-bold rounded-md shadow-lg text-[13px]">结束门控检查 </button></div>
             </footer>
         </div>
     );
@@ -716,4 +716,4 @@ const Param = ({ label, value }: { label: string; value: string }) => (
     </div>
 );
 
-export default FourDViewScreen;
+export default GatingViewScreen;

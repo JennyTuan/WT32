@@ -16,8 +16,8 @@ import SequenceScanConfirmScreen from "./screens/SequenceScanConfirmScreen";
 import HelicalScanConfirmScreen from "./screens/HelicalScanConfirmScreen";
 import HelicalExecuteScanScreen from "./screens/HelicalExecuteScanScreen";
 import ViewScreen from "./screens/ViewScreen";
-import FourDViewScreen from "./screens/FourDViewScreen";
-import FourDECPGProcessingScreen from "./screens/FourDECPGProcessingScreen";
+import GatingViewScreen from "./screens/FourDViewScreen";
+import GatingSignalProcessingScreen from "./screens/FourDECPGProcessingScreen";
 import ManualScanScreen from "./screens/ManualScanScreen";
 import MockScanScreen from "./screens/MockScanScreen";
 import TubeWarmupScreen from "./screens/TubeWarmupScreen";
@@ -114,8 +114,8 @@ export default function App() {
               <Route path="/helical-confirm" element={<HelicalScanConfirmScreen />} />
               <Route path="/helical-execute" element={<HelicalExecuteScanScreen />} />
               <Route path="/image-viewer" element={<ViewScreen />} />
-              <Route path="/image-viewer-4d" element={<FourDViewScreen />} />
-              <Route path="/fourd-ecpg-processing" element={<FourDECPGProcessingScreen />} />
+              <Route path="/image-viewer-gating" element={<GatingViewScreen />} />
+              <Route path="/gating-signal-processing" element={<GatingSignalProcessingScreen />} />
 
               <Route path="/mobile/manual-scan" element={<ManualScanScreen />} />
               <Route path="/mobile/mock-scan" element={<MockScanScreen />} />

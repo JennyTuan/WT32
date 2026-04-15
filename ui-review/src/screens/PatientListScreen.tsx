@@ -330,7 +330,7 @@ const PatientListScreen = () => {
                                                             onClick={(event) => {
                                                                 event.stopPropagation();
                                                                 const is4D = patient.type.toLowerCase().includes("4d");
-                                                                navigate(is4D ? "/image-viewer-4d" : "/image-viewer");
+                                                                navigate(is4D ? "/image-viewer-gating" : "/image-viewer");
                                                             }}
                                                             className="inline-flex h-[24px] px-2 rounded-full items-center justify-center gap-1 text-[11px] font-bold bg-[#E3F2FD] text-[#1E88E5] border border-[#BBDEFB]"
                                                         >

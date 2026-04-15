@@ -27,7 +27,7 @@ import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen
 import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
 
 // ---------------------------------------------------------------------------
-// Constants for 4D waveform / bed positions / DICOM
+// Constants for gating waveform / bed positions / DICOM
 // ---------------------------------------------------------------------------
 const BREATHING_BED_POSITION_COUNT = 10;
 const FOUR_D_SCOUT_SERIES = {
@@ -80,7 +80,7 @@ interface FourDLoadedSlice {
 type FourDDragHandle = "move" | "top" | "bottom" | "left" | "right";
 
 // ---------------------------------------------------------------------------
-// 4D Scout Viewport (Robust implementation copied from ScoutScanScreen)
+// Gating Scout Viewport (Robust implementation copied from ScoutScanScreen)
 // ---------------------------------------------------------------------------
 interface FourDScoutViewportProps {
     onCropBoxChange?: (box: { width: number; height: number }) => void;
@@ -474,9 +474,9 @@ function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: Helical
 }
 
 // ---------------------------------------------------------------------------
-// 4D Helical Param Defaults
+// Gating Helical Param Defaults
 // ---------------------------------------------------------------------------
-const HELICAL_4D_PARAMS = {
+const HELICAL_GATING_PARAMS = {
     bedMode: "OUT",
     position: "HFS",
     scanLength: "220.0",
@@ -490,16 +490,16 @@ const HELICAL_4D_PARAMS = {
 // ---------------------------------------------------------------------------
 // Build steps helper
 // ---------------------------------------------------------------------------
-const buildSequenceSteps = (type: WorkflowSequenceType, is4D: boolean): string[] => {
-    if (is4D && type === "scout") return ["呼吸采集", "激光灯定位", "参数确认", "执行扫描"];
+const buildSequenceSteps = (type: WorkflowSequenceType, isGatingWorkflow: boolean): string[] => {
+    if (isGatingWorkflow && type === "scout") return ["呼吸采集", "激光灯定位", "参数确认", "执行扫描"];
     if (type === "scout") return ["激光灯定位", "参数确认", "执行扫描"];
     return ["参数确认", "执行扫描"];
 };
 
 // ---------------------------------------------------------------------------
-// 4D Confirm Screen (rendered only for 4D protocols)
+// Gating Confirm Screen (rendered only for gating protocols)
 // ---------------------------------------------------------------------------
-const FourDHelicalConfirmScreen = () => {
+const GatingHelicalConfirmScreen = () => {
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
@@ -509,10 +509,10 @@ const FourDHelicalConfirmScreen = () => {
         if (workflowPlans.length === 0) {
             return [{
                 id: "g1",
-                name: "胸腔4D",
+                name: "胸腔门控",
                 sequences: [
-                    { id: "s1", name: "胸腔4D Topogram", type: "scout", steps: buildSequenceSteps("scout", true) },
-                    { id: "s2", name: "胸腔4D Diagnostic", type: "helical", steps: buildSequenceSteps("helical", true) },
+                    { id: "s1", name: "胸腔门控 Topogram", type: "scout", steps: buildSequenceSteps("scout", true) },
+                    { id: "s2", name: "胸腔门控 Diagnostic", type: "helical", steps: buildSequenceSteps("helical", true) },
                 ],
             }];
         }
@@ -670,8 +670,8 @@ const FourDHelicalConfirmScreen = () => {
 
     // Dynamic scan params linked to crop box
     const [dynamicParams, setDynamicParams] = useState({
-        scanLength: Number(HELICAL_4D_PARAMS.scanLength),
-        fov: Number(HELICAL_4D_PARAMS.fov),
+        scanLength: Number(HELICAL_GATING_PARAMS.scanLength),
+        fov: Number(HELICAL_GATING_PARAMS.fov),
     });
 
     // Load actual session data for the confirmation modal
@@ -879,14 +879,14 @@ const FourDHelicalConfirmScreen = () => {
                         </button>
                         <div className="grid grid-cols-2 gap-1.5">
                             {[
-                                { label: "进出床", value: HELICAL_4D_PARAMS.bedMode },
-                                { label: "体位", value: HELICAL_4D_PARAMS.position },
+                                { label: "进出床", value: HELICAL_GATING_PARAMS.bedMode },
+                                { label: "体位", value: HELICAL_GATING_PARAMS.position },
                                 { label: "扫描长度", value: dynamicParams.scanLength.toFixed(1) },
-                                { label: "MA", value: HELICAL_4D_PARAMS.mA },
-                                { label: "KV", value: HELICAL_4D_PARAMS.kV },
-                                { label: "旋转时间", value: HELICAL_4D_PARAMS.collimation },
+                                { label: "MA", value: HELICAL_GATING_PARAMS.mA },
+                                { label: "KV", value: HELICAL_GATING_PARAMS.kV },
+                                { label: "旋转时间", value: HELICAL_GATING_PARAMS.collimation },
                                 { label: "FOV", value: dynamicParams.fov.toString() },
-                                { label: "床倾角", value: HELICAL_4D_PARAMS.bedAngle },
+                                { label: "床倾角", value: HELICAL_GATING_PARAMS.bedAngle },
                             ].map(({ label, value }) => (
                                 <div key={label} className="px-1.5 py-1 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
                                     <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</span>
@@ -1027,7 +1027,7 @@ const FourDHelicalConfirmScreen = () => {
                     <button
                         onClick={() => {
                             if (scanCompleted) {
-                                navigate("/fourd-ecpg-processing");
+                                navigate("/gating-signal-processing");
                             } else {
                                 setShowPatientConfirm(true);
                             }
@@ -1135,7 +1135,7 @@ const FourDHelicalConfirmScreen = () => {
 // ---------------------------------------------------------------------------
 const HelicalScanConfirmScreen = () => {
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
-    const is4DWorkflow = useMemo(
+    const isGatingWorkflow = useMemo(
         () => workflowPlans.some((p) => p.sequences.some((s) => s.type === "4d" || p.title.includes("4D"))),
         [workflowPlans]
     );
@@ -1145,7 +1145,7 @@ const HelicalScanConfirmScreen = () => {
     const updateTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
-        if (is4DWorkflow) return; // Skip for 4D — uses its own layout
+        if (isGatingWorkflow) return;
         let cancelled = false;
 
         const loadSessionDefaults = async () => {
@@ -1166,10 +1166,10 @@ const HelicalScanConfirmScreen = () => {
 
         void loadSessionDefaults();
         return () => { cancelled = true; };
-    }, [is4DWorkflow]);
+    }, [isGatingWorkflow]);
 
     useEffect(() => {
-        if (is4DWorkflow || !helicalParamId) return;
+        if (isGatingWorkflow || !helicalParamId) return;
         const scanLength = Number(measurements.scanLength);
         const scoutFov = Number(measurements.scoutFov);
         if (!Number.isFinite(scanLength) || !Number.isFinite(scoutFov)) return;
@@ -1186,7 +1186,7 @@ const HelicalScanConfirmScreen = () => {
         }, 180);
 
         return () => { if (updateTimerRef.current !== null) window.clearTimeout(updateTimerRef.current); };
-    }, [is4DWorkflow, helicalParamId, measurements.scanLength, measurements.scoutFov]);
+    }, [isGatingWorkflow, helicalParamId, measurements.scanLength, measurements.scoutFov]);
 
     useEffect(() => {
         const preventBackNavigation = () => {
@@ -1198,8 +1198,8 @@ const HelicalScanConfirmScreen = () => {
     }, []);
 
     // 4D gets a completely different layout
-    if (is4DWorkflow) {
-        return <FourDHelicalConfirmScreen />;
+    if (isGatingWorkflow) {
+        return <GatingHelicalConfirmScreen />;
     }
 
     // Regular helical scan — unchanged

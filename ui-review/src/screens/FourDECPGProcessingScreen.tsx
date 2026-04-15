@@ -37,7 +37,7 @@ const getTouchDistance = (firstTouch: TouchLike, secondTouch: TouchLike) =>
 const getTouchMidpointX = (firstTouch: TouchLike, secondTouch: TouchLike) =>
     (firstTouch.clientX + secondTouch.clientX) / 2;
 
-export default function FourDECPGProcessingScreen() {
+export default function GatingSignalProcessingScreen() {
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const [autoRecalc, setAutoRecalc] = useState(true);
@@ -557,10 +557,10 @@ export default function FourDECPGProcessingScreen() {
                 </button>
 
                 <button
-                    onClick={() => navigate("/image-viewer-4d")}
+                    onClick={() => navigate("/image-viewer-gating")}
                     className="h-10 rounded-md bg-[radial-gradient(ellipse_at_top,#22C55E_0%,#16A34A_100%)] px-8 text-[14px] font-bold tracking-wider text-white shadow-[0_4px_12px_rgba(34,197,94,0.3)] transition-all hover:scale-[1.02] active:scale-[0.98]"
                 >
-                    确认并进入四维浏览
+                    确认并进入门控浏览
                 </button>
             </footer>
         </div>
