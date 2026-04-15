@@ -165,8 +165,8 @@ def get_series(series_id: int, db: Session = Depends(get_db)):
 @router.post("/series/", response_model=schemas.SeriesDetail, status_code=status.HTTP_201_CREATED)
 def create_series(payload: schemas.SeriesCreate, db: Session = Depends(get_db)):
     protocol = _get_protocol_or_404(payload.protocol_id, db)
-    if payload.series_type == "4d" and protocol.scan_mode != "4d":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="4D series requires a protocol with scan_mode='4d'")
+    if payload.series_type == "4d" and protocol.acquisition_type != "four_d":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="4D series requires a protocol with acquisition_type='four_d'")
     series = models.Series(**payload.model_dump())
     db.add(series)
     try:
@@ -188,8 +188,8 @@ def update_series(series_id: int, payload: schemas.SeriesUpdate, db: Session = D
         protocol = _get_protocol_or_404(series.protocol_id, db)
     for field, value in updates.items():
         setattr(series, field, value)
-    if series.series_type == "4d" and protocol.scan_mode != "4d":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="4D series requires a protocol with scan_mode='4d'")
+    if series.series_type == "4d" and protocol.acquisition_type != "four_d":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="4D series requires a protocol with acquisition_type='four_d'")
     _validate_series_logic(series)
     try:
         db.commit()
