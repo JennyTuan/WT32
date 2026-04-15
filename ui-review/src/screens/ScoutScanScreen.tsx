@@ -26,7 +26,7 @@ import { useNavigate } from "react-router-dom";
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
 import { saveScoutPositioningRange } from "../lib/scoutPositioningSession";
 import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
-import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { loadSelectedScanWorkflowPlans, usesLegacy4DScanFlow, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 
 interface Sequence {
     id: string;
@@ -600,10 +600,12 @@ const ScoutScanScreen = ({
 
     // 4D workflow detection - drives all 4D-specific UI without touching regular scan logic
     const is4DWorkflow = useMemo(() =>
+        usesLegacy4DScanFlow(workflowPlans) ||
         workflowPlans.some(p => p.sequences.some(s => s.type === '4d' || p.title.includes('4D'))),
     [workflowPlans]);
     const [activeStepIdx, setActiveStepIdx] = useState(0);
     const isBreathingAcquisitionStep = is4DWorkflow && activeStepIdx === 0;
+    const is4DParamConfirmStep = is4DWorkflow && activeStepIdx === 2;
 
     const isBreathingTraining = bottomPanelMode === "breathing" && breathingWorkflowVariant === "training";
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
@@ -1169,6 +1171,27 @@ const ScoutScanScreen = ({
                                 </div>
                             </div>
                         </div>
+                    ) : is4DParamConfirmStep ? (
+                        <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 overflow-hidden">
+                            <button className="h-[28px] w-full rounded-md text-[10px] font-bold flex items-center justify-center border border-[#4D94FF] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
+                                定位像参数
+                            </button>
+                            <div className="grid grid-cols-2 gap-1.5">
+                                <BreathingHelicalParamCard label="进出床" value="IN" />
+                                <BreathingHelicalParamCard label="体位" value="HFS" />
+                                <BreathingHelicalParamCard label="扫描长度" value="122.2" />
+                                <BreathingHelicalParamCard label="mA" value="50" />
+                                <BreathingHelicalParamCard label="kV" value="120" />
+                                <BreathingHelicalParamCard label="旋转时间" value="0.5" />
+                                <BreathingHelicalParamCard label="FOV" value="500" />
+                                <BreathingHelicalParamCard label="床倾角" value="0" />
+                            </div>
+                            <div className="mt-auto pt-0.5">
+                                <button className="h-[28px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
+                                    <Info size={14} /> 参数详情
+                                </button>
+                            </div>
+                        </div>
                     ) : (
                         <div className={`mt-auto border-t border-[#EEF2F9] bg-[#F8FAFC] px-4 py-3 shrink-0 transition-all duration-300 ${isTreeCollapsed ? 'flex-1 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]' : 'h-[168px]'}`}>
                             <div className="mb-3 text-[12px] font-bold text-[#546E7A]">{positioningHint}</div>
@@ -1619,9 +1642,14 @@ const ScoutScanScreen = ({
                                 setActiveStepIdx(idx => idx + 1);
                                 return;
                             }
+                            // 4D scout 共4步(0-3)，步骤0-2推进，步骤3才导航
+                            if (is4DWorkflow && activeStepIdx < 3) {
+                                setActiveStepIdx(idx => idx + 1);
+                                return;
+                            }
                             if (bottomPanelMode !== 'breathing') {
                                 try { await persistPositioningToSession(); } catch (error) { console.error(error); }
-                                navigate('/scan-confirm');
+                                navigate(is4DWorkflow ? '/helical-confirm' : '/scan-confirm');
                             }
                         }}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md shadow-lg transition-all uppercase text-[13px] active:scale-95 ${

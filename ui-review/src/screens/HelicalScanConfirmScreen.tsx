@@ -22,7 +22,7 @@ import { fetchSelectedScanSession, updateSelectedScanSessionHelicalParam } from 
 import type { ApiScanSessionDetail } from "../lib/scanSession";
 
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
-import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { loadSelectedScanWorkflowPlans, usesLegacy4DScanFlow, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
 
@@ -1136,7 +1136,7 @@ const GatingHelicalConfirmScreen = () => {
 const HelicalScanConfirmScreen = () => {
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const isGatingWorkflow = useMemo(
-        () => workflowPlans.some((p) => p.sequences.some((s) => s.type === "4d" || p.title.includes("4D"))),
+        () => usesLegacy4DScanFlow(workflowPlans) || workflowPlans.some((p) => p.sequences.some((s) => s.type === "4d" || p.title.includes("4D"))),
         [workflowPlans]
     );
 

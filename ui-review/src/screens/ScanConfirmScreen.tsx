@@ -27,7 +27,7 @@ import {
 import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb, type RawProtocolCase } from "../lib/protocolDb";
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
 import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
-import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { loadSelectedScanWorkflowPlans, usesLegacy4DScanFlow, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 
 interface Sequence {
     id: string;
@@ -376,7 +376,7 @@ const ScanConfirmScreen = ({
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const is4DWorkflow = useMemo(
-        () => workflowPlans.some((plan) => plan.sequences.some((seq) => seq.type === "4d")),
+        () => usesLegacy4DScanFlow(workflowPlans) || workflowPlans.some((plan) => plan.sequences.some((seq) => seq.type === "4d")),
         [workflowPlans]
     );
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
