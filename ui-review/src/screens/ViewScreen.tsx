@@ -23,8 +23,10 @@ import {
     Network,
     Siren,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
+import { FourDPhaseReviewModal } from "./FourDPhaseReviewModal";
+import { hasPhaseConflicts, type FourDPostScanState, type PhaseSelections } from "../lib/fourDTypes";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
 import {
@@ -209,6 +211,34 @@ const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count /
 
 const ViewScreen = () => {
     const navigate = useNavigate();
+    const location = useLocation();
+
+    // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
+    const fourDState = location.state as FourDPostScanState | null;
+    const isFourDEntry = !!fourDState?.scanResult;
+
+    /** "idle" → 非4D入口；"loading" → 模拟重建加载中；"review" → 相位审核弹窗；"done" → 审核完成 */
+    const [fourDStage, setFourDStage] = useState<"idle" | "loading" | "review" | "done">(
+        isFourDEntry ? "loading" : "idle"
+    );
+    const [phaseSelections, setPhaseSelections] = useState<PhaseSelections | null>(null);
+
+    // 模拟 4D 图像重建耗时（2.5 秒），完成后检查是否需要相位审核
+    useEffect(() => {
+        if (!isFourDEntry) return;
+        const timer = window.setTimeout(() => {
+            const scanResult = fourDState!.scanResult;
+            if (hasPhaseConflicts(scanResult)) {
+                setFourDStage("review");
+            } else {
+                setFourDStage("done");
+            }
+        }, 2500);
+        return () => window.clearTimeout(timer);
+    // 只在首次进入时触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
     const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
@@ -1294,9 +1324,93 @@ const ViewScreen = () => {
                     </button>
                 </div>
             </footer>
+
+            {/* ── 4D 图像重建加载中 overlay ── */}
+            {fourDStage === "loading" && (
+                <FourDLoadingOverlay
+                    bedCount={fourDState!.scanResult.bedCount}
+                    phaseCount={fourDState!.scanResult.phaseCount}
+                />
+            )}
+
+            {/* ── 4D 相位审核弹窗 ── */}
+            {fourDStage === "review" && fourDState?.scanResult && (
+                <FourDPhaseReviewModal
+                    scanResult={fourDState.scanResult}
+                    onComplete={(selections) => {
+                        setPhaseSelections(selections);
+                        setFourDStage("done");
+                    }}
+                />
+            )}
         </div>
     );
 };
+
+// ─── 4D 重建加载动画（内部组件） ────────────────────────────────────────────
+function FourDLoadingOverlay({ bedCount, phaseCount }: { bedCount: number; phaseCount: number }) {
+    const [progress, setProgress] = useState(0);
+
+    useEffect(() => {
+        const start = performance.now();
+        const duration = 2400; // 略短于外层 2500ms timeout
+
+        const tick = (now: number) => {
+            const p = Math.min((now - start) / duration, 1);
+            // Ease-out curve
+            setProgress(1 - Math.pow(1 - p, 3));
+            if (p < 1) requestAnimationFrame(tick);
+        };
+        const rafId = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(rafId);
+    }, []);
+
+    const stages = [
+        { label: "床位数据读取", done: progress > 0.25 },
+        { label: "呼吸相位分拣", done: progress > 0.55 },
+        { label: "回顾式图像重建", done: progress > 0.85 },
+    ];
+
+    return (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#0a1520]/85 backdrop-blur-[4px]">
+            <div className="flex flex-col items-center gap-6 rounded-2xl bg-[#0F1E30] border border-[#1E3A5F] px-12 py-10 shadow-2xl w-[420px]">
+                {/* 标题 */}
+                <div className="flex flex-col items-center gap-1">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-blue-400">4D CT</div>
+                    <div className="text-[20px] font-black text-white">图像重建中</div>
+                    <div className="text-[11px] text-slate-400">
+                        {bedCount} 个床位 · {phaseCount} 个呼吸相位
+                    </div>
+                </div>
+
+                {/* 进度条 */}
+                <div className="w-full">
+                    <div className="h-2 w-full rounded-full bg-[#1E3A5F] overflow-hidden">
+                        <div
+                            className="h-full rounded-full bg-[#4D94FF] transition-none"
+                            style={{ width: `${progress * 100}%` }}
+                        />
+                    </div>
+                    <div className="mt-2 text-right text-[11px] font-bold text-blue-300">
+                        {Math.round(progress * 100)}%
+                    </div>
+                </div>
+
+                {/* 阶段指示 */}
+                <div className="flex flex-col gap-2 w-full">
+                    {stages.map((s) => (
+                        <div key={s.label} className="flex items-center gap-3">
+                            <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${s.done ? "bg-green-400" : "bg-[#1E3A5F]"}`} />
+                            <span className={`text-[11px] font-bold ${s.done ? "text-green-400" : "text-slate-500"}`}>
+                                {s.label}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
 
 const Param = ({ label, value }: { label: string; value: string }) => (
     <div className="p-2 bg-white border border-[#B0C4DE]/30 rounded-md flex flex-col items-center justify-center shadow-sm min-h-[56px]">

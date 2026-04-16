@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { generateMockScanResult, hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
+import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
 import {
     AlertTriangle,
     Check,
@@ -174,12 +174,12 @@ export default function FourDDiagnosticConfirmScreen() {
         );
         const postScanState: FourDPostScanState = { scanResult };
 
-        if (hasPhaseConflicts(scanResult)) {
-            navigate("/fourd-phase-review", { state: postScanState });
-        } else if (scanResult.rescanOccurred) {
+        if (scanResult.rescanOccurred) {
+            // 先做重扫区域选择，再进图像浏览
             navigate("/fourd-rescan-select", { state: postScanState });
         } else {
-            navigate("/image-viewer");
+            // 直接进图像浏览，若有相位冲突在那里弹窗处理
+            navigate("/image-viewer", { state: postScanState });
         }
     }, [bedSegmentCount, dynamicParams.scanLength, navigate]);
 
