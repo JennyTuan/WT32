@@ -6,7 +6,8 @@
  * 第一次采集还是重扫采集的数据，之后进入图像重建。
  */
 
-import { useState, useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   ChevronLeft,
@@ -22,6 +23,8 @@ import {
   Sun,
   Settings,
   MoveVertical,
+  Plus,
+  Trash2,
 } from "lucide-react";
 
 import { loadSelectedPatient } from "../lib/patientSession";
@@ -185,25 +188,66 @@ function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
 
 interface WaveformPoint {
   id: number;
-  label: string;
   kind: "peak" | "valley";
+  t: number; // 0~1：时间轴位置
   value: number;
 }
 
 interface RespiratoryWaveEditorProps {
   points: WaveformPoint[];
-  onValueChange: (id: number, value: number) => void;
+  onPointMove: (id: number, t: number, value: number) => void;
+  onAddPoint: (kind: "peak" | "valley") => void;
+  onDeletePoint: (id: number) => void;
 }
 
-function RespiratoryWaveEditor({ points, onValueChange }: RespiratoryWaveEditorProps) {
+function RespiratoryWaveEditor({
+  points,
+  onPointMove,
+  onAddPoint,
+  onDeletePoint,
+}: RespiratoryWaveEditorProps) {
   const chartWidth = 760;
   const chartHeight = 180;
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
   const yFromValue = (value: number) => 20 + ((100 - value) / 100) * (chartHeight - 40);
-  const xFromIndex = (index: number) => 24 + (index * (chartWidth - 48)) / (points.length - 1);
+  const xFromT = (t: number) => 24 + t * (chartWidth - 48);
+  const valueFromY = (y: number) => {
+    const ratio = (y - 20) / (chartHeight - 40);
+    return Math.max(5, Math.min(95, Math.round(100 - ratio * 100)));
+  };
+  const tFromX = (x: number) => {
+    const ratio = (x - 24) / (chartWidth - 48);
+    return Math.max(0.02, Math.min(0.98, Number(ratio.toFixed(3))));
+  };
+  const pointsSorted = [...points].sort((a, b) => a.t - b.t);
+  const doseWindowStart = 0.32;
+  const doseWindowEnd = 0.71;
 
-  const polyline = points
-    .map((point, idx) => `${xFromIndex(idx)},${yFromValue(point.value)}`)
+  const polyline = pointsSorted
+    .map((point) => `${xFromT(point.t)},${yFromValue(point.value)}`)
     .join(" ");
+
+  const labelsById = new Map<number, string>();
+  let peakNo = 0;
+  let valleyNo = 0;
+  pointsSorted.forEach((point) => {
+    if (point.kind === "peak") {
+      peakNo += 1;
+      labelsById.set(point.id, `P${peakNo}`);
+    } else {
+      valleyNo += 1;
+      labelsById.set(point.id, `V${valleyNo}`);
+    }
+  });
+
+  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (draggingId === null || !svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const svgX = ((event.clientX - rect.left) / rect.width) * chartWidth;
+    const svgY = ((event.clientY - rect.top) / rect.height) * chartHeight;
+    onPointMove(draggingId, tFromX(svgX), valueFromY(svgY));
+  };
 
   return (
     <div className="rounded-xl bg-white border border-slate-200 p-5 shadow-sm">
@@ -211,18 +255,34 @@ function RespiratoryWaveEditor({ points, onValueChange }: RespiratoryWaveEditorP
         <div className="text-[12px] font-black text-slate-700">呼吸波形编辑（波峰/波谷）</div>
         <div className="flex items-center gap-2 text-[11px] text-slate-500">
           <MoveVertical size={13} />
-          可拖动滑杆调整每个波峰与波谷幅值
+          可拖拽点位调整时间与幅值；支持新增/删除峰谷
         </div>
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-[linear-gradient(180deg,#F8FBFF_0%,#EEF4FF_100%)] px-3 py-3">
-        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-[180px] w-full">
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+          className="h-[180px] w-full touch-none"
+          onPointerMove={handlePointerMove}
+          onPointerUp={() => setDraggingId(null)}
+          onPointerLeave={() => setDraggingId(null)}
+        >
           <defs>
             <linearGradient id="waveStroke" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#4D94FF" />
               <stop offset="100%" stopColor="#2563EB" />
             </linearGradient>
           </defs>
+          <rect
+            x={xFromT(doseWindowStart)}
+            y={10}
+            width={xFromT(doseWindowEnd) - xFromT(doseWindowStart)}
+            height={chartHeight - 20}
+            fill="#FB923C"
+            fillOpacity={0.2}
+            rx={6}
+          />
           {[20, 40, 60, 80].map((y) => (
             <line
               key={y}
@@ -235,8 +295,8 @@ function RespiratoryWaveEditor({ points, onValueChange }: RespiratoryWaveEditorP
             />
           ))}
           <polyline fill="none" stroke="url(#waveStroke)" strokeWidth="3" strokeLinejoin="round" points={polyline} />
-          {points.map((point, idx) => {
-            const x = xFromIndex(idx);
+          {pointsSorted.map((point) => {
+            const x = xFromT(point.t);
             const y = yFromValue(point.value);
             const isPeak = point.kind === "peak";
             return (
@@ -248,9 +308,15 @@ function RespiratoryWaveEditor({ points, onValueChange }: RespiratoryWaveEditorP
                   fill={isPeak ? "#F97316" : "#2563EB"}
                   stroke="white"
                   strokeWidth="2"
+                  className="cursor-grab active:cursor-grabbing"
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    (event.currentTarget as SVGCircleElement).setPointerCapture(event.pointerId);
+                    setDraggingId(point.id);
+                  }}
                 />
                 <text x={x} y={y - 12} textAnchor="middle" fontSize="10" fill={isPeak ? "#C2410C" : "#1D4ED8"}>
-                  {point.label}
+                  {labelsById.get(point.id)}
                 </text>
               </g>
             );
@@ -258,14 +324,47 @@ function RespiratoryWaveEditor({ points, onValueChange }: RespiratoryWaveEditorP
         </svg>
       </div>
 
+      <div className="mt-2 flex items-center justify-between text-[11px]">
+        <div className="flex items-center gap-2 text-slate-500">
+          <span className="inline-block h-2.5 w-2.5 rounded bg-[#FB923C]/70" />
+          橙色背景：受剂量曝光影响时间窗
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onAddPoint("peak")}
+            className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-orange-50 px-2.5 py-1 font-bold text-orange-700 hover:bg-orange-100"
+          >
+            <Plus size={12} /> 添加波峰
+          </button>
+          <button
+            type="button"
+            onClick={() => onAddPoint("valley")}
+            className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 font-bold text-blue-700 hover:bg-blue-100"
+          >
+            <Plus size={12} /> 添加波谷
+          </button>
+        </div>
+      </div>
+
       <div className="mt-3 grid grid-cols-2 gap-3">
-        {points.map((point) => (
+        {pointsSorted.map((point) => (
           <label key={point.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="mb-1 flex items-center justify-between text-[11px]">
+            <div className="mb-1 flex items-center justify-between text-[11px] gap-2">
               <span className={`font-bold ${point.kind === "peak" ? "text-orange-600" : "text-blue-600"}`}>
-                {point.label} · {point.kind === "peak" ? "波峰" : "波谷"}
+                {labelsById.get(point.id)} · {point.kind === "peak" ? "波峰" : "波谷"}
               </span>
-              <span className="font-mono text-slate-500">{point.value}%</span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-slate-500">{point.value}% · t={point.t.toFixed(2)}</span>
+                <button
+                  type="button"
+                  onClick={() => onDeletePoint(point.id)}
+                  className="text-slate-400 hover:text-red-500"
+                  title="删除此峰谷点"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
             </div>
             <input
               type="range"
@@ -273,7 +372,7 @@ function RespiratoryWaveEditor({ points, onValueChange }: RespiratoryWaveEditorP
               max={95}
               step={1}
               value={point.value}
-              onChange={(event) => onValueChange(point.id, Number(event.target.value))}
+              onChange={(event) => onPointMove(point.id, point.t, Number(event.target.value))}
               className="h-2 w-full accent-[#4D94FF]"
             />
           </label>
@@ -310,12 +409,12 @@ export default function FourDRescanSelectScreen() {
   const [viewMode, setViewMode] = useState<"timeline" | "table">("table");
   const [laserActive, setLaserActive] = useState(false);
   const [wavePoints, setWavePoints] = useState<WaveformPoint[]>([
-    { id: 1, label: "P1", kind: "peak", value: 78 },
-    { id: 2, label: "V1", kind: "valley", value: 26 },
-    { id: 3, label: "P2", kind: "peak", value: 82 },
-    { id: 4, label: "V2", kind: "valley", value: 24 },
-    { id: 5, label: "P3", kind: "peak", value: 74 },
-    { id: 6, label: "V3", kind: "valley", value: 30 },
+    { id: 1, kind: "peak", t: 0.08, value: 78 },
+    { id: 2, kind: "valley", t: 0.23, value: 26 },
+    { id: 3, kind: "peak", t: 0.39, value: 82 },
+    { id: 4, kind: "valley", t: 0.54, value: 24 },
+    { id: 5, kind: "peak", t: 0.7, value: 74 },
+    { id: 6, kind: "valley", t: 0.86, value: 30 },
   ]);
 
   const handleBulkSelect = (choice: "first" | "rescan") => {
@@ -341,10 +440,22 @@ export default function FourDRescanSelectScreen() {
 
   const rescanCount = rescanRange ? rescanRange[1] - rescanRange[0] + 1 : 0;
   const rescanSelectedCount = Object.values(choices).filter((c) => c === "rescan").length;
-  const handleWavePointChange = (id: number, value: number) => {
+  const handleWavePointChange = (id: number, t: number, value: number) => {
     setWavePoints((prev) =>
-      prev.map((point) => (point.id === id ? { ...point, value } : point))
+      prev
+        .map((point) => (point.id === id ? { ...point, t, value } : point))
+        .sort((a, b) => a.t - b.t)
     );
+  };
+  const handleAddWavePoint = (kind: "peak" | "valley") => {
+    setWavePoints((prev) => {
+      const nextId = prev.reduce((maxId, point) => Math.max(maxId, point.id), 0) + 1;
+      const defaultValue = kind === "peak" ? 80 : 25;
+      return [...prev, { id: nextId, kind, t: 0.5, value: defaultValue }].sort((a, b) => a.t - b.t);
+    });
+  };
+  const handleDeleteWavePoint = (id: number) => {
+    setWavePoints((prev) => (prev.length <= 2 ? prev : prev.filter((point) => point.id !== id)));
   };
 
   // ── 确认进入重建 ──
@@ -507,7 +618,12 @@ export default function FourDRescanSelectScreen() {
           )}
         </div>
 
-        <RespiratoryWaveEditor points={wavePoints} onValueChange={handleWavePointChange} />
+        <RespiratoryWaveEditor
+          points={wavePoints}
+          onPointMove={handleWavePointChange}
+          onAddPoint={handleAddWavePoint}
+          onDeletePoint={handleDeleteWavePoint}
+        />
       </div>
 
       {/* ── Footer ─────────────────────────────────────────────────── */}
