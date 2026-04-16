@@ -1,40 +1,30 @@
 /**
- * FourDRescanSelectScreen — 4D 扫描后处理：重扫区域数据选择
- *
- * 触发条件：本次 4D 扫描发生了暂停重扫（rescanOccurred=true），
- * 某段床位范围存在两套采集数据，用户需要为每个冲突床位选择使用
- * 第一次采集还是重扫采集的数据，之后进入图像重建。
+ * FourDRescanSelectScreen - 4D 扫描后的重扫数据选择页面
  */
 
 import { useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
+  AlertTriangle,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Flame,
   LayoutGrid,
   List,
-  CheckCircle2,
-  AlertTriangle,
-  User,
-  Flame,
-  Siren,
   Network,
-  Sun,
   Settings,
-  MoveVertical,
-  Plus,
-  Trash2,
+  Siren,
+  Sun,
+  User,
 } from "lucide-react";
 
 import { loadSelectedPatient } from "../lib/patientSession";
 import type { FourDPostScanState, RescanChoices } from "../lib/fourDTypes";
 
-// ─── 常量 ───────────────────────────────────────────────────────────────────
-
 const BED_TRAVEL_MM = 19.2;
-
-// ─── 子组件：床位时间轴可视化 ────────────────────────────────────────────────
+const FIRST_ACQUISITION_EXPOSURE = "2s";
+const SECOND_ACQUISITION_EXPOSURE = "6s";
 
 interface BedTimelineProps {
   bedCount: number;
@@ -48,66 +38,65 @@ function BedTimeline({ bedCount, rescanRange, choices, onBedClick }: BedTimeline
 
   return (
     <div className="flex flex-col gap-2">
-      {/* 标尺 */}
       <div className="flex items-end gap-1">
-        {Array.from({ length: bedCount }, (_, bi) => {
-          const inRescan = bi >= start && bi <= end;
-          const choice = choices[bi];
+        {Array.from({ length: bedCount }, (_, bedIdx) => {
+          const inRescan = bedIdx >= start && bedIdx <= end;
+          const choice = choices[bedIdx];
+
           return (
-            <div key={bi} className="flex flex-col items-center gap-1" style={{ flex: 1 }}>
-              {/* 床位方块 */}
+            <div key={bedIdx} className="flex flex-1 flex-col items-center gap-1">
               <button
-                onClick={() => inRescan && onBedClick(bi)}
+                type="button"
+                onClick={() => inRescan && onBedClick(bedIdx)}
                 disabled={!inRescan}
-                title={inRescan ? `床位 ${bi + 1}：点击切换选择` : `床位 ${bi + 1}`}
-                className={`
-                  w-full rounded transition-all
-                  ${inRescan
+                title={inRescan ? `床位 ${bedIdx + 1}：点击切换重扫选择` : `床位 ${bedIdx + 1}`}
+                className={`w-full rounded transition-all ${
+                  inRescan
                     ? choice === "rescan"
-                      ? "h-[52px] bg-[#4D94FF] border-2 border-[#2563EB] cursor-pointer hover:brightness-110 active:scale-95"
-                      : "h-[52px] bg-[#F59E0B] border-2 border-[#D97706] cursor-pointer hover:brightness-110 active:scale-95"
-                    : "h-[44px] bg-[#CBD5E1] border border-[#94A3B8] cursor-default"
-                  }
-                `}
+                      ? "h-[52px] cursor-pointer border-2 border-[#2563EB] bg-[#4D94FF] hover:brightness-110 active:scale-95"
+                      : "h-[52px] cursor-pointer border-2 border-[#D97706] bg-[#F59E0B] hover:brightness-110 active:scale-95"
+                    : "h-[44px] cursor-default border border-[#94A3B8] bg-[#CBD5E1]"
+                }`}
               >
                 {inRescan && (
                   <div className="flex h-full items-center justify-center">
-                    <span className="text-[9px] font-black text-white">
-                      {choice === "rescan" ? "重扫" : "采集1"}
-                    </span>
+                    <div className="flex flex-col items-center leading-none text-white">
+                      <span className="text-[9px] font-black">
+                        {choice === "rescan" ? "采集 2" : "采集 1"}
+                      </span>
+                      <span className="mt-1 text-[8px] font-semibold opacity-90">
+                        {choice === "rescan" ? SECOND_ACQUISITION_EXPOSURE : FIRST_ACQUISITION_EXPOSURE}
+                      </span>
+                    </div>
                   </div>
                 )}
               </button>
 
-              {/* 床位编号 */}
               <span className={`text-[9px] font-bold ${inRescan ? "text-slate-700" : "text-slate-400"}`}>
-                {bi + 1}
+                {bedIdx + 1}
               </span>
             </div>
           );
         })}
       </div>
 
-      {/* 图例说明 */}
-      <div className="flex items-center gap-4 justify-center mt-1">
+      <div className="mt-1 flex items-center justify-center gap-4">
         <div className="flex items-center gap-1.5">
-          <div className="h-3.5 w-3.5 rounded bg-[#CBD5E1] border border-[#94A3B8]" />
-          <span className="text-[10px] text-slate-500">单次采集（正常）</span>
+          <div className="h-3.5 w-3.5 rounded border border-[#94A3B8] bg-[#CBD5E1]" />
+          <span className="text-[10px] text-slate-500">正常单次采集</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="h-3.5 w-3.5 rounded bg-[#F59E0B] border-2 border-[#D97706]" />
-          <span className="text-[10px] text-slate-500">使用采集 1</span>
+          <div className="h-3.5 w-3.5 rounded border-2 border-[#D97706] bg-[#F59E0B]" />
+          <span className="text-[10px] text-slate-500">使用采集 1：{FIRST_ACQUISITION_EXPOSURE}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="h-3.5 w-3.5 rounded bg-[#4D94FF] border-2 border-[#2563EB]" />
-          <span className="text-[10px] text-slate-500">使用重扫</span>
+          <div className="h-3.5 w-3.5 rounded border-2 border-[#2563EB] bg-[#4D94FF]" />
+          <span className="text-[10px] text-slate-500">使用采集 2：{SECOND_ACQUISITION_EXPOSURE}</span>
         </div>
       </div>
     </div>
   );
 }
-
-// ─── 子组件：床位逐条列表 ──────────────────────────────────────────────────
 
 interface BedTableProps {
   rescanRange: [number, number];
@@ -117,63 +106,58 @@ interface BedTableProps {
 
 function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
   const [start, end] = rescanRange;
-  const beds = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  const beds = Array.from({ length: end - start + 1 }, (_, index) => start + index);
 
   return (
-    <div className="rounded-xl border border-slate-200 overflow-hidden">
+    <div className="overflow-hidden rounded-xl border border-slate-200">
       <table className="w-full text-[12px]">
         <thead>
           <tr className="bg-[#F1F5F9]">
             <th className="px-4 py-2.5 text-left font-bold text-slate-600">床位</th>
-            <th className="px-4 py-2.5 text-left font-bold text-slate-600">
-              扫描位置范围
-            </th>
-            <th className="px-4 py-2.5 text-center font-bold text-amber-600">
-              采集 1（初次）
-            </th>
-            <th className="px-4 py-2.5 text-center font-bold text-[#4D94FF]">
-              采集 2（重扫）
-            </th>
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">扫描位置范围</th>
+            <th className="px-4 py-2.5 text-center font-bold text-amber-600">采集 1（初扫 · {FIRST_ACQUISITION_EXPOSURE}）</th>
+            <th className="px-4 py-2.5 text-center font-bold text-[#4D94FF]">采集 2（重扫 · {SECOND_ACQUISITION_EXPOSURE}）</th>
           </tr>
         </thead>
         <tbody>
-          {beds.map((bi) => {
-            const posStart = (bi * BED_TRAVEL_MM).toFixed(1);
-            const posEnd = ((bi + 1) * BED_TRAVEL_MM).toFixed(1);
-            const choice = choices[bi];
+          {beds.map((bedIdx) => {
+            const posStart = (bedIdx * BED_TRAVEL_MM).toFixed(1);
+            const posEnd = ((bedIdx + 1) * BED_TRAVEL_MM).toFixed(1);
+            const choice = choices[bedIdx];
+
             return (
-              <tr key={bi} className="border-t border-slate-100 hover:bg-slate-50">
-                <td className="px-4 py-3 font-bold text-slate-700">床位 {bi + 1}</td>
-                <td className="px-4 py-3 text-slate-500 font-mono text-[11px]">
-                  {posStart} – {posEnd} mm
+              <tr key={bedIdx} className="border-t border-slate-100 hover:bg-slate-50">
+                <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1}</td>
+                <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
+                  {posStart} - {posEnd} mm
                 </td>
                 <td className="px-4 py-3 text-center">
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <label className="inline-flex cursor-pointer items-center gap-2">
                     <input
                       type="radio"
-                      name={`bed-${bi}`}
+                      name={`bed-${bedIdx}`}
                       checked={choice === "first"}
-                      onChange={() => onChange(bi, "first")}
-                      className="accent-amber-500 h-4 w-4"
+                      onChange={() => onChange(bedIdx, "first")}
+                      className="h-4 w-4 accent-amber-500"
                     />
                     <span className={`font-bold ${choice === "first" ? "text-amber-600" : "text-slate-400"}`}>
-                      {choice === "first" && <CheckCircle2 size={12} className="inline mr-1 text-amber-500" />}
-                      采集 1
+                      {choice === "first" && <CheckCircle2 size={12} className="mr-1 inline text-amber-500" />}
+                      采集 1：{FIRST_ACQUISITION_EXPOSURE}
                     </span>
                   </label>
                 </td>
                 <td className="px-4 py-3 text-center">
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <label className="inline-flex cursor-pointer items-center gap-2">
                     <input
                       type="radio"
-                      name={`bed-${bi}`}
+                      name={`bed-${bedIdx}`}
                       checked={choice === "rescan"}
-                      onChange={() => onChange(bi, "rescan")}
-                      className="accent-[#4D94FF] h-4 w-4"
+                      onChange={() => onChange(bedIdx, "rescan")}
+                      className="h-4 w-4 accent-[#4D94FF]"
                     />
                     <span className={`font-bold ${choice === "rescan" ? "text-[#4D94FF]" : "text-slate-400"}`}>
-                      {choice === "rescan" && <CheckCircle2 size={12} className="inline mr-1 text-[#4D94FF]" />}
-                      重扫
+                      {choice === "rescan" && <CheckCircle2 size={12} className="mr-1 inline text-[#4D94FF]" />}
+                      采集 2：{SECOND_ACQUISITION_EXPOSURE}
                     </span>
                   </label>
                 </td>
@@ -189,73 +173,183 @@ function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
 interface WaveformPoint {
   id: number;
   kind: "peak" | "valley";
-  t: number; // 0~1：时间轴位置
+  t: number;
   value: number;
 }
 
-interface RespiratoryWaveEditorProps {
-  points: WaveformPoint[];
-  onPointMove: (id: number, t: number, value: number) => void;
-  onAddPoint: (kind: "peak" | "valley") => void;
-  onDeletePoint: (id: number) => void;
+interface WaveSample {
+  t: number;
+  value: number;
 }
 
-function RespiratoryWaveEditor({
-  points,
-  onPointMove,
-  onAddPoint,
-  onDeletePoint,
-}: RespiratoryWaveEditorProps) {
-  const chartWidth = 760;
-  const chartHeight = 180;
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const [draggingId, setDraggingId] = useState<number | null>(null);
-  const yFromValue = (value: number) => 20 + ((100 - value) / 100) * (chartHeight - 40);
-  const xFromT = (t: number) => 24 + t * (chartWidth - 48);
-  const valueFromY = (y: number) => {
-    const ratio = (y - 20) / (chartHeight - 40);
-    return Math.max(5, Math.min(95, Math.round(100 - ratio * 100)));
-  };
-  const tFromX = (x: number) => {
-    const ratio = (x - 24) / (chartWidth - 48);
-    return Math.max(0.02, Math.min(0.98, Number(ratio.toFixed(3))));
-  };
-  const pointsSorted = [...points].sort((a, b) => a.t - b.t);
-  const doseWindowStart = 0.32;
-  const doseWindowEnd = 0.71;
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
 
-  const polyline = pointsSorted
-    .map((point) => `${xFromT(point.t)},${yFromValue(point.value)}`)
+function movingAverage(values: number[], radius: number) {
+  return values.map((_, index) => {
+    let weightedSum = 0;
+    let weightTotal = 0;
+
+    for (let offset = -radius; offset <= radius; offset += 1) {
+      const sample = values[clamp(index + offset, 0, values.length - 1)];
+      const weight = radius + 1 - Math.abs(offset);
+      weightedSum += sample * weight;
+      weightTotal += weight;
+    }
+
+    return weightedSum / weightTotal;
+  });
+}
+
+function buildRespiratorySignal(points: WaveformPoint[], sampleCount: number) {
+  const anchors = [...points].sort((a, b) => a.t - b.t);
+  const rawSamples: WaveSample[] = [];
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const t = index / (sampleCount - 1);
+    let segmentIndex = anchors.findIndex((point, pointIndex) => {
+      const next = anchors[pointIndex + 1];
+      return next && t >= point.t && t <= next.t;
+    });
+
+    if (segmentIndex === -1) {
+      segmentIndex = Math.max(0, anchors.length - 2);
+    }
+
+    const start = anchors[segmentIndex];
+    const end = anchors[segmentIndex + 1] ?? anchors[segmentIndex];
+    const duration = Math.max(0.0001, end.t - start.t);
+    const localT = clamp((t - start.t) / duration, 0, 1);
+    const eased = 0.5 - 0.5 * Math.cos(localT * Math.PI);
+    const baseline = start.value + (end.value - start.value) * eased;
+    const harmonic =
+      Math.sin(t * Math.PI * 18) * 1.6 +
+      Math.sin(t * Math.PI * 43 + 0.8) * 0.8 +
+      Math.sin(t * Math.PI * 71 + 1.5) * 0.35;
+
+    rawSamples.push({
+      t,
+      value: clamp(baseline + harmonic, 6, 94),
+    });
+  }
+
+  const filteredValues = movingAverage(rawSamples.map((sample) => sample.value), 5);
+
+  return {
+    raw: rawSamples,
+    filtered: rawSamples.map((sample, index) => ({
+      t: sample.t,
+      value: filteredValues[index],
+    })),
+  };
+}
+
+interface RespiratoryWaveMonitorProps {
+  points: WaveformPoint[];
+  bedCount: number;
+  rescanRange: [number, number];
+  onPointMove: (id: number, t: number, value: number) => void;
+}
+
+function RespiratoryWaveMonitor({ points, bedCount, rescanRange, onPointMove }: RespiratoryWaveMonitorProps) {
+  const chartWidth = 760;
+  const chartHeight = 222;
+  const leftPad = 34;
+  const rightPad = 18;
+  const plotTop = 18;
+  const plotBottom = 132;
+  const bedTop = 164;
+  const bedHeight = 26;
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [draggingPointId, setDraggingPointId] = useState<number | null>(null);
+  const sortedPoints = useMemo(() => [...points].sort((a, b) => a.t - b.t), [points]);
+  const signal = useMemo(() => buildRespiratorySignal(sortedPoints, 180), [sortedPoints]);
+  const [rescanStart, rescanEnd] = rescanRange;
+  const totalCycles = bedCount + 2;
+
+  const xFromT = (t: number) => leftPad + t * (chartWidth - leftPad - rightPad);
+  const yFromValue = (value: number) => plotTop + ((100 - value) / 100) * (plotBottom - plotTop);
+  const tFromX = (x: number) => clamp((x - leftPad) / (chartWidth - leftPad - rightPad), 0.01, 0.99);
+  const valueFromY = (y: number) => {
+    const normalized = clamp((y - plotTop) / (plotBottom - plotTop), 0, 1);
+    return 100 - normalized * 100;
+  };
+
+  const rawPath = signal.raw
+    .map((sample) => `${xFromT(sample.t)},${yFromValue(sample.value)}`)
+    .join(" ");
+  const filteredPath = signal.filtered
+    .map((sample) => `${xFromT(sample.t)},${yFromValue(sample.value)}`)
     .join(" ");
 
-  const labelsById = new Map<number, string>();
-  let peakNo = 0;
-  let valleyNo = 0;
-  pointsSorted.forEach((point) => {
-    if (point.kind === "peak") {
-      peakNo += 1;
-      labelsById.set(point.id, `P${peakNo}`);
-    } else {
-      valleyNo += 1;
-      labelsById.set(point.id, `V${valleyNo}`);
-    }
-  });
+  const bedSegments = Array.from({ length: bedCount }, (_, index) => {
+    const segmentStart = (index + 1) / totalCycles;
+    const segmentEnd = (index + 2) / totalCycles;
+    const centerT = (segmentStart + segmentEnd) / 2;
 
-  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
-    if (draggingId === null || !svgRef.current) return;
+    return {
+      index,
+      x: xFromT(segmentStart),
+      width: xFromT(segmentEnd) - xFromT(segmentStart),
+      centerX: xFromT(centerT),
+      inRescan: index >= rescanStart && index <= rescanEnd,
+    };
+  });
+  const allBedOverlay = {
+    x: bedSegments[0]?.x ?? xFromT(1 / totalCycles),
+    width:
+      bedSegments.length > 0
+        ? bedSegments[bedSegments.length - 1].x + bedSegments[bedSegments.length - 1].width - bedSegments[0].x
+        : xFromT((totalCycles - 1) / totalCycles) - xFromT(1 / totalCycles),
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (draggingPointId === null || !svgRef.current) return;
+
+    const pointIndex = sortedPoints.findIndex((point) => point.id === draggingPointId);
+    if (pointIndex === -1) return;
+
+    const point = sortedPoints[pointIndex];
+    const previousPoint = sortedPoints[pointIndex - 1];
+    const nextPoint = sortedPoints[pointIndex + 1];
     const rect = svgRef.current.getBoundingClientRect();
     const svgX = ((event.clientX - rect.left) / rect.width) * chartWidth;
     const svgY = ((event.clientY - rect.top) / rect.height) * chartHeight;
-    onPointMove(draggingId, tFromX(svgX), valueFromY(svgY));
+    const minT = previousPoint ? previousPoint.t + 0.025 : 0.01;
+    const maxT = nextPoint ? nextPoint.t - 0.025 : 0.99;
+    const t = clamp(tFromX(svgX), minT, maxT);
+    const rawValue = valueFromY(svgY);
+    const value = point.kind === "peak" ? clamp(rawValue, 55, 92) : clamp(rawValue, 8, 45);
+
+    onPointMove(point.id, t, value);
+  };
+
+  const handlePointerUp = () => {
+    setDraggingPointId(null);
   };
 
   return (
-    <div className="rounded-xl bg-white border border-slate-200 p-5 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-3 flex items-center justify-between">
-        <div className="text-[12px] font-black text-slate-700">呼吸波形编辑（波峰/波谷）</div>
-        <div className="flex items-center gap-2 text-[11px] text-slate-500">
-          <MoveVertical size={13} />
-          可拖拽点位调整时间与幅值；支持新增/删除峰谷
+        <div>
+          <div className="text-[12px] font-black text-slate-700">呼吸波形监测</div>
+          <div className="mt-1 text-[11px] text-slate-400">
+            全部床位范围完整覆盖，床位前后各保留一个完整呼吸周期作为缓冲
+          </div>
+          <div className="mt-1 text-[11px] text-slate-400">
+            可直接拖动波峰和波谷，实时调整周期时刻与呼吸幅值
+          </div>
+        </div>
+        <div className="flex items-center gap-4 text-[11px] text-slate-500">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-[2px] w-6 rounded bg-slate-400 opacity-80" />
+            原始波形
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-[3px] w-6 rounded bg-[#2563EB]" />
+            平滑滤波
+          </span>
         </div>
       </div>
 
@@ -263,161 +357,253 @@ function RespiratoryWaveEditor({
         <svg
           ref={svgRef}
           viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-          className="h-[180px] w-full touch-none"
+          className="h-[222px] w-full touch-none"
           onPointerMove={handlePointerMove}
-          onPointerUp={() => setDraggingId(null)}
-          onPointerLeave={() => setDraggingId(null)}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
         >
           <defs>
-            <linearGradient id="waveStroke" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#4D94FF" />
+            <linearGradient id="resp-wave-stroke-monitor" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#38BDF8" />
               <stop offset="100%" stopColor="#2563EB" />
             </linearGradient>
           </defs>
+
           <rect
-            x={xFromT(doseWindowStart)}
-            y={10}
-            width={xFromT(doseWindowEnd) - xFromT(doseWindowStart)}
-            height={chartHeight - 20}
-            fill="#FB923C"
-            fillOpacity={0.2}
+            x={allBedOverlay.x}
+            y={plotTop - 2}
+            width={allBedOverlay.width}
+            height={plotBottom - plotTop + bedHeight + 22}
+            fill="#F97316"
+            fillOpacity={0.14}
             rx={6}
           />
-          {[20, 40, 60, 80].map((y) => (
+
+          {[20, 40, 60, 80].map((level) => (
             <line
-              key={y}
-              x1={8}
-              y1={yFromValue(y)}
-              x2={chartWidth - 8}
-              y2={yFromValue(y)}
+              key={level}
+              x1={leftPad - 8}
+              y1={yFromValue(level)}
+              x2={chartWidth - rightPad}
+              y2={yFromValue(level)}
               stroke="#D7E4FA"
               strokeDasharray="4 4"
             />
           ))}
-          <polyline fill="none" stroke="url(#waveStroke)" strokeWidth="3" strokeLinejoin="round" points={polyline} />
-          {pointsSorted.map((point) => {
+
+          <line
+            x1={leftPad - 8}
+            y1={plotBottom}
+            x2={chartWidth - rightPad}
+            y2={plotBottom}
+            stroke="#94A3B8"
+            strokeWidth="1"
+            strokeDasharray="3 3"
+            opacity="0.45"
+          />
+
+          <polyline
+            fill="none"
+            stroke="#64748B"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity="0.46"
+            points={rawPath}
+          />
+          <polyline
+            fill="none"
+            stroke="url(#resp-wave-stroke-monitor)"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            points={filteredPath}
+          />
+
+          {sortedPoints.map((point, index) => {
+            const isPeak = point.kind === "peak";
             const x = xFromT(point.t);
             const y = yFromValue(point.value);
-            const isPeak = point.kind === "peak";
+            const label = `${isPeak ? "P" : "V"}${Math.floor(index / 2) + (isPeak ? 1 : 1)}`;
+
             return (
-              <g key={point.id}>
+              <g key={`control-${point.id}`}>
                 <circle
                   cx={x}
                   cy={y}
-                  r="6"
-                  fill={isPeak ? "#F97316" : "#2563EB"}
+                  r="8"
+                  fill={isPeak ? "#2563EB" : "#DC2626"}
+                  fillOpacity="0.16"
+                />
+                <circle
+                  cx={x}
+                  cy={y}
+                  r="5"
+                  fill={isPeak ? "#2563EB" : "#DC2626"}
                   stroke="white"
                   strokeWidth="2"
                   className="cursor-grab active:cursor-grabbing"
                   onPointerDown={(event) => {
                     event.preventDefault();
-                    (event.currentTarget as SVGCircleElement).setPointerCapture(event.pointerId);
-                    setDraggingId(point.id);
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    setDraggingPointId(point.id);
                   }}
                 />
-                <text x={x} y={y - 12} textAnchor="middle" fontSize="10" fill={isPeak ? "#C2410C" : "#1D4ED8"}>
-                  {labelsById.get(point.id)}
+                <text
+                  x={x}
+                  y={isPeak ? y - 13 : y + 19}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fontWeight="700"
+                  fill={isPeak ? "#1D4ED8" : "#B91C1C"}
+                >
+                  {label}
                 </text>
               </g>
             );
           })}
+
+          {bedSegments.map((segment) => (
+            <g key={`bed-${segment.index}`}>
+              <line
+                x1={segment.centerX}
+                y1={plotBottom + 4}
+                x2={segment.centerX}
+                y2={bedTop}
+                stroke={segment.inRescan ? "#F97316" : "#94A3B8"}
+                strokeWidth="1"
+                strokeDasharray={segment.inRescan ? "4 3" : "2 4"}
+                opacity="0.95"
+              />
+              <rect
+                x={segment.x + 1}
+                y={bedTop}
+                width={Math.max(0, segment.width - 2)}
+                height={bedHeight}
+                rx={5}
+                fill={segment.inRescan ? "#FDBA74" : "#E2E8F0"}
+                stroke={segment.inRescan ? "#F97316" : "#94A3B8"}
+                strokeWidth={segment.inRescan ? "1.4" : "1"}
+              />
+              <text
+                x={segment.centerX}
+                y={bedTop + 17}
+                textAnchor="middle"
+                fontSize="10"
+                fontWeight="700"
+                fill={segment.inRescan ? "#9A3412" : "#475569"}
+              >
+                {segment.index + 1}
+              </text>
+            </g>
+          ))}
+
+          {[20, 40, 60, 80].map((level) => (
+            <text key={`axis-${level}`} x={8} y={yFromValue(level) + 3} fontSize="10" fill="#64748B">
+              {level}
+            </text>
+          ))}
+
+          <text x={8} y={bedTop + 17} fontSize="10" fontWeight="700" fill="#475569">
+            床位
+          </text>
         </svg>
       </div>
 
-      <div className="mt-2 flex items-center justify-between text-[11px]">
-        <div className="flex items-center gap-2 text-slate-500">
-          <span className="inline-block h-2.5 w-2.5 rounded bg-[#FB923C]/70" />
-          橙色背景：受剂量曝光影响时间窗
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onAddPoint("peak")}
-            className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-orange-50 px-2.5 py-1 font-bold text-orange-700 hover:bg-orange-100"
-          >
-            <Plus size={12} /> 添加波峰
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddPoint("valley")}
-            className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 font-bold text-blue-700 hover:bg-blue-100"
-          >
-            <Plus size={12} /> 添加波谷
-          </button>
-        </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-full bg-[#2563EB]" />
+          波峰
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-full bg-[#DC2626]" />
+          波谷
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-sm border border-[#F97316] bg-[#FDBA74]" />
+          受辐射区域
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-[2px] w-5 rounded bg-[#94A3B8]" />
+          床位连接线
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-full border-2 border-slate-400 bg-white" />
+          拖动控制点
+        </span>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px]">
-        {pointsSorted.map((point) => (
-          <span key={point.id} className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1">
-            <span className={`font-bold ${point.kind === "peak" ? "text-orange-600" : "text-blue-600"}`}>
-              {labelsById.get(point.id)}
-            </span>
-            <span className="font-mono text-slate-500">{point.value}% · t={point.t.toFixed(2)}</span>
-            <button
-              type="button"
-              onClick={() => onDeletePoint(point.id)}
-              className="text-slate-400 hover:text-red-500"
-              title="删除此峰谷点"
-            >
-              <Trash2 size={13} />
-            </button>
-          </span>
-        ))}
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+        当前重扫覆盖床位 {rescanStart + 1}-{rescanEnd + 1}。橙色高亮完整覆盖全部床位区间，床位 1 前和末床位后各额外显示一个完整呼吸周期。
       </div>
     </div>
   );
 }
-
-// ─── 主界面 ──────────────────────────────────────────────────────────────────
 
 export default function FourDRescanSelectScreen() {
   const navigate = useNavigate();
   const location = useLocation();
   const state = location.state as FourDPostScanState | null;
   const scanResult = state?.scanResult;
-
   const selectedPatient = useMemo(() => loadSelectedPatient(), []);
-
   const rescanRange = scanResult?.rescanBedRange ?? null;
   const bedCount = scanResult?.bedCount ?? 0;
 
-  // ── 每个重扫床位的选择，默认选"重扫"（通常质量更好） ──
   const [choices, setChoices] = useState<RescanChoices>(() => {
     if (!rescanRange) return {};
-    const init: RescanChoices = {};
-    for (let bi = rescanRange[0]; bi <= rescanRange[1]; bi++) {
-      init[bi] = "rescan";
+
+    const initialChoices: RescanChoices = {};
+    for (let bedIdx = rescanRange[0]; bedIdx <= rescanRange[1]; bedIdx += 1) {
+      initialChoices[bedIdx] = "rescan";
     }
-    return init;
+    return initialChoices;
   });
 
-  // ── 批量选择模式 ──
   const [viewMode, setViewMode] = useState<"timeline" | "table">("table");
   const [laserActive, setLaserActive] = useState(false);
-  const [wavePoints, setWavePoints] = useState<WaveformPoint[]>([
-    { id: 1, kind: "peak", t: 0.08, value: 78 },
-    { id: 2, kind: "valley", t: 0.23, value: 26 },
-    { id: 3, kind: "peak", t: 0.39, value: 82 },
-    { id: 4, kind: "valley", t: 0.54, value: 24 },
-    { id: 5, kind: "peak", t: 0.7, value: 74 },
-    { id: 6, kind: "valley", t: 0.86, value: 30 },
-  ]);
+  const initialWavePoints = useMemo<WaveformPoint[]>(() => {
+    const points: WaveformPoint[] = [];
+    const cycles = Math.max(bedCount + 2, 3);
+    const cycleWidth = 1 / cycles;
+
+    for (let index = 0; index <= cycles; index += 1) {
+      const valleyT = clamp(index * cycleWidth, 0.01, 0.99);
+      points.push({
+        id: points.length + 1,
+        kind: "valley",
+        t: valleyT,
+        value: 24 + (index % 3) * 2,
+      });
+
+      if (index < cycles) {
+        const peakT = clamp(index * cycleWidth + cycleWidth * 0.48, 0.02, 0.98);
+        points.push({
+          id: points.length + 1,
+          kind: "peak",
+          t: peakT,
+          value: 76 + (index % 4) * 2,
+        });
+      }
+    }
+
+    return points.sort((a, b) => a.t - b.t);
+  }, [bedCount]);
+  const [wavePoints, setWavePoints] = useState<WaveformPoint[]>(initialWavePoints);
 
   const handleBulkSelect = (choice: "first" | "rescan") => {
     if (!rescanRange) return;
-    const next: RescanChoices = {};
-    for (let bi = rescanRange[0]; bi <= rescanRange[1]; bi++) {
-      next[bi] = choice;
+
+    const nextChoices: RescanChoices = {};
+    for (let bedIdx = rescanRange[0]; bedIdx <= rescanRange[1]; bedIdx += 1) {
+      nextChoices[bedIdx] = choice;
     }
-    setChoices(next);
+    setChoices(nextChoices);
   };
 
   const handleBedChange = (bedIdx: number, choice: "first" | "rescan") => {
     setChoices((prev) => ({ ...prev, [bedIdx]: choice }));
   };
 
-  // 时间轴模式点击：切换单床位选择
   const handleBedClick = (bedIdx: number) => {
     setChoices((prev) => ({
       ...prev,
@@ -425,46 +611,35 @@ export default function FourDRescanSelectScreen() {
     }));
   };
 
-  const rescanCount = rescanRange ? rescanRange[1] - rescanRange[0] + 1 : 0;
-  const rescanSelectedCount = Object.values(choices).filter((c) => c === "rescan").length;
-  const handleWavePointChange = (id: number, t: number, value: number) => {
+  const handleWavePointMove = (id: number, t: number, value: number) => {
     setWavePoints((prev) =>
       prev
         .map((point) => (point.id === id ? { ...point, t, value } : point))
-        .sort((a, b) => a.t - b.t)
+        .sort((a, b) => a.t - b.t),
     );
   };
-  const handleAddWavePoint = (kind: "peak" | "valley") => {
-    setWavePoints((prev) => {
-      const nextId = prev.reduce((maxId, point) => Math.max(maxId, point.id), 0) + 1;
-      const defaultValue = kind === "peak" ? 80 : 25;
-      return [...prev, { id: nextId, kind, t: 0.5, value: defaultValue }].sort((a, b) => a.t - b.t);
-    });
-  };
-  const handleDeleteWavePoint = (id: number) => {
-    setWavePoints((prev) => (prev.length <= 2 ? prev : prev.filter((point) => point.id !== id)));
-  };
 
-  // ── 确认进入重建 ──
+  const rescanCount = rescanRange ? rescanRange[1] - rescanRange[0] + 1 : 0;
+  const rescanSelectedCount = Object.values(choices).filter((choice) => choice === "rescan").length;
+
   const handleConfirm = () => {
     if (!scanResult) return;
+
     navigate("/image-viewer", {
       state: { ...state, scanResult, rescanChoices: choices } as FourDPostScanState,
     });
   };
 
-  // ── 无数据保护 ──
   if (!scanResult || !rescanRange) {
     return (
-      <div className="flex h-full items-center justify-center bg-[#0F172A] text-white text-[13px]">
+      <div className="flex h-full items-center justify-center bg-[#0F172A] text-[13px] text-white">
         无效状态，请重新扫描。
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-[#EDF1F7] select-none">
-      {/* ── Header ─────────────────────────────────────────────────── */}
+    <div className="flex h-full select-none flex-col bg-[#EDF1F7]">
       <header className="flex h-[80px] shrink-0 items-center justify-between border-b border-[#B0C4DE] bg-[#E8EAF1] px-4">
         <div className="flex items-center gap-3">
           <div className="flex min-w-[220px] items-center gap-3 rounded-sm border border-[#B0C4DE] bg-[#DCE6F2] px-4 py-1.5">
@@ -473,12 +648,13 @@ export default function FourDRescanSelectScreen() {
             </div>
             <div className="flex flex-col">
               <span className="text-[14px] font-bold text-[#37474F]">{selectedPatient?.name ?? "未选择患者"}</span>
-              <span className="text-[11px] font-medium text-[#546E7A]">{selectedPatient?.id ?? "—"}</span>
+              <span className="text-[11px] font-medium text-[#546E7A]">{selectedPatient?.id ?? "-"}</span>
             </div>
           </div>
+
           <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-            <div className="text-[9px] font-bold italic">♂ 0</div>
-            <div className="text-[9px] font-bold">♀ 0</div>
+            <div className="text-[9px] font-bold italic">⌀ 0</div>
+            <div className="text-[9px] font-bold">⏚ 0</div>
             <div className="flex items-center gap-1 text-[11px] font-bold">
               <Flame size={13} />
               <span>0%</span>
@@ -488,14 +664,18 @@ export default function FourDRescanSelectScreen() {
 
         <div className="text-center leading-none">
           <div className="text-[24px] font-bold tracking-tight text-[#37474F]">13:52</div>
-          <div className="mt-1 text-[11px] font-medium text-[#546E7A] uppercase opacity-80">2月26日 周四</div>
+          <div className="mt-1 text-[11px] font-medium uppercase opacity-80 text-[#546E7A]">4月16日 周四</div>
         </div>
 
         <div className="flex items-center gap-4 pr-2 text-[#546E7A]">
-          <div className="cursor-pointer p-1 text-[#D32F2F] hover:opacity-70"><Siren size={24} /></div>
+          <div className="cursor-pointer p-1 text-[#D32F2F] hover:opacity-70">
+            <Siren size={24} />
+          </div>
           <div className="relative cursor-pointer p-1 hover:opacity-70">
             <Network size={20} />
-            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-[#D32F2F] text-[9px] font-bold text-white">5</span>
+            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-[#D32F2F] text-[9px] font-bold text-white">
+              5
+            </span>
           </div>
           <button
             type="button"
@@ -508,41 +688,43 @@ export default function FourDRescanSelectScreen() {
           </button>
           <div className="relative cursor-pointer p-1 hover:opacity-70">
             <Settings size={20} />
-            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-[#D32F2F] text-[9px] font-bold text-white">10</span>
+            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-[#D32F2F] text-[9px] font-bold text-white">
+              10
+            </span>
           </div>
         </div>
       </header>
 
-      {/* ── 状态栏 ─────────────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center justify-between bg-white border-b border-slate-200 px-6 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
         <div className="flex items-center gap-3">
           <AlertTriangle size={16} className="text-amber-500" />
           <span className="text-[13px] font-bold text-slate-700">
-            床位 {rescanRange[0] + 1}–{rescanRange[1] + 1} 存在重扫重叠
+            床位 {rescanRange[0] + 1}-{rescanRange[1] + 1} 存在重扫重叠
             <span className="ml-2 text-[11px] font-normal text-slate-400">
-              共 {rescanCount} 个床位有两套采集数据，请为每个床位选择使用哪套
+              共 {rescanCount} 个床位存在两套采集数据，请为每个床位选择使用哪一套
             </span>
           </span>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* 批量选择 */}
           <button
+            type="button"
             onClick={() => handleBulkSelect("first")}
-            className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors"
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-700 transition-colors hover:bg-amber-100"
           >
             全选采集 1
           </button>
           <button
+            type="button"
             onClick={() => handleBulkSelect("rescan")}
-            className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-[#4D94FF] bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors"
+            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-bold text-[#4D94FF] transition-colors hover:bg-blue-100"
           >
             全选重扫
           </button>
 
-          {/* 视图切换 */}
-          <div className="ml-3 flex rounded-lg border border-slate-200 overflow-hidden">
+          <div className="ml-3 flex overflow-hidden rounded-lg border border-slate-200">
             <button
+              type="button"
               onClick={() => setViewMode("table")}
               className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold transition-colors ${
                 viewMode === "table" ? "bg-[#4D94FF] text-white" : "bg-white text-slate-500 hover:bg-slate-50"
@@ -551,6 +733,7 @@ export default function FourDRescanSelectScreen() {
               <List size={12} /> 列表
             </button>
             <button
+              type="button"
               onClick={() => setViewMode("timeline")}
               className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold transition-colors ${
                 viewMode === "timeline" ? "bg-[#4D94FF] text-white" : "bg-white text-slate-500 hover:bg-slate-50"
@@ -562,16 +745,15 @@ export default function FourDRescanSelectScreen() {
         </div>
       </div>
 
-      {/* ── 主内容区 ────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto px-6 py-5 flex flex-col gap-5">
-        {/* 全程扫描可视化 */}
-        <div className="rounded-xl bg-white border border-slate-200 p-5 shadow-sm">
+      <div className="flex flex-1 flex-col gap-5 overflow-auto px-6 py-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <div className="text-[12px] font-black text-slate-700">扫描床位总览</div>
             <div className="text-[11px] text-slate-400">
               总扫描长度 {scanResult.scanLength.toFixed(1)} mm · {bedCount} 个床位
             </div>
           </div>
+
           <BedTimeline
             bedCount={bedCount}
             rescanRange={rescanRange}
@@ -580,44 +762,36 @@ export default function FourDRescanSelectScreen() {
           />
         </div>
 
-        {/* 详细选择区 */}
-        <div className="rounded-xl bg-white border border-slate-200 p-5 shadow-sm">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <div className="text-[12px] font-black text-slate-700">
-              重扫床位逐一选择
-            </div>
+            <div className="text-[12px] font-black text-slate-700">重扫床位逐一选择</div>
             <div className="text-[11px] text-slate-400">
               已选重扫 {rescanSelectedCount}/{rescanCount} 个床位
             </div>
           </div>
 
           {viewMode === "table" ? (
-            <BedTable
-              rescanRange={rescanRange}
-              choices={choices}
-              onChange={handleBedChange}
-            />
+            <BedTable rescanRange={rescanRange} choices={choices} onChange={handleBedChange} />
           ) : (
-            /* 时间轴模式下不需要额外列表 */
-            <div className="flex items-center justify-center h-24 text-[12px] text-slate-400">
+            <div className="flex h-24 items-center justify-center text-[12px] text-slate-400">
               在上方时间轴中直接点击床位块切换选择
             </div>
           )}
         </div>
 
-        <RespiratoryWaveEditor
+        <RespiratoryWaveMonitor
           points={wavePoints}
-          onPointMove={handleWavePointChange}
-          onAddPoint={handleAddWavePoint}
-          onDeletePoint={handleDeleteWavePoint}
+          bedCount={bedCount}
+          rescanRange={rescanRange}
+          onPointMove={handleWavePointMove}
         />
       </div>
 
-      {/* ── Footer ─────────────────────────────────────────────────── */}
       <footer className="flex h-[84px] shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6">
         <button
+          type="button"
           onClick={() => navigate(-1)}
-          className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 shadow-sm transition-all uppercase text-[13px] active:scale-95"
+          className="flex h-[52px] items-center gap-2 rounded-md border-2 border-[#4D94FF] bg-white px-10 text-[13px] font-bold uppercase text-[#4D94FF] shadow-sm transition-all hover:bg-blue-50 active:scale-95"
         >
           <ChevronLeft size={20} /> 上一步
         </button>
@@ -627,8 +801,9 @@ export default function FourDRescanSelectScreen() {
         </div>
 
         <button
+          type="button"
           onClick={handleConfirm}
-          className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
+          className="flex h-[52px] items-center gap-2 rounded-md bg-[#4D94FF] px-10 text-[13px] font-bold uppercase text-white shadow-lg transition-all hover:bg-blue-600 active:scale-95"
         >
           进入图像重建 <ChevronRight size={20} />
         </button>
