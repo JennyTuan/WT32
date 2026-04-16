@@ -26,6 +26,7 @@ interface CornerstoneStackViewportProps {
   imageUrls?: string[];
   currentImageIndex?: number;
   onImageIndexChange?: (index: number) => void;
+  onStatusChange?: (status: 'loading' | 'ready' | 'error') => void;
   activeTool?: string;
   windowCenter?: number;
   windowWidth?: number;
@@ -61,6 +62,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       imageUrls,
       currentImageIndex = 0,
       onImageIndexChange,
+      onStatusChange,
       activeTool = 'pan',
       windowCenter = 40,
       windowWidth = 400,
@@ -82,6 +84,10 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
     const lastEmittedVoiRef = useRef<{ lower: number; upper: number } | null>(null);
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [errorMsg, setErrorMsg] = useState('');
+
+    useEffect(() => {
+      onStatusChange?.(status);
+    }, [onStatusChange, status]);
 
     // Expose imperative API for direct viewport control (zoom, fit, reset)
     useImperativeHandle(ref, () => ({

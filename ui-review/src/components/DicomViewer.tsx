@@ -8,6 +8,7 @@ interface DicomViewerProps {
     imageUrls?: string[];
     currentImageIndex?: number;
     onImageIndexChange?: (index: number) => void;
+    onStatusChange?: (status: 'loading' | 'ready' | 'error') => void;
     activeTool?: string;
     windowCenter?: number;
     windowWidth?: number;
@@ -21,6 +22,7 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
         imageUrls,
         currentImageIndex = 0,
         onImageIndexChange,
+        onStatusChange,
         activeTool = 'pan',
         windowCenter = 40,
         windowWidth = 400,
@@ -46,6 +48,7 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
             imageUrls={imageUrls}
             currentImageIndex={currentImageIndex}
             onImageIndexChange={onImageIndexChange}
+            onStatusChange={onStatusChange}
             activeTool={activeTool}
             windowCenter={windowCenter}
             windowWidth={windowWidth}

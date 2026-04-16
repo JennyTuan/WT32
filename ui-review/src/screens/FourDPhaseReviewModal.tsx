@@ -236,13 +236,12 @@ export function FourDPhaseReviewModal({ scanResult, onComplete }: FourDPhaseRevi
 
   return (
     // 全屏遮罩层——覆盖图像浏览界面
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-[3px]">
+    <div className="absolute inset-0 z-40 bg-black/70 backdrop-blur-[3px]">
       {/* 弹窗容器 */}
-      <div className="relative flex flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
-           style={{ width: 900, maxHeight: 680 }}>
+      <div className="relative flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl">
 
         {/* ── 弹窗 Header ── */}
-        <div className="flex h-[64px] shrink-0 items-center justify-between bg-[#1E3A5F] px-6">
+        <div className="flex h-[72px] shrink-0 items-center justify-between bg-[#1E3A5F] px-8">
           <div className="flex flex-col gap-0.5">
             <div className="text-[10px] font-bold uppercase tracking-widest text-blue-300">4D 数据后处理</div>
             <div className="text-[15px] font-black text-white">相位数据审核</div>
@@ -277,7 +276,7 @@ export function FourDPhaseReviewModal({ scanResult, onComplete }: FourDPhaseRevi
         </div>
 
         {/* ── 状态提示条 ── */}
-        <div className="flex h-[40px] shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-6">
+        <div className="flex h-[46px] shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-8">
           {totalConflicts > 0 ? (
             <>
               <AlertCircle size={14} className="text-amber-500 shrink-0" />
@@ -295,7 +294,7 @@ export function FourDPhaseReviewModal({ scanResult, onComplete }: FourDPhaseRevi
         </div>
 
         {/* ── 矩阵区域 ── */}
-        <div className="flex-1 overflow-auto px-6 py-4">
+        <div className="flex-1 overflow-auto px-8 py-6">
           <table className="border-separate" style={{ borderSpacing: "3px" }}>
             <thead>
               <tr>
@@ -393,7 +392,7 @@ export function FourDPhaseReviewModal({ scanResult, onComplete }: FourDPhaseRevi
         </div>
 
         {/* ── 弹窗 Footer ── */}
-        <div className="flex h-[64px] shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6">
+        <div className="flex h-[72px] shrink-0 items-center justify-between border-t border-slate-200 bg-white px-8">
           <div className="text-[11px] text-slate-400">
             {!allConfirmed
               ? <span className="text-amber-500 font-bold">还有 {totalConflicts - confirmedCount} 个冲突未确认</span>

@@ -26,7 +26,7 @@ import {
 import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import { FourDPhaseReviewModal } from "./FourDPhaseReviewModal";
-import { hasPhaseConflicts, type FourDPostScanState, type PhaseSelections } from "../lib/fourDTypes";
+import { hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
 import {
@@ -119,6 +119,7 @@ const cleanOverlayText = (value?: string) => {
 const DEFAULT_PANEL_CLASS = "relative overflow-hidden bg-black";
 const HIDDEN_PANEL_CLASS = "hidden";
 const PSEUDO_COLOR_OPTIONS: PseudoColorMode[] = ["灰阶", "Hot Iron", "PET", "Spectrum", "Bone", "Rainbow", "Blue-Orange"];
+const FOUR_D_PHASE_LABELS = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"];
 
 // (Pseudo-color logic removed)
 
@@ -212,6 +213,7 @@ const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count /
 const ViewScreen = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    const FOUR_D_RECON_MIN_LOADING_MS = 20000;
 
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
     const fourDState = location.state as FourDPostScanState | null;
@@ -221,26 +223,38 @@ const ViewScreen = () => {
     const [fourDStage, setFourDStage] = useState<"idle" | "loading" | "review" | "done">(
         isFourDEntry ? "loading" : "idle"
     );
-    const [phaseSelections, setPhaseSelections] = useState<PhaseSelections | null>(null);
+    const [viewerLoadStatus, setViewerLoadStatus] = useState<"loading" | "ready" | "error">(
+        isFourDEntry ? "loading" : "ready"
+    );
+    const fourDReviewTriggeredRef = useRef(false);
+    const fourDLoadingStartedAtRef = useRef<number>(Date.now());
 
-    // 模拟 4D 图像重建耗时（2.5 秒），完成后检查是否需要相位审核
+    // 4D 入口下，等图像浏览界面的真实加载完成后，再决定是否弹出相位审核
     useEffect(() => {
         if (!isFourDEntry) return;
+        if (fourDReviewTriggeredRef.current) return;
+        if (viewerLoadStatus !== "ready") return;
+
+        const elapsed = Date.now() - fourDLoadingStartedAtRef.current;
+        const remaining = Math.max(0, FOUR_D_RECON_MIN_LOADING_MS - elapsed);
+
         const timer = window.setTimeout(() => {
+            if (fourDReviewTriggeredRef.current) return;
+            fourDReviewTriggeredRef.current = true;
             const scanResult = fourDState!.scanResult;
             if (hasPhaseConflicts(scanResult)) {
                 setFourDStage("review");
             } else {
                 setFourDStage("done");
             }
-        }, 2500);
+        }, remaining);
+
         return () => window.clearTimeout(timer);
-    // 只在首次进入时触发
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [FOUR_D_RECON_MIN_LOADING_MS, fourDState, isFourDEntry, viewerLoadStatus]);
 
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
+    const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
     const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
     const [toolMode, setToolMode] = useState<"pan" | "wl" | "measure" | "annotate" | "eraser">("pan");
@@ -475,6 +489,9 @@ const ViewScreen = () => {
         images: Array.from({ length: REAL_LUNG_SERIES.count }, (_, i) => ({ id: `qin-img-${i + 1}`, name: `Image ${i + 1}` })),
     }];
     const selectedSeries = safeSeriesList.find((s) => s.id === selectedSeriesId) ?? safeSeriesList[0];
+    const isFourDLungReconSeries =
+        selectedSeries.seriesType === "4d" &&
+        /肺/.test(selectedSeries.name);
     const totalSlices = selectedSeries.count;
     const viewportContainerClassName =
         imageMode === "2D"
@@ -496,6 +513,10 @@ const ViewScreen = () => {
             window.cancelAnimationFrame(frameId);
         };
     }, [imageMode, selectedSeriesId]);
+
+    useEffect(() => {
+        setSelectedPhaseIndex(0);
+    }, [selectedSeriesId]);
 
     // Auto-select first series when session data loads (or series list changes)
     useEffect(() => {
@@ -960,13 +981,45 @@ const ViewScreen = () => {
                         <div className="flex-1 p-3 grid grid-cols-2 gap-2 overflow-y-auto">
                             {imageMode === "2D" ? (
                                 <>
-                                    {/* Prefer live DICOM tag values; fall back to scan session / static values */}
-                                    <Param label="Kernel" value={selectedSeries.kernel !== "—" ? selectedSeries.kernel : meta.seriesDescription} />
-                                    <Param label="Thick" value={meta.thickness !== "N/A" ? meta.thickness : selectedSeries.thickness} />
-                                    <Param label="FOV" value={selectedSeries.fov} />
-                                    <Param label="Matrix" value={meta.rows > 0 ? `${meta.rows}×${meta.cols}` : selectedSeries.matrix} />
                                     <Param label="WW" value={String(Math.round(displayWw))} />
                                     <Param label="WL" value={String(Math.round(displayWl))} />
+                                    {isFourDLungReconSeries ? (
+                                        <div className="col-span-2 rounded-md border border-[#B0C4DE]/30 bg-white p-3 shadow-sm">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="text-[8px] font-black uppercase tracking-[0.16em] text-[#90A4AE]">PHASE</span>
+                                                <span className="text-[11px] font-bold text-[#2563EB]">
+                                                    当前相位 {FOUR_D_PHASE_LABELS[selectedPhaseIndex]}
+                                                </span>
+                                            </div>
+                                            <div className="mt-3 grid grid-cols-5 gap-2">
+                                                {FOUR_D_PHASE_LABELS.map((phaseLabel, phaseIndex) => {
+                                                    const active = selectedPhaseIndex === phaseIndex;
+                                                    return (
+                                                        <button
+                                                            key={phaseLabel}
+                                                            type="button"
+                                                            onClick={() => setSelectedPhaseIndex(phaseIndex)}
+                                                            className={`flex h-[34px] items-center justify-center rounded-md border text-[11px] font-black transition-all ${
+                                                                active
+                                                                    ? "border-[#2563EB] bg-[#E8F1FF] text-[#2563EB] shadow-[0_0_0_1px_rgba(37,99,235,0.12)]"
+                                                                    : "border-[#DCE6F2] bg-[#F8FAFC] text-[#64748B] hover:border-[#93C5FD] hover:text-[#2563EB]"
+                                                            }`}
+                                                        >
+                                                            {phaseLabel}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {/* Prefer live DICOM tag values; fall back to scan session / static values */}
+                                            <Param label="Kernel" value={selectedSeries.kernel !== "—" ? selectedSeries.kernel : meta.seriesDescription} />
+                                            <Param label="Thick" value={meta.thickness !== "N/A" ? meta.thickness : selectedSeries.thickness} />
+                                            <Param label="FOV" value={selectedSeries.fov} />
+                                            <Param label="Matrix" value={meta.rows > 0 ? `${meta.rows}×${meta.cols}` : selectedSeries.matrix} />
+                                        </>
+                                    )}
                                 </>
                             ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
@@ -1068,6 +1121,7 @@ const ViewScreen = () => {
                         <CornerstoneMPRViewport
                             ref={mprRef}
                             imageUrls={seriesImageUrls}
+                            onStatusChange={setViewerLoadStatus}
                             windowCenter={wl}
                             windowWidth={ww}
                             activeTool={mapCornerstoneTool(toolMode)}
@@ -1089,6 +1143,7 @@ const ViewScreen = () => {
                             <DicomViewer
                                 ref={dicomViewerRef}
                                 imageUrls={seriesImageUrls}
+                                onStatusChange={setViewerLoadStatus}
                                 currentImageIndex={clampSliceIndex(sliceIndex)}
                                 onImageIndexChange={setSliceIndex}
                                 activeTool={mapCornerstoneTool(toolMode)}
@@ -1337,8 +1392,7 @@ const ViewScreen = () => {
             {fourDStage === "review" && fourDState?.scanResult && (
                 <FourDPhaseReviewModal
                     scanResult={fourDState.scanResult}
-                    onComplete={(selections) => {
-                        setPhaseSelections(selections);
+                    onComplete={() => {
                         setFourDStage("done");
                     }}
                 />
@@ -1353,7 +1407,7 @@ function FourDLoadingOverlay({ bedCount, phaseCount }: { bedCount: number; phase
 
     useEffect(() => {
         const start = performance.now();
-        const duration = 2400; // 略短于外层 2500ms timeout
+        const duration = 19500; // 与外层最短 20s 基本一致，保留少量收尾余量
 
         const tick = (now: number) => {
             const p = Math.min((now - start) / duration, 1);

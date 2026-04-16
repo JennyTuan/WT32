@@ -25,6 +25,7 @@ export type CornerstoneMPRHandle = {
 
 interface CornerstoneMPRViewportProps {
   imageUrls: string[];
+  onStatusChange?: (status: 'loading' | 'ready' | 'error') => void;
   windowCenter?: number;
   windowWidth?: number;
   onWindowLevelChange?: (wc: number, ww: number) => void;
@@ -52,6 +53,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
   function CornerstoneMPRViewport(
     {
       imageUrls,
+      onStatusChange,
       windowCenter = 40,
       windowWidth = 400,
       onWindowLevelChange,
@@ -85,6 +87,10 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [errorMsg, setErrorMsg] = useState('');
+
+    useEffect(() => {
+      onStatusChange?.(status);
+    }, [onStatusChange, status]);
 
     useImperativeHandle(ref, () => ({
       resetAll: () => {
