@@ -347,35 +347,22 @@ function RespiratoryWaveEditor({
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px]">
         {pointsSorted.map((point) => (
-          <label key={point.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="mb-1 flex items-center justify-between text-[11px] gap-2">
-              <span className={`font-bold ${point.kind === "peak" ? "text-orange-600" : "text-blue-600"}`}>
-                {labelsById.get(point.id)} · {point.kind === "peak" ? "波峰" : "波谷"}
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-slate-500">{point.value}% · t={point.t.toFixed(2)}</span>
-                <button
-                  type="button"
-                  onClick={() => onDeletePoint(point.id)}
-                  className="text-slate-400 hover:text-red-500"
-                  title="删除此峰谷点"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            </div>
-            <input
-              type="range"
-              min={5}
-              max={95}
-              step={1}
-              value={point.value}
-              onChange={(event) => onPointMove(point.id, point.t, Number(event.target.value))}
-              className="h-2 w-full accent-[#4D94FF]"
-            />
-          </label>
+          <span key={point.id} className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1">
+            <span className={`font-bold ${point.kind === "peak" ? "text-orange-600" : "text-blue-600"}`}>
+              {labelsById.get(point.id)}
+            </span>
+            <span className="font-mono text-slate-500">{point.value}% · t={point.t.toFixed(2)}</span>
+            <button
+              type="button"
+              onClick={() => onDeletePoint(point.id)}
+              className="text-slate-400 hover:text-red-500"
+              title="删除此峰谷点"
+            >
+              <Trash2 size={13} />
+            </button>
+          </span>
         ))}
       </div>
     </div>
