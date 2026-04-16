@@ -38,7 +38,7 @@ type LoadedSlice = {
     hu: Float32Array;
 };
 
-type PostScoutScanType = Extract<WorkflowSequenceType, "helical" | "axial">;
+type PostScoutScanType = Extract<WorkflowSequenceType, "helical" | "axial" | "4d">;
 
 const DEFAULT_POST_SCOUT_SCAN_TYPE: PostScoutScanType = "helical";
 
@@ -51,13 +51,19 @@ const POST_SCOUT_SCAN_CONFIG: Record<PostScoutScanType, { label: string; route: 
         label: "断层扫描",
         route: "/sequence-confirm",
     },
+    "4d": {
+        label: "4D扫描",
+        route: "/fourd-confirm",
+    },
 };
 
 const resolvePostScoutScanTypeFromWorkflowPlans = (): PostScoutScanType | null => {
     const workflowPlans = loadSelectedScanWorkflowPlans();
     for (const plan of workflowPlans) {
-        const nextSequence = plan.sequences.find((sequence) => sequence.type === "helical" || sequence.type === "axial");
-        if (nextSequence && (nextSequence.type === "helical" || nextSequence.type === "axial")) {
+        const nextSequence = plan.sequences.find(
+            (sequence) => sequence.type === "helical" || sequence.type === "axial" || sequence.type === "4d"
+        );
+        if (nextSequence && (nextSequence.type === "helical" || nextSequence.type === "axial" || nextSequence.type === "4d")) {
             return nextSequence.type;
         }
     }
@@ -392,9 +398,9 @@ export default function ScoutExecuteScanScreen() {
                 if (cancelled || !scanSession) return;
 
                 const nextSeries = scanSession.series.find(
-                    (series) => series.series_type === "helical" || series.series_type === "axial"
+                    (series) => series.series_type === "helical" || series.series_type === "axial" || series.series_type === "4d"
                 );
-                if (nextSeries?.series_type === "helical" || nextSeries?.series_type === "axial") {
+                if (nextSeries?.series_type === "helical" || nextSeries?.series_type === "axial" || nextSeries?.series_type === "4d") {
                     setPostScoutScanType(nextSeries.series_type);
                 }
             } catch (error) {
@@ -410,6 +416,7 @@ export default function ScoutExecuteScanScreen() {
     }, []);
 
     const postScoutAction = POST_SCOUT_SCAN_CONFIG[postScoutScanType];
+    const isFourDScoutWorkflow = postScoutScanType === "4d";
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -536,7 +543,8 @@ export default function ScoutExecuteScanScreen() {
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
             <ScanConfirmScreen
-                activeScoutStepIndex={stage === "completed" ? 3 : 2}
+                activeScoutStepIndex={isFourDScoutWorkflow ? (stage === "completed" ? 4 : 3) : (stage === "completed" ? 3 : 2)}
+                forceFourDScoutWorkflow={isFourDScoutWorkflow}
                 readOnlyMode
                 onExecuteScan={handleExecuteScanClick}
                 executeButtonLabel={stage === "completed" ? postScoutAction.label : "执行扫描"}

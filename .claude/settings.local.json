@@ -27,7 +27,14 @@
       "Bash(taskkill //F //PID 24792)",
       "Bash(taskkill //F //PID 13748)",
       "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")",
-      "Bash(node_modules/.bin/tsc --noEmit)"
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(xxd)",
+      "Bash(python3 -c \"import sys; line = sys.stdin.read\\(\\); start = line.find\\('\\\\\"'\\) + 1; end = line.rfind\\('\\\\\"'\\); print\\(repr\\(line[start:end]\\)\\)\")",
+      "Bash(python3)",
+      "Bash(python3 -c ':*)",
+      "Bash(python -c ':*)",
+      "Bash(ls -la /c/CT-Prototype-backup/CT-Prototype/ui-review/src/*.tsx /c/CT-Prototype-backup/CT-Prototype/ui-review/src/*.ts)",
+      "Read(//tmp/**)"
     ]
   }
 }

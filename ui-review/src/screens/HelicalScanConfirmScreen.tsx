@@ -82,14 +82,14 @@ type FourDDragHandle = "move" | "top" | "bottom" | "left" | "right";
 // ---------------------------------------------------------------------------
 // Gating Scout Viewport (Robust implementation copied from ScoutScanScreen)
 // ---------------------------------------------------------------------------
-interface FourDScoutViewportProps {
+export interface FourDScoutViewportProps {
     onCropBoxChange?: (box: { width: number; height: number }) => void;
     onRectChange?: (rect: { x: number; y: number; width: number; height: number }) => void;
     isScanning?: boolean;
     revealY?: number; // 0 to 1
 }
 
-function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, revealY = 1 }: FourDScoutViewportProps) {
+export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, revealY = 1 }: FourDScoutViewportProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const projectionRef = useRef<Float32Array | null>(null);

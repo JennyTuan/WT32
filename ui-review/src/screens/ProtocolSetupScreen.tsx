@@ -228,18 +228,14 @@ const getAcquisitionTypeLabel = (type: ApiProtocolDetail["acquisition_type"] | A
 };
 
 const getScanFlowStartRoute = (
-    acquisitionType: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]
+    _acquisitionType: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]
 ): "/scout-scan" | null => {
-    if (acquisitionType === "four_d") return null;
     return "/scout-scan";
 };
 
 const getScanFlowUnavailableMessage = (
-    acquisitionType: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]
+    _acquisitionType: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]
 ) => {
-    if (acquisitionType === "four_d") {
-        return "4D鎵弿娴佺▼姝ｅ湪閲嶆柊姊崇悊锛屾殏鏃朵笉鍙粠杩欎釜鍏ュ彛鍚姩";
-    }
     return "";
 };
 
@@ -2538,6 +2534,5 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
 
 
 export default ProtocolSetupScreen;
-
 
 

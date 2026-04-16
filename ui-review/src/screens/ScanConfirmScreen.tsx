@@ -46,6 +46,7 @@ type ScanConfirmScreenProps = {
     activeScoutStepIndex?: number;
     activeSequenceId?: string;
     activeSequenceStepIndex?: number;
+    forceFourDScoutWorkflow?: boolean;
     parameterPanelMode?: "scout" | "tomographicScan" | "helicalScan";
     tomographicParamOverrides?: Partial<TomographicScanDisplayParams>;
     helicalParamOverrides?: Partial<HelicalScanDisplayParams>;
@@ -149,9 +150,18 @@ const DEFAULT_SCOUT_DOSE_PARAMS: ScoutDoseDisplayParams = {
     notifyDlp: "--",
 };
 
-const buildSequenceSteps = (type: WorkflowSequenceType) => {
+const buildSequenceSteps = (type: WorkflowSequenceType, isFourDScoutWorkflow = false) => {
     if (type === "scout") {
-        if (false) {
+        if (isFourDScoutWorkflow) {
+            return ["呼吸采集", "激光灯定位", "参数确认", "执行扫描"];
+        }
+        return ["激光灯定位", "参数确认", "执行扫描"];
+    }
+
+    return ["参数确认", "执行扫描"];
+
+    if (type === "scout") {
+        if (isFourDScoutWorkflow) {
             return ["呼吸采集", "激光灯定位", "参数确认", "执行扫描"];
         }
         return ["激光灯定位", "参数确认", "执行扫描"];
@@ -362,6 +372,7 @@ const ScanConfirmScreen = ({
     activeScoutStepIndex = 1,
     activeSequenceId,
     activeSequenceStepIndex,
+    forceFourDScoutWorkflow = false,
     parameterPanelMode = "scout",
     tomographicParamOverrides,
     helicalParamOverrides,
@@ -399,6 +410,7 @@ const ScanConfirmScreen = ({
     const [showPatientConfirm, setShowPatientConfirm] = useState(false);
     const [laserActive, setLaserActive] = useState(false);
     const [scoutDoseDisplayParams, setScoutDoseDisplayParams] = useState<ScoutDoseDisplayParams>(DEFAULT_SCOUT_DOSE_PARAMS);
+    const isFourDScoutWorkflow = forceFourDScoutWorkflow || scanSession?.acquisition_type === "four_d";
 
     const buildGroupsFromWorkflowPlans = useCallback((): ProtocolGroup[] => {
         if (workflowPlans.length === 0) {
@@ -407,8 +419,8 @@ const ScanConfirmScreen = ({
                     id: "g1",
                     name: "Head_FacialBoneVolume",
                     sequences: [
-                        { id: "s1", name: "Scout", type: "scout", steps: buildSequenceSteps("scout") },
-                        { id: "s2", name: "Helical Scan", type: "helical", steps: buildSequenceSteps("helical") },
+                        { id: "s1", name: "Scout", type: "scout", steps: buildSequenceSteps("scout", isFourDScoutWorkflow) },
+                        { id: "s2", name: "Helical Scan", type: "helical", steps: buildSequenceSteps("helical", isFourDScoutWorkflow) },
                     ],
                 },
             ];
@@ -421,15 +433,14 @@ const ScanConfirmScreen = ({
                 id: `group-${plan.id}-seq-${sequence.id}`,
                 name: sequence.name,
                 type: sequence.type,
-                steps: buildSequenceSteps(sequence.type),
+                steps: buildSequenceSteps(sequence.type, isFourDScoutWorkflow),
             })),
         }));
-    }, [workflowPlans]);
+    }, [isFourDScoutWorkflow, workflowPlans]);
 
     useEffect(() => {
-        if (workflowPlans.length === 0) return;
         setGroups(buildGroupsFromWorkflowPlans());
-    }, [buildGroupsFromWorkflowPlans, workflowPlans.length]);
+    }, [buildGroupsFromWorkflowPlans]);
 
     const allSequences = useMemo(() => groups.flatMap((group) => group.sequences), [groups]);
     const firstScoutSequenceId = useMemo(

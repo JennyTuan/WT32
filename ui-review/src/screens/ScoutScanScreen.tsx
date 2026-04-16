@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import * as dicomParser from "dicom-parser";
 import { useCallback, useMemo } from "react";
 import {
@@ -13,8 +13,6 @@ import {
     Trash2,
     ArrowUpDown,
     AlertTriangle,
-    Activity,
-    TrendingUp,
     Check,
     CheckCircle,
     Flame,
@@ -27,6 +25,7 @@ import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSe
 import { saveScoutPositioningRange } from "../lib/scoutPositioningSession";
 import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { PatientConfirmationModal } from "./ScanConfirmScreen";
 
 interface Sequence {
     id: string;
@@ -115,6 +114,77 @@ const BreathingHelicalParamCard = ({ label, value }: { label: string; value: str
         <span className="mt-px text-[12px] font-black text-[#37474F]">{value}</span>
     </div>
 );
+
+type FourDScoutParams = {
+    bedMode: string;
+    position: string;
+    scanLength: string;
+    mA: string;
+    kV: string;
+    rotationTime: string;
+    fov: string;
+    gantryTilt: string;
+};
+
+function FourDScoutParamPanel({
+    params,
+    onChange,
+    readOnly,
+}: {
+    params: FourDScoutParams;
+    onChange: (key: keyof FourDScoutParams, value: string) => void;
+    readOnly: boolean;
+}) {
+    const fields: Array<{ key: keyof FourDScoutParams; label: string }> = [
+        { key: "bedMode", label: "进出床" },
+        { key: "position", label: "体位" },
+        { key: "scanLength", label: "扫描长度" },
+        { key: "mA", label: "mA" },
+        { key: "kV", label: "kV" },
+        { key: "rotationTime", label: "旋转时间" },
+        { key: "fov", label: "FOV" },
+        { key: "gantryTilt", label: "床倾角" },
+    ];
+
+    return (
+        <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 overflow-hidden">
+            <div className="grid grid-cols-2 gap-1.5">
+                {fields.map(({ key, label }) => (
+                    <label
+                        key={key}
+                        className={`rounded-md border px-2 py-1.5 shadow-sm transition-colors ${
+                            readOnly ? "border-[#B0C4DE]/30 bg-[#F3F6FA]" : "border-[#B0C4DE]/40 bg-white"
+                        }`}
+                    >
+                        <div className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</div>
+                        <input
+                            type="text"
+                            value={params[key]}
+                            readOnly={readOnly}
+                            disabled={readOnly}
+                            onChange={(e) => onChange(key, e.target.value)}
+                            className={`mt-1 h-[24px] w-full border-0 bg-transparent p-0 text-[12px] font-black outline-none ${
+                                readOnly ? "cursor-not-allowed text-[#90A4AE]" : "text-[#37474F]"
+                            }`}
+                        />
+                    </label>
+                ))}
+            </div>
+            <div className="mt-auto pt-0.5">
+                <button
+                    disabled={readOnly}
+                    className={`h-[28px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border shadow-sm transition-all ${
+                        readOnly
+                            ? "cursor-not-allowed border-[#D6E0EA] bg-[#EEF2F6] text-[#A0AEC0]"
+                            : "border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95"
+                    }`}
+                >
+                    <Info size={14} /> 参数详情
+                </button>
+            </div>
+        </div>
+    );
+}
 
 function BreathingScoutViewport() {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -598,11 +668,18 @@ const ScoutScanScreen = ({
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const navigate = useNavigate();
 
-    // 4D workflow detection - drives all 4D-specific UI without touching regular scan logic
-    const is4DWorkflow = false;
+    // 4D workflow detection - driven by scan session acquisition_type
+    const [is4DWorkflow, setIs4DWorkflow] = useState(false);
     const [activeStepIdx, setActiveStepIdx] = useState(0);
     const isBreathingAcquisitionStep = is4DWorkflow && activeStepIdx === 0;
     const is4DParamConfirmStep = is4DWorkflow && activeStepIdx === 2;
+    const is4DScoutExecuteStep = is4DWorkflow && activeStepIdx === 3;
+
+    useEffect(() => {
+        fetchSelectedScanSession().then(session => {
+            if (session?.acquisition_type === 'four_d') setIs4DWorkflow(true);
+        }).catch(() => {});
+    }, []);
 
     const isBreathingTraining = bottomPanelMode === "breathing" && breathingWorkflowVariant === "training";
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
@@ -615,26 +692,42 @@ const ScoutScanScreen = ({
         peakThreshold: 1.2,
         valleyThreshold: 0.35,
         gain: 1.5,
+        triggerDelay: 0.0,
+    });
+    const [fourDScoutParams, setFourDScoutParams] = useState<FourDScoutParams>({
+        bedMode: "IN",
+        position: "HFS",
+        scanLength: "122.2",
+        mA: "50",
+        kV: "120",
+        rotationTime: "0.5",
+        fov: "500",
+        gantryTilt: "0",
     });
 
     const [breathingPhase, setBreathingPhase] = useState<"training" | "stable">("training");
-    const [trainingTimer, setTrainingTimer] = useState(10);
+    const [breathingReadyCountdown, setBreathingReadyCountdown] = useState(10);
+    // Rolling peak tracker for stability detection
+    const peakHistoryRef = useRef<{ value: number; time: number }[]>([]);
+    const trainingStartRef = useRef<number>(Date.now());
+    const demoStableTimerRef = useRef<number | null>(null);
+    const demoCountdownTimerRef = useRef<number | null>(null);
+    const MIN_TRAINING_MS = 10000; // demo: stabilize after 10 seconds
+    const MIN_PEAKS_REQUIRED = 6;
 
-    useEffect(() => {
-        if (!isBreathingAcquisitionStep || breathingPhase !== 'training' || trainingTimer <= 0) return;
-
-        const interval = setInterval(() => {
-            setTrainingTimer(prev => {
-                const next = prev - 1;
-                if (next === 0) {
-                    setTimeout(() => setBreathingPhase('stable'), 0);
-                }
-                return next;
-            });
-        }, 1000);
-
-        return () => clearInterval(interval);
-    }, [isBreathingAcquisitionStep, breathingPhase, trainingTimer]);
+    // Stability check: CV of peak amplitudes < 12% AND CV of intervals < 15%
+    const checkBreathingStability = (peaks: { value: number; time: number }[]) => {
+        if (peaks.length < MIN_PEAKS_REQUIRED) return false;
+        if (Date.now() - trainingStartRef.current < MIN_TRAINING_MS) return false;
+        const recent = peaks.slice(-MIN_PEAKS_REQUIRED);
+        const vals = recent.map(p => p.value);
+        const vMean = vals.reduce((a, b) => a + b, 0) / vals.length;
+        const vCv = Math.sqrt(vals.reduce((a, b) => a + (b - vMean) ** 2, 0) / vals.length) / vMean;
+        const intervals = recent.slice(1).map((p, i) => p.time - recent[i].time);
+        const iMean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+        const iCv = Math.sqrt(intervals.reduce((a, b) => a + (b - iMean) ** 2, 0) / intervals.length) / iMean;
+        return vCv < 0.12 && iCv < 0.15;
+    };
 
     const handleSwap = () => {
         setStartPos(endPos);
@@ -673,24 +766,35 @@ const ScoutScanScreen = ({
             setRawWaveData(prev => [...prev.slice(1), rawVal]);
             setFilteredWaveData(prev => [...prev.slice(1), filteredVal]);
 
-            if (Math.random() > 0.98) {
+            // Peak detection for stability tracking (every ~2s)
+            if (Math.random() > 0.96) {
                 setFilteredWaveData(currentData => {
-                    let peaks = 0;
+                    let peakCount = 0;
+                    let latestPeakVal = 0;
                     for (let i = 4; i < currentData.length - 4; i++) {
                         if (currentData[i] > currentData[i - 1] && currentData[i] > currentData[i + 1] &&
                             currentData[i] > currentData[i - 2] && currentData[i] > currentData[i + 2] &&
                             currentData[i] > 650) {
-                            peaks++;
+                            peakCount++;
+                            latestPeakVal = currentData[i];
                         }
                     }
-                    const baseBpm = (peaks / 500) * 1200;
+                    const baseBpm = (peakCount / 500) * 1200;
                     const bpm = Math.max(14.2, Math.min(15.8, baseBpm + (Math.random() - 0.5) * 0.2));
-                    setMetrics((current) => ({
-                        ...current,
-                        bpm: bpm.toFixed(1),
-                        peakErr: (1.2 + Math.random() * 0.6).toFixed(1),
-                        freqErr: (1.5 + Math.random() * 0.5).toFixed(1),
-                    }));
+                    const peakErr = (1.2 + Math.random() * 0.6).toFixed(1);
+                    const freqErr = (1.5 + Math.random() * 0.5).toFixed(1);
+                    setMetrics(() => ({ bpm: bpm.toFixed(1), peakErr, freqErr }));
+
+                    // Track peaks for stability check
+                    if (latestPeakVal > 0 && isBreathingAcquisitionStep) {
+                        peakHistoryRef.current = [
+                            ...peakHistoryRef.current.slice(-20),
+                            { value: latestPeakVal, time: Date.now() },
+                        ];
+                        if (breathingPhase === 'training' && checkBreathingStability(peakHistoryRef.current)) {
+                            setBreathingPhase('stable');
+                        }
+                    }
                     return currentData;
                 });
             }
@@ -702,7 +806,51 @@ const ScoutScanScreen = ({
         return () => {
             if (timerRef.current !== null) cancelAnimationFrame(timerRef.current);
         };
-    }, [bottomPanelMode, isBreathingAcquisitionStep, isBreathingSignalEnabled]);
+    }, [bottomPanelMode, breathingPhase, isBreathingAcquisitionStep, isBreathingSignalEnabled]);
+
+    useEffect(() => {
+        if (!isBreathingAcquisitionStep) {
+            if (demoStableTimerRef.current !== null) {
+                window.clearTimeout(demoStableTimerRef.current);
+                demoStableTimerRef.current = null;
+            }
+            if (demoCountdownTimerRef.current !== null) {
+                window.clearInterval(demoCountdownTimerRef.current);
+                demoCountdownTimerRef.current = null;
+            }
+            setBreathingPhase("training");
+            setBreathingReadyCountdown(10);
+            peakHistoryRef.current = [];
+            trainingStartRef.current = Date.now();
+            return;
+        }
+
+        setBreathingPhase("training");
+        setBreathingReadyCountdown(10);
+        peakHistoryRef.current = [];
+        trainingStartRef.current = Date.now();
+
+        demoStableTimerRef.current = window.setTimeout(() => {
+            setBreathingPhase("stable");
+            setBreathingReadyCountdown(0);
+        }, MIN_TRAINING_MS);
+
+        demoCountdownTimerRef.current = window.setInterval(() => {
+            const elapsedSeconds = Math.floor((Date.now() - trainingStartRef.current) / 1000);
+            setBreathingReadyCountdown(Math.max(0, 10 - elapsedSeconds));
+        }, 250);
+
+        return () => {
+            if (demoStableTimerRef.current !== null) {
+                window.clearTimeout(demoStableTimerRef.current);
+                demoStableTimerRef.current = null;
+            }
+            if (demoCountdownTimerRef.current !== null) {
+                window.clearInterval(demoCountdownTimerRef.current);
+                demoCountdownTimerRef.current = null;
+            }
+        };
+    }, [isBreathingAcquisitionStep, MIN_TRAINING_MS]);
 
     useEffect(() => {
         if (bottomPanelMode !== "breathing") return;
@@ -765,6 +913,7 @@ const ScoutScanScreen = ({
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
+    const [showPatientConfirm, setShowPatientConfirm] = useState(false);
     const [laserActive, setLaserActive] = useState(false);
     const [selectedPosition, setSelectedPosition] = useState<"start" | "end" | null>(null);
     const [expandedSeqId, setExpandedSeqId] = useState<string | null>(() => buildGroupsFromWorkflowPlans()[0]?.sequences[0]?.id ?? null);
@@ -789,9 +938,10 @@ const ScoutScanScreen = ({
         if (bottomPanelMode !== "positioning") return;
 
         if (laserActive || selectedPosition) {
-            setActiveStepIdx(0);
+            const positioningStepIdx = is4DWorkflow ? 1 : 0;
+            setActiveStepIdx((prev) => (prev === 0 ? positioningStepIdx : prev));
         }
-    }, [bottomPanelMode, laserActive, selectedPosition]);
+    }, [bottomPanelMode, is4DWorkflow, laserActive, selectedPosition]);
 
     useEffect(() => {
         if (!laserActive || !selectedPosition) return;
@@ -1121,74 +1271,46 @@ const ScoutScanScreen = ({
                             </div>
                         </div>
                     ) : isBreathingAcquisitionStep ? (
-                        <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] p-4 flex-1 flex flex-col gap-5 overflow-y-auto">
-                            <div className="mb-4 flex items-center justify-between">
-                                <span className="text-[14px] font-black text-[#37474F]">呼吸检测</span>
-                                <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md shadow-sm border ${
-                                    breathingPhase === 'stable' ? 'bg-[#E8F5E9] border-[#A5D6A7]' : 'bg-[#FFF8E1] border-[#FFE082]'
-                                }`}>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${
-                                        breathingPhase === 'stable' ? 'bg-[#43A047]' : 'bg-[#F57C00] animate-pulse'
-                                    }`} />
-                                    <span className={`text-[9px] font-black ${
-                                        breathingPhase === 'stable' ? 'text-[#2E7D32]' : 'text-[#F57C00]'
-                                    }`}>
-                                        {breathingPhase === 'stable' ? '呼吸采集 (已就绪)' : '呼吸采集 (训练中)'}
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                                <div className="bg-white border border-[#EEF2F9] rounded-lg p-3 flex flex-col gap-1 shadow-sm">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-2 h-2 rounded-full bg-[#4D94FF]" />
-                                        <span className="text-[10px] font-bold text-[#90A4AE] uppercase tracking-tighter">原始主频</span>
-                                    </div>
-                                    <span className="text-[20px] font-black text-[#37474F] leading-none mt-1">15</span>
-                                </div>
-                                <div className="bg-white border border-[#4D94FF]/30 rounded-lg p-3 flex flex-col gap-1 shadow-[0_4px_12px_rgba(77,148,255,0.08)]">
-                                    <div className="text-[10px] font-bold text-[#4D94FF] uppercase tracking-tighter">呼吸频率</div>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <Activity size={16} className="text-[#4D94FF]" />
-                                        <span className="text-[20px] font-black text-[#4D94FF] leading-none">{metrics.bpm} <span className="text-[10px] font-bold ml-0.5">BPM</span></span>
-                                    </div>
-                                </div>
-                                <div className="bg-white border border-[#EEF2F9] rounded-lg p-3 flex flex-col gap-1 shadow-sm">
-                                    <div className="flex items-center gap-2">
-                                        <TrendingUp size={14} className="text-[#90A4AE]" />
-                                        <span className="text-[10px] font-bold text-[#90A4AE] uppercase tracking-tighter">峰值误差</span>
-                                    </div>
-                                    <span className="text-[18px] font-black text-[#37474F] leading-none mt-1">{metrics.peakErr}%</span>
-                                </div>
-                                <div className="bg-white border border-[#EEF2F9] rounded-lg p-3 flex flex-col gap-1 shadow-sm">
-                                    <div className="flex items-center gap-2">
-                                        <Info size={14} className="text-[#90A4AE]" />
-                                        <span className="text-[10px] font-bold text-[#90A4AE] uppercase tracking-tighter">频率误差</span>
-                                    </div>
-                                    <span className="text-[18px] font-black text-[#37474F] leading-none mt-1">{metrics.freqErr}%</span>
-                                </div>
-                            </div>
-                        </div>
-                    ) : is4DParamConfirmStep ? (
                         <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 overflow-hidden">
-                            <button className="h-[28px] w-full rounded-md text-[10px] font-bold flex items-center justify-center border border-[#4D94FF] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
-                                定位像参数
-                            </button>
-                            <div className="grid grid-cols-2 gap-1.5">
-                                <BreathingHelicalParamCard label="进出床" value="IN" />
-                                <BreathingHelicalParamCard label="体位" value="HFS" />
-                                <BreathingHelicalParamCard label="扫描长度" value="122.2" />
-                                <BreathingHelicalParamCard label="mA" value="50" />
-                                <BreathingHelicalParamCard label="kV" value="120" />
-                                <BreathingHelicalParamCard label="旋转时间" value="0.5" />
-                                <BreathingHelicalParamCard label="FOV" value="500" />
-                                <BreathingHelicalParamCard label="床倾角" value="0" />
+                            {/* Status badge */}
+                            <div className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border ${
+                                breathingPhase === 'stable' ? 'bg-[#E8F5E9] border-[#A5D6A7]' : 'bg-[#FFF8E1] border-[#FFE082]'
+                            }`}>
+                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                    breathingPhase === 'stable' ? 'bg-[#43A047]' : 'bg-[#F57C00] animate-pulse'
+                                }`} />
+                                <span className={`text-[9px] font-black ${
+                                    breathingPhase === 'stable' ? 'text-[#2E7D32]' : 'text-[#F57C00]'
+                                }`}>
+                                    {breathingPhase === 'stable' ? '呼吸稳定 · 可继续' : `呼吸模拟中… ${breathingReadyCountdown}s`}
+                                </span>
                             </div>
-                            <div className="mt-auto pt-0.5">
-                                <button className="h-[28px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
-                                    <Info size={14} /> 参数详情
-                                </button>
+                            {/* Read-only 呼吸参数 */}
+                            <div className="text-[10px] font-black text-[#90A4AE] uppercase tracking-wider px-0.5">呼吸参数</div>
+                            <div className="grid grid-cols-2 gap-1.5 overflow-y-auto">
+                                {[
+                                    { label: "呼吸模式", value: "自由呼吸" },
+                                    { label: "采集相位", value: "10" },
+                                    { label: "采集时间", value: "30s" },
+                                    { label: "触发阈值", value: "50%" },
+                                    { label: "采集窗口", value: "30%" },
+                                    { label: "相位间隔", value: "0°" },
+                                    { label: "BPM", value: metrics.bpm },
+                                    { label: "频率误差", value: `${metrics.freqErr}%` },
+                                ].map(({ label, value }) => (
+                                    <div key={label} className="px-1.5 py-1 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</span>
+                                        <span className="mt-px text-[12px] font-black text-[#37474F]">{value}</span>
+                                    </div>
+                                ))}
                             </div>
                         </div>
+                    ) : is4DParamConfirmStep || is4DScoutExecuteStep ? (
+                        <FourDScoutParamPanel
+                            params={fourDScoutParams}
+                            onChange={(key, value) => setFourDScoutParams((prev) => ({ ...prev, [key]: value }))}
+                            readOnly={is4DScoutExecuteStep}
+                        />
                     ) : (
                         <div className={`mt-auto border-t border-[#EEF2F9] bg-[#F8FAFC] px-4 py-3 shrink-0 transition-all duration-300 ${isTreeCollapsed ? 'flex-1 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]' : 'h-[168px]'}`}>
                             <div className="mb-3 text-[12px] font-bold text-[#546E7A]">{positioningHint}</div>
@@ -1276,9 +1398,8 @@ const ScoutScanScreen = ({
                                     <SliderField label="滤波阈值" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.filterThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, filterThreshold: v }))} />
                                     <SliderField label="峰值阈值" min={0.5} max={2.5} step={0.05} value={breathingAcquisitionParams.peakThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, peakThreshold: v }))} />
                                     <SliderField label="谷值阈值" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.valleyThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, valleyThreshold: v }))} />
-                                    <div className="col-span-2">
-                                        <SliderField label="增益" min={0.5} max={3} step={0.1} value={breathingAcquisitionParams.gain} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, gain: v }))} />
-                                    </div>
+                                    <SliderField label="增益" min={0.5} max={3} step={0.1} value={breathingAcquisitionParams.gain} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, gain: v }))} />
+                                    <SliderField label="触发延迟(ms)" min={0} max={500} step={10} value={breathingAcquisitionParams.triggerDelay} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, triggerDelay: v }))} />
                                 </div>
                             </div>
                             <div className="min-h-0 flex-1 bg-white rounded-md border border-[#B0C4DE]/40 shadow-inner p-3 relative overflow-hidden">
@@ -1617,10 +1738,10 @@ const ScoutScanScreen = ({
                     </button>
                 </div>
 
-                {bottomPanelMode === 'breathing' ? (
-                    <div className="flex-1 flex justify-center items-center gap-2">
-                        {/* Deleted Steady Breathing indicator from here */}
-                    </div>
+                {isBreathingAcquisitionStep ? (
+                    <div className="flex-1" />
+                ) : bottomPanelMode === 'breathing' ? (
+                    <div className="flex-1 flex justify-center items-center gap-2" />
                 ) : (
                     <div className="flex-1 flex justify-center">
                         <button
@@ -1639,6 +1760,10 @@ const ScoutScanScreen = ({
                                 setActiveStepIdx(idx => idx + 1);
                                 return;
                             }
+                            if (is4DWorkflow && activeStepIdx === 2) {
+                                setShowPatientConfirm(true);
+                                return;
+                            }
                             // 4D scout 共4步(0-3)，步骤0-2推进，步骤3才导航
                             if (is4DWorkflow && activeStepIdx < 3) {
                                 setActiveStepIdx(idx => idx + 1);
@@ -1655,7 +1780,7 @@ const ScoutScanScreen = ({
                                 : (isBreathingAcquisitionStep ? 'bg-[#4D94FF] text-white hover:bg-blue-600' : (bottomPanelMode === 'breathing' ? 'bg-[#7EAAFF] text-white hover:bg-[#6FA0FF]' : 'bg-[#4D94FF] text-white hover:bg-blue-600'))
                         }`}
                     >
-                        {isBreathingAcquisitionStep ? '定位像' : (bottomPanelMode === 'breathing' ? '断层扫描' : '下一步')} <ChevronRight size={20} />
+                        {isBreathingAcquisitionStep ? '定位像' : (is4DWorkflow && activeStepIdx === 2 ? '执行扫描' : (bottomPanelMode === 'breathing' ? '断层扫描' : '下一步'))} <ChevronRight size={20} />
                     </button>
                 </div>
             </footer>
@@ -1690,6 +1815,33 @@ const ScoutScanScreen = ({
                     </div>
                 </div>
             )}
+
+            <PatientConfirmationModal
+                isOpen={showPatientConfirm}
+                onClose={() => setShowPatientConfirm(false)}
+                onConfirm={async () => {
+                    setShowPatientConfirm(false);
+                    try {
+                        await persistPositioningToSession();
+                    } catch (error) {
+                        console.error(error);
+                    }
+                    navigate('/scout-execute');
+                }}
+                patientData={selectedPatient ? {
+                    name: selectedPatient.name,
+                    age: selectedPatient.age,
+                    gender: selectedPatient.gender,
+                    idNumber: "--",
+                    patientId: selectedPatient.patientId,
+                    checkType: selectedPatient.checkType ?? "4D Scout",
+                } : undefined}
+                scanData={{
+                    ctdi: "--",
+                    dlp: "--",
+                    protocol: "定位像",
+                }}
+            />
 
             {/* Abort Confirmation Dialog */}
             {showAbortConfirm && (
