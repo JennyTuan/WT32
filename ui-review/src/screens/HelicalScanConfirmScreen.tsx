@@ -287,13 +287,13 @@ export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, 
 // ---------------------------------------------------------------------------
 // Helical Scan Preview Viewport (Real-time axial reconstruction simulator)
 // ---------------------------------------------------------------------------
-interface HelicalScanPreviewViewportProps {
+export interface HelicalScanPreviewViewportProps {
     isScanning: boolean;
     active: boolean;
     revealY?: number;
 }
 
-function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: HelicalScanPreviewViewportProps) {
+export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: HelicalScanPreviewViewportProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const slicesRef = useRef<FourDLoadedSlice[]>([]);

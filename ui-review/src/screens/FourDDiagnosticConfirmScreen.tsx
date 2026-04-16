@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
     Activity,
@@ -409,36 +409,55 @@ export default function FourDDiagnosticConfirmScreen() {
                         ))}
                     </div>
 
-                    <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 overflow-hidden">
-                        <div className="rounded-lg border border-[#DBEAFE] bg-[#EFF6FF] px-3 py-2 flex items-start gap-2 shadow-sm">
-                            <Activity size={16} className="text-[#2563EB] mt-0.5 shrink-0" />
-                            <div>
-                                <div className="text-[11px] font-black text-[#1D4ED8]">4D采集模式</div>
-                                <div className="text-[10px] text-[#3B82F6] mt-0.5">点击底部执行扫描后，通过右侧模拟物理按键触发采集。</div>
-                            </div>
+                    <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 py-3 shrink-0">
+                        <div className="rounded-lg border border-[#DBEAFE] bg-[#EFF6FF] px-3 py-2 shadow-sm">
+                            <div className="text-[11px] font-black text-[#1D4ED8]">扫描参数</div>
                         </div>
-
-                        {[
-                            { label: "采集相位数", value: FOURD_PARAMS.phases },
-                            { label: "采集时间", value: FOURD_PARAMS.acquisitionTime },
-                            { label: "呼吸模式", value: FOURD_PARAMS.breathingMode },
-                            { label: "触发阈值", value: FOURD_PARAMS.triggerThreshold },
-                            { label: "旋转时间", value: `${FOURD_PARAMS.rotationTime} s` },
-                            { label: "Pitch", value: FOURD_PARAMS.pitch },
-                            { label: "扫描长度", value: `${FOURD_PARAMS.scanLength} mm` },
-                            { label: "FOV", value: FOURD_PARAMS.fov },
-                        ].map(({ label, value }) => (
-                            <div key={label} className="bg-white border border-[#B0C4DE]/60 rounded-lg px-3 py-2 flex items-center justify-between shadow-sm">
-                                <span className="text-[11px] font-bold text-[#546E7A]">{label}</span>
-                                <span className="text-[13px] font-black text-[#37474F]">{value}</span>
-                            </div>
-                        ))}
+                        <div className="mt-2 flex flex-col gap-2">
+                            {[
+                                { label: "进出床", value: FOURD_PARAMS.bedMode },
+                                { label: "体位", value: FOURD_PARAMS.position },
+                                { label: "扫描长度", value: `${FOURD_PARAMS.scanLength} mm` },
+                                { label: "MA", value: FOURD_PARAMS.mA },
+                                { label: "KV", value: FOURD_PARAMS.kV },
+                            ].map(({ label, value }) => (
+                                <div key={label} className="bg-white border border-[#B0C4DE]/60 rounded-lg px-3 py-2 flex items-center justify-between shadow-sm">
+                                    <span className="text-[11px] font-bold text-[#546E7A]">{label}</span>
+                                    <span className="text-[13px] font-black text-[#37474F]">{value}</span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </aside>
 
                 <section className="flex-1 flex flex-col gap-2">
                     <div className="min-h-0 flex-[1.05] overflow-hidden rounded-md border border-[#B0C4DE]/30 bg-[#16202B]">
-                        <FourDScoutViewport onCropBoxChange={() => {}} />
+                        <div className="flex h-full bg-[#F8FAFC] relative">
+                            <div className="flex-1 relative overflow-hidden bg-black">
+                                <FourDScoutViewport onCropBoxChange={() => {}} />
+                            </div>
+                            <div className="w-[216px] shrink-0 border-l border-[#B0C4DE]/60 bg-[#F8FAFC] px-3 py-3 flex flex-col gap-2">
+                                <div className="rounded-lg border border-[#DBEAFE] bg-[#EFF6FF] px-3 py-2 flex items-start gap-2 shadow-sm">
+                                    <Activity size={16} className="text-[#2563EB] mt-0.5 shrink-0" />
+                                    <div>
+                                        <div className="text-[11px] font-black text-[#1D4ED8]">呼吸参数</div>
+                                        <div className="text-[10px] text-[#3B82F6] mt-0.5 leading-snug">点击底部执行扫描后，通过右侧物理按钮触发采集。</div>
+                                    </div>
+                                </div>
+
+                                {[
+                                    { label: "采集相位数", value: FOURD_PARAMS.phases },
+                                    { label: "采集时间", value: FOURD_PARAMS.acquisitionTime },
+                                    { label: "呼吸模式", value: FOURD_PARAMS.breathingMode },
+                                    { label: "触发阈值", value: FOURD_PARAMS.triggerThreshold },
+                                ].map(({ label, value }) => (
+                                    <div key={label} className="bg-white border border-[#B0C4DE]/60 rounded-lg px-3 py-2 flex items-center justify-between shadow-sm">
+                                        <span className="text-[11px] font-bold text-[#546E7A]">{label}</span>
+                                        <span className="text-[13px] font-black text-[#37474F]">{value}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     </div>
 
                     <div className="h-[220px] shrink-0 bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex overflow-hidden">
@@ -534,7 +553,7 @@ export default function FourDDiagnosticConfirmScreen() {
                                     </div>
                                     <div>
                                         <div className="text-[13px] font-black text-[#2E7D32]">采集完成</div>
-                                        <div className="text-[10px] text-[#546E7A] mt-1 leading-snug">4D 重建任务已提交，等待后续图像浏览。</div>
+                                        <div className="text-[10px] text-[#546E7A] mt-1 leading-snug">4D重建任务已提交，等待后续图像浏览。</div>
                                     </div>
                                 </div>
                             ) : scanStarted ? (
@@ -570,9 +589,8 @@ export default function FourDDiagnosticConfirmScreen() {
                                     </div>
                                     <div className="text-[12px] font-black text-[#37474F]">执行扫描</div>
                                     <div className="text-[10px] text-[#546E7A] leading-snug">
-                                        点击底部执行扫描后
-                                        <br />
-                                        右侧弹出模拟物理按键
+                                        点击底部执行扫描后 <br />
+                                        通过右侧物理按钮开始采集
                                     </div>
                                 </div>
                             )}
@@ -587,8 +605,7 @@ export default function FourDDiagnosticConfirmScreen() {
                         onClick={() => navigate(-1)}
                         className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95"
                     >
-                        <ChevronLeft size={20} /> 上一步
-                    </button>
+                        <ChevronLeft size={20} /> 上一步                    </button>
                 </div>
 
                 <div className="flex-1 flex justify-center">
@@ -597,8 +614,7 @@ export default function FourDDiagnosticConfirmScreen() {
                             onClick={() => setShowAbortConfirm(true)}
                             className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#F57C00] font-bold rounded-md border-2 border-[#F57C00] hover:bg-orange-50 transition-all uppercase text-[13px] shadow-sm active:scale-95"
                         >
-                            <AlertTriangle size={20} /> 中止检查
-                        </button>
+                            <AlertTriangle size={20} /> 中止检查                        </button>
                     )}
                 </div>
 
@@ -627,7 +643,7 @@ export default function FourDDiagnosticConfirmScreen() {
                 <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
                     <div className="border-b border-slate-200 px-5 py-4">
                         <div className="text-[14px] font-black text-slate-700">实体按键操作引导</div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">长按三秒后触发 4D 采集，扫描进度会在主界面实时更新。</div>
+                        <div className="mt-1 text-[11px] font-medium text-slate-400">长按三秒后触发4D采集，扫描进度会在主界面实时更新。</div>
                     </div>
 
                     <div className="flex flex-1 flex-col">
@@ -692,13 +708,12 @@ export default function FourDDiagnosticConfirmScreen() {
                             </div>
                             <div>
                                 <div className="text-[15px] font-black text-[#37474F]">中止检查</div>
-                                <div className="text-[12px] text-[#78909C] mt-0.5">确认中止当前 4D 扫描流程？</div>
+                                <div className="text-[12px] text-[#78909C] mt-0.5">确认中止当前4D扫描流程？</div>
                             </div>
                         </div>
                         <div className="px-5 py-3">
                             <p className="text-[13px] text-[#546E7A] leading-relaxed">
-                                中止后，<span className="font-bold text-[#37474F]">当前 4D 扫描将终止</span>，已采集数据会保留。
-                            </p>
+                                中止后，<span className="font-bold text-[#37474F]">当前4D扫描将终止</span>，已采集数据会保留。                            </p>
                         </div>
                         <div className="flex gap-2 px-5 pb-4">
                             <button
