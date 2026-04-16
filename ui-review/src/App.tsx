@@ -16,6 +16,8 @@ import SequenceScanConfirmScreen from "./screens/SequenceScanConfirmScreen";
 import HelicalScanConfirmScreen from "./screens/HelicalScanConfirmScreen";
 import HelicalExecuteScanScreen from "./screens/HelicalExecuteScanScreen";
 import FourDDiagnosticConfirmScreen from "./screens/FourDDiagnosticConfirmScreen";
+import FourDPhaseReviewScreen from "./screens/FourDPhaseReviewScreen";
+import FourDRescanSelectScreen from "./screens/FourDRescanSelectScreen";
 import ViewScreen from "./screens/ViewScreen";
 import ManualScanScreen from "./screens/ManualScanScreen";
 import MockScanScreen from "./screens/MockScanScreen";
@@ -113,6 +115,8 @@ export default function App() {
               <Route path="/helical-confirm" element={<HelicalScanConfirmScreen />} />
               <Route path="/helical-execute" element={<HelicalExecuteScanScreen />} />
               <Route path="/fourd-confirm" element={<FourDDiagnosticConfirmScreen />} />
+              <Route path="/fourd-phase-review" element={<FourDPhaseReviewScreen />} />
+              <Route path="/fourd-rescan-select" element={<FourDRescanSelectScreen />} />
               <Route path="/image-viewer" element={<ViewScreen />} />
 
               <Route path="/mobile/manual-scan" element={<ManualScanScreen />} />

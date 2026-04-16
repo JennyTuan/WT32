@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { generateMockScanResult, hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
 import {
-    Activity,
     AlertTriangle,
     Check,
     CheckCircle,
@@ -164,6 +164,24 @@ export default function FourDDiagnosticConfirmScreen() {
         setScanProgress(1);
         setBedProgress(bedSegmentCount);
     }, [bedSegmentCount]);
+
+    /** 扫描完成后点击"下一步"时的路由决策 */
+    const handlePostScanNavigate = useCallback(() => {
+        const scanResult = generateMockScanResult(
+            bedSegmentCount,
+            Number(FOURD_PARAMS.phases),
+            dynamicParams.scanLength
+        );
+        const postScanState: FourDPostScanState = { scanResult };
+
+        if (hasPhaseConflicts(scanResult)) {
+            navigate("/fourd-phase-review", { state: postScanState });
+        } else if (scanResult.rescanOccurred) {
+            navigate("/fourd-rescan-select", { state: postScanState });
+        } else {
+            navigate("/image-viewer");
+        }
+    }, [bedSegmentCount, dynamicParams.scanLength, navigate]);
 
     const handleCropBoxChange = useCallback(({ width, height }: { width: number; height: number }) => {
         setDynamicParams({
@@ -659,7 +677,7 @@ export default function FourDDiagnosticConfirmScreen() {
                         disabled={scanStarted}
                         onClick={() => {
                             if (scanCompleted) {
-                                navigate("/image-viewer");
+                                handlePostScanNavigate();
                                 return;
                             }
                             setGuideVisible(true);
