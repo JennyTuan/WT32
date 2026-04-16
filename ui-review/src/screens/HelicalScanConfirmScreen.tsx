@@ -215,22 +215,6 @@ export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, 
         
         ctx.drawImage(offscreen, x, y, drawW, drawH);
         
-        if (isScanning && revealY < 1) {
-            const drawClipH = drawH * revealY;
-            
-            // Draw Scan Line
-            ctx.beginPath();
-            ctx.moveTo(x, y + drawClipH);
-            ctx.lineTo(x + drawW, y + drawClipH);
-            ctx.strokeStyle = "#34D399";
-            ctx.lineWidth = 2;
-            ctx.setLineDash([]);
-            ctx.stroke();
-            // Glow effect
-            ctx.strokeStyle = "rgba(52, 211, 153, 0.4)";
-            ctx.lineWidth = 4;
-            ctx.stroke();
-        }
         ctx.restore();
     }, [loadState, windowLevel, windowWidth, isScanning, revealY]);
 
@@ -273,6 +257,18 @@ export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, 
             {loadState === "ready" && meta && (
                 <>
                     <div className="absolute border-2 border-[#4D94FF] bg-[#4D94FF]/8 pointer-events-auto" style={{ left: `${cropBox.x*100}%`, top: `${cropBox.y*100}%`, width: `${cropBox.width*100}%`, height: `${cropBox.height*100}%` }} onMouseDown={startCropDrag("move")}>
+                        {isScanning && (
+                            <>
+                                <div
+                                    className="absolute inset-x-0 bg-[#F59E0B]/18"
+                                    style={{ height: `${Math.min(revealY, 1) * 100}%` }}
+                                />
+                                <div
+                                    className="absolute inset-x-0 h-[2px] bg-[#F59E0B] shadow-[0_0_10px_rgba(245,158,11,0.65)]"
+                                    style={{ top: `calc(${Math.min(revealY, 1) * 100}% - 1px)` }}
+                                />
+                            </>
+                        )}
                         <div className="absolute -top-3 left-1/2 h-6 w-12 -translate-x-1/2 cursor-ns-resize" onMouseDown={startCropDrag("top")} />
                         <div className="absolute -bottom-3 left-1/2 h-6 w-12 -translate-x-1/2 cursor-ns-resize" onMouseDown={startCropDrag("bottom")} />
                         <div className="absolute left-0 top-1/2 h-12 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize" onMouseDown={startCropDrag("left")} />

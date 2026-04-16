@@ -11,6 +11,7 @@ import {
     ChevronsUp,
     FilePlus,
     Flame,
+    Info,
     Network,
     Settings,
     Siren,
@@ -26,7 +27,7 @@ import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 
 const HOLD_DURATION_MS = 3000;
 const SCAN_DURATION_MS = 16000;
-const BED_SEGMENTS = 10;
+const BED_TRAVEL_MM = 19.2;
 
 const FOURD_PARAMS = {
     bedMode: "OUT",
@@ -75,6 +76,17 @@ export default function FourDDiagnosticConfirmScreen() {
     const [scanCompleted, setScanCompleted] = useState(false);
     const [scanProgress, setScanProgress] = useState(0);
     const [bedProgress, setBedProgress] = useState(0);
+    const [dynamicParams, setDynamicParams] = useState({
+        scanLength: Number(FOURD_PARAMS.scanLength),
+        fov: Number(FOURD_PARAMS.fov),
+    });
+    const [breathingControls, setBreathingControls] = useState({
+        minSpacing: 1.8,
+        filterThreshold: 0.42,
+        peakThreshold: 1.15,
+        gain: 1.4,
+        triggerDelay: 120,
+    });
 
     const [rawWaveData, setRawWaveData] = useState<number[]>(new Array(500).fill(100));
     const [filteredWaveData, setFilteredWaveData] = useState<number[]>(new Array(500).fill(100));
@@ -140,12 +152,24 @@ export default function FourDDiagnosticConfirmScreen() {
         }
     };
 
+    const bedSegmentCount = useMemo(
+        () => Math.max(1, Math.ceil(dynamicParams.scanLength / BED_TRAVEL_MM)),
+        [dynamicParams.scanLength]
+    );
+
     const handleScanComplete = useCallback(() => {
         setScanStarted(false);
         setScanCompleted(true);
         setScanStage("completed");
         setScanProgress(1);
-        setBedProgress(BED_SEGMENTS);
+        setBedProgress(bedSegmentCount);
+    }, [bedSegmentCount]);
+
+    const handleCropBoxChange = useCallback(({ width, height }: { width: number; height: number }) => {
+        setDynamicParams({
+            scanLength: Number((height * 458.33).toFixed(1)),
+            fov: Math.round(width * 892.86),
+        });
     }, []);
 
     const triggerScanSequence = useCallback(() => {
@@ -206,7 +230,7 @@ export default function FourDDiagnosticConfirmScreen() {
             if (startTs === null) startTs = timestamp;
             const progress = Math.min((timestamp - startTs) / SCAN_DURATION_MS, 1);
             setScanProgress(progress);
-            setBedProgress(Math.min(BED_SEGMENTS, Math.max(0, Math.ceil(progress * BED_SEGMENTS))));
+            setBedProgress(Math.min(bedSegmentCount, Math.max(0, Math.ceil(progress * bedSegmentCount))));
 
             if (progress >= 1) {
                 handleScanComplete();
@@ -218,7 +242,7 @@ export default function FourDDiagnosticConfirmScreen() {
 
         scanRafRef.current = requestAnimationFrame(tick);
         return clearScanRaf;
-    }, [handleScanComplete, scanStarted]);
+    }, [bedSegmentCount, handleScanComplete, scanStarted]);
 
     useEffect(() => {
         const tick = () => {
@@ -267,6 +291,21 @@ export default function FourDDiagnosticConfirmScreen() {
         : scanStage === "exposing" ? "正在4D采集"
         : "按住绿色按钮";
 
+    const sidebarParams = [
+        { label: "进出床", value: FOURD_PARAMS.bedMode },
+        { label: "体位", value: FOURD_PARAMS.position },
+        { label: "扫描长度", value: dynamicParams.scanLength.toFixed(1) },
+        { label: "MA", value: FOURD_PARAMS.mA },
+        { label: "KV", value: FOURD_PARAMS.kV },
+        { label: "旋转时间", value: FOURD_PARAMS.rotationTime },
+        { label: "准直", value: FOURD_PARAMS.collimation },
+        { label: "FOV", value: dynamicParams.fov.toString() },
+    ];
+
+    const currentBedDisplay = scanCompleted ? bedSegmentCount : scanStarted ? Math.max(1, bedProgress) : 0;
+    const waveformExposureWidth = 96;
+    const waveformExposureX = Math.max(0, Math.min(800 - waveformExposureWidth, scanProgress * (800 - waveformExposureWidth)));
+
     const renderSteps = (sequence: Sequence, isActiveSequence: boolean, isCompletedSequence: boolean) => (
         <div className="flex flex-col ml-12 mt-2 gap-4 relative pb-4">
             <div className="absolute left-[7px] top-2 bottom-6 w-[1px] bg-[#B0C4DE]" />
@@ -292,6 +331,34 @@ export default function FourDDiagnosticConfirmScreen() {
                 );
             })}
         </div>
+    );
+
+    const renderControlSlider = (
+        label: string,
+        value: number,
+        min: number,
+        max: number,
+        step: number,
+        onChange: (value: number) => void,
+        unit = ""
+    ) => (
+        <label className="block">
+            <div className="mb-px flex items-center justify-between text-[8px] font-bold leading-none text-[#546E7A]">
+                <span className="tracking-tight">{label}</span>
+                <span className="font-mono text-[#37474F]">
+                    {value.toFixed(step < 0.1 ? 2 : 1)}{unit}
+                </span>
+            </div>
+            <input
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={value}
+                onChange={(event) => onChange(Number(event.target.value))}
+                className="w-full accent-[#4D94FF] h-3"
+            />
+        </label>
     );
 
     return (
@@ -375,6 +442,8 @@ export default function FourDDiagnosticConfirmScreen() {
                                     {group.sequences.map((sequence) => {
                                         const isScout = sequence.type === "scout";
                                         const isFourD = sequence.id === fourDSequenceId || sequence.type === "4d";
+                                        const isFourDCompleted = isFourD && scanCompleted;
+                                        const isFourDActive = isFourD && !scanCompleted;
                                         const isExpanded = expandedSeqId === sequence.id;
 
                                         return (
@@ -382,25 +451,31 @@ export default function FourDDiagnosticConfirmScreen() {
                                                 <div
                                                     onClick={() => setExpandedSeqId(isExpanded ? null : sequence.id)}
                                                     className={`flex items-center gap-2 px-3 rounded-lg mb-1 transition-all relative cursor-pointer border h-[28px] ${
-                                                        isFourD
+                                                        isFourDActive
                                                             ? "bg-[#4D94FF] border-[#4D94FF] text-white shadow-md"
+                                                            : isFourDCompleted
+                                                                ? "bg-[#E8F5E9] border-[#A5D6A7] text-[#2E7D32]"
                                                             : isScout
                                                                 ? "bg-[#E8F5E9] border-[#A5D6A7] text-[#2E7D32]"
                                                                 : "bg-transparent border-transparent text-[#546E7A] hover:bg-[#EEF2F9]"
                                                     }`}
                                                 >
                                                     {isExpanded
-                                                        ? <ChevronDown size={14} className={isFourD ? "text-white/70" : isScout ? "text-[#2E7D32]/70" : "text-gray-400"} />
-                                                        : <ChevronRight size={14} className={isFourD ? "text-white/70" : isScout ? "text-[#2E7D32]/70" : "text-gray-400"} />}
+                                                        ? <ChevronDown size={14} className={isFourDActive ? "text-white/70" : isScout || isFourDCompleted ? "text-[#2E7D32]/70" : "text-gray-400"} />
+                                                        : <ChevronRight size={14} className={isFourDActive ? "text-white/70" : isScout || isFourDCompleted ? "text-[#2E7D32]/70" : "text-gray-400"} />}
                                                     <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center shrink-0 ${
-                                                        isScout ? "bg-[#66BB6A] border-[#66BB6A]" : isFourD ? "bg-white/20 border-white/30" : "bg-white border-[#B0C4DE]"
+                                                        isScout || isFourDCompleted
+                                                            ? "bg-[#66BB6A] border-[#66BB6A]"
+                                                            : isFourDActive
+                                                                ? "bg-white/20 border-white/30"
+                                                                : "bg-white border-[#B0C4DE]"
                                                     }`}>
-                                                        {isScout && <Check size={9} className="text-white stroke-[3]" />}
+                                                        {(isScout || isFourDCompleted) && <Check size={9} className="text-white stroke-[3]" />}
                                                     </div>
                                                     <span className="text-[13px] font-bold">{sequence.name}</span>
                                                 </div>
 
-                                                {isExpanded && renderSteps(sequence, isFourD, isScout)}
+                                                {isExpanded && renderSteps(sequence, isFourDActive, isScout || isFourDCompleted)}
                                             </div>
                                         );
                                     })}
@@ -409,24 +484,18 @@ export default function FourDDiagnosticConfirmScreen() {
                         ))}
                     </div>
 
-                    <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 py-3 shrink-0">
-                        <div className="rounded-lg border border-[#DBEAFE] bg-[#EFF6FF] px-3 py-2 shadow-sm">
-                            <div className="text-[11px] font-black text-[#1D4ED8]">扫描参数</div>
-                        </div>
-                        <div className="mt-2 flex flex-col gap-2">
-                            {[
-                                { label: "进出床", value: FOURD_PARAMS.bedMode },
-                                { label: "体位", value: FOURD_PARAMS.position },
-                                { label: "扫描长度", value: `${FOURD_PARAMS.scanLength} mm` },
-                                { label: "MA", value: FOURD_PARAMS.mA },
-                                { label: "KV", value: FOURD_PARAMS.kV },
-                            ].map(({ label, value }) => (
-                                <div key={label} className="bg-white border border-[#B0C4DE]/60 rounded-lg px-3 py-2 flex items-center justify-between shadow-sm">
-                                    <span className="text-[11px] font-bold text-[#546E7A]">{label}</span>
-                                    <span className="text-[13px] font-black text-[#37474F]">{value}</span>
+                    <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 py-2 shrink-0">
+                        <div className="grid grid-cols-2 gap-1.5">
+                            {sidebarParams.map(({ label, value }) => (
+                                <div key={label} className="px-1.5 py-1 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
+                                    <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</span>
+                                    <span className="mt-px text-[12px] font-black text-[#37474F]">{value}</span>
                                 </div>
                             ))}
                         </div>
+                        <button className="w-full h-[28px] mt-2 rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
+                            <Info size={14} /> 参数详情
+                        </button>
                     </div>
                 </aside>
 
@@ -434,28 +503,11 @@ export default function FourDDiagnosticConfirmScreen() {
                     <div className="min-h-0 flex-[1.05] overflow-hidden rounded-md border border-[#B0C4DE]/30 bg-[#16202B]">
                         <div className="flex h-full bg-[#F8FAFC] relative">
                             <div className="flex-1 relative overflow-hidden bg-black">
-                                <FourDScoutViewport onCropBoxChange={() => {}} />
-                            </div>
-                            <div className="w-[216px] shrink-0 border-l border-[#B0C4DE]/60 bg-[#F8FAFC] px-3 py-3 flex flex-col gap-2">
-                                <div className="rounded-lg border border-[#DBEAFE] bg-[#EFF6FF] px-3 py-2 flex items-start gap-2 shadow-sm">
-                                    <Activity size={16} className="text-[#2563EB] mt-0.5 shrink-0" />
-                                    <div>
-                                        <div className="text-[11px] font-black text-[#1D4ED8]">呼吸参数</div>
-                                        <div className="text-[10px] text-[#3B82F6] mt-0.5 leading-snug">点击底部执行扫描后，通过右侧物理按钮触发采集。</div>
-                                    </div>
-                                </div>
-
-                                {[
-                                    { label: "采集相位数", value: FOURD_PARAMS.phases },
-                                    { label: "采集时间", value: FOURD_PARAMS.acquisitionTime },
-                                    { label: "呼吸模式", value: FOURD_PARAMS.breathingMode },
-                                    { label: "触发阈值", value: FOURD_PARAMS.triggerThreshold },
-                                ].map(({ label, value }) => (
-                                    <div key={label} className="bg-white border border-[#B0C4DE]/60 rounded-lg px-3 py-2 flex items-center justify-between shadow-sm">
-                                        <span className="text-[11px] font-bold text-[#546E7A]">{label}</span>
-                                        <span className="text-[13px] font-black text-[#37474F]">{value}</span>
-                                    </div>
-                                ))}
+                                <FourDScoutViewport
+                                    onCropBoxChange={handleCropBoxChange}
+                                    isScanning={scanStarted}
+                                    revealY={scanProgress}
+                                />
                             </div>
                         </div>
                     </div>
@@ -496,6 +548,17 @@ export default function FourDDiagnosticConfirmScreen() {
                                             <stop offset="100%" stopColor="#3B82F6" stopOpacity="0.01" />
                                         </linearGradient>
                                     </defs>
+                                    {scanStarted && (
+                                        <rect
+                                            x={waveformExposureX}
+                                            y="0"
+                                            width={waveformExposureWidth}
+                                            height="120"
+                                            fill="#F59E0B"
+                                            opacity="0.18"
+                                            rx="6"
+                                        />
+                                    )}
                                     <line x1="0" y1="60" x2="800" y2="60" stroke="#94A3B8" strokeWidth="1" strokeDasharray="3 3" opacity="0.4" />
                                     <path
                                         d={`M ${rawWaveData.map((value, index) => `${(index / (rawWaveData.length - 1)) * 800},${120 - (value / 1100) * 120}`).join(" L ")}`}
@@ -519,81 +582,54 @@ export default function FourDDiagnosticConfirmScreen() {
                                 </svg>
                             </div>
 
-                            {(scanStarted || scanCompleted) && (
-                                <div className="absolute inset-x-3 bottom-1 flex items-center gap-2">
-                                    <span className="text-[8px] font-black text-[#475569] uppercase opacity-70 shrink-0">床位进度</span>
-                                    <div className="flex flex-1 gap-1 items-end h-4">
-                                        {Array.from({ length: BED_SEGMENTS }, (_, index) => (
+                            <div className="absolute inset-x-3 bottom-1 flex items-center gap-2">
+                                <span className="text-[8px] font-black text-[#475569] uppercase opacity-70 shrink-0">床位进度</span>
+                                <div className="flex flex-1 gap-1 items-end h-4">
+                                    {Array.from({ length: bedSegmentCount }, (_, index) => {
+                                        const isCompletedSegment = scanCompleted || index < bedProgress;
+                                        const isActiveSegment = scanStarted && !scanCompleted && index === bedProgress;
+                                        return (
                                             <div key={index} className="flex-1 flex flex-col gap-0.5">
                                                 <div className={`h-2.5 w-full rounded-sm transition-all duration-500 ${
-                                                    scanCompleted || index < bedProgress
+                                                    isCompletedSegment
                                                         ? "bg-[#3B82F6]"
-                                                        : index === bedProgress
+                                                        : isActiveSegment
                                                             ? "bg-[#93C5FD] animate-pulse"
                                                             : "bg-[#E2E8F0]"
                                                 }`} />
-                                                <span className={`text-[7px] text-center font-bold font-mono ${index === bedProgress ? "text-[#3B82F6]" : "text-[#94A3B8]"}`}>
+                                                <span className={`text-[7px] text-center font-bold font-mono ${
+                                                    isActiveSegment ? "text-[#3B82F6]" : "text-[#94A3B8]"
+                                                }`}>
                                                     {index + 1}
                                                 </span>
                                             </div>
-                                        ))}
-                                    </div>
-                                    <div className="text-[9px] font-mono font-bold text-[#475569] shrink-0">
-                                        {scanCompleted ? BED_SEGMENTS : bedProgress}/{BED_SEGMENTS}
-                                    </div>
+                                        );
+                                    })}
                                 </div>
-                            )}
+                                <div className="text-[9px] font-mono font-bold text-[#475569] shrink-0">
+                                    {currentBedDisplay}/{bedSegmentCount}
+                                </div>
+                            </div>
                         </div>
 
-                        <div className="w-[200px] shrink-0 border-l border-[#B0C4DE]/60 flex flex-col items-center justify-center gap-3 bg-[#F8FAFC] px-4">
-                            {scanCompleted ? (
-                                <div className="flex flex-col items-center gap-3 text-center">
-                                    <div className="w-12 h-12 rounded-full bg-[#E8F5E9] border-2 border-[#66BB6A] flex items-center justify-center">
-                                        <CheckCircle size={24} className="text-[#43A047]" />
-                                    </div>
-                                    <div>
-                                        <div className="text-[13px] font-black text-[#2E7D32]">采集完成</div>
-                                        <div className="text-[10px] text-[#546E7A] mt-1 leading-snug">4D重建任务已提交，等待后续图像浏览。</div>
-                                    </div>
-                                </div>
-                            ) : scanStarted ? (
-                                <div className="flex flex-col items-center gap-2 text-center">
-                                    <div className="w-12 h-12 rounded-full bg-[#E3F2FD] border-2 border-[#42A5F5] flex items-center justify-center">
-                                        <Activity size={24} className="text-[#1976D2] animate-pulse" />
-                                    </div>
-                                    <div className="text-[13px] font-black text-[#1976D2]">4D采集中</div>
-                                    <div className="w-16 h-16 relative">
-                                        <svg className="w-full h-full -rotate-90" viewBox="0 0 64 64">
-                                            <circle cx="32" cy="32" r="26" fill="none" stroke="#E2E8F0" strokeWidth="5" />
-                                            <circle
-                                                cx="32"
-                                                cy="32"
-                                                r="26"
-                                                fill="none"
-                                                stroke="#3B82F6"
-                                                strokeWidth="5"
-                                                strokeDasharray={`${2 * Math.PI * 26}`}
-                                                strokeDashoffset={`${2 * Math.PI * 26 * (1 - scanProgress)}`}
-                                                strokeLinecap="round"
-                                            />
-                                        </svg>
-                                        <div className="absolute inset-0 flex items-center justify-center">
-                                            <span className="text-[13px] font-black text-[#1E293B]">{Math.round(scanProgress * 100)}%</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="flex flex-col items-center gap-3 text-center">
-                                    <div className="w-12 h-12 rounded-full bg-[#E3F2FD] border-2 border-[#90CAF9] flex items-center justify-center">
-                                        <Zap size={22} className="text-[#1E88E5]" />
-                                    </div>
-                                    <div className="text-[12px] font-black text-[#37474F]">执行扫描</div>
-                                    <div className="text-[10px] text-[#546E7A] leading-snug">
-                                        点击底部执行扫描后 <br />
-                                        通过右侧物理按钮开始采集
-                                    </div>
-                                </div>
-                            )}
+                        <div className="w-[216px] shrink-0 border-l border-[#B0C4DE]/60 bg-[#F8FAFC] px-2 py-1.5 flex flex-col justify-between">
+                            <div className="space-y-1">
+                                {renderControlSlider("最小间距", breathingControls.minSpacing, 0.5, 5, 0.1, (value) => {
+                                    setBreathingControls((prev) => ({ ...prev, minSpacing: value }));
+                                }, " s")}
+                                {renderControlSlider("滤波阈", breathingControls.filterThreshold, 0.1, 1, 0.01, (value) => {
+                                    setBreathingControls((prev) => ({ ...prev, filterThreshold: value }));
+                                })}
+                                {renderControlSlider("峰值阈", breathingControls.peakThreshold, 0.5, 2.5, 0.05, (value) => {
+                                    setBreathingControls((prev) => ({ ...prev, peakThreshold: value }));
+                                })}
+                                {renderControlSlider("增益", breathingControls.gain, 0.5, 3, 0.1, (value) => {
+                                    setBreathingControls((prev) => ({ ...prev, gain: value }));
+                                })}
+                                {renderControlSlider("延迟", breathingControls.triggerDelay, 0, 500, 10, (value) => {
+                                    setBreathingControls((prev) => ({ ...prev, triggerDelay: value }));
+                                }, " ms")}
+                            </div>
                         </div>
                     </div>
                 </section>
