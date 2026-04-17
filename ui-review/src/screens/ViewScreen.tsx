@@ -1036,40 +1036,47 @@ const ViewScreen = () => {
                                 </>
                             ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
-                                    {isFourDLungReconSeries && (
-                                        <div className="rounded-md border border-[#2563EB]/30 bg-gradient-to-br from-[#E8F1FF] to-white px-3 py-2 shadow-sm">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-[#2563EB]">4D PHASE</span>
-                                                <span className={`text-[9px] font-bold ${isPhaseCinePlaying ? "text-[#059669]" : "text-[#94A3B8]"}`}>
-                                                    {isPhaseCinePlaying ? "CINE ▶" : "PAUSED"}
-                                                </span>
-                                            </div>
-                                            <div className="mt-1 flex items-baseline gap-1.5">
-                                                <span className="text-[18px] font-black leading-none text-[#2563EB] tabular-nums">
-                                                    {FOUR_D_PHASE_LABELS[selectedPhaseIndex]}
-                                                </span>
-                                                <span className="text-[10px] text-[#64748B]">
-                                                    / {FOUR_D_PHASE_LABELS.length} 相位
-                                                </span>
-                                            </div>
-                                            <div className="mt-1 text-[9px] text-[#64748B]">
-                                                第 4 窗：跨相位 {phaseMipMode}
-                                            </div>
-                                        </div>
-                                    )}
                                     {/* Layout Dropdown */}
                                     <div className="flex items-center gap-2 relative">
                                         <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">布局</span>
-                                        <div
-                                            onClick={() => { if (isFourDLungReconSeries) return; setIsLayoutOpen(!isLayoutOpen); }}
-                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all ${isFourDLungReconSeries ? 'cursor-not-allowed opacity-70 border-[#DCE6F2]' : `cursor-pointer ${isLayoutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}`}
-                                            title={isFourDLungReconSeries ? "4D 浏览下布局锁定为多平面重建" : undefined}
-                                        >
-                                            <span className="text-[12px] font-medium text-[#37474F] truncate">
-                                                {selectedLayout}{isFourDLungReconSeries ? " · 锁定" : ""}
-                                            </span>
-                                            <ChevronDown size={13} className={`text-[#4D94FF] transition-transform shrink-0 ml-1 ${isLayoutOpen && !isFourDLungReconSeries ? 'rotate-180' : ''} ${isFourDLungReconSeries ? 'opacity-40' : ''}`} />
-                                        </div>
+                                        {isFourDLungReconSeries ? (
+                                            <div
+                                                onClick={() => setIsLayoutOpen(!isLayoutOpen)}
+                                                className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isLayoutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                            >
+                                                <span className="text-[12px] font-medium text-[#37474F] truncate">{phaseMipMode}</span>
+                                                <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isLayoutOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                            </div>
+                                        ) : (
+                                            <div
+                                                onClick={() => setIsLayoutOpen(!isLayoutOpen)}
+                                                className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isLayoutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                            >
+                                                <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                    {selectedLayout}
+                                                </span>
+                                                <ChevronDown size={13} className={`text-[#4D94FF] transition-transform shrink-0 ml-1 ${isLayoutOpen ? 'rotate-180' : ''}`} />
+                                            </div>
+                                        )}
+                                        {isLayoutOpen && isFourDLungReconSeries && (
+                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                {(["MIP", "MinIP", "Avg"] as const).map((opt) => (
+                                                    <div
+                                                        key={opt}
+                                                        onClick={() => {
+                                                            setPhaseMipMode(opt);
+                                                            if (opt === "Avg") setSelectedRenderMode("MPR");
+                                                            else setSelectedRenderMode(opt);
+                                                            setIsLayoutOpen(false);
+                                                        }}
+                                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${phaseMipMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                        title={opt === "MIP" ? "最大密度投影 - 肿瘤包络 / ITV" : opt === "MinIP" ? "最小密度投影 - 气道 / 低密度结构" : "10 相位平均"}
+                                                    >
+                                                        {opt}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                         {isLayoutOpen && !isFourDLungReconSeries && (
                                             <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                 {[
@@ -1093,32 +1100,33 @@ const ViewScreen = () => {
                                     </div>
 
                                     {/* Render Mode Dropdown */}
-                                    <div className="flex items-center gap-2 relative">
-                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">渲染</span>
-                                        <div
-                                            onClick={() => { if (isFourDLungReconSeries) return; setIsRenderModeOpen(!isRenderModeOpen); }}
-                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all ${isFourDLungReconSeries ? 'cursor-not-allowed opacity-70 border-[#DCE6F2]' : `cursor-pointer ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}`}
-                                            title={isFourDLungReconSeries ? "4D 浏览下渲染模式由相位时间轴的跨相位选择控制" : undefined}
-                                        >
-                                            <span className="text-[12px] font-medium text-[#37474F]">
-                                                {selectedRenderMode}{isFourDLungReconSeries ? " · 锁定" : ""}
-                                            </span>
-                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen && !isFourDLungReconSeries ? 'rotate-180 text-[#4D94FF]' : ''} ${isFourDLungReconSeries ? 'opacity-40' : ''}`} />
-                                        </div>
-                                        {isRenderModeOpen && !isFourDLungReconSeries && (
-                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                                                {["MIP", "MPR", "VR", "MinIP"].map((opt) => (
-                                                    <div
-                                                        key={opt}
-                                                        onClick={() => { setSelectedRenderMode(opt); setIsRenderModeOpen(false); }}
-                                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedRenderMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
-                                                    >
-                                                        {opt}
-                                                    </div>
-                                                ))}
+                                    {!isFourDLungReconSeries && (
+                                        <div className="flex items-center gap-2 relative">
+                                            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">渲染</span>
+                                            <div
+                                                onClick={() => setIsRenderModeOpen(!isRenderModeOpen)}
+                                                className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                            >
+                                                <span className="text-[12px] font-medium text-[#37474F]">
+                                                    {selectedRenderMode}
+                                                </span>
+                                                <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                             </div>
-                                        )}
-                                    </div>
+                                            {isRenderModeOpen && (
+                                                <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                    {["MIP", "MPR", "VR", "MinIP"].map((opt) => (
+                                                        <div
+                                                            key={opt}
+                                                            onClick={() => { setSelectedRenderMode(opt); setIsRenderModeOpen(false); }}
+                                                            className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedRenderMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                        >
+                                                            {opt}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {/* Pseudo Color Dropdown */}
                                     <div className="flex items-center gap-2 relative">
@@ -1147,11 +1155,13 @@ const ViewScreen = () => {
                                 </div>
                             )}
                         </div>
-                        <div className="px-3 pb-3">
-                            <button className="h-[32px] w-full bg-white border border-[#B0C4DE] rounded-md text-[10px] font-bold text-[#4D94FF] hover:bg-blue-50 transition-all shadow-sm">
-                                详情
-                            </button>
-                        </div>
+                        {imageMode === "2D" && (
+                            <div className="px-3 pb-3">
+                                <button className="h-[32px] w-full bg-white border border-[#B0C4DE] rounded-md text-[10px] font-bold text-[#4D94FF] hover:bg-blue-50 transition-all shadow-sm">
+                                    详情
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </aside>
 
@@ -1441,13 +1451,6 @@ const ViewScreen = () => {
                     onSpeedChange={setPhaseCineSpeed}
                     loopMode={phaseCineMode}
                     onLoopModeChange={setPhaseCineMode}
-                    mipMode={phaseMipMode}
-                    onMipModeChange={(m) => {
-                        setPhaseMipMode(m);
-                        // 将"跨相位"选择映射到 MPR viewport 的 renderMode —— 第 4 窗由此反映
-                        if (m === "Avg") setSelectedRenderMode("MPR");
-                        else setSelectedRenderMode(m);
-                    }}
                 />
             )}
 
@@ -1492,7 +1495,6 @@ const ViewScreen = () => {
 // ─── 4D 相位时间轴（底部控制条） ────────────────────────────────────────────
 type PhaseCineSpeed = 0.5 | 1 | 2;
 type PhaseCineMode = "forward" | "bounce";
-type PhaseMipMode = "MIP" | "MinIP" | "Avg";
 
 function PhaseTimelineBar(props: {
     phaseLabels: string[];
@@ -1504,19 +1506,15 @@ function PhaseTimelineBar(props: {
     onSpeedChange: (s: PhaseCineSpeed) => void;
     loopMode: PhaseCineMode;
     onLoopModeChange: (m: PhaseCineMode) => void;
-    mipMode: PhaseMipMode;
-    onMipModeChange: (m: PhaseMipMode) => void;
 }) {
     const {
         phaseLabels, currentPhaseIndex, onPhaseChange,
         isPlaying, onTogglePlay,
         speed, onSpeedChange,
         loopMode, onLoopModeChange,
-        mipMode, onMipModeChange,
     } = props;
 
     const speeds: PhaseCineSpeed[] = [0.5, 1, 2];
-    const mipModes: PhaseMipMode[] = ["MIP", "MinIP", "Avg"];
 
     return (
         <div className="h-[64px] shrink-0 border-t border-[#B0C4DE] bg-[#F8FAFC] px-4 flex items-center gap-4 z-10">
@@ -1608,30 +1606,6 @@ function PhaseTimelineBar(props: {
                                     <span className={`text-[8px] font-black tabular-nums ${active ? "text-[#4D94FF]" : "text-[#94A3B8] group-hover:text-[#4D94FF]"}`}>
                                         {label}
                                     </span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            </div>
-
-            {/* ── 右：跨相位聚合（ITV） ── */}
-            <div className="flex items-center gap-2 shrink-0">
-                <div className="flex flex-col gap-0.5">
-                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#D97706]">第 4 窗 · 跨相位</span>
-                    <div className="flex items-center rounded-md border border-[#FDE68A] bg-white overflow-hidden">
-                        {mipModes.map((m) => {
-                            const active = m === mipMode;
-                            return (
-                                <button
-                                    key={m}
-                                    onClick={() => onMipModeChange(m)}
-                                    className={`px-2 h-[22px] text-[10px] font-black transition-all ${
-                                        active ? "bg-[#F59E0B] text-white" : "text-[#94A3B8] hover:text-[#D97706]"
-                                    }`}
-                                    title={m === "MIP" ? "最大密度投影 —— 肿瘤包络 / ITV" : m === "MinIP" ? "最小密度投影 —— 气道 / 低密度结构" : "10 相位平均"}
-                                >
-                                    {m}
                                 </button>
                             );
                         })}

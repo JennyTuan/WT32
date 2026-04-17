@@ -6,6 +6,7 @@ import {
 } from '@cornerstonejs/core';
 import {
   addTool,
+  CrosshairsTool,
   Enums as CornerstoneToolsEnums,
   EraserTool,
   init as initCornerstoneTools,
@@ -28,6 +29,7 @@ const TOOL_NAMES = {
   length: 'Length',
   eraser: 'Eraser',
   stackScroll: 'StackScroll',
+  crosshairs: 'Crosshairs',
 } as const;
 
 function registerTools() {
@@ -41,6 +43,7 @@ function registerTools() {
   addTool(LengthTool);
   addTool(EraserTool);
   addTool(StackScrollTool);
+  addTool(CrosshairsTool);
   toolsRegistered = true;
 }
 
@@ -82,11 +85,29 @@ export function getOrCreateToolGroup(toolGroupId: string) {
   toolGroup.addTool(TOOL_NAMES.length);
   toolGroup.addTool(TOOL_NAMES.eraser);
   toolGroup.addTool(TOOL_NAMES.stackScroll);
+  toolGroup.addTool(TOOL_NAMES.crosshairs, {
+    getReferenceLineColor: (viewportId: string) => {
+      if (viewportId.endsWith('-axial')) return 'rgb(239, 68, 68)';
+      if (viewportId.endsWith('-coronal')) return 'rgb(34, 197, 94)';
+      if (viewportId.endsWith('-sagittal')) return 'rgb(59, 130, 246)';
+      if (viewportId.endsWith('-slab')) return 'rgb(251, 191, 36)';
+      return 'rgb(200, 200, 200)';
+    },
+    getReferenceLineControllable: () => true,
+    getReferenceLineDraggableRotatable: () => false,
+    getReferenceLineSlabThicknessControlsOn: () => false,
+    centerPoint: {
+      enabled: true,
+      color: 'rgba(255,255,255,0.65)',
+      size: 2,
+    },
+  });
   toolGroup.setToolPassive(TOOL_NAMES.pan);
   toolGroup.setToolPassive(TOOL_NAMES.zoom);
   toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
   toolGroup.setToolPassive(TOOL_NAMES.length);
   toolGroup.setToolPassive(TOOL_NAMES.eraser);
+  toolGroup.setToolEnabled(TOOL_NAMES.crosshairs);
   toolGroup.setToolActive(TOOL_NAMES.stackScroll, {
     bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Wheel }],
   });
