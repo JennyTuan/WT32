@@ -255,6 +255,13 @@ const ViewScreen = () => {
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
+    // 4D phase cine (separate from slice-playback isPlaying)
+    const [isPhaseCinePlaying, setIsPhaseCinePlaying] = useState(false);
+    const [phaseCineSpeed, setPhaseCineSpeed] = useState<0.5 | 1 | 2>(1); // multiplier; 1× = 500 ms/phase
+    const [phaseCineMode, setPhaseCineMode] = useState<"forward" | "bounce">("forward");
+    const phaseCineDirectionRef = useRef<1 | -1>(1);
+    // Across-phase aggregation for the MPR 4th panel (ITV visualisation)
+    const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
     const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
     const [toolMode, setToolMode] = useState<"pan" | "wl" | "measure" | "annotate" | "eraser">("pan");
@@ -493,10 +500,12 @@ const ViewScreen = () => {
         selectedSeries.seriesType === "4d" &&
         /肺/.test(selectedSeries.name);
     const totalSlices = selectedSeries.count;
+    // Single flex container for both 2D and 3D; CornerstoneMPRViewport does its own 2×2 panel grid internally.
+    // (`currentLayoutSpec` retained for backward-compatible dropdown but no longer drives the outer layout —
+    //  the Cornerstone MPR implementation doesn't honor per-panel spans anyway.)
+    void currentLayoutSpec;
     const viewportContainerClassName =
-        imageMode === "2D"
-            ? "flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]"
-            : currentLayoutSpec.containerClassName;
+        "flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]";
 
 
 
@@ -516,7 +525,43 @@ const ViewScreen = () => {
 
     useEffect(() => {
         setSelectedPhaseIndex(0);
+        setIsPhaseCinePlaying(false);
+        phaseCineDirectionRef.current = 1;
     }, [selectedSeriesId]);
+
+    // When a 4D series is active, auto-switch to 3D MPR layout; leave non-4D workflows untouched.
+    useEffect(() => {
+        if (!isFourDLungReconSeries) return;
+        setImageMode("3D");
+        setSelectedLayout("多平面重建");
+        setSelectedRenderMode("MPR");
+    }, [isFourDLungReconSeries]);
+
+    // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
+    // (clinical convention: cine cycles phases at a locked anatomical slice).
+    useEffect(() => {
+        if (!isFourDLungReconSeries || !isPhaseCinePlaying) return;
+        const total = FOUR_D_PHASE_LABELS.length;
+        const intervalMs = 500 / phaseCineSpeed; // 1× ≈ 2 Hz phase rate
+        const timer = window.setInterval(() => {
+            setSelectedPhaseIndex((prev) => {
+                if (phaseCineMode === "forward") {
+                    return (prev + 1) % total;
+                }
+                // bounce
+                let next = prev + phaseCineDirectionRef.current;
+                if (next >= total) {
+                    phaseCineDirectionRef.current = -1;
+                    next = total - 2;
+                } else if (next < 0) {
+                    phaseCineDirectionRef.current = 1;
+                    next = 1;
+                }
+                return next;
+            });
+        }, intervalMs);
+        return () => window.clearInterval(timer);
+    }, [isFourDLungReconSeries, isPhaseCinePlaying, phaseCineSpeed, phaseCineMode]);
 
     // Auto-select first series when session data loads (or series list changes)
     useEffect(() => {
@@ -983,57 +1028,49 @@ const ViewScreen = () => {
                                 <>
                                     <Param label="WW" value={String(Math.round(displayWw))} />
                                     <Param label="WL" value={String(Math.round(displayWl))} />
-                                    {isFourDLungReconSeries ? (
-                                        <div className="col-span-2 rounded-md border border-[#B0C4DE]/30 bg-white p-3 shadow-sm">
-                                            <div className="flex items-center justify-between gap-2">
-                                                <span className="text-[8px] font-black uppercase tracking-[0.16em] text-[#90A4AE]">PHASE</span>
-                                                <span className="text-[11px] font-bold text-[#2563EB]">
-                                                    当前相位 {FOUR_D_PHASE_LABELS[selectedPhaseIndex]}
-                                                </span>
-                                            </div>
-                                            <div className="mt-3 grid grid-cols-5 gap-2">
-                                                {FOUR_D_PHASE_LABELS.map((phaseLabel, phaseIndex) => {
-                                                    const active = selectedPhaseIndex === phaseIndex;
-                                                    return (
-                                                        <button
-                                                            key={phaseLabel}
-                                                            type="button"
-                                                            onClick={() => setSelectedPhaseIndex(phaseIndex)}
-                                                            className={`flex h-[34px] items-center justify-center rounded-md border text-[11px] font-black transition-all ${
-                                                                active
-                                                                    ? "border-[#2563EB] bg-[#E8F1FF] text-[#2563EB] shadow-[0_0_0_1px_rgba(37,99,235,0.12)]"
-                                                                    : "border-[#DCE6F2] bg-[#F8FAFC] text-[#64748B] hover:border-[#93C5FD] hover:text-[#2563EB]"
-                                                            }`}
-                                                        >
-                                                            {phaseLabel}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            {/* Prefer live DICOM tag values; fall back to scan session / static values */}
-                                            <Param label="Kernel" value={selectedSeries.kernel !== "—" ? selectedSeries.kernel : meta.seriesDescription} />
-                                            <Param label="Thick" value={meta.thickness !== "N/A" ? meta.thickness : selectedSeries.thickness} />
-                                            <Param label="FOV" value={selectedSeries.fov} />
-                                            <Param label="Matrix" value={meta.rows > 0 ? `${meta.rows}×${meta.cols}` : selectedSeries.matrix} />
-                                        </>
-                                    )}
+                                    {/* Prefer live DICOM tag values; fall back to scan session / static values */}
+                                    <Param label="Kernel" value={selectedSeries.kernel !== "—" ? selectedSeries.kernel : meta.seriesDescription} />
+                                    <Param label="Thick" value={meta.thickness !== "N/A" ? meta.thickness : selectedSeries.thickness} />
+                                    <Param label="FOV" value={selectedSeries.fov} />
+                                    <Param label="Matrix" value={meta.rows > 0 ? `${meta.rows}×${meta.cols}` : selectedSeries.matrix} />
                                 </>
                             ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
+                                    {isFourDLungReconSeries && (
+                                        <div className="rounded-md border border-[#2563EB]/30 bg-gradient-to-br from-[#E8F1FF] to-white px-3 py-2 shadow-sm">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-[#2563EB]">4D PHASE</span>
+                                                <span className={`text-[9px] font-bold ${isPhaseCinePlaying ? "text-[#059669]" : "text-[#94A3B8]"}`}>
+                                                    {isPhaseCinePlaying ? "CINE ▶" : "PAUSED"}
+                                                </span>
+                                            </div>
+                                            <div className="mt-1 flex items-baseline gap-1.5">
+                                                <span className="text-[18px] font-black leading-none text-[#2563EB] tabular-nums">
+                                                    {FOUR_D_PHASE_LABELS[selectedPhaseIndex]}
+                                                </span>
+                                                <span className="text-[10px] text-[#64748B]">
+                                                    / {FOUR_D_PHASE_LABELS.length} 相位
+                                                </span>
+                                            </div>
+                                            <div className="mt-1 text-[9px] text-[#64748B]">
+                                                第 4 窗：跨相位 {phaseMipMode}
+                                            </div>
+                                        </div>
+                                    )}
                                     {/* Layout Dropdown */}
                                     <div className="flex items-center gap-2 relative">
                                         <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">布局</span>
                                         <div
-                                            onClick={() => setIsLayoutOpen(!isLayoutOpen)}
-                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isLayoutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                            onClick={() => { if (isFourDLungReconSeries) return; setIsLayoutOpen(!isLayoutOpen); }}
+                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all ${isFourDLungReconSeries ? 'cursor-not-allowed opacity-70 border-[#DCE6F2]' : `cursor-pointer ${isLayoutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}`}
+                                            title={isFourDLungReconSeries ? "4D 浏览下布局锁定为多平面重建" : undefined}
                                         >
-                                            <span className="text-[12px] font-medium text-[#37474F] truncate">{selectedLayout}</span>
-                                            <ChevronDown size={13} className={`text-[#4D94FF] transition-transform shrink-0 ml-1 ${isLayoutOpen ? 'rotate-180' : ''}`} />
+                                            <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                {selectedLayout}{isFourDLungReconSeries ? " · 锁定" : ""}
+                                            </span>
+                                            <ChevronDown size={13} className={`text-[#4D94FF] transition-transform shrink-0 ml-1 ${isLayoutOpen && !isFourDLungReconSeries ? 'rotate-180' : ''} ${isFourDLungReconSeries ? 'opacity-40' : ''}`} />
                                         </div>
-                                        {isLayoutOpen && (
+                                        {isLayoutOpen && !isFourDLungReconSeries && (
                                             <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                 {[
                                                     "多平面重建",
@@ -1059,13 +1096,16 @@ const ViewScreen = () => {
                                     <div className="flex items-center gap-2 relative">
                                         <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">渲染</span>
                                         <div
-                                            onClick={() => setIsRenderModeOpen(!isRenderModeOpen)}
-                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                            onClick={() => { if (isFourDLungReconSeries) return; setIsRenderModeOpen(!isRenderModeOpen); }}
+                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all ${isFourDLungReconSeries ? 'cursor-not-allowed opacity-70 border-[#DCE6F2]' : `cursor-pointer ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}`}
+                                            title={isFourDLungReconSeries ? "4D 浏览下渲染模式由相位时间轴的跨相位选择控制" : undefined}
                                         >
-                                            <span className="text-[12px] font-medium text-[#37474F]">{selectedRenderMode}</span>
-                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                            <span className="text-[12px] font-medium text-[#37474F]">
+                                                {selectedRenderMode}{isFourDLungReconSeries ? " · 锁定" : ""}
+                                            </span>
+                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen && !isFourDLungReconSeries ? 'rotate-180 text-[#4D94FF]' : ''} ${isFourDLungReconSeries ? 'opacity-40' : ''}`} />
                                         </div>
-                                        {isRenderModeOpen && (
+                                        {isRenderModeOpen && !isFourDLungReconSeries && (
                                             <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                 {["MIP", "MPR", "VR", "MinIP"].map((opt) => (
                                                     <div
@@ -1118,20 +1158,45 @@ const ViewScreen = () => {
                 <div className={viewportContainerClassName}>
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
                     {imageMode === "3D" && (
-                        <CornerstoneMPRViewport
-                            ref={mprRef}
-                            imageUrls={seriesImageUrls}
-                            onStatusChange={setViewerLoadStatus}
-                            windowCenter={wl}
-                            windowWidth={ww}
-                            activeTool={mapCornerstoneTool(toolMode)}
-                            renderMode={selectedRenderMode as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
-                            onWindowLevelChange={(wc, wwidth) => {
-                                setDisplayWl(Math.round(wc));
-                                setDisplayWw(Math.round(wwidth));
-                            }}
-                            className="flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden relative"
-                        />
+                        <div className="relative flex-1 min-w-0 overflow-hidden">
+                            <CornerstoneMPRViewport
+                                ref={mprRef}
+                                imageUrls={seriesImageUrls}
+                                onStatusChange={setViewerLoadStatus}
+                                windowCenter={wl}
+                                windowWidth={ww}
+                                activeTool={mapCornerstoneTool(toolMode)}
+                                renderMode={selectedRenderMode as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
+                                onWindowLevelChange={(wc, wwidth) => {
+                                    setDisplayWl(Math.round(wc));
+                                    setDisplayWw(Math.round(wwidth));
+                                }}
+                                className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden"
+                            />
+                            {isFourDLungReconSeries && (
+                                <>
+                                    {/* 顶部中央：呼吸相位主指示 pill */}
+                                    <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 z-20 flex items-center gap-2 rounded-full border border-[#2563EB]/50 bg-[#0F172A]/90 pl-2 pr-3 py-1 shadow-[0_4px_16px_rgba(37,99,235,0.25)] backdrop-blur-sm">
+                                        <div className={`h-2 w-2 rounded-full ${isPhaseCinePlaying ? "bg-[#34D399] shadow-[0_0_10px_rgba(52,211,153,0.95)] animate-pulse" : "bg-[#60A5FA]/60"}`} />
+                                        <span className="text-[8px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">呼吸相位</span>
+                                        <span className="text-[14px] font-black leading-none text-white tabular-nums">
+                                            {FOUR_D_PHASE_LABELS[selectedPhaseIndex]}
+                                        </span>
+                                        <span className="text-[9px] font-bold text-[#60A5FA]/70">
+                                            {selectedPhaseIndex + 1}/{FOUR_D_PHASE_LABELS.length}
+                                        </span>
+                                    </div>
+                                    {/* 右下第 4 窗：跨相位 MIP/MinIP/Avg —— ITV 可视化 */}
+                                    <div className="pointer-events-none absolute right-3 bottom-3 z-20 rounded-md border border-[#F59E0B]/50 bg-[#0F172A]/90 px-2.5 py-1.5 shadow-lg backdrop-blur-sm">
+                                        <div className="flex items-baseline gap-1.5">
+                                            <span className="text-[8px] font-black uppercase tracking-[0.16em] text-[#FBBF24]">跨相位</span>
+                                            <span className="text-[13px] font-black leading-none text-white tabular-nums">{phaseMipMode}</span>
+                                        </div>
+                                        <div className="text-[8px] font-bold text-[#FBBF24]/80 mt-0.5">10 相位聚合 · ITV</div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     )}
                     {/* ── 2D mode: single Cornerstone stack viewport ── */}
                     {imageMode === "2D" && (
@@ -1224,7 +1289,8 @@ const ViewScreen = () => {
                             </div>
                         </section>
                     )}
-                    <aside className="w-[72px] bg-[#111827] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
+                </div>
+                <aside className="w-[72px] bg-[#111827] border-l border-white/10 overflow-hidden shrink-0 flex flex-col rounded-lg">
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3" onPointerDown={(e) => e.stopPropagation()}>
                             {(["pan", "wl", "measure", "annotate", "eraser"] as const).map((mode, i) => {
                                 const icons = [
@@ -1360,8 +1426,28 @@ const ViewScreen = () => {
                             </button>
                         </div>
                     </aside>
-                </div>
             </main>
+
+            {isFourDLungReconSeries && (
+                <PhaseTimelineBar
+                    phaseLabels={FOUR_D_PHASE_LABELS}
+                    currentPhaseIndex={selectedPhaseIndex}
+                    onPhaseChange={(idx) => { setSelectedPhaseIndex(idx); }}
+                    isPlaying={isPhaseCinePlaying}
+                    onTogglePlay={() => setIsPhaseCinePlaying((v) => !v)}
+                    speed={phaseCineSpeed}
+                    onSpeedChange={setPhaseCineSpeed}
+                    loopMode={phaseCineMode}
+                    onLoopModeChange={setPhaseCineMode}
+                    mipMode={phaseMipMode}
+                    onMipModeChange={(m) => {
+                        setPhaseMipMode(m);
+                        // 将"跨相位"选择映射到 MPR viewport 的 renderMode —— 第 4 窗由此反映
+                        if (m === "Avg") setSelectedRenderMode("MPR");
+                        else setSelectedRenderMode(m);
+                    }}
+                />
+            )}
 
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
                 <div className="flex-1">
@@ -1400,6 +1486,159 @@ const ViewScreen = () => {
         </div>
     );
 };
+
+// ─── 4D 相位时间轴（底部控制条） ────────────────────────────────────────────
+type PhaseCineSpeed = 0.5 | 1 | 2;
+type PhaseCineMode = "forward" | "bounce";
+type PhaseMipMode = "MIP" | "MinIP" | "Avg";
+
+function PhaseTimelineBar(props: {
+    phaseLabels: string[];
+    currentPhaseIndex: number;
+    onPhaseChange: (idx: number) => void;
+    isPlaying: boolean;
+    onTogglePlay: () => void;
+    speed: PhaseCineSpeed;
+    onSpeedChange: (s: PhaseCineSpeed) => void;
+    loopMode: PhaseCineMode;
+    onLoopModeChange: (m: PhaseCineMode) => void;
+    mipMode: PhaseMipMode;
+    onMipModeChange: (m: PhaseMipMode) => void;
+}) {
+    const {
+        phaseLabels, currentPhaseIndex, onPhaseChange,
+        isPlaying, onTogglePlay,
+        speed, onSpeedChange,
+        loopMode, onLoopModeChange,
+        mipMode, onMipModeChange,
+    } = props;
+
+    const speeds: PhaseCineSpeed[] = [0.5, 1, 2];
+    const mipModes: PhaseMipMode[] = ["MIP", "MinIP", "Avg"];
+
+    return (
+        <div className="h-[64px] shrink-0 border-t border-[#B0C4DE] bg-gradient-to-b from-[#0F1E30] to-[#0a1520] px-4 flex items-center gap-4 z-10">
+            {/* ── 左：播放 + 速度 + 循环 ── */}
+            <div className="flex items-center gap-2 shrink-0">
+                <button
+                    onClick={onTogglePlay}
+                    title={isPlaying ? "暂停相位动画" : "播放相位动画"}
+                    className={`h-[36px] w-[36px] rounded-full flex items-center justify-center transition-all ${
+                        isPlaying
+                            ? "bg-[#34D399] text-[#0F1E30] shadow-[0_0_14px_rgba(52,211,153,0.5)]"
+                            : "bg-[#1E3A5F] text-[#E0F2FE] hover:bg-[#2E4A7F]"
+                    }`}
+                >
+                    {isPlaying ? <Pause size={18} strokeWidth={2.5} /> : <Play size={18} strokeWidth={2.5} />}
+                </button>
+                <div className="flex flex-col gap-0.5">
+                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#60A5FA]">Speed</span>
+                    <div className="flex items-center rounded-md border border-[#1E3A5F] bg-[#0a1520] overflow-hidden">
+                        {speeds.map((s) => {
+                            const active = s === speed;
+                            return (
+                                <button
+                                    key={s}
+                                    onClick={() => onSpeedChange(s)}
+                                    className={`px-2 h-[22px] text-[10px] font-black transition-all ${
+                                        active ? "bg-[#2563EB] text-white" : "text-[#94A3B8] hover:text-white"
+                                    }`}
+                                >
+                                    {s}×
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#60A5FA]">Loop</span>
+                    <div className="flex items-center rounded-md border border-[#1E3A5F] bg-[#0a1520] overflow-hidden">
+                        {([
+                            { k: "forward" as const, l: "正向" },
+                            { k: "bounce" as const, l: "往返" },
+                        ]).map(({ k, l }) => {
+                            const active = loopMode === k;
+                            return (
+                                <button
+                                    key={k}
+                                    onClick={() => onLoopModeChange(k)}
+                                    className={`px-2 h-[22px] text-[10px] font-black transition-all ${
+                                        active ? "bg-[#2563EB] text-white" : "text-[#94A3B8] hover:text-white"
+                                    }`}
+                                >
+                                    {l}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+
+            {/* ── 中：相位 scrubber ── */}
+            <div className="flex-1 min-w-0 flex items-center gap-3">
+                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-[#60A5FA] shrink-0">相位</span>
+                <div className="relative flex-1 h-[36px] flex items-center">
+                    {/* 刻度背景线 */}
+                    <div className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 bg-[#1E3A5F] rounded-full" />
+                    {/* 已播过的进度条 */}
+                    <div
+                        className="absolute left-0 top-1/2 h-[2px] -translate-y-1/2 bg-gradient-to-r from-[#2563EB] to-[#60A5FA] rounded-full transition-all"
+                        style={{ width: `${(currentPhaseIndex / Math.max(phaseLabels.length - 1, 1)) * 100}%` }}
+                    />
+                    {/* 10 个相位刻度 */}
+                    <div className="relative flex-1 flex justify-between">
+                        {phaseLabels.map((label, idx) => {
+                            const active = idx === currentPhaseIndex;
+                            return (
+                                <button
+                                    key={label}
+                                    onClick={() => onPhaseChange(idx)}
+                                    className="group relative flex flex-col items-center gap-0.5"
+                                    title={`相位 ${label}`}
+                                >
+                                    <div
+                                        className={`h-3 w-3 rounded-full border-2 transition-all ${
+                                            active
+                                                ? "bg-[#60A5FA] border-white shadow-[0_0_10px_rgba(96,165,250,0.9)] scale-125"
+                                                : "bg-[#0F1E30] border-[#3B5A8F] group-hover:border-[#60A5FA]"
+                                        }`}
+                                    />
+                                    <span className={`text-[8px] font-black tabular-nums ${active ? "text-white" : "text-[#64748B] group-hover:text-[#93C5FD]"}`}>
+                                        {label}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+
+            {/* ── 右：跨相位聚合（ITV） ── */}
+            <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-col gap-0.5">
+                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#FBBF24]">第 4 窗 · 跨相位</span>
+                    <div className="flex items-center rounded-md border border-[#7C4A0E] bg-[#0a1520] overflow-hidden">
+                        {mipModes.map((m) => {
+                            const active = m === mipMode;
+                            return (
+                                <button
+                                    key={m}
+                                    onClick={() => onMipModeChange(m)}
+                                    className={`px-2 h-[22px] text-[10px] font-black transition-all ${
+                                        active ? "bg-[#F59E0B] text-[#0F1E30]" : "text-[#94A3B8] hover:text-[#FBBF24]"
+                                    }`}
+                                    title={m === "MIP" ? "最大密度投影 —— 肿瘤包络 / ITV" : m === "MinIP" ? "最小密度投影 —— 气道 / 低密度结构" : "10 相位平均"}
+                                >
+                                    {m}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 // ─── 4D 重建加载动画（内部组件） ────────────────────────────────────────────
 function FourDLoadingOverlay({ bedCount, phaseCount }: { bedCount: number; phaseCount: number }) {
