@@ -997,6 +997,20 @@ const ScoutScanScreen = ({
         });
     }, [endPos, startPos]);
 
+    const handlePreviousStep = useCallback(() => {
+        if (is4DWorkflow) {
+            if (activeStepIdx > 0) {
+                setActiveStepIdx((idx) => Math.max(0, idx - 1));
+                return;
+            }
+
+            navigate("/protocol-select");
+            return;
+        }
+
+        navigate("/protocol-select");
+    }, [activeStepIdx, is4DWorkflow, navigate]);
+
     const toggleSelection = (id: string) => {
         setSelectedIds(prev => {
             const next = new Set(prev);
@@ -1731,7 +1745,7 @@ const ScoutScanScreen = ({
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
                 <div className="flex-1">
                     <button
-                        onClick={() => navigate(-1)}
+                        onClick={handlePreviousStep}
                         className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95"
                     >
                         <ChevronLeft size={20} /> 上一步

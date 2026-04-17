@@ -85,6 +85,9 @@ type ApiTopogramParam = {
     scan_length: number;
     tube_angle: number;
     fov: number;
+    collimator?: string | null;
+    scan_direction?: string | null;
+    dom?: string | null;
     ctdi_vol?: number | null;
     dlp?: number | null;
 };
@@ -97,6 +100,9 @@ type ApiHelicalParam = {
     rotation_time: number;
     scan_length: number;
     fov: number;
+    collimator?: string | null;
+    scan_direction?: string | null;
+    dom?: string | null;
     ctdi_vol?: number | null;
     dlp?: number | null;
     auto_ma?: boolean;
@@ -110,6 +116,9 @@ type ApiAxialParam = {
     rotation_time: number;
     scan_length: number;
     fov: number;
+    collimator?: string | null;
+    scan_direction?: string | null;
+    dom?: string | null;
     ctdi_vol?: number | null;
     dlp?: number | null;
     step_count?: number | null;
@@ -131,6 +140,18 @@ type ApiFourDConfig = {
     phase_count: number;
     acquisition_time: number;
     trigger_threshold?: number | null;
+};
+
+type LegacyBusinessSequenceRow = {
+    params?: string;
+};
+
+type LegacyBusinessSnapshot = {
+    tables?: {
+        protocol_queue?: {
+            rows?: LegacyBusinessSequenceRow[];
+        };
+    };
 };
 
 type ApiSeriesDetail = {
@@ -270,9 +291,66 @@ const getModeLabel = (seriesType: ApiSeriesDetail["series_type"]): string => {
     }
 };
 
+const scanParamOrder = ["mA", "kV", "scanLength", "scanningDirection", "angle", "rotationTime", "collimation", "scoutFOV", "dom", "pitch", "scanIncrement", "cycleCount"];
+
+type ScanParamKey = (typeof scanParamOrder)[number];
+
+const parseLegacyFourDScanParams = (snapshot: LegacyBusinessSnapshot): Record<string, Partial<Record<ScanParamKey, string | number | boolean>>> => {
+    const rows = snapshot.tables?.protocol_queue?.rows;
+    if (!Array.isArray(rows)) return {};
+
+    const allowedKeys = new Set<ScanParamKey>(scanParamOrder);
+    const map: Record<string, Partial<Record<ScanParamKey, string | number | boolean>>> = {};
+
+    rows.forEach((row) => {
+        if (typeof row.params !== "string") return;
+
+        try {
+            const parsed = JSON.parse(row.params) as Record<string, unknown>;
+            const respMode = typeof parsed.respMode === "string" ? parsed.respMode : null;
+            if (!respMode) return;
+
+            const filteredEntries = Object.entries(parsed).filter(
+                (entry): entry is [ScanParamKey, string | number | boolean] =>
+                    allowedKeys.has(entry[0] as ScanParamKey) &&
+                    (typeof entry[1] === "string" || typeof entry[1] === "number" || typeof entry[1] === "boolean")
+            );
+
+            if (filteredEntries.length === 0) return;
+            map[respMode] = Object.fromEntries(filteredEntries);
+        } catch {
+            return;
+        }
+    });
+
+    return map;
+};
+
+const getLegacyFourDScanParams = (
+    fourdConfig: ApiFourDConfig | null | undefined,
+    legacyFourDScanParamsByRespMode: Record<string, Partial<Record<ScanParamKey, string | number | boolean>>>
+) => {
+    const respModeCandidates =
+        fourdConfig?.breathing_mode === "trigger"
+            ? ["breath_hold_trigger", "trigger"]
+            : fourdConfig?.breathing_mode === "gating"
+                ? ["gating"]
+                : ["free_breathing"];
+
+    for (const respMode of respModeCandidates) {
+        const params = legacyFourDScanParamsByRespMode[respMode];
+        if (params && Object.keys(params).length > 0) {
+            return params;
+        }
+    }
+
+    return {};
+};
+
 const mapApiSeriesToRawSequence = (
     protocol: ApiProtocolDetail,
-    series: ApiSeriesDetail
+    series: ApiSeriesDetail,
+    legacyFourDScanParamsByRespMode: Record<string, Partial<Record<ScanParamKey, string | number | boolean>>> = {}
 ): RawSequence => {
     const baseScanParams: Record<string, string | number | boolean> = {
         scanningDirection: protocol.table_direction.toUpperCase(),
@@ -280,32 +358,41 @@ const mapApiSeriesToRawSequence = (
 
     if (series.topogram_param) {
         Object.assign(baseScanParams, {
+            scanningDirection: (series.topogram_param.scan_direction ?? protocol.table_direction).toUpperCase(),
             scanLength: series.topogram_param.scan_length,
             mA: series.topogram_param.ma,
             kV: series.topogram_param.kv,
             angle: series.topogram_param.tube_angle,
+            collimation: series.topogram_param.collimator ?? undefined,
             scoutFOV: series.topogram_param.fov,
+            dom: series.topogram_param.dom ?? undefined,
         });
     }
 
     if (series.helical_param) {
         Object.assign(baseScanParams, {
+            scanningDirection: (series.helical_param.scan_direction ?? protocol.table_direction).toUpperCase(),
             scanLength: series.helical_param.scan_length,
             mA: series.helical_param.ma,
             kV: series.helical_param.kv,
             rotationTime: series.helical_param.rotation_time,
+            collimation: series.helical_param.collimator ?? undefined,
             scoutFOV: series.helical_param.fov,
+            dom: series.helical_param.dom ?? undefined,
             pitch: series.helical_param.pitch,
         });
     }
 
     if (series.axial_param) {
         Object.assign(baseScanParams, {
+            scanningDirection: (series.axial_param.scan_direction ?? protocol.table_direction).toUpperCase(),
             scanLength: series.axial_param.scan_length,
             mA: series.axial_param.ma,
             kV: series.axial_param.kv,
             rotationTime: series.axial_param.rotation_time,
+            collimation: series.axial_param.collimator ?? undefined,
             scoutFOV: series.axial_param.fov,
+            dom: series.axial_param.dom ?? undefined,
             scanIncrement: series.axial_param.slice_interval,
             cycleCount: series.axial_param.step_count ?? undefined,
         });
@@ -313,9 +400,7 @@ const mapApiSeriesToRawSequence = (
 
     if (series.fourd_config) {
         Object.assign(baseScanParams, {
-            acquisitionTime: series.fourd_config.acquisition_time,
-            phaseCount: series.fourd_config.phase_count,
-            triggerThreshold: series.fourd_config.trigger_threshold ?? undefined,
+            ...getLegacyFourDScanParams(series.fourd_config, legacyFourDScanParamsByRespMode),
         });
     }
 
@@ -340,7 +425,10 @@ const mapApiSeriesToRawSequence = (
     };
 };
 
-const mapApiProtocolToRawCase = (protocol: ApiProtocolDetail): RawProtocolCase => ({
+const mapApiProtocolToRawCase = (
+    protocol: ApiProtocolDetail,
+    legacyFourDScanParamsByRespMode: Record<string, Partial<Record<ScanParamKey, string | number | boolean>>> = {}
+): RawProtocolCase => ({
     protocol: {
         id: String(protocol.id),
         name: protocol.name,
@@ -350,7 +438,7 @@ const mapApiProtocolToRawCase = (protocol: ApiProtocolDetail): RawProtocolCase =
         supportedPositions: [protocol.patient_position],
         supportedModes: protocol.series.map((series) => getModeLabel(series.series_type)),
     },
-    sequences: protocol.series.map((series) => mapApiSeriesToRawSequence(protocol, series)),
+    sequences: protocol.series.map((series) => mapApiSeriesToRawSequence(protocol, series, legacyFourDScanParamsByRespMode)),
 });
 
 const loadDraftProtocolFromStorage = (): ApiProtocolDetail | null => {
@@ -367,8 +455,11 @@ const loadDraftProtocolFromStorage = (): ApiProtocolDetail | null => {
     }
 };
 
-const buildDraftScanPlan = (protocol: ApiProtocolDetail): UiPlan => {
-    const basePlan = toUiPlan(mapApiProtocolToRawCase({ ...protocol, id: -1 }));
+const buildDraftScanPlan = (
+    protocol: ApiProtocolDetail,
+    legacyFourDScanParamsByRespMode: Record<string, Partial<Record<ScanParamKey, string | number | boolean>>> = {}
+): UiPlan => {
+    const basePlan = toUiPlan(mapApiProtocolToRawCase({ ...protocol, id: -1 }, legacyFourDScanParamsByRespMode));
     return {
         ...basePlan,
         id: DRAFT_SCAN_PLAN_ID,
@@ -422,7 +513,10 @@ const persistProtocolSelectState = (payload: {
     }
 };
 
-const mapScanSessionToRawCase = (scanSession: ApiScanSessionDetail): RawProtocolCase => ({
+const mapScanSessionToRawCase = (
+    scanSession: ApiScanSessionDetail,
+    legacyFourDScanParamsByRespMode: Record<string, Partial<Record<ScanParamKey, string | number | boolean>>> = {}
+): RawProtocolCase => ({
     protocol: {
         id: String(scanSession.protocol_id),
         name: scanSession.name,
@@ -459,7 +553,8 @@ const mapScanSessionToRawCase = (scanSession: ApiScanSessionDetail): RawProtocol
                 axial_param: series.axial_param ?? null,
                 recon_series: series.recon_series,
                 fourd_config: series.fourd_config ?? null,
-            }
+            },
+            legacyFourDScanParamsByRespMode
         )
     ),
 });
@@ -628,7 +723,6 @@ export const protocolCaseData: RawProtocolCase[] = [
     },
 ];
 
-const scanParamOrder = ["mA", "kV", "scanLength", "scanningDirection", "angle", "rotationTime", "collimation", "scoutFOV", "dom", "pitch", "scanIncrement", "cycleCount"];
 const scanParamLabelMap: Record<string, string> = {
     mA: "MA",
     kV: "KV",
@@ -782,6 +876,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const [protocolSummaries, setProtocolSummaries] = useState<ApiProtocolSummary[]>([]);
     const [protocolDetailsById, setProtocolDetailsById] = useState<Record<number, ApiProtocolDetail>>({});
+    const [legacyFourDScanParamsByRespMode, setLegacyFourDScanParamsByRespMode] = useState<Record<string, Partial<Record<ScanParamKey, string | number | boolean>>>>({});
     const [draftScanProtocol, setDraftScanProtocol] = useState<ApiProtocolDetail | null>(null);
     const [isLoadingProtocols, setIsLoadingProtocols] = useState(true);
     const [protocolsError, setProtocolsError] = useState("");
@@ -832,6 +927,28 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         };
 
         void loadProtocols();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadLegacySnapshot = async () => {
+            try {
+                const response = await fetch("/db_business_4tables_for_ai.json");
+                if (!response.ok || cancelled) return;
+                const snapshot = (await response.json()) as LegacyBusinessSnapshot;
+                if (cancelled) return;
+                setLegacyFourDScanParamsByRespMode(parseLegacyFourDScanParams(snapshot));
+            } catch (error) {
+                console.error("Failed to load legacy 4D scan params snapshot.", error);
+            }
+        };
+
+        void loadLegacySnapshot();
 
         return () => {
             cancelled = true;
@@ -957,23 +1074,23 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                     const scanSession = scanSessionsByProtocolId[id];
                     const protocolDetail = protocolDetailsById[id];
                     return scanSession
-                        ? toUiPlan(mapScanSessionToRawCase(scanSession), { sourceSessionId: scanSession.id })
+                        ? toUiPlan(mapScanSessionToRawCase(scanSession, legacyFourDScanParamsByRespMode), { sourceSessionId: scanSession.id })
                         : protocolDetail
-                            ? toUiPlan(mapApiProtocolToRawCase(protocolDetail))
+                            ? toUiPlan(mapApiProtocolToRawCase(protocolDetail, legacyFourDScanParamsByRespMode))
                             : null;
                 })
                 .filter((plan): plan is UiPlan => plan !== null);
 
             const adHocPlans = adHocScanSessions
                 .map((scanSession) => toUiPlan(
-                    mapScanSessionToRawCase(scanSession),
+                    mapScanSessionToRawCase(scanSession, legacyFourDScanParamsByRespMode),
                     { sourceSessionId: scanSession.id, planId: `session-${scanSession.id}` }
                 ));
 
             const plansWithAdHoc = [...basePlans, ...adHocPlans];
-            return draftScanProtocol ? [...plansWithAdHoc, buildDraftScanPlan(draftScanProtocol)] : plansWithAdHoc;
+            return draftScanProtocol ? [...plansWithAdHoc, buildDraftScanPlan(draftScanProtocol, legacyFourDScanParamsByRespMode)] : plansWithAdHoc;
         },
-        [adHocScanSessions, draftScanProtocol, protocolDetailsById, scanSessionsByProtocolId]
+        [adHocScanSessions, draftScanProtocol, legacyFourDScanParamsByRespMode, protocolDetailsById, scanSessionsByProtocolId]
     );
 
     const applySessionToScreen = useCallback((scanSession: ApiScanSessionDetail) => {
@@ -1494,19 +1611,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         );
 
         try {
-            if (label === "DIR") {
-                const updatedSession = await updateScanSessionById(activeScanSession.id, { table_direction: rawValue.toLowerCase() });
-                applySessionToScreen(updatedSession);
-                return;
-            }
-
             if (activeSessionSeries.topogram_param) {
-                const patch: Record<string, number> = {};
+                const patch: Record<string, string | number> = {};
                 if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.ma;
                 if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.kv;
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.scan_length;
                 if (label === "ANG") patch.tube_angle = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.tube_angle;
                 if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.fov;
+                if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
                 if (Object.keys(patch).length > 0) {
                     await updateSelectedScanSessionTopogramParam(activeSessionSeries.topogram_param.id, patch);
                     await refreshCurrentSession(activeScanSession.id);
@@ -1515,11 +1627,12 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             }
 
             if (activeSessionSeries.helical_param) {
-                const patch: Record<string, number> = {};
+                const patch: Record<string, string | number> = {};
                 if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.ma;
                 if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.kv;
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.scan_length;
                 if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.fov;
+                if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
                 if (Object.keys(patch).length > 0) {
                     await updateSelectedScanSessionHelicalParam(activeSessionSeries.helical_param.id, patch);
                     await refreshCurrentSession(activeScanSession.id);
@@ -1528,15 +1641,22 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             }
 
             if (activeSessionSeries.axial_param) {
-                const patch: Record<string, number> = {};
+                const patch: Record<string, string | number> = {};
                 if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.ma;
                 if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.kv;
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.scan_length;
                 if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.fov;
+                if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
                 if (Object.keys(patch).length > 0) {
                     await updateSelectedScanSessionAxialParam(activeSessionSeries.axial_param.id, patch);
                     await refreshCurrentSession(activeScanSession.id);
                 }
+                return;
+            }
+
+            if (label === "DIR") {
+                const updatedSession = await updateScanSessionById(activeScanSession.id, { table_direction: rawValue.toLowerCase() });
+                applySessionToScreen(updatedSession);
             }
         } catch (error) {
             console.error(error);
@@ -2534,5 +2654,3 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
 
 
 export default ProtocolSetupScreen;
-
-

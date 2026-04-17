@@ -310,14 +310,14 @@ export default function FourDDiagnosticConfirmScreen() {
         : "按住绿色按钮";
 
     const sidebarParams = [
-        { label: "进出床", value: FOURD_PARAMS.bedMode },
-        { label: "体位", value: FOURD_PARAMS.position },
-        { label: "扫描长度", value: dynamicParams.scanLength.toFixed(1) },
-        { label: "MA", value: FOURD_PARAMS.mA },
-        { label: "KV", value: FOURD_PARAMS.kV },
-        { label: "旋转时间", value: FOURD_PARAMS.rotationTime },
-        { label: "准直", value: FOURD_PARAMS.collimation },
-        { label: "FOV", value: dynamicParams.fov.toString() },
+        { label: "进出床", value: FOURD_PARAMS.bedMode, accent: false },
+        { label: "体位", value: FOURD_PARAMS.position, accent: false },
+        { label: "扫描长度", value: dynamicParams.scanLength.toFixed(1), accent: false },
+        { label: "mA", value: FOURD_PARAMS.mA, accent: true },
+        { label: "KV", value: FOURD_PARAMS.kV, accent: true },
+        { label: "旋转时间", value: FOURD_PARAMS.rotationTime, accent: true },
+        { label: "准直", value: FOURD_PARAMS.collimation, accent: false },
+        { label: "FOV", value: dynamicParams.fov.toString(), accent: true },
     ];
 
     const currentBedDisplay = scanCompleted ? bedSegmentCount : scanStarted ? Math.max(1, bedProgress) : 0;
@@ -502,18 +502,35 @@ export default function FourDDiagnosticConfirmScreen() {
                         ))}
                     </div>
 
-                    <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 py-2 shrink-0">
-                        <div className="grid grid-cols-2 gap-1.5">
-                            {sidebarParams.map(({ label, value }) => (
-                                <div key={label} className="px-1.5 py-1 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                    <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</span>
-                                    <span className="mt-px text-[12px] font-black text-[#37474F]">{value}</span>
-                                </div>
-                            ))}
+                    <div className="h-[220px] shrink-0 border-t border-[#EEF2F9] bg-[#F8FAFC] flex flex-col overflow-hidden">
+                        <div className="flex-1 p-2 pt-2 flex flex-col gap-2 overflow-y-auto">
+                            <div className="grid grid-cols-2 gap-2">
+                                {sidebarParams.map(({ label, value, accent }) => (
+                                    <div
+                                        key={label}
+                                        className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm ${
+                                            accent ? "group hover:border-[#4D94FF] cursor-pointer" : ""
+                                        }`}
+                                    >
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</span>
+                                        {accent ? (
+                                            <div className="flex items-center gap-1 mt-[1px]">
+                                                <span className="text-[13px] font-black text-[#37474F]">{value}</span>
+                                                <ChevronDown size={9} className="text-[#90A4AE] group-hover:text-[#4D94FF]" />
+                                            </div>
+                                        ) : (
+                                            <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{value}</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                        <button className="w-full h-[28px] mt-2 rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
-                            <Info size={14} /> 参数详情
-                        </button>
+
+                        <div className="p-2 flex justify-center shrink-0">
+                            <button className="h-[32px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
+                                <Info size={14} /> 参数详情
+                            </button>
+                        </div>
                     </div>
                 </aside>
 
