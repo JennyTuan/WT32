@@ -505,7 +505,7 @@ const ViewScreen = () => {
     //  the Cornerstone MPR implementation doesn't honor per-panel spans anyway.)
     void currentLayoutSpec;
     const viewportContainerClassName =
-        "flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE] bg-[#0F172A]";
+        "flex-1 min-w-0 flex overflow-hidden bg-[#0F172A]";
 
 
 
@@ -1155,6 +1155,7 @@ const ViewScreen = () => {
                     </div>
                 </aside>
 
+                <div className="flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE]">
                 <div className={viewportContainerClassName}>
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
                     {imageMode === "3D" && (
@@ -1290,7 +1291,7 @@ const ViewScreen = () => {
                         </section>
                     )}
                 </div>
-                <aside className="w-[72px] bg-[#111827] border-l border-white/10 overflow-hidden shrink-0 flex flex-col rounded-lg">
+                <aside className="w-[72px] bg-[#0F172A] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3" onPointerDown={(e) => e.stopPropagation()}>
                             {(["pan", "wl", "measure", "annotate", "eraser"] as const).map((mode, i) => {
                                 const icons = [
@@ -1426,6 +1427,7 @@ const ViewScreen = () => {
                             </button>
                         </div>
                     </aside>
+                </div>
             </main>
 
             {isFourDLungReconSeries && (
@@ -1517,7 +1519,7 @@ function PhaseTimelineBar(props: {
     const mipModes: PhaseMipMode[] = ["MIP", "MinIP", "Avg"];
 
     return (
-        <div className="h-[64px] shrink-0 border-t border-[#B0C4DE] bg-gradient-to-b from-[#0F1E30] to-[#0a1520] px-4 flex items-center gap-4 z-10">
+        <div className="h-[64px] shrink-0 border-t border-[#B0C4DE] bg-[#F8FAFC] px-4 flex items-center gap-4 z-10">
             {/* ── 左：播放 + 速度 + 循环 ── */}
             <div className="flex items-center gap-2 shrink-0">
                 <button
@@ -1525,15 +1527,15 @@ function PhaseTimelineBar(props: {
                     title={isPlaying ? "暂停相位动画" : "播放相位动画"}
                     className={`h-[36px] w-[36px] rounded-full flex items-center justify-center transition-all ${
                         isPlaying
-                            ? "bg-[#34D399] text-[#0F1E30] shadow-[0_0_14px_rgba(52,211,153,0.5)]"
-                            : "bg-[#1E3A5F] text-[#E0F2FE] hover:bg-[#2E4A7F]"
+                            ? "bg-[#10B981] text-white shadow-[0_0_10px_rgba(16,185,129,0.4)]"
+                            : "bg-[#4D94FF] text-white hover:bg-[#3B82F6]"
                     }`}
                 >
                     {isPlaying ? <Pause size={18} strokeWidth={2.5} /> : <Play size={18} strokeWidth={2.5} />}
                 </button>
                 <div className="flex flex-col gap-0.5">
-                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#60A5FA]">Speed</span>
-                    <div className="flex items-center rounded-md border border-[#1E3A5F] bg-[#0a1520] overflow-hidden">
+                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#4D94FF]">Speed</span>
+                    <div className="flex items-center rounded-md border border-[#DCE6F2] bg-white overflow-hidden">
                         {speeds.map((s) => {
                             const active = s === speed;
                             return (
@@ -1541,7 +1543,7 @@ function PhaseTimelineBar(props: {
                                     key={s}
                                     onClick={() => onSpeedChange(s)}
                                     className={`px-2 h-[22px] text-[10px] font-black transition-all ${
-                                        active ? "bg-[#2563EB] text-white" : "text-[#94A3B8] hover:text-white"
+                                        active ? "bg-[#4D94FF] text-white" : "text-[#546E7A] hover:text-[#37474F]"
                                     }`}
                                 >
                                     {s}×
@@ -1551,8 +1553,8 @@ function PhaseTimelineBar(props: {
                     </div>
                 </div>
                 <div className="flex flex-col gap-0.5">
-                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#60A5FA]">Loop</span>
-                    <div className="flex items-center rounded-md border border-[#1E3A5F] bg-[#0a1520] overflow-hidden">
+                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#4D94FF]">Loop</span>
+                    <div className="flex items-center rounded-md border border-[#DCE6F2] bg-white overflow-hidden">
                         {([
                             { k: "forward" as const, l: "正向" },
                             { k: "bounce" as const, l: "往返" },
@@ -1563,7 +1565,7 @@ function PhaseTimelineBar(props: {
                                     key={k}
                                     onClick={() => onLoopModeChange(k)}
                                     className={`px-2 h-[22px] text-[10px] font-black transition-all ${
-                                        active ? "bg-[#2563EB] text-white" : "text-[#94A3B8] hover:text-white"
+                                        active ? "bg-[#4D94FF] text-white" : "text-[#546E7A] hover:text-[#37474F]"
                                     }`}
                                 >
                                     {l}
@@ -1576,13 +1578,13 @@ function PhaseTimelineBar(props: {
 
             {/* ── 中：相位 scrubber ── */}
             <div className="flex-1 min-w-0 flex items-center gap-3">
-                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-[#60A5FA] shrink-0">相位</span>
+                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-[#4D94FF] shrink-0">相位</span>
                 <div className="relative flex-1 h-[36px] flex items-center">
                     {/* 刻度背景线 */}
-                    <div className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 bg-[#1E3A5F] rounded-full" />
+                    <div className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 bg-[#DCE6F2] rounded-full" />
                     {/* 已播过的进度条 */}
                     <div
-                        className="absolute left-0 top-1/2 h-[2px] -translate-y-1/2 bg-gradient-to-r from-[#2563EB] to-[#60A5FA] rounded-full transition-all"
+                        className="absolute left-0 top-1/2 h-[2px] -translate-y-1/2 bg-gradient-to-r from-[#4D94FF] to-[#60A5FA] rounded-full transition-all"
                         style={{ width: `${(currentPhaseIndex / Math.max(phaseLabels.length - 1, 1)) * 100}%` }}
                     />
                     {/* 10 个相位刻度 */}
@@ -1599,11 +1601,11 @@ function PhaseTimelineBar(props: {
                                     <div
                                         className={`h-3 w-3 rounded-full border-2 transition-all ${
                                             active
-                                                ? "bg-[#60A5FA] border-white shadow-[0_0_10px_rgba(96,165,250,0.9)] scale-125"
-                                                : "bg-[#0F1E30] border-[#3B5A8F] group-hover:border-[#60A5FA]"
+                                                ? "bg-[#4D94FF] border-white shadow-[0_0_8px_rgba(77,148,255,0.6)] scale-125"
+                                                : "bg-white border-[#B0C4DE] group-hover:border-[#4D94FF]"
                                         }`}
                                     />
-                                    <span className={`text-[8px] font-black tabular-nums ${active ? "text-white" : "text-[#64748B] group-hover:text-[#93C5FD]"}`}>
+                                    <span className={`text-[8px] font-black tabular-nums ${active ? "text-[#4D94FF]" : "text-[#94A3B8] group-hover:text-[#4D94FF]"}`}>
                                         {label}
                                     </span>
                                 </button>
@@ -1616,8 +1618,8 @@ function PhaseTimelineBar(props: {
             {/* ── 右：跨相位聚合（ITV） ── */}
             <div className="flex items-center gap-2 shrink-0">
                 <div className="flex flex-col gap-0.5">
-                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#FBBF24]">第 4 窗 · 跨相位</span>
-                    <div className="flex items-center rounded-md border border-[#7C4A0E] bg-[#0a1520] overflow-hidden">
+                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#D97706]">第 4 窗 · 跨相位</span>
+                    <div className="flex items-center rounded-md border border-[#FDE68A] bg-white overflow-hidden">
                         {mipModes.map((m) => {
                             const active = m === mipMode;
                             return (
@@ -1625,7 +1627,7 @@ function PhaseTimelineBar(props: {
                                     key={m}
                                     onClick={() => onMipModeChange(m)}
                                     className={`px-2 h-[22px] text-[10px] font-black transition-all ${
-                                        active ? "bg-[#F59E0B] text-[#0F1E30]" : "text-[#94A3B8] hover:text-[#FBBF24]"
+                                        active ? "bg-[#F59E0B] text-white" : "text-[#94A3B8] hover:text-[#D97706]"
                                     }`}
                                     title={m === "MIP" ? "最大密度投影 —— 肿瘤包络 / ITV" : m === "MinIP" ? "最小密度投影 —— 气道 / 低密度结构" : "10 相位平均"}
                                 >
