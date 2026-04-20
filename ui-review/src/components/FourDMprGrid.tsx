@@ -14,7 +14,6 @@ import {
     buildFourDImageUrls,
     buildFourDMipUrls,
     type FourDManifest,
-    type FourDView,
 } from "../lib/fourDImageSource";
 import WebImageViewer from "./WebImageViewer";
 import type { DicomViewerHandle } from "./DicomViewer";
@@ -30,6 +29,7 @@ export interface FourDMprGridHandle {
 interface FourDMprGridProps {
     manifest: FourDManifest;
     phase: number;                    // 0..9
+    sliceCineTick?: number;
     mipMode?: "MIP" | "MinIP" | "Avg"; // label only; we only pre-render MIP
     activeTool?: string;
     windowCenter?: number;
@@ -46,6 +46,7 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     {
         manifest,
         phase,
+        sliceCineTick = 0,
         mipMode = "MIP",
         activeTool = "pan",
         windowCenter,
@@ -74,6 +75,14 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     const sagittalUrls = useMemo(() => buildFourDImageUrls(manifest, phase, "sagittal"), [manifest, phase]);
     // MIP is cross-phase so phase doesn't affect it. Show coronal by default (most common ITV view).
     const mipUrls      = useMemo<string[]>(() => buildFourDMipUrls(manifest, "coronal"), [manifest]);
+
+    // Slice-cine: whenever parent bumps tick, advance spatial slices (phase remains locked).
+    useEffect(() => {
+        if (sliceCineTick <= 0) return;
+        setAxialIdx((prev) => (prev + 1) % Math.max(1, axialUrls.length));
+        setCoronalIdx((prev) => (prev + 1) % Math.max(1, coronalUrls.length));
+        setSagittalIdx((prev) => (prev + 1) % Math.max(1, sagittalUrls.length));
+    }, [sliceCineTick, axialUrls.length, coronalUrls.length, sagittalUrls.length]);
 
     // Bubble status: ready once axial plane has loaded at least one frame.
     const [axialStatus, setAxialStatus] = useState<"loading" | "ready" | "error">("loading");
