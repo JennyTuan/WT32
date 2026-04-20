@@ -179,7 +179,7 @@ python ui-review/scripts/preprocess_4d.py --input "D:\data-tcia-4d-lung-part-1-m
 - [x] 阶段 2.3：`WebImageViewer.tsx` + `FourDMprGrid.tsx` ✅（方案 A，canvas/img 渲染）
 - [x] 阶段 2.4：预加载 ✅（manifest 加载后预热 10 个相位的 axial 中间层）
 - [x] 阶段 3：浏览器端验证 ✅（2026-04-20，用户反馈"性能挺好"）
-- [ ] 阶段 4：文档和清理 ← **剩余任务**
+- [x] 阶段 4：文档和清理 ✅（2026-04-20，已确认 `.gitignore` 且补充 `ui-review/README.md`）
 
 ### 阶段 2 实际改动清单
 
@@ -197,24 +197,24 @@ python ui-review/scripts/preprocess_4d.py --input "D:\data-tcia-4d-lung-part-1-m
 
 非 4D 流程（普通 DICOM 浏览）完全未动。
 
-## 阶段 4 剩余任务（交接给下一个 AI）
+## 阶段 4 完成记录（2026-04-20）
 
-1. **`.gitignore` 确认**：`ui-review/public/dicom-4d/` 应入 git（它是产物，不是源数据）。检查项目根 `.gitignore` 和 `ui-review/.gitignore`，别把 `public/` 或 `*.webp` 排掉了。
-2. **更新 `ui-review/README.md`**（若存在）：加一段"4D 数据来源"：
+1. **`.gitignore` 已确认**：项目根 `.gitignore` 与 `ui-review/.gitignore` 均未排除 `ui-review/public/dicom-4d/`，产物可正常入库。
+2. **`ui-review/README.md` 已补充**：
    - 数据集链接：https://github.com/RadiotherapyAI/data-tcia-4d-lung-part-1
    - 预处理命令：`python ui-review/scripts/preprocess_4d.py --input <...> --output ui-review/public/dicom-4d`
    - 依赖：`pip install pydicom numpy pillow scipy`
-3. **可选清理**：
-   - 旧数据 `ui-review/public/dicom/QIN LUNG CT`（930MB）是否保留？当前非 4D 流程还在用（[ViewScreen.tsx:198](../ui-review/src/screens/ViewScreen.tsx) 的 `REAL_LUNG_SERIES.basePath`）。**保留**。
-   - `preprocess_4d.py` 的 input 参数是硬编码路径（用户本地 D 盘），README 里提醒一下即可。
+3. **旧数据保留策略已明确**：
+   - 旧数据 `ui-review/public/dicom/QIN LUNG CT`（930MB）继续保留，供非 4D 流程使用。
+   - README 已注明 `--input` 为本机路径，需按环境替换。
 4. **可选增强**（若时间有）：
    - MIP 面板目前只预渲染了 MIP 模式（未生成 MinIP/Avg）。切换模式时 UI 会显示标签变化但图不变。要想真的支持需扩展 `preprocess_4d.py` 多算两种聚合 + 产物 `mip-itv/min/`、`mip-itv/avg/`，前端按 `phaseMipMode` 选对应路径。
    - WL 调节是 CSS filter 近似（非放射级精确）。如果需要更精确，改成在 preprocess 时保存 16-bit PNG 或原始 HU volume（体积会大 4-8 倍），前端 canvas pixel-manipulation 做真实 windowing。
 
 ## 给接手 AI 的提示（阶段 4）
 
-- 此文档的"进度追踪"已反映截至阶段 3 的真实状态。
-- 阶段 4 主要是文档/卫生工作，不涉及运行时逻辑，无风险。
+- 此文档的"进度追踪"已反映截至阶段 4 的状态。
+- 阶段 4 已完成；后续改动可聚焦可选增强，不影响当前演示路径。
 - 若要做"可选增强"，先看 `preprocess_4d.py` 里的 `mip_vol = stacked.max(axis=0)`，仿写 `min` / `mean` 即可；前端在 `FourDMprGrid.tsx` 里把 `buildFourDMipUrls(manifest, "coronal")` 换成按 `mipMode` 查路径。
 
 ### 阶段 1 产物摘要（供阶段 2 参考）
