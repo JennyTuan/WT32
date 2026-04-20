@@ -100,6 +100,7 @@ type LayoutSpec = {
     panels: Record<PanelId, string>;
 };
 type PseudoColorMode = "灰阶" | "Hot Iron" | "PET" | "Spectrum" | "Bone" | "Rainbow" | "Blue-Orange";
+type FourDBrowseMode = "phase" | "slice";
 
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
 
@@ -261,8 +262,10 @@ const ViewScreen = () => {
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    // 4D phase cine (separate from slice-playback isPlaying)
-    const [isPhaseCinePlaying, setIsPhaseCinePlaying] = useState(false);
+    // 4D browsing cine (separate from slice-playback isPlaying)
+    const [isFourDBrowsePlaying, setIsFourDBrowsePlaying] = useState(false);
+    const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("phase");
+    const [sliceCineTick, setSliceCineTick] = useState(0);
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<0.5 | 1 | 2>(1); // multiplier; 1× = 500 ms/phase
     const [phaseCineMode, setPhaseCineMode] = useState<"forward" | "bounce">("forward");
     const phaseCineDirectionRef = useRef<1 | -1>(1);
@@ -537,7 +540,9 @@ const ViewScreen = () => {
 
     useEffect(() => {
         setSelectedPhaseIndex(0);
-        setIsPhaseCinePlaying(false);
+        setIsFourDBrowsePlaying(false);
+        setFourDBrowseMode("phase");
+        setSliceCineTick(0);
         phaseCineDirectionRef.current = 1;
     }, [selectedSeriesId]);
 
@@ -578,7 +583,7 @@ const ViewScreen = () => {
     // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
     // (clinical convention: cine cycles phases at a locked anatomical slice).
     useEffect(() => {
-        if (!isFourDLungReconSeries || !isPhaseCinePlaying) return;
+        if (!isFourDLungReconSeries || !isFourDBrowsePlaying || fourDBrowseMode !== "phase") return;
         const total = FOUR_D_PHASE_LABELS.length;
         const intervalMs = 500 / phaseCineSpeed; // 1× ≈ 2 Hz phase rate
         const timer = window.setInterval(() => {
@@ -599,7 +604,17 @@ const ViewScreen = () => {
             });
         }, intervalMs);
         return () => window.clearInterval(timer);
-    }, [isFourDLungReconSeries, isPhaseCinePlaying, phaseCineSpeed, phaseCineMode]);
+    }, [isFourDLungReconSeries, isFourDBrowsePlaying, phaseCineSpeed, phaseCineMode, fourDBrowseMode]);
+
+    // Slice cine: lock current phase, cycle spatial slices in all MPR planes.
+    useEffect(() => {
+        if (!isFourDLungReconSeries || !isFourDBrowsePlaying || fourDBrowseMode !== "slice") return;
+        const intervalMs = 220 / phaseCineSpeed;
+        const timer = window.setInterval(() => {
+            setSliceCineTick((prev) => prev + 1);
+        }, intervalMs);
+        return () => window.clearInterval(timer);
+    }, [isFourDLungReconSeries, isFourDBrowsePlaying, phaseCineSpeed, fourDBrowseMode]);
 
     // Auto-select first series when session data loads (or series list changes)
     useEffect(() => {
@@ -1215,6 +1230,7 @@ const ViewScreen = () => {
                                     ref={fourDGridRef}
                                     manifest={fourDManifest}
                                     phase={selectedPhaseIndex}
+                                    sliceCineTick={sliceCineTick}
                                     mipMode={phaseMipMode}
                                     activeTool={mapCornerstoneTool(toolMode)}
                                     windowCenter={wl}
@@ -1499,8 +1515,10 @@ const ViewScreen = () => {
                     phaseLabels={FOUR_D_PHASE_LABELS}
                     currentPhaseIndex={selectedPhaseIndex}
                     onPhaseChange={(idx) => { setSelectedPhaseIndex(idx); }}
-                    isPlaying={isPhaseCinePlaying}
-                    onTogglePlay={() => setIsPhaseCinePlaying((v) => !v)}
+                    browseMode={fourDBrowseMode}
+                    onBrowseModeChange={setFourDBrowseMode}
+                    isPlaying={isFourDBrowsePlaying}
+                    onTogglePlay={() => setIsFourDBrowsePlaying((v) => !v)}
                     speed={phaseCineSpeed}
                     onSpeedChange={setPhaseCineSpeed}
                     loopMode={phaseCineMode}
@@ -1554,6 +1572,8 @@ function PhaseTimelineBar(props: {
     phaseLabels: string[];
     currentPhaseIndex: number;
     onPhaseChange: (idx: number) => void;
+    browseMode: FourDBrowseMode;
+    onBrowseModeChange: (m: FourDBrowseMode) => void;
     isPlaying: boolean;
     onTogglePlay: () => void;
     speed: PhaseCineSpeed;
@@ -1563,6 +1583,7 @@ function PhaseTimelineBar(props: {
 }) {
     const {
         phaseLabels, currentPhaseIndex, onPhaseChange,
+        browseMode, onBrowseModeChange,
         isPlaying, onTogglePlay,
         speed, onSpeedChange,
         loopMode, onLoopModeChange,
@@ -1572,11 +1593,33 @@ function PhaseTimelineBar(props: {
 
     return (
         <div className="h-[64px] shrink-0 border-t border-[#B0C4DE] bg-[#F8FAFC] px-4 flex items-center gap-4 z-10">
-            {/* ── 左：播放 + 速度 + 循环 ── */}
+            {/* ── 左：模式 + 播放 + 速度 + 循环 ── */}
             <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-col gap-0.5">
+                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#4D94FF]">Mode</span>
+                    <div className="flex items-center rounded-md border border-[#DCE6F2] bg-white overflow-hidden">
+                        {([
+                            { k: "phase" as const, l: "4D Cine" },
+                            { k: "slice" as const, l: "Slice Cine" },
+                        ]).map(({ k, l }) => {
+                            const active = browseMode === k;
+                            return (
+                                <button
+                                    key={k}
+                                    onClick={() => onBrowseModeChange(k)}
+                                    className={`px-2 h-[22px] text-[10px] font-black transition-all ${
+                                        active ? "bg-[#4D94FF] text-white" : "text-[#546E7A] hover:text-[#37474F]"
+                                    }`}
+                                >
+                                    {l}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
                 <button
                     onClick={onTogglePlay}
-                    title={isPlaying ? "暂停相位动画" : "播放相位动画"}
+                    title={isPlaying ? "暂停浏览动画" : "播放浏览动画"}
                     className={`h-[36px] w-[36px] rounded-full flex items-center justify-center transition-all ${
                         isPlaying
                             ? "bg-[#10B981] text-white shadow-[0_0_10px_rgba(16,185,129,0.4)]"
@@ -1616,9 +1659,10 @@ function PhaseTimelineBar(props: {
                                 <button
                                     key={k}
                                     onClick={() => onLoopModeChange(k)}
+                                    disabled={browseMode === "slice"}
                                     className={`px-2 h-[22px] text-[10px] font-black transition-all ${
                                         active ? "bg-[#4D94FF] text-white" : "text-[#546E7A] hover:text-[#37474F]"
-                                    }`}
+                                    } ${browseMode === "slice" ? "opacity-40 cursor-not-allowed" : ""}`}
                                 >
                                     {l}
                                 </button>
@@ -1626,11 +1670,16 @@ function PhaseTimelineBar(props: {
                         })}
                     </div>
                 </div>
+                <div className="text-[10px] text-[#64748B] font-semibold whitespace-nowrap">
+                    {browseMode === "phase" ? "时间维度循环（多相位）" : "空间维度循环（单相位）"}
+                </div>
             </div>
 
             {/* ── 中：相位 scrubber ── */}
             <div className="flex-1 min-w-0 flex items-center gap-3">
-                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-[#4D94FF] shrink-0">相位</span>
+                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-[#4D94FF] shrink-0">
+                    {browseMode === "phase" ? "相位" : "固定相位"}
+                </span>
                 <div className="relative flex-1 h-[36px] flex items-center">
                     {/* 刻度背景线 */}
                     <div className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 bg-[#DCE6F2] rounded-full" />
