@@ -10,8 +10,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Flame,
-  LayoutGrid,
-  List,
   Network,
   Plus,
   RotateCcw,
@@ -1009,7 +1007,6 @@ export default function FourDRescanSelectScreen() {
     return initialChoices;
   });
 
-  const [viewMode, setViewMode] = useState<"timeline" | "table">("table");
   const [laserActive, setLaserActive] = useState(false);
   const initialWavePoints = useMemo<WaveformPoint[]>(() => buildInitialWavePoints(bedCount), [bedCount]);
   const [wavePoints, setWavePoints] = useState<WaveformPoint[]>(initialWavePoints);
@@ -1168,26 +1165,6 @@ export default function FourDRescanSelectScreen() {
             全选重扫
           </button>
 
-          <div className="ml-3 flex overflow-hidden rounded-lg border border-slate-200">
-            <button
-              type="button"
-              onClick={() => setViewMode("table")}
-              className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold transition-colors ${
-                viewMode === "table" ? "bg-[#4D94FF] text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              <List size={12} /> 列表
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("timeline")}
-              className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold transition-colors ${
-                viewMode === "timeline" ? "bg-[#4D94FF] text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              <LayoutGrid size={12} /> 时间轴
-            </button>
-          </div>
         </div>
       </div>
 
@@ -1216,13 +1193,7 @@ export default function FourDRescanSelectScreen() {
             </div>
           </div>
 
-          {viewMode === "table" ? (
-            <BedTable rescanRange={rescanRange} choices={choices} onChange={handleBedChange} />
-          ) : (
-            <div className="flex h-24 items-center justify-center text-[12px] text-slate-400">
-              在上方时间轴中直接点击床位块切换选择
-            </div>
-          )}
+          <BedTable rescanRange={rescanRange} choices={choices} onChange={handleBedChange} />
         </div>
 
         <RespiratoryWaveMonitor
