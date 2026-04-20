@@ -351,6 +351,7 @@ const ViewScreen = () => {
     const [selectedLayout, setSelectedLayout] = useState("三维四窗");
     const [selectedRenderMode, setSelectedRenderMode] = useState("MPR");
     const [selectedPseudoColor, setSelectedPseudoColor] = useState<PseudoColorMode>("灰阶");
+    const [isBrowseModeOpen, setIsBrowseModeOpen] = useState(false);
     const [isLayoutOpen, setIsLayoutOpen] = useState(false);
     const [isRenderModeOpen, setIsRenderModeOpen] = useState(false);
     const [isPseudoColorOpen, setIsPseudoColorOpen] = useState(false);
@@ -511,6 +512,7 @@ const ViewScreen = () => {
         images: Array.from({ length: REAL_LUNG_SERIES.count }, (_, i) => ({ id: `qin-img-${i + 1}`, name: `Image ${i + 1}` })),
     }];
     const selectedSeries = safeSeriesList.find((s) => s.id === selectedSeriesId) ?? safeSeriesList[0];
+    const isTopogramSeries = selectedSeries.seriesType === "topogram";
     const isFourDLungReconSeries =
         selectedSeries.seriesType === "4d" &&
         /肺/.test(selectedSeries.name);
@@ -553,6 +555,11 @@ const ViewScreen = () => {
         setSelectedLayout("多平面重建");
         setSelectedRenderMode("MPR");
     }, [isFourDLungReconSeries]);
+
+    useEffect(() => {
+        if (!isTopogramSeries) return;
+        setImageMode("2D");
+    }, [isTopogramSeries]);
 
     // Load 4D manifest + preload each phase's first frame (mid axial) so
     // phase switches are instant after the initial warm.
@@ -1056,27 +1063,7 @@ const ViewScreen = () => {
                             <SlidersHorizontal size={14} className="text-[#4D94FF]" />
                             <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">PARAMS</span>
                         </div>
-                        {isFourDLungReconSeries ? (
-                            <div className="flex items-center gap-1 rounded-md border border-[#DCE6F2] bg-white overflow-hidden shadow-sm">
-                                {([
-                                    { k: "phase" as const, l: "4D Cine" },
-                                    { k: "slice" as const, l: "Slice Cine" },
-                                ]).map(({ k, l }) => {
-                                    const active = fourDBrowseMode === k;
-                                    return (
-                                        <button
-                                            key={k}
-                                            onClick={() => setFourDBrowseMode(k)}
-                                            className={`px-2 h-[24px] text-[10px] font-black transition-all ${
-                                                active ? "bg-[#4D94FF] text-white" : "text-[#546E7A] hover:text-[#37474F]"
-                                            }`}
-                                        >
-                                            {l}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        ) : (
+                        {!isFourDLungReconSeries && !isTopogramSeries ? (
                             <div className="flex items-center gap-1 rounded-full border border-[#DCE6F2] bg-[#F1F5F9] p-[3px] shadow-sm overflow-hidden">
                                 {(["2D", "3D"] as const).map((mode) => {
                                     const active = imageMode === mode;
@@ -1094,12 +1081,12 @@ const ViewScreen = () => {
                                     );
                                 })}
                             </div>
-                        )}
+                        ) : null}
                     </div>
 
                     <div className="flex-1 bg-[#F8FAFC] overflow-hidden flex flex-col">
                         <div className="flex-1 p-3 grid grid-cols-2 gap-2 overflow-y-auto">
-                            {imageMode === "2D" ? (
+                            {imageMode === "2D" || isTopogramSeries ? (
                                 <>
                                     <Param label="WW" value={String(Math.round(displayWw))} />
                                     <Param label="WL" value={String(Math.round(displayWl))} />
@@ -1227,10 +1214,44 @@ const ViewScreen = () => {
                                             </div>
                                         )}
                                     </div>
+
+                                    {isFourDLungReconSeries && (
+                                        <div className="flex items-center gap-2 relative">
+                                            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">模式</span>
+                                            <div
+                                                onClick={() => setIsBrowseModeOpen(!isBrowseModeOpen)}
+                                                className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isBrowseModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                            >
+                                                <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                    {fourDBrowseMode === "phase" ? "4D Cine" : "Slice Cine"}
+                                                </span>
+                                                <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isBrowseModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                            </div>
+                                            {isBrowseModeOpen && (
+                                                <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                    {([
+                                                        { k: "phase" as const, l: "4D Cine" },
+                                                        { k: "slice" as const, l: "Slice Cine" },
+                                                    ]).map(({ k, l }) => (
+                                                        <div
+                                                            key={k}
+                                                            onClick={() => {
+                                                                setFourDBrowseMode(k);
+                                                                setIsBrowseModeOpen(false);
+                                                            }}
+                                                            className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${fourDBrowseMode === k ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                        >
+                                                            {l}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
-                        {imageMode === "2D" && (
+                        {!isTopogramSeries && imageMode === "2D" && (
                             <div className="px-3 pb-3">
                                 <button className="h-[32px] w-full bg-white border border-[#B0C4DE] rounded-md text-[10px] font-bold text-[#4D94FF] hover:bg-blue-50 transition-all shadow-sm">
                                     详情
@@ -1243,7 +1264,7 @@ const ViewScreen = () => {
                 <div className="flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE]">
                 <div className={viewportContainerClassName}>
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
-                    {imageMode === "3D" && (
+                    {!isTopogramSeries && imageMode === "3D" && (
                         <div className="relative flex-1 min-w-0 overflow-hidden">
                             {/* 4D entry: drive the grid from pre-rendered WebP stacks so
                                 the phase slider actually changes the image. */}
@@ -1302,7 +1323,7 @@ const ViewScreen = () => {
                         </div>
                     )}
                     {/* ── 2D mode: single Cornerstone stack viewport ── */}
-                    {imageMode === "2D" && (
+                    {(imageMode === "2D" || isTopogramSeries) && (
                         <section
                             ref={viewportRef}
                             className={`flex-1 min-w-0 bg-black overflow-hidden relative ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : toolMode === "pan" ? "cursor-grab" : "cursor-default"}`}
@@ -1538,7 +1559,6 @@ const ViewScreen = () => {
                     currentPhaseIndex={selectedPhaseIndex}
                     onPhaseChange={(idx) => { setSelectedPhaseIndex(idx); }}
                     browseMode={fourDBrowseMode}
-                    onBrowseModeChange={setFourDBrowseMode}
                     isPlaying={isFourDBrowsePlaying}
                     onTogglePlay={() => setIsFourDBrowsePlaying((v) => !v)}
                     speed={phaseCineSpeed}
@@ -1595,7 +1615,6 @@ function PhaseTimelineBar(props: {
     currentPhaseIndex: number;
     onPhaseChange: (idx: number) => void;
     browseMode: FourDBrowseMode;
-    onBrowseModeChange: (m: FourDBrowseMode) => void;
     isPlaying: boolean;
     onTogglePlay: () => void;
     speed: PhaseCineSpeed;
@@ -1605,7 +1624,7 @@ function PhaseTimelineBar(props: {
 }) {
     const {
         phaseLabels, currentPhaseIndex, onPhaseChange,
-        browseMode, onBrowseModeChange,
+        browseMode,
         isPlaying, onTogglePlay,
         speed, onSpeedChange,
         loopMode, onLoopModeChange,
@@ -1617,28 +1636,6 @@ function PhaseTimelineBar(props: {
         <div className="h-[64px] shrink-0 border-t border-[#B0C4DE] bg-[#F8FAFC] px-4 flex items-center gap-4 z-10">
             {/* ── 左：模式 + 播放 + 速度 + 循环 ── */}
             <div className="flex items-center gap-2 shrink-0">
-                <div className="flex flex-col gap-0.5">
-                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-[#4D94FF]">Mode</span>
-                    <div className="flex items-center rounded-md border border-[#DCE6F2] bg-white overflow-hidden">
-                        {([
-                            { k: "phase" as const, l: "4D Cine" },
-                            { k: "slice" as const, l: "Slice Cine" },
-                        ]).map(({ k, l }) => {
-                            const active = browseMode === k;
-                            return (
-                                <button
-                                    key={k}
-                                    onClick={() => onBrowseModeChange(k)}
-                                    className={`px-2 h-[22px] text-[10px] font-black transition-all ${
-                                        active ? "bg-[#4D94FF] text-white" : "text-[#546E7A] hover:text-[#37474F]"
-                                    }`}
-                                >
-                                    {l}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
                 <button
                     onClick={onTogglePlay}
                     title={isPlaying ? "暂停浏览动画" : "播放浏览动画"}
@@ -1692,9 +1689,7 @@ function PhaseTimelineBar(props: {
                         })}
                     </div>
                 </div>
-                <div className="text-[10px] text-[#64748B] font-semibold whitespace-nowrap">
-                    {browseMode === "phase" ? "时间维度循环（多相位）" : "空间维度循环（单相位）"}
-                </div>
+               
             </div>
 
             {/* ── 中：相位 scrubber ── */}
