@@ -1056,23 +1056,45 @@ const ViewScreen = () => {
                             <SlidersHorizontal size={14} className="text-[#4D94FF]" />
                             <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">PARAMS</span>
                         </div>
-                        <div className="flex items-center gap-1 rounded-full border border-[#DCE6F2] bg-[#F1F5F9] p-[3px] shadow-sm overflow-hidden">
-                            {(["2D", "3D"] as const).map((mode) => {
-                                const active = imageMode === mode;
-                                return (
-                                    <button
-                                        key={mode}
-                                        onClick={() => setImageMode(mode)}
-                                        className={`min-w-[40px] h-[24px] px-2 rounded-full text-[10px] font-black transition-all ${active
-                                            ? "bg-white text-[#4D94FF] shadow-[0_2px_4px_rgba(0,0,0,0.05)] border border-[#DCE6F2]/50"
-                                            : "text-[#94A3B8] hover:text-[#4D94FF]"
+                        {isFourDLungReconSeries ? (
+                            <div className="flex items-center gap-1 rounded-md border border-[#DCE6F2] bg-white overflow-hidden shadow-sm">
+                                {([
+                                    { k: "phase" as const, l: "4D Cine" },
+                                    { k: "slice" as const, l: "Slice Cine" },
+                                ]).map(({ k, l }) => {
+                                    const active = fourDBrowseMode === k;
+                                    return (
+                                        <button
+                                            key={k}
+                                            onClick={() => setFourDBrowseMode(k)}
+                                            className={`px-2 h-[24px] text-[10px] font-black transition-all ${
+                                                active ? "bg-[#4D94FF] text-white" : "text-[#546E7A] hover:text-[#37474F]"
                                             }`}
-                                    >
-                                        {mode}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                                        >
+                                            {l}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-1 rounded-full border border-[#DCE6F2] bg-[#F1F5F9] p-[3px] shadow-sm overflow-hidden">
+                                {(["2D", "3D"] as const).map((mode) => {
+                                    const active = imageMode === mode;
+                                    return (
+                                        <button
+                                            key={mode}
+                                            onClick={() => setImageMode(mode)}
+                                            className={`min-w-[40px] h-[24px] px-2 rounded-full text-[10px] font-black transition-all ${active
+                                                ? "bg-white text-[#4D94FF] shadow-[0_2px_4px_rgba(0,0,0,0.05)] border border-[#DCE6F2]/50"
+                                                : "text-[#94A3B8] hover:text-[#4D94FF]"
+                                                }`}
+                                        >
+                                            {mode}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex-1 bg-[#F8FAFC] overflow-hidden flex flex-col">
