@@ -8,11 +8,12 @@
  * Slice indices per plane are managed locally (one mid-slice per plane on
  * mount); the phase index is controlled externally via the bottom phase bar.
  */
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import {
     buildFourDImageUrls,
     buildFourDMipUrls,
+    type FourDAggregateMode,
     type FourDManifest,
 } from "../lib/fourDImageSource";
 import WebImageViewer from "./WebImageViewer";
@@ -30,7 +31,7 @@ interface FourDMprGridProps {
     manifest: FourDManifest;
     phase: number;                    // 0..9
     sliceCineTick?: number;
-    mipMode?: "MIP" | "MinIP" | "Avg"; // label only; we only pre-render MIP
+    mipMode?: FourDAggregateMode;
     activeTool?: string;
     windowCenter?: number;
     windowWidth?: number;
@@ -41,6 +42,46 @@ interface FourDMprGridProps {
 
 const PANEL_LABEL_STYLE =
     "absolute top-2 left-2 px-1.5 py-0.5 text-[10px] font-bold tracking-[0.18em] text-white/90 bg-black/40 rounded pointer-events-none";
+
+const AXIAL_COLOR = "#EF4444";
+const CORONAL_COLOR = "#22C55E";
+const SAGITTAL_COLOR = "#FACC15";
+
+function toPercent(index: number, count: number) {
+    if (count <= 1) return 50;
+    return (index / (count - 1)) * 100;
+}
+
+function CrosshairOverlay({
+    horizontalColor,
+    verticalColor,
+    xPercent,
+    yPercent,
+}: {
+    horizontalColor: string;
+    verticalColor: string;
+    xPercent: number;
+    yPercent: number;
+}) {
+    return (
+        <div
+            className="pointer-events-none absolute inset-0 z-[2]"
+        >
+            <div
+                className="absolute top-0 bottom-0 w-px shadow-[0_0_10px_rgba(255,255,255,0.18)]"
+                style={{ left: `${xPercent}%`, backgroundColor: verticalColor }}
+            />
+            <div
+                className="absolute left-0 right-0 h-px shadow-[0_0_10px_rgba(255,255,255,0.18)]"
+                style={{ top: `${yPercent}%`, backgroundColor: horizontalColor }}
+            />
+            <div
+                className="absolute h-2.5 w-2.5 rounded-full border border-white/80 bg-white/20 -translate-x-1/2 -translate-y-1/2"
+                style={{ left: `${xPercent}%`, top: `${yPercent}%` }}
+            />
+        </div>
+    );
+}
 
 const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function FourDMprGrid(
     {
@@ -61,6 +102,9 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     const coronalRef  = useRef<DicomViewerHandle>(null);
     const sagittalRef = useRef<DicomViewerHandle>(null);
     const mipRef      = useRef<DicomViewerHandle>(null);
+    const axialPanelRef = useRef<HTMLDivElement>(null);
+    const coronalPanelRef = useRef<HTMLDivElement>(null);
+    const sagittalPanelRef = useRef<HTMLDivElement>(null);
 
     // Per-plane slice indices (independent scrubbing)
     const [axialIdx, setAxialIdx] = useState(() => Math.floor(manifest.views.axial.slices / 2));
@@ -73,8 +117,11 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     const axialUrls    = useMemo(() => buildFourDImageUrls(manifest, phase, "axial"),    [manifest, phase]);
     const coronalUrls  = useMemo(() => buildFourDImageUrls(manifest, phase, "coronal"),  [manifest, phase]);
     const sagittalUrls = useMemo(() => buildFourDImageUrls(manifest, phase, "sagittal"), [manifest, phase]);
-    // MIP is cross-phase so phase doesn't affect it. Show coronal by default (most common ITV view).
-    const mipUrls      = useMemo<string[]>(() => buildFourDMipUrls(manifest, "coronal"), [manifest]);
+    // Cross-phase aggregate so phase doesn't affect it. Show coronal by default.
+    const mipUrls      = useMemo<string[]>(
+        () => buildFourDMipUrls(manifest, "coronal", mipMode),
+        [manifest, mipMode]
+    );
 
     // Slice-cine: whenever parent bumps tick, advance spatial slices (phase remains locked).
     useEffect(() => {
@@ -113,10 +160,94 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     const panelBase =
         "relative bg-black overflow-hidden border border-[#0F172A]";
 
+    const updateCrosshairFromPointer = useCallback((
+        panel: "axial" | "coronal" | "sagittal",
+        clientX: number,
+        clientY: number,
+    ) => {
+        const panelRef =
+            panel === "axial" ? axialPanelRef.current :
+            panel === "coronal" ? coronalPanelRef.current :
+            sagittalPanelRef.current;
+        if (!panelRef) return;
+        const rect = panelRef.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+
+        const xRatio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        const yRatio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+
+        const toIndex = (ratio: number, count: number) =>
+            Math.max(0, Math.min(count - 1, Math.round(ratio * Math.max(count - 1, 0))));
+
+        if (panel === "axial") {
+            setSagittalIdx(toIndex(xRatio, manifest.views.sagittal.slices));
+            setCoronalIdx(toIndex(yRatio, manifest.views.coronal.slices));
+            return;
+        }
+
+        if (panel === "coronal") {
+            setSagittalIdx(toIndex(xRatio, manifest.views.sagittal.slices));
+            setAxialIdx(toIndex(yRatio, manifest.views.axial.slices));
+            return;
+        }
+
+        setCoronalIdx(toIndex(xRatio, manifest.views.coronal.slices));
+        setAxialIdx(toIndex(yRatio, manifest.views.axial.slices));
+    }, [manifest.views.axial.slices, manifest.views.coronal.slices, manifest.views.sagittal.slices]);
+
+    const dragPanelRef = useRef<"axial" | "coronal" | "sagittal" | null>(null);
+    useEffect(() => {
+        const handleMove = (event: PointerEvent) => {
+            if (!dragPanelRef.current) return;
+            updateCrosshairFromPointer(dragPanelRef.current, event.clientX, event.clientY);
+        };
+        const handleUp = () => {
+            dragPanelRef.current = null;
+        };
+        window.addEventListener("pointermove", handleMove);
+        window.addEventListener("pointerup", handleUp);
+        return () => {
+            window.removeEventListener("pointermove", handleMove);
+            window.removeEventListener("pointerup", handleUp);
+        };
+    }, [updateCrosshairFromPointer]);
+
+    const axialCrosshair = {
+        xPercent: toPercent(sagittalIdx, manifest.views.sagittal.slices),
+        yPercent: toPercent(coronalIdx, manifest.views.coronal.slices),
+    };
+    const coronalCrosshair = {
+        xPercent: toPercent(sagittalIdx, manifest.views.sagittal.slices),
+        yPercent: toPercent(axialIdx, manifest.views.axial.slices),
+    };
+    const sagittalCrosshair = {
+        xPercent: toPercent(coronalIdx, manifest.views.coronal.slices),
+        yPercent: toPercent(axialIdx, manifest.views.axial.slices),
+    };
+
+    const bindCrosshairDrag = useCallback(
+        (panel: "axial" | "coronal" | "sagittal") => ({
+            onPointerDownCapture: (event: React.PointerEvent<HTMLDivElement>) => {
+                // Keep regular pan/WL mouse gestures available; use Shift+drag
+                // when the operator wants to reposition MPR crosshairs.
+                if (!event.shiftKey) return;
+                dragPanelRef.current = panel;
+                updateCrosshairFromPointer(panel, event.clientX, event.clientY);
+                event.preventDefault();
+                event.stopPropagation();
+            },
+        }),
+        [updateCrosshairFromPointer],
+    );
+
     return (
         <div className={className}>
             {/* AXIAL */}
-            <div className={panelBase}>
+            <div
+                ref={axialPanelRef}
+                className={panelBase}
+                {...bindCrosshairDrag("axial")}
+            >
                 <WebImageViewer
                     ref={axialRef}
                     imageUrls={axialUrls}
@@ -125,11 +256,20 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
                     onStatusChange={setAxialStatus}
                     {...viewerCommon}
                 />
+                <CrosshairOverlay
+                    {...axialCrosshair}
+                    horizontalColor={CORONAL_COLOR}
+                    verticalColor={SAGITTAL_COLOR}
+                />
                 <div className={PANEL_LABEL_STYLE}>AXIAL</div>
             </div>
 
             {/* CORONAL */}
-            <div className={panelBase}>
+            <div
+                ref={coronalPanelRef}
+                className={panelBase}
+                {...bindCrosshairDrag("coronal")}
+            >
                 <WebImageViewer
                     ref={coronalRef}
                     imageUrls={coronalUrls}
@@ -137,17 +277,31 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
                     onImageIndexChange={setCoronalIdx}
                     {...viewerCommon}
                 />
+                <CrosshairOverlay
+                    {...coronalCrosshair}
+                    horizontalColor={AXIAL_COLOR}
+                    verticalColor={SAGITTAL_COLOR}
+                />
                 <div className={PANEL_LABEL_STYLE}>CORONAL</div>
             </div>
 
             {/* SAGITTAL */}
-            <div className={panelBase}>
+            <div
+                ref={sagittalPanelRef}
+                className={panelBase}
+                {...bindCrosshairDrag("sagittal")}
+            >
                 <WebImageViewer
                     ref={sagittalRef}
                     imageUrls={sagittalUrls}
                     currentImageIndex={sagittalIdx}
                     onImageIndexChange={setSagittalIdx}
                     {...viewerCommon}
+                />
+                <CrosshairOverlay
+                    {...sagittalCrosshair}
+                    horizontalColor={AXIAL_COLOR}
+                    verticalColor={CORONAL_COLOR}
                 />
                 <div className={PANEL_LABEL_STYLE}>SAGITTAL</div>
             </div>

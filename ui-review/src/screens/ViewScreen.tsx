@@ -99,7 +99,6 @@ type LayoutSpec = {
     containerClassName: string;
     panels: Record<PanelId, string>;
 };
-type PseudoColorMode = "灰阶" | "Hot Iron" | "PET" | "Spectrum" | "Bone" | "Rainbow" | "Blue-Orange";
 type FourDBrowseMode = "phase" | "slice";
 
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
@@ -125,10 +124,7 @@ const cleanOverlayText = (value?: string) => {
 
 const DEFAULT_PANEL_CLASS = "relative overflow-hidden bg-black";
 const HIDDEN_PANEL_CLASS = "hidden";
-const PSEUDO_COLOR_OPTIONS: PseudoColorMode[] = ["灰阶", "Hot Iron", "PET", "Spectrum", "Bone", "Rainbow", "Blue-Orange"];
 const FOUR_D_PHASE_LABELS = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"];
-
-// (Pseudo-color logic removed)
 
 const LAYOUT_SPECS: Record<string, LayoutSpec> = {
     "多平面重建": {
@@ -262,6 +258,9 @@ const ViewScreen = () => {
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
+    const [selectedSliceCinePhases, setSelectedSliceCinePhases] = useState<number[]>(
+        () => FOUR_D_PHASE_LABELS.map((_, idx) => idx)
+    );
     // 4D browsing cine (separate from slice-playback isPlaying)
     const [isFourDBrowsePlaying, setIsFourDBrowsePlaying] = useState(false);
     const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("phase");
@@ -350,11 +349,9 @@ const ViewScreen = () => {
 
     const [selectedLayout, setSelectedLayout] = useState("三维四窗");
     const [selectedRenderMode, setSelectedRenderMode] = useState("MPR");
-    const [selectedPseudoColor, setSelectedPseudoColor] = useState<PseudoColorMode>("灰阶");
     const [isBrowseModeOpen, setIsBrowseModeOpen] = useState(false);
     const [isLayoutOpen, setIsLayoutOpen] = useState(false);
     const [isRenderModeOpen, setIsRenderModeOpen] = useState(false);
-    const [isPseudoColorOpen, setIsPseudoColorOpen] = useState(false);
     const currentLayoutSpec = useMemo(
         () => LAYOUT_SPECS[selectedLayout] ?? LAYOUT_SPECS["三维四窗"],
         [selectedLayout]
@@ -523,6 +520,15 @@ const ViewScreen = () => {
     void currentLayoutSpec;
     const viewportContainerClassName =
         "flex-1 min-w-0 flex overflow-hidden bg-[#0F172A]";
+    const isMprViewActive = !isTopogramSeries && imageMode === "3D";
+    const isFourDMprViewActive = isMprViewActive && isFourDLungReconSeries;
+    const isToolSupportedInCurrentView = (mode: "pan" | "wl" | "measure" | "annotate" | "eraser") => {
+        if (!isMprViewActive) return true;
+        if (isFourDMprViewActive) {
+            return mode === "pan" || mode === "wl";
+        }
+        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "eraser";
+    };
 
 
 
@@ -542,6 +548,7 @@ const ViewScreen = () => {
 
     useEffect(() => {
         setSelectedPhaseIndex(0);
+        setSelectedSliceCinePhases(FOUR_D_PHASE_LABELS.map((_, idx) => idx));
         setIsFourDBrowsePlaying(false);
         setFourDBrowseMode("phase");
         setSliceCineTick(0);
@@ -560,6 +567,19 @@ const ViewScreen = () => {
         if (!isTopogramSeries) return;
         setImageMode("2D");
     }, [isTopogramSeries]);
+
+    useEffect(() => {
+        if (fourDBrowseMode !== "slice") return;
+        if (selectedSliceCinePhases.length === 0) return;
+        if (!selectedSliceCinePhases.includes(selectedPhaseIndex)) {
+            setSelectedPhaseIndex(selectedSliceCinePhases[0]);
+        }
+    }, [fourDBrowseMode, selectedPhaseIndex, selectedSliceCinePhases]);
+
+    useEffect(() => {
+        if (isToolSupportedInCurrentView(toolMode)) return;
+        setToolMode("pan");
+    }, [toolMode, isMprViewActive, isFourDMprViewActive]);
 
     // Load 4D manifest + preload each phase's first frame (mid axial) so
     // phase switches are instant after the initial warm.
@@ -619,9 +639,17 @@ const ViewScreen = () => {
         const intervalMs = 220 / phaseCineSpeed;
         const timer = window.setInterval(() => {
             setSliceCineTick((prev) => prev + 1);
+            if (selectedSliceCinePhases.length > 1) {
+                setSelectedPhaseIndex((prev) => {
+                    const currentIdx = selectedSliceCinePhases.indexOf(prev);
+                    const baseIdx = currentIdx >= 0 ? currentIdx : 0;
+                    const nextIdx = (baseIdx + 1) % selectedSliceCinePhases.length;
+                    return selectedSliceCinePhases[nextIdx];
+                });
+            }
         }, intervalMs);
         return () => window.clearInterval(timer);
-    }, [isFourDLungReconSeries, isFourDBrowsePlaying, phaseCineSpeed, fourDBrowseMode]);
+    }, [isFourDLungReconSeries, isFourDBrowsePlaying, phaseCineSpeed, fourDBrowseMode, selectedSliceCinePhases]);
 
     // Auto-select first series when session data loads (or series list changes)
     useEffect(() => {
@@ -1190,31 +1218,6 @@ const ViewScreen = () => {
                                         </div>
                                     )}
 
-                                    {/* Pseudo Color Dropdown */}
-                                    <div className="flex items-center gap-2 relative">
-                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">伪彩</span>
-                                        <div
-                                            onClick={() => setIsPseudoColorOpen(!isPseudoColorOpen)}
-                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isPseudoColorOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
-                                        >
-                                            <span className="text-[12px] font-medium text-[#37474F] truncate">{selectedPseudoColor}</span>
-                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isPseudoColorOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
-                                        </div>
-                                        {isPseudoColorOpen && (
-                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden max-h-[160px] overflow-y-auto">
-                                                {PSEUDO_COLOR_OPTIONS.map((opt) => (
-                                                    <div
-                                                        key={opt}
-                                                        onClick={() => { setSelectedPseudoColor(opt); setIsPseudoColorOpen(false); }}
-                                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedPseudoColor === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
-                                                    >
-                                                        {opt}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-
                                     {isFourDLungReconSeries && (
                                         <div className="flex items-center gap-2 relative">
                                             <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">模式</span>
@@ -1426,11 +1429,16 @@ const ViewScreen = () => {
                                 ];
                                 const titles = ["Pan", "WW/WL", "Measure", "Annotate", "Eraser"];
                                 const active = toolMode === mode;
+                                const supported = isToolSupportedInCurrentView(mode);
                                 return (
                                     <button
                                         key={mode}
                                         title={titles[i]}
-                                        onClick={() => setToolMode(mode)}
+                                        onClick={() => {
+                                            if (!supported) return;
+                                            setToolMode(mode);
+                                        }}
+                                        disabled={!supported}
                                         style={{
                                             width: "44px",
                                             height: "44px",
@@ -1439,11 +1447,12 @@ const ViewScreen = () => {
                                             alignItems: "center",
                                             justifyContent: "center",
                                             border: "none",
-                                            cursor: "pointer",
+                                            cursor: supported ? "pointer" : "not-allowed",
                                             transition: "all 0.15s ease",
                                             background: active ? "#3B82F6" : "transparent",
-                                            color: active ? "#ffffff" : "#94A3B8",
+                                            color: active ? "#ffffff" : supported ? "#94A3B8" : "#475569",
                                             boxShadow: active ? "0 0 15px rgba(59,130,246,0.55)" : "none",
+                                            opacity: supported ? 1 : 0.45,
                                         }}
                                     >
                                         {icons[i]}
@@ -1458,15 +1467,26 @@ const ViewScreen = () => {
                                     title: "Zoom In",
                                     icon: <ZoomIn size={20} strokeWidth={1.5} />,
                                     action: () => {
-                                        dicomViewerRef.current?.zoomIn();
-                                        // MPR: Cornerstone handles zoom via scroll/pinch internally
+                                        if (imageMode === "2D") {
+                                            dicomViewerRef.current?.zoomIn();
+                                        } else if (isFourDLungReconSeries) {
+                                            fourDGridRef.current?.zoomIn();
+                                        } else {
+                                            mprRef.current?.zoomIn();
+                                        }
                                     },
                                 },
                                 {
                                     title: "Zoom Out",
                                     icon: <ZoomOut size={20} strokeWidth={1.5} />,
                                     action: () => {
-                                        dicomViewerRef.current?.zoomOut();
+                                        if (imageMode === "2D") {
+                                            dicomViewerRef.current?.zoomOut();
+                                        } else if (isFourDLungReconSeries) {
+                                            fourDGridRef.current?.zoomOut();
+                                        } else {
+                                            mprRef.current?.zoomOut();
+                                        }
                                     },
                                 },
                                 {
@@ -1475,6 +1495,8 @@ const ViewScreen = () => {
                                     action: () => {
                                         if (imageMode === "2D") {
                                             dicomViewerRef.current?.fit();
+                                        } else if (isFourDLungReconSeries) {
+                                            fourDGridRef.current?.fit();
                                         } else {
                                             mprRef.current?.resetAll();
                                         }
@@ -1486,6 +1508,12 @@ const ViewScreen = () => {
                                     action: () => {
                                         if (imageMode === "2D") {
                                             dicomViewerRef.current?.reset();
+                                            setDisplayWw(defaultWindowRef.current.ww);
+                                            setDisplayWl(defaultWindowRef.current.wl);
+                                        } else if (isFourDLungReconSeries) {
+                                            fourDGridRef.current?.reset();
+                                            setWw(defaultWindowRef.current.ww);
+                                            setWl(defaultWindowRef.current.wl);
                                             setDisplayWw(defaultWindowRef.current.ww);
                                             setDisplayWl(defaultWindowRef.current.wl);
                                         } else {
@@ -1508,6 +1536,7 @@ const ViewScreen = () => {
                                     key={title}
                                     title={title}
                                     onClick={action}
+                                    disabled={false}
                                     style={{
                                         width: "44px",
                                         height: "44px",
@@ -1559,6 +1588,21 @@ const ViewScreen = () => {
                     currentPhaseIndex={selectedPhaseIndex}
                     onPhaseChange={(idx) => { setSelectedPhaseIndex(idx); }}
                     browseMode={fourDBrowseMode}
+                    selectedPhaseIndexes={selectedSliceCinePhases}
+                    onTogglePhaseSelection={(idx) => {
+                        setSelectedSliceCinePhases((prev) => {
+                            const exists = prev.includes(idx);
+                            if (exists) {
+                                if (prev.length === 1) return prev;
+                                const next = prev.filter((value) => value !== idx);
+                                if (selectedPhaseIndex === idx) {
+                                    setSelectedPhaseIndex(next[0]);
+                                }
+                                return next;
+                            }
+                            return [...prev, idx].sort((a, b) => a - b);
+                        });
+                    }}
                     isPlaying={isFourDBrowsePlaying}
                     onTogglePlay={() => setIsFourDBrowsePlaying((v) => !v)}
                     speed={phaseCineSpeed}
@@ -1615,6 +1659,8 @@ function PhaseTimelineBar(props: {
     currentPhaseIndex: number;
     onPhaseChange: (idx: number) => void;
     browseMode: FourDBrowseMode;
+    selectedPhaseIndexes: number[];
+    onTogglePhaseSelection: (idx: number) => void;
     isPlaying: boolean;
     onTogglePlay: () => void;
     speed: PhaseCineSpeed;
@@ -1625,6 +1671,7 @@ function PhaseTimelineBar(props: {
     const {
         phaseLabels, currentPhaseIndex, onPhaseChange,
         browseMode,
+        selectedPhaseIndexes, onTogglePhaseSelection,
         isPlaying, onTogglePlay,
         speed, onSpeedChange,
         loopMode, onLoopModeChange,
@@ -1709,10 +1756,16 @@ function PhaseTimelineBar(props: {
                     <div className="relative flex-1 flex justify-between">
                         {phaseLabels.map((label, idx) => {
                             const active = idx === currentPhaseIndex;
+                            const selected = selectedPhaseIndexes.includes(idx);
                             return (
                                 <button
                                     key={label}
-                                    onClick={() => onPhaseChange(idx)}
+                                    onClick={() => {
+                                        if (browseMode === "slice") {
+                                            onTogglePhaseSelection(idx);
+                                        }
+                                        onPhaseChange(idx);
+                                    }}
                                     className="group relative flex flex-col items-center gap-0.5"
                                     title={`相位 ${label}`}
                                 >
@@ -1720,10 +1773,25 @@ function PhaseTimelineBar(props: {
                                         className={`h-3 w-3 rounded-full border-2 transition-all ${
                                             active
                                                 ? "bg-[#4D94FF] border-white shadow-[0_0_8px_rgba(77,148,255,0.6)] scale-125"
-                                                : "bg-white border-[#B0C4DE] group-hover:border-[#4D94FF]"
+                                                : selected && browseMode === "slice"
+                                                    ? "bg-[#DBEAFE] border-[#4D94FF] group-hover:border-[#2563EB]"
+                                                    : "bg-white border-[#B0C4DE] group-hover:border-[#4D94FF]"
                                         }`}
                                     />
-                                    <span className={`text-[8px] font-black tabular-nums ${active ? "text-[#4D94FF]" : "text-[#94A3B8] group-hover:text-[#4D94FF]"}`}>
+                                    {browseMode === "slice" && (
+                                        <span
+                                            className={`absolute -top-1.5 right-0 h-2.5 w-2.5 rounded-full border border-white ${
+                                                selected ? "bg-[#4D94FF]" : "bg-white"
+                                            }`}
+                                        />
+                                    )}
+                                    <span className={`text-[8px] font-black tabular-nums ${
+                                        active
+                                            ? "text-[#4D94FF]"
+                                            : selected && browseMode === "slice"
+                                                ? "text-[#2563EB] group-hover:text-[#1D4ED8]"
+                                                : "text-[#94A3B8] group-hover:text-[#4D94FF]"
+                                    }`}>
                                         {label}
                                     </span>
                                 </button>

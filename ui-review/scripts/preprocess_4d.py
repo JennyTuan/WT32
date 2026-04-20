@@ -28,6 +28,11 @@ QUALITY = 82      # WebP quality
 
 PHASE_RE = re.compile(r"Gated\s+(\d+\.\d+)A")
 INT_SUFFIX_RE = re.compile(r"-\d+$")  # raw series end with plain integer, e.g. "-29193"
+AGGREGATE_DIR_NAMES = {
+    "MIP": "mip",
+    "MinIP": "min",
+    "Avg": "avg",
+}
 
 
 def find_phase_dirs(study_dir: Path) -> list[tuple[float, Path]]:
@@ -127,6 +132,26 @@ def save_slices(
     return n
 
 
+def save_aggregate_volume(
+    vol_hu: np.ndarray,
+    out_root: Path,
+    dir_name: str,
+    target: int,
+    quality: int,
+) -> dict[str, int]:
+    """Save one aggregate volume under mip-itv/<dir_name>/<view>/."""
+    vol_u8 = hu_to_u8(vol_hu)
+    aggregate_out = out_root / dir_name
+    n_ax = save_slices(vol_u8, aggregate_out / "axial", axis=0, target=target, quality=quality)
+    n_co = save_slices(vol_u8, aggregate_out / "coronal", axis=1, target=target, quality=quality)
+    n_sa = save_slices(vol_u8, aggregate_out / "sagittal", axis=2, target=target, quality=quality)
+    return {
+        "axial": n_ax,
+        "coronal": n_co,
+        "sagittal": n_sa,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True, type=Path, help="Study dir with 10+ phase subfolders")
@@ -180,7 +205,7 @@ def main() -> int:
             slices_meta = {"axial": n_ax, "coronal": n_co, "sagittal": n_sa}
 
     # ── cross-phase MIP (ITV) ────────────────────────────────────────────────
-    print("\nComputing cross-phase MIP (ITV)...")
+    print("\nComputing cross-phase aggregates (ITV)...")
     shapes = [v.shape for _, v, _ in phase_volumes]
     if len(set(shapes)) > 1:
         minZ = min(s[0] for s in shapes)
@@ -193,15 +218,27 @@ def main() -> int:
     else:
         stacked = np.stack([v for _, v, _ in phase_volumes], axis=0)
 
-    mip_vol = stacked.max(axis=0)
-    mip_u8 = hu_to_u8(mip_vol)
+    aggregate_volumes = {
+        "MIP": stacked.max(axis=0),
+        "MinIP": stacked.min(axis=0),
+        "Avg": stacked.mean(axis=0),
+    }
     del stacked  # free ~1.5GB
 
     mip_out = out / "mip-itv"
-    n_mx = save_slices(mip_u8, mip_out / "axial",    axis=0, target=MIP_TARGET, quality=QUALITY)
-    n_mc = save_slices(mip_u8, mip_out / "coronal",  axis=1, target=MIP_TARGET, quality=QUALITY)
-    n_ms = save_slices(mip_u8, mip_out / "sagittal", axis=2, target=MIP_TARGET, quality=QUALITY)
-    print(f"  MIP saved: axial={n_mx}, coronal={n_mc}, sagittal={n_ms}")
+    aggregate_meta: dict[str, dict[str, dict[str, int]]] = {}
+    for mode_name, vol_hu in aggregate_volumes.items():
+        dir_name = AGGREGATE_DIR_NAMES[mode_name]
+        saved = save_aggregate_volume(vol_hu, mip_out, dir_name, target=MIP_TARGET, quality=QUALITY)
+        aggregate_meta[dir_name] = {
+            "axial": {"slices": saved["axial"], "width": MIP_TARGET, "height": MIP_TARGET},
+            "coronal": {"slices": saved["coronal"], "width": MIP_TARGET, "height": MIP_TARGET},
+            "sagittal": {"slices": saved["sagittal"], "width": MIP_TARGET, "height": MIP_TARGET},
+        }
+        print(
+            f"  {mode_name} saved: "
+            f"axial={saved['axial']}, coronal={saved['coronal']}, sagittal={saved['sagittal']}"
+        )
 
     # ── manifest ─────────────────────────────────────────────────────────────
     first_meta = phase_volumes[0][2]
@@ -215,11 +252,8 @@ def main() -> int:
             "coronal":  {"slices": slices_meta["coronal"],  "width": TARGET, "height": TARGET},
             "sagittal": {"slices": slices_meta["sagittal"], "width": TARGET, "height": TARGET},
         },
-        "mip": {
-            "axial":    {"slices": n_mx, "width": MIP_TARGET, "height": MIP_TARGET},
-            "coronal":  {"slices": n_mc, "width": MIP_TARGET, "height": MIP_TARGET},
-            "sagittal": {"slices": n_ms, "width": MIP_TARGET, "height": MIP_TARGET},
-        },
+        "mip": aggregate_meta["mip"],
+        "aggregates": aggregate_meta,
         "defaults": {"ww": WW, "wl": WL},
         "spacing": {
             "x": first_meta["pixel_spacing_x"],

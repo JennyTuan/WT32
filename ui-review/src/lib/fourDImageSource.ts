@@ -9,6 +9,8 @@
  */
 
 export type FourDView = "axial" | "coronal" | "sagittal";
+export type FourDAggregateMode = "MIP" | "MinIP" | "Avg";
+type FourDAggregateDir = "mip" | "min" | "avg";
 
 export interface FourDViewMeta {
     slices: number;
@@ -23,6 +25,7 @@ export interface FourDManifest {
     phase_values: number[];
     views: Record<FourDView, FourDViewMeta>;
     mip: Record<FourDView, FourDViewMeta>;
+    aggregates?: Partial<Record<FourDAggregateDir, Record<FourDView, FourDViewMeta>>>;
     defaults: { ww: number; wl: number };
     spacing: { x: number; y: number; z: number };
 }
@@ -58,8 +61,22 @@ export function getFourDImageUrl(phase: number, view: FourDView, slice1Based: nu
 }
 
 /** URL for the cross-phase MIP (ITV) image. */
-export function getFourDMipUrl(view: FourDView, slice1Based: number): string {
-    return `/dicom-4d/mip-itv/${view}/${pad3(slice1Based)}.webp`;
+function getAggregateDir(mode: FourDAggregateMode): FourDAggregateDir {
+    if (mode === "MinIP") return "min";
+    if (mode === "Avg") return "avg";
+    return "mip";
+}
+
+export function getFourDMipUrl(
+    view: FourDView,
+    slice1Based: number,
+    mode: FourDAggregateMode = "MIP",
+    useLegacyRoot = false,
+): string {
+    if (useLegacyRoot) {
+        return `/dicom-4d/mip-itv/${view}/${pad3(slice1Based)}.webp`;
+    }
+    return `/dicom-4d/mip-itv/${getAggregateDir(mode)}/${view}/${pad3(slice1Based)}.webp`;
 }
 
 /**
@@ -79,11 +96,18 @@ export function buildFourDImageUrls(
     return urls;
 }
 
-export function buildFourDMipUrls(manifest: FourDManifest, view: FourDView): string[] {
-    const count = manifest.mip[view].slices;
+export function buildFourDMipUrls(
+    manifest: FourDManifest,
+    view: FourDView,
+    mode: FourDAggregateMode = "MIP",
+): string[] {
+    const dir = getAggregateDir(mode);
+    const meta = manifest.aggregates?.[dir]?.[view] ?? manifest.mip[view];
+    const useLegacyRoot = !manifest.aggregates && mode === "MIP";
+    const count = meta.slices;
     const urls: string[] = new Array(count);
     for (let i = 0; i < count; i++) {
-        urls[i] = getFourDMipUrl(view, i + 1);
+        urls[i] = getFourDMipUrl(view, i + 1, mode, useLegacyRoot);
     }
     return urls;
 }

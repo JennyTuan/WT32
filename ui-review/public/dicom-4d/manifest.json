@@ -56,5 +56,58 @@
     "x": 0.9766,
     "y": 0.9766,
     "z": 3.0
+  },
+  "aggregates": {
+    "min": {
+      "axial": {
+        "slices": 142,
+        "width": 384,
+        "height": 384
+      },
+      "coronal": {
+        "slices": 512,
+        "width": 384,
+        "height": 384
+      },
+      "sagittal": {
+        "slices": 512,
+        "width": 384,
+        "height": 384
+      }
+    },
+    "avg": {
+      "axial": {
+        "slices": 142,
+        "width": 384,
+        "height": 384
+      },
+      "coronal": {
+        "slices": 512,
+        "width": 384,
+        "height": 384
+      },
+      "sagittal": {
+        "slices": 512,
+        "width": 384,
+        "height": 384
+      }
+    },
+    "mip": {
+      "axial": {
+        "slices": 142,
+        "width": 512,
+        "height": 512
+      },
+      "coronal": {
+        "slices": 512,
+        "width": 512,
+        "height": 512
+      },
+      "sagittal": {
+        "slices": 512,
+        "width": 512,
+        "height": 512
+      }
+    }
   }
 }

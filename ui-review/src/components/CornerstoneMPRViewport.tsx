@@ -19,6 +19,8 @@ import {
 } from '../lib/cornerstone/initCornerstone';
 
 export type CornerstoneMPRHandle = {
+  zoomIn: () => void;
+  zoomOut: () => void;
   resetAll: () => void;
   forceWindowLevel: (wc: number, ww: number) => void;
 };
@@ -45,6 +47,34 @@ function registerVolumeLoader() {
 
 const PANEL_LABEL_CLASS =
   'pointer-events-none absolute left-2 top-2 inline-flex h-[18px] items-center rounded-full border border-white/10 bg-black/55 px-2 text-[9px] font-black uppercase tracking-[0.18em] text-[#93C5FD] z-10';
+
+const CROSSHAIR_OVERLAY_CLASS = 'pointer-events-none absolute inset-0 z-[2]';
+
+const AXIAL_COLOR = '#EF4444';
+const CORONAL_COLOR = '#22C55E';
+const SAGITTAL_COLOR = '#FACC15';
+
+function CrosshairOverlay({
+  horizontalColor,
+  verticalColor,
+}: {
+  horizontalColor: string;
+  verticalColor: string;
+}) {
+  return (
+    <div className={CROSSHAIR_OVERLAY_CLASS}>
+      <div
+        className="absolute left-1/2 top-0 bottom-0 w-px -translate-x-1/2"
+        style={{ backgroundColor: verticalColor, boxShadow: `0 0 10px ${verticalColor}66` }}
+      />
+      <div
+        className="absolute top-1/2 left-0 right-0 h-px -translate-y-1/2"
+        style={{ backgroundColor: horizontalColor, boxShadow: `0 0 10px ${horizontalColor}66` }}
+      />
+      <div className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 bg-white/25" />
+    </div>
+  );
+}
 
 // Slab thickness (mm) used for the 4th panel in MIP / MinIP modes
 const SLAB_THICKNESS_MM = 150;
@@ -93,6 +123,26 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     }, [onStatusChange, status]);
 
     useImperativeHandle(ref, () => ({
+      zoomIn: () => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        allVpIds.forEach((id) => {
+          const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
+          if (!vp) return;
+          vp.setZoom(vp.getZoom() * 1.15);
+          vp.render();
+        });
+      },
+      zoomOut: () => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        allVpIds.forEach((id) => {
+          const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
+          if (!vp) return;
+          vp.setZoom(vp.getZoom() * 0.87);
+          vp.render();
+        });
+      },
       resetAll: () => {
         const engine = engineRef.current;
         if (!engine) return;
@@ -389,12 +439,21 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       >
         {/* ── Four panels ── */}
         <div ref={axialRef}    className={panelBase} style={{ minHeight: 0 }}>
+          {renderMode === 'MPR' && (
+            <CrosshairOverlay horizontalColor={CORONAL_COLOR} verticalColor={SAGITTAL_COLOR} />
+          )}
           <div className={PANEL_LABEL_CLASS}>Axial</div>
         </div>
         <div ref={coronalRef}  className={panelBase} style={{ minHeight: 0 }}>
+          {renderMode === 'MPR' && (
+            <CrosshairOverlay horizontalColor={AXIAL_COLOR} verticalColor={SAGITTAL_COLOR} />
+          )}
           <div className={PANEL_LABEL_CLASS}>Coronal</div>
         </div>
         <div ref={sagittalRef} className={panelBase} style={{ minHeight: 0 }}>
+          {renderMode === 'MPR' && (
+            <CrosshairOverlay horizontalColor={AXIAL_COLOR} verticalColor={CORONAL_COLOR} />
+          )}
           <div className={PANEL_LABEL_CLASS}>Sagittal</div>
         </div>
         <div ref={slabRef} className={panelBase} style={{ minHeight: 0 }}>
