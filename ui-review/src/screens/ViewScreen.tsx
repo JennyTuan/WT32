@@ -1186,17 +1186,6 @@ const ViewScreen = () => {
                             />
                             {isFourDLungReconSeries && (
                                 <>
-                                    {/* 顶部中央：呼吸相位主指示 pill */}
-                                    <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 z-20 flex items-center gap-2 rounded-full border border-[#2563EB]/50 bg-[#0F172A]/90 pl-2 pr-3 py-1 shadow-[0_4px_16px_rgba(37,99,235,0.25)] backdrop-blur-sm">
-                                        <div className={`h-2 w-2 rounded-full ${isPhaseCinePlaying ? "bg-[#34D399] shadow-[0_0_10px_rgba(52,211,153,0.95)] animate-pulse" : "bg-[#60A5FA]/60"}`} />
-                                        <span className="text-[8px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">呼吸相位</span>
-                                        <span className="text-[14px] font-black leading-none text-white tabular-nums">
-                                            {FOUR_D_PHASE_LABELS[selectedPhaseIndex]}
-                                        </span>
-                                        <span className="text-[9px] font-bold text-[#60A5FA]/70">
-                                            {selectedPhaseIndex + 1}/{FOUR_D_PHASE_LABELS.length}
-                                        </span>
-                                    </div>
                                     {/* 右下第 4 窗：跨相位 MIP/MinIP/Avg —— ITV 可视化 */}
                                     <div className="pointer-events-none absolute right-3 bottom-3 z-20 rounded-md border border-[#F59E0B]/50 bg-[#0F172A]/90 px-2.5 py-1.5 shadow-lg backdrop-blur-sm">
                                         <div className="flex items-baseline gap-1.5">
