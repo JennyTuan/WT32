@@ -29,6 +29,12 @@ import { FourDPhaseReviewModal } from "./FourDPhaseReviewModal";
 import { hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
+import FourDMprGrid, { type FourDMprGridHandle } from "../components/FourDMprGrid";
+import {
+    loadFourDManifest,
+    preloadPhaseFirstFrames,
+    type FourDManifest,
+} from "../lib/fourDImageSource";
 import {
     fetchSelectedScanSession,
     type ApiScanSessionDetail,
@@ -277,6 +283,12 @@ const ViewScreen = () => {
     const dicomViewerRef = useRef<DicomViewerHandle>(null);
     // Ref for the 3D MPR Cornerstone viewport
     const mprRef = useRef<CornerstoneMPRHandle>(null);
+    // Ref for the 4D pre-rendered MPR grid (used when isFourDLungReconSeries)
+    const fourDGridRef = useRef<FourDMprGridHandle>(null);
+
+    // ─── 4D manifest (pre-rendered WebP dataset) ───────────────────────────
+    const [fourDManifest, setFourDManifest] = useState<FourDManifest | null>(null);
+    const [fourDManifestError, setFourDManifestError] = useState<string | null>(null);
 
     // ─── Live clock ───────────────────────────────────────────────────────────
     const buildClock = () => {
@@ -536,6 +548,32 @@ const ViewScreen = () => {
         setSelectedLayout("多平面重建");
         setSelectedRenderMode("MPR");
     }, [isFourDLungReconSeries]);
+
+    // Load 4D manifest + preload each phase's first frame (mid axial) so
+    // phase switches are instant after the initial warm.
+    useEffect(() => {
+        if (!isFourDLungReconSeries) return;
+        if (fourDManifest || fourDManifestError) return;
+        let cancelled = false;
+        loadFourDManifest()
+            .then((m) => {
+                if (cancelled) return;
+                setFourDManifest(m);
+                // Apply baseline lung window from manifest
+                setWw(m.defaults.ww);
+                setWl(m.defaults.wl);
+                setDisplayWw(m.defaults.ww);
+                setDisplayWl(m.defaults.wl);
+                // Best-effort warm; ignore failure
+                preloadPhaseFirstFrames(m, "axial").catch(() => {});
+            })
+            .catch((err: Error) => {
+                if (!cancelled) setFourDManifestError(err.message);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isFourDLungReconSeries, fourDManifest, fourDManifestError]);
 
     // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
     // (clinical convention: cine cycles phases at a locked anatomical slice).
@@ -1170,20 +1208,47 @@ const ViewScreen = () => {
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
                     {imageMode === "3D" && (
                         <div className="relative flex-1 min-w-0 overflow-hidden">
-                            <CornerstoneMPRViewport
-                                ref={mprRef}
-                                imageUrls={seriesImageUrls}
-                                onStatusChange={setViewerLoadStatus}
-                                windowCenter={wl}
-                                windowWidth={ww}
-                                activeTool={mapCornerstoneTool(toolMode)}
-                                renderMode={selectedRenderMode as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
-                                onWindowLevelChange={(wc, wwidth) => {
-                                    setDisplayWl(Math.round(wc));
-                                    setDisplayWw(Math.round(wwidth));
-                                }}
-                                className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden"
-                            />
+                            {/* 4D entry: drive the grid from pre-rendered WebP stacks so
+                                the phase slider actually changes the image. */}
+                            {isFourDLungReconSeries && fourDManifest ? (
+                                <FourDMprGrid
+                                    ref={fourDGridRef}
+                                    manifest={fourDManifest}
+                                    phase={selectedPhaseIndex}
+                                    mipMode={phaseMipMode}
+                                    activeTool={mapCornerstoneTool(toolMode)}
+                                    windowCenter={wl}
+                                    windowWidth={ww}
+                                    onWindowLevelChange={(wc, wwidth) => {
+                                        setWl(Math.round(wc));
+                                        setWw(Math.round(wwidth));
+                                        setDisplayWl(Math.round(wc));
+                                        setDisplayWw(Math.round(wwidth));
+                                    }}
+                                    onStatusChange={setViewerLoadStatus}
+                                />
+                            ) : isFourDLungReconSeries && !fourDManifest ? (
+                                <div className="absolute inset-0 flex items-center justify-center text-xs text-white/70 bg-black">
+                                    {fourDManifestError
+                                        ? `4D 数据加载失败: ${fourDManifestError}`
+                                        : "正在加载 4D 影像数据…"}
+                                </div>
+                            ) : (
+                                <CornerstoneMPRViewport
+                                    ref={mprRef}
+                                    imageUrls={seriesImageUrls}
+                                    onStatusChange={setViewerLoadStatus}
+                                    windowCenter={wl}
+                                    windowWidth={ww}
+                                    activeTool={mapCornerstoneTool(toolMode)}
+                                    renderMode={selectedRenderMode as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
+                                    onWindowLevelChange={(wc, wwidth) => {
+                                        setDisplayWl(Math.round(wc));
+                                        setDisplayWw(Math.round(wwidth));
+                                    }}
+                                    className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden"
+                                />
+                            )}
                             {isFourDLungReconSeries && (
                                 <>
                                     {/* 右下第 4 窗：跨相位 MIP/MinIP/Avg —— ITV 可视化 */}
