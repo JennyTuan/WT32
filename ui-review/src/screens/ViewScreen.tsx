@@ -236,21 +236,17 @@ const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count /
 const ViewScreen = () => {
     const navigate = useNavigate();
     const location = useLocation();
-    const FOUR_D_RECON_MIN_LOADING_MS = 20000;
 
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
     const fourDState = location.state as FourDPostScanState | null;
     const isFourDEntry = !!fourDState?.scanResult;
 
-    /** "idle" → 非4D入口；"loading" → 模拟重建加载中；"review" → 相位审核弹窗；"done" → 审核完成 */
-    const [fourDStage, setFourDStage] = useState<"idle" | "loading" | "review" | "done">(
-        isFourDEntry ? "loading" : "idle"
-    );
+    /** "idle" → 非4D入口/等待图像加载；"review" → 相位审核弹窗；"done" → 审核完成 */
+    const [fourDStage, setFourDStage] = useState<"idle" | "review" | "done">("idle");
     const [viewerLoadStatus, setViewerLoadStatus] = useState<"loading" | "ready" | "error">(
         isFourDEntry ? "loading" : "ready"
     );
     const fourDReviewTriggeredRef = useRef(false);
-    const fourDLoadingStartedAtRef = useRef<number>(Date.now());
 
     // 4D 入口下，等图像浏览界面的真实加载完成后，再决定是否弹出相位审核
     useEffect(() => {
@@ -258,22 +254,14 @@ const ViewScreen = () => {
         if (fourDReviewTriggeredRef.current) return;
         if (viewerLoadStatus !== "ready") return;
 
-        const elapsed = Date.now() - fourDLoadingStartedAtRef.current;
-        const remaining = Math.max(0, FOUR_D_RECON_MIN_LOADING_MS - elapsed);
-
-        const timer = window.setTimeout(() => {
-            if (fourDReviewTriggeredRef.current) return;
-            fourDReviewTriggeredRef.current = true;
-            const scanResult = fourDState!.scanResult;
-            if (hasPhaseConflicts(scanResult)) {
-                setFourDStage("review");
-            } else {
-                setFourDStage("done");
-            }
-        }, remaining);
-
-        return () => window.clearTimeout(timer);
-    }, [FOUR_D_RECON_MIN_LOADING_MS, fourDState, isFourDEntry, viewerLoadStatus]);
+        fourDReviewTriggeredRef.current = true;
+        const scanResult = fourDState!.scanResult;
+        if (hasPhaseConflicts(scanResult)) {
+            setFourDStage("review");
+        } else {
+            setFourDStage("done");
+        }
+    }, [fourDState, isFourDEntry, viewerLoadStatus]);
 
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
@@ -1648,14 +1636,6 @@ const ViewScreen = () => {
                 </div>
             </footer>
 
-            {/* ── 4D 图像重建加载中 overlay ── */}
-            {fourDStage === "loading" && (
-                <FourDLoadingOverlay
-                    bedCount={fourDState!.scanResult.bedCount}
-                    phaseCount={fourDState!.scanResult.phaseCount}
-                />
-            )}
-
             {/* ── 4D 相位审核弹窗 ── */}
             {fourDStage === "review" && fourDState?.scanResult && (
                 <FourDPhaseReviewModal
@@ -1817,71 +1797,6 @@ function PhaseTimelineBar(props: {
                             );
                         })}
                     </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// ─── 4D 重建加载动画（内部组件） ────────────────────────────────────────────
-function FourDLoadingOverlay({ bedCount, phaseCount }: { bedCount: number; phaseCount: number }) {
-    const [progress, setProgress] = useState(0);
-
-    useEffect(() => {
-        const start = performance.now();
-        const duration = 19500; // 与外层最短 20s 基本一致，保留少量收尾余量
-
-        const tick = (now: number) => {
-            const p = Math.min((now - start) / duration, 1);
-            // Ease-out curve
-            setProgress(1 - Math.pow(1 - p, 3));
-            if (p < 1) requestAnimationFrame(tick);
-        };
-        const rafId = requestAnimationFrame(tick);
-        return () => cancelAnimationFrame(rafId);
-    }, []);
-
-    const stages = [
-        { label: "床位数据读取", done: progress > 0.25 },
-        { label: "呼吸相位分拣", done: progress > 0.55 },
-        { label: "回顾式图像重建", done: progress > 0.85 },
-    ];
-
-    return (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#0a1520]/85 backdrop-blur-[4px]">
-            <div className="flex flex-col items-center gap-6 rounded-2xl bg-[#0F1E30] border border-[#1E3A5F] px-12 py-10 shadow-2xl w-[420px]">
-                {/* 标题 */}
-                <div className="flex flex-col items-center gap-1">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-blue-400">4D CT</div>
-                    <div className="text-[20px] font-black text-white">图像重建中</div>
-                    <div className="text-[11px] text-slate-400">
-                        {bedCount} 个床位 · {phaseCount} 个呼吸相位
-                    </div>
-                </div>
-
-                {/* 进度条 */}
-                <div className="w-full">
-                    <div className="h-2 w-full rounded-full bg-[#1E3A5F] overflow-hidden">
-                        <div
-                            className="h-full rounded-full bg-[#4D94FF] transition-none"
-                            style={{ width: `${progress * 100}%` }}
-                        />
-                    </div>
-                    <div className="mt-2 text-right text-[11px] font-bold text-blue-300">
-                        {Math.round(progress * 100)}%
-                    </div>
-                </div>
-
-                {/* 阶段指示 */}
-                <div className="flex flex-col gap-2 w-full">
-                    {stages.map((s) => (
-                        <div key={s.label} className="flex items-center gap-3">
-                            <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${s.done ? "bg-green-400" : "bg-[#1E3A5F]"}`} />
-                            <span className={`text-[11px] font-bold ${s.done ? "text-green-400" : "text-slate-500"}`}>
-                                {s.label}
-                            </span>
-                        </div>
-                    ))}
                 </div>
             </div>
         </div>
