@@ -542,6 +542,7 @@ export default function FourDDiagnosticConfirmScreen() {
                                     onCropBoxChange={handleCropBoxChange}
                                     isScanning={scanStarted}
                                     revealY={scanProgress}
+                                    enableImageTools
                                 />
                             </div>
                         </div>

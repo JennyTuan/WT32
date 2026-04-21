@@ -17,6 +17,12 @@ import {
     Network,
     Siren,
     Zap,
+    Hand,
+    SlidersHorizontal,
+    ZoomIn,
+    ZoomOut,
+    Maximize2,
+    RotateCcw,
 } from "lucide-react";
 import { fetchSelectedScanSession, updateSelectedScanSessionHelicalParam } from "../lib/scanSession";
 import type { ApiScanSessionDetail } from "../lib/scanSession";
@@ -88,9 +94,16 @@ export interface FourDScoutViewportProps {
     onRectChange?: (rect: { x: number; y: number; width: number; height: number }) => void;
     isScanning?: boolean;
     revealY?: number; // 0 to 1
+    enableImageTools?: boolean;
 }
 
-export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, revealY = 1 }: FourDScoutViewportProps) {
+export function FourDScoutViewport({
+    onCropBoxChange,
+    onRectChange,
+    isScanning,
+    revealY = 1,
+    enableImageTools = false,
+}: FourDScoutViewportProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const projectionRef = useRef<Float32Array | null>(null);
@@ -102,9 +115,13 @@ export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, 
     const [windowWidth, setWindowWidth] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowWidth);
     const [windowLevel, setWindowLevel] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowLevel);
     const [isAdjustingWindow, setIsAdjustingWindow] = useState(false);
+    const [interactionMode, setInteractionMode] = useState<"wl" | "pan">("wl");
+    const [zoomScale, setZoomScale] = useState(1);
+    const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [cropBox, setCropBox] = useState({ x: 0.2, y: 0.18, width: 0.56, height: 0.48 });
 
     const dragStateRef = useRef<{ startX: number; startY: number; startWw: number; startWl: number } | null>(null);
+    const panDragStateRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
     const cropDragStateRef = useRef<{ handle: FourDDragHandle; startX: number; startY: number; initialBox: { x: number; y: number; width: number; height: number } } | null>(null);
 
     useEffect(() => {
@@ -215,12 +232,17 @@ export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, 
         ctx.save();
         ctx.imageSmoothingEnabled = true;
         ctx.filter = "contrast(1.12) brightness(0.94)";
-        const fitScale = Math.min(viewW / size.width, viewH / size.height), drawScale = fitScale * 0.98, drawW = size.width * drawScale, drawH = size.height * drawScale, x = (viewW - drawW) / 2, y = (viewH - drawH) / 2;
+        const fitScale = Math.min(viewW / size.width, viewH / size.height);
+        const drawScale = fitScale * 0.98 * zoomScale;
+        const drawW = size.width * drawScale;
+        const drawH = size.height * drawScale;
+        const x = (viewW - drawW) / 2 + panOffset.x;
+        const y = (viewH - drawH) / 2 + panOffset.y;
         
         ctx.drawImage(offscreen, x, y, drawW, drawH);
         
         ctx.restore();
-    }, [loadState, windowLevel, windowWidth, isScanning, revealY]);
+    }, [loadState, windowLevel, windowWidth, isScanning, revealY, panOffset.x, panOffset.y, zoomScale]);
 
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
@@ -239,12 +261,25 @@ export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, 
                 if (onRectChange) onRectChange(next);
                 return;
             }
+            if (panDragStateRef.current) {
+                const drag = panDragStateRef.current;
+                setPanOffset({
+                    x: drag.baseX + (e.clientX - drag.startX),
+                    y: drag.baseY + (e.clientY - drag.startY),
+                });
+                return;
+            }
             if (!isAdjustingWindow || !dragStateRef.current) return;
             const deltaX = e.clientX - dragStateRef.current.startX, deltaY = e.clientY - dragStateRef.current.startY;
             setWindowWidth(Math.min(1800, Math.max(80, dragStateRef.current.startWw + deltaX * 4)));
             setWindowLevel(Math.min(300, Math.max(-300, dragStateRef.current.startWl - deltaY * 2)));
         };
-        const handleMouseUp = () => { cropDragStateRef.current = null; dragStateRef.current = null; setIsAdjustingWindow(false); };
+        const handleMouseUp = () => {
+            cropDragStateRef.current = null;
+            dragStateRef.current = null;
+            panDragStateRef.current = null;
+            setIsAdjustingWindow(false);
+        };
         window.addEventListener("mousemove", handleMouseMove); window.addEventListener("mouseup", handleMouseUp);
         return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
     }, [isAdjustingWindow]);
@@ -254,10 +289,125 @@ export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, 
         cropDragStateRef.current = { handle, startX: e.clientX, startY: e.clientY, initialBox: cropBox };
     };
 
+    const resetImageTools = useCallback(() => {
+        setWindowWidth(metaRef.current?.ww ?? FOUR_D_SCOUT_SERIES.fallbackWindowWidth);
+        setWindowLevel(metaRef.current?.wl ?? FOUR_D_SCOUT_SERIES.fallbackWindowLevel);
+        setZoomScale(1);
+        setPanOffset({ x: 0, y: 0 });
+    }, []);
+
+    const handleViewportMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (loadState !== "ready") return;
+        if (!enableImageTools || interactionMode === "wl") {
+            dragStateRef.current = {
+                startX: e.clientX,
+                startY: e.clientY,
+                startWw: windowWidth,
+                startWl: windowLevel,
+            };
+            setIsAdjustingWindow(true);
+            return;
+        }
+        panDragStateRef.current = {
+            startX: e.clientX,
+            startY: e.clientY,
+            baseX: panOffset.x,
+            baseY: panOffset.y,
+        };
+    };
+
+    const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+        if (!enableImageTools || loadState !== "ready") return;
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        setZoomScale((prev) => clamp(prev * factor, 0.5, 3.5));
+    };
+
     return (
-        <div ref={viewportRef} onMouseDown={(e) => { if (loadState === "ready") { dragStateRef.current = { startX: e.clientX, startY: e.clientY, startWw: windowWidth, startWl: windowLevel }; setIsAdjustingWindow(true); } }} className="absolute inset-0 bg-black cursor-crosshair">
+        <div
+            ref={viewportRef}
+            onMouseDown={handleViewportMouseDown}
+            onWheel={handleWheel}
+            className={`absolute inset-0 bg-black ${enableImageTools && interactionMode === "pan" ? "cursor-grab" : "cursor-crosshair"}`}
+        >
             <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
             {loadState === "loading" && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#9FB2C5]">载入 DICOM 影像...</div>}
+            {enableImageTools && (
+                <div className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-md border border-[#B0C4DE]/60 bg-[#0F172A]/75 px-2 py-1 text-white shadow-md backdrop-blur-sm">
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setInteractionMode("pan");
+                        }}
+                        className={`h-7 w-7 rounded border flex items-center justify-center transition-colors ${
+                            interactionMode === "pan" ? "border-[#60A5FA] bg-[#1D4ED8]/70" : "border-white/25 hover:bg-white/15"
+                        }`}
+                        title="平移浏览"
+                    >
+                        <Hand size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setInteractionMode("wl");
+                        }}
+                        className={`h-7 w-7 rounded border flex items-center justify-center transition-colors ${
+                            interactionMode === "wl" ? "border-[#60A5FA] bg-[#1D4ED8]/70" : "border-white/25 hover:bg-white/15"
+                        }`}
+                        title="窗宽窗位"
+                    >
+                        <SlidersHorizontal size={14} />
+                    </button>
+                    <div className="mx-0.5 h-4 w-px bg-white/20" />
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setZoomScale((prev) => clamp(prev / 1.1, 0.5, 3.5));
+                        }}
+                        className="h-7 w-7 rounded border border-white/25 hover:bg-white/15 flex items-center justify-center"
+                        title="缩小"
+                    >
+                        <ZoomOut size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setZoomScale((prev) => clamp(prev * 1.1, 0.5, 3.5));
+                        }}
+                        className="h-7 w-7 rounded border border-white/25 hover:bg-white/15 flex items-center justify-center"
+                        title="放大"
+                    >
+                        <ZoomIn size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setZoomScale(1);
+                            setPanOffset({ x: 0, y: 0 });
+                        }}
+                        className="h-7 w-7 rounded border border-white/25 hover:bg-white/15 flex items-center justify-center"
+                        title="适配窗口"
+                    >
+                        <Maximize2 size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            resetImageTools();
+                        }}
+                        className="h-7 w-7 rounded border border-white/25 hover:bg-white/15 flex items-center justify-center"
+                        title="重置"
+                    >
+                        <RotateCcw size={14} />
+                    </button>
+                </div>
+            )}
             {loadState === "ready" && meta && (
                 <>
                     <div className="absolute border-2 border-[#4D94FF] bg-[#4D94FF]/8 pointer-events-auto" style={{ left: `${cropBox.x*100}%`, top: `${cropBox.y*100}%`, width: `${cropBox.width*100}%`, height: `${cropBox.height*100}%` }} onMouseDown={startCropDrag("move")}>
