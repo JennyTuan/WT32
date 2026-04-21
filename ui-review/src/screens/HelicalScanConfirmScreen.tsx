@@ -31,8 +31,8 @@ import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
 // ---------------------------------------------------------------------------
 const BREATHING_BED_POSITION_COUNT = 10;
 const FOUR_D_SCOUT_SERIES = {
-    basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
-    count: 118,
+    basePath: "/daae3df7f522b56724aed7e3e544c0fe/series-000001",
+    count: 5,
     fallbackWindowWidth: 350,
     fallbackWindowLevel: 45,
 };
@@ -118,7 +118,7 @@ export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, 
                     const batch = sliceNumbers.slice(start, start + concurrency);
                     const loadedBatch = await Promise.all(
                         batch.map(async (sliceNumber) => {
-                            const fileName = `1-${String(sliceNumber).padStart(3, "0")}.dcm`;
+                            const fileName = `image-${String(sliceNumber).padStart(6, "0")}.dcm`;
                             const response = await fetch(`${FOUR_D_SCOUT_SERIES.basePath}/${fileName}`);
                             if (!response.ok) throw new Error(`Failed to fetch ${fileName}`);
                             const arrayBuffer = await response.arrayBuffer();
@@ -310,7 +310,7 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
                 for (let start = 0; start < sliceNumbers.length; start += concurrency) {
                     const batch = sliceNumbers.slice(start, start + concurrency);
                     const batchResults = await Promise.all(batch.map(async (n) => {
-                        const fileName = `1-${String(n).padStart(3, "0")}.dcm`;
+                        const fileName = `image-${String(n).padStart(6, "0")}.dcm`;
                         const res = await fetch(`${FOUR_D_SCOUT_SERIES.basePath}/${fileName}`);
                         if (!res.ok) throw new Error("Fetch failed");
                         const ab = await res.arrayBuffer();
