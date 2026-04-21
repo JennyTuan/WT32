@@ -12,9 +12,25 @@ const RENDER_DURATION_MS = 2200;
 const SCOUT_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
     count: 118,
+    firstImageNumber: 1,
+    fileNamePrefix: "1-",
+    fileNamePadding: 3,
+    directImage: false,
     fallbackWindowWidth: 350,
     fallbackWindowLevel: 45,
 };
+const FOUR_D_SCOUT_SERIES = {
+    basePath: "/daae3df7f522b56724aed7e3e544c0fe/series-000002",
+    count: 1,
+    firstImageNumber: 2,
+    fileNamePrefix: "image-",
+    fileNamePadding: 6,
+    directImage: true,
+    fallbackWindowWidth: 500,
+    fallbackWindowLevel: 50,
+};
+
+type ScoutDicomSeries = typeof SCOUT_SERIES;
 
 type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "rendering" | "completed";
 
@@ -78,9 +94,11 @@ function clamp01(value: number) {
 function ScoutProjectionViewport({
     renderProgress,
     active,
+    series,
 }: {
     renderProgress: number;
     active: boolean;
+    series: ScoutDicomSeries;
 }) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -95,7 +113,7 @@ function ScoutProjectionViewport({
 
         const loadSlices = async () => {
             try {
-                const sliceNumbers = Array.from({ length: SCOUT_SERIES.count }, (_, index) => index + 1);
+                const sliceNumbers = Array.from({ length: series.count }, (_, index) => series.firstImageNumber + index);
                 const slices: LoadedSlice[] = [];
                 const concurrency = 8;
 
@@ -103,8 +121,8 @@ function ScoutProjectionViewport({
                     const batch = sliceNumbers.slice(start, start + concurrency);
                     const loadedBatch = await Promise.all(
                         batch.map(async (sliceNumber) => {
-                            const fileName = `1-${String(sliceNumber).padStart(3, "0")}.dcm`;
-                            const response = await fetch(`${SCOUT_SERIES.basePath}/${fileName}`);
+                            const fileName = `${series.fileNamePrefix}${String(sliceNumber).padStart(series.fileNamePadding, "0")}.dcm`;
+                            const response = await fetch(`${series.basePath}/${fileName}`);
                             if (!response.ok) {
                                 throw new Error(`Failed to fetch ${fileName}`);
                             }
@@ -156,8 +174,8 @@ function ScoutProjectionViewport({
                                 pixelSpacingX: pixelSpacing[1] || 1,
                                 sliceThickness: Number.isFinite(sliceThickness) && sliceThickness > 0 ? sliceThickness : 1,
                                 hu,
-                                ww: Number(dataSet.string("x00281051") ?? `${SCOUT_SERIES.fallbackWindowWidth}`),
-                                wl: Number(dataSet.string("x00281050") ?? `${SCOUT_SERIES.fallbackWindowLevel}`),
+                                ww: Number(dataSet.string("x00281051") ?? `${series.fallbackWindowWidth}`),
+                                wl: Number(dataSet.string("x00281050") ?? `${series.fallbackWindowLevel}`),
                                 kvp: dataSet.string("x00180060") ?? "120",
                                 mas: dataSet.string("x00181152") ?? "Auto",
                                 thickness: dataSet.string("x00180050") ?? "3.0 mm",
@@ -176,15 +194,15 @@ function ScoutProjectionViewport({
                             hu: slice.hu,
                         });
 
-                        if (!metaRef.current) {
-                            metaRef.current = {
-                                width: slice.cols,
-                                height: SCOUT_SERIES.count,
-                                ww: Number.isFinite(slice.ww) && slice.ww > 1 ? slice.ww : SCOUT_SERIES.fallbackWindowWidth,
-                                wl: Number.isFinite(slice.wl) ? slice.wl : SCOUT_SERIES.fallbackWindowLevel,
-                                kvp: slice.kvp,
-                                mas: slice.mas,
-                                thickness: slice.thickness,
+                            if (!metaRef.current) {
+                                metaRef.current = {
+                                    width: slice.cols,
+                                    height: series.directImage ? slice.rows : series.count,
+                                    ww: Number.isFinite(slice.ww) && slice.ww > 1 ? slice.ww : series.fallbackWindowWidth,
+                                    wl: Number.isFinite(slice.wl) ? slice.wl : series.fallbackWindowLevel,
+                                    kvp: slice.kvp,
+                                    mas: slice.mas,
+                                    thickness: slice.thickness,
                             };
                         }
                     });
@@ -197,41 +215,50 @@ function ScoutProjectionViewport({
 
                 const rows = slices[0].rows;
                 const cols = slices[0].cols;
-                const bandHalfHeight = Math.max(10, Math.floor(rows * 0.08));
-                const centerY = Math.floor(rows / 2);
-                const sampleStart = Math.max(0, centerY - bandHalfHeight);
-                const sampleEnd = Math.min(rows, centerY + bandHalfHeight);
-                const ww = metaRef.current?.ww ?? SCOUT_SERIES.fallbackWindowWidth;
-                const wl = metaRef.current?.wl ?? SCOUT_SERIES.fallbackWindowLevel;
+                const ww = metaRef.current?.ww ?? series.fallbackWindowWidth;
+                const wl = metaRef.current?.wl ?? series.fallbackWindowLevel;
                 const minVal = wl - ww / 2;
                 const maxVal = wl + ww / 2;
                 const range = Math.max(maxVal - minVal, 1);
-                const output = new Uint8ClampedArray(cols * slices.length);
+                const output = new Uint8ClampedArray(cols * (series.directImage ? rows : slices.length));
 
-                slices.forEach((slice, sliceIndex) => {
-                    for (let x = 0; x < cols; x += 1) {
-                        let accum = 0;
-                        let samples = 0;
-
-                        for (let y = sampleStart; y < sampleEnd; y += 1) {
-                            accum += slice.hu[y * cols + x];
-                            samples += 1;
-                        }
-
-                        const meanHu = accum / Math.max(samples, 1);
-                        const normalized = clamp01((meanHu - minVal) / range);
-                        const gray = Math.round(normalized * 255);
-                        output[sliceIndex * cols + x] = 255 - gray;
+                if (series.directImage) {
+                    const slice = slices[0];
+                    for (let index = 0; index < slice.hu.length; index += 1) {
+                        const normalized = clamp01((slice.hu[index] - minVal) / range);
+                        output[index] = Math.round(normalized * 255);
                     }
-                });
+                } else {
+                    const bandHalfHeight = Math.max(10, Math.floor(rows * 0.08));
+                    const centerY = Math.floor(rows / 2);
+                    const sampleStart = Math.max(0, centerY - bandHalfHeight);
+                    const sampleEnd = Math.min(rows, centerY + bandHalfHeight);
+
+                    slices.forEach((slice, sliceIndex) => {
+                        for (let x = 0; x < cols; x += 1) {
+                            let accum = 0;
+                            let samples = 0;
+
+                            for (let y = sampleStart; y < sampleEnd; y += 1) {
+                                accum += slice.hu[y * cols + x];
+                                samples += 1;
+                            }
+
+                            const meanHu = accum / Math.max(samples, 1);
+                            const normalized = clamp01((meanHu - minVal) / range);
+                            const gray = Math.round(normalized * 255);
+                            output[sliceIndex * cols + x] = 255 - gray;
+                        }
+                    });
+                }
 
                 if (cancelled) return;
 
                 projectionRef.current = output;
-                projectionSizeRef.current = { width: cols, height: slices.length };
+                projectionSizeRef.current = { width: cols, height: series.directImage ? rows : slices.length };
                 setMeta({
                     width: cols,
-                    height: slices.length,
+                    height: series.directImage ? rows : slices.length,
                     ww,
                     wl,
                     kvp: metaRef.current?.kvp ?? "120",
@@ -252,7 +279,7 @@ function ScoutProjectionViewport({
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [series]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -375,7 +402,9 @@ export default function ScoutExecuteScanScreen() {
     const [holdProgress, setHoldProgress] = useState(0);
     const [guideVisible, setGuideVisible] = useState(true);
     const [renderProgress, setRenderProgress] = useState(0);
-    const [postScoutScanType, setPostScoutScanType] = useState<PostScoutScanType>(DEFAULT_POST_SCOUT_SCAN_TYPE);
+    const [postScoutScanType, setPostScoutScanType] = useState<PostScoutScanType>(
+        () => resolvePostScoutScanTypeFromWorkflowPlans() ?? DEFAULT_POST_SCOUT_SCAN_TYPE
+    );
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
@@ -417,6 +446,7 @@ export default function ScoutExecuteScanScreen() {
 
     const postScoutAction = POST_SCOUT_SCAN_CONFIG[postScoutScanType];
     const isFourDScoutWorkflow = postScoutScanType === "4d";
+    const scoutResultSeries = isFourDScoutWorkflow ? FOUR_D_SCOUT_SERIES : SCOUT_SERIES;
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -560,7 +590,11 @@ export default function ScoutExecuteScanScreen() {
                         </div>
 
                         <div className={`absolute inset-0 transition-opacity duration-500 ${stage === "rendering" || stage === "completed" ? "opacity-100" : "opacity-0"}`}>
-                            <ScoutProjectionViewport renderProgress={renderProgress} active={stage === "rendering" || stage === "completed"} />
+                            <ScoutProjectionViewport
+                                renderProgress={renderProgress}
+                                active={stage === "rendering" || stage === "completed"}
+                                series={scoutResultSeries}
+                            />
                         </div>
                     </div>
                 </div>

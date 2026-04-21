@@ -31,10 +31,11 @@ import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
 // ---------------------------------------------------------------------------
 const BREATHING_BED_POSITION_COUNT = 10;
 const FOUR_D_SCOUT_SERIES = {
-    basePath: "/daae3df7f522b56724aed7e3e544c0fe/series-000001",
-    count: 5,
-    fallbackWindowWidth: 350,
-    fallbackWindowLevel: 45,
+    basePath: "/daae3df7f522b56724aed7e3e544c0fe/series-000002",
+    count: 1,
+    firstImageNumber: 2,
+    fallbackWindowWidth: 500,
+    fallbackWindowLevel: 50,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -110,7 +111,10 @@ export function FourDScoutViewport({ onCropBoxChange, onRectChange, isScanning, 
         let cancelled = false;
         const loadSlices = async () => {
             try {
-                const sliceNumbers = Array.from({ length: FOUR_D_SCOUT_SERIES.count }, (_, index) => index + 1);
+                const sliceNumbers = Array.from(
+                    { length: FOUR_D_SCOUT_SERIES.count },
+                    (_, index) => FOUR_D_SCOUT_SERIES.firstImageNumber + index
+                );
                 const slices: FourDLoadedSlice[] = [];
                 const concurrency = 8;
 
@@ -304,7 +308,10 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
         let cancelled = false;
         const load = async () => {
             try {
-                const sliceNumbers = Array.from({ length: FOUR_D_SCOUT_SERIES.count }, (_, i) => i + 1);
+                const sliceNumbers = Array.from(
+                    { length: FOUR_D_SCOUT_SERIES.count },
+                    (_, i) => FOUR_D_SCOUT_SERIES.firstImageNumber + i
+                );
                 const loadedSlices: FourDLoadedSlice[] = [];
                 const concurrency = 8;
                 for (let start = 0; start < sliceNumbers.length; start += concurrency) {

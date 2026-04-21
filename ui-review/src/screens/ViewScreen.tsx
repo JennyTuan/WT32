@@ -200,8 +200,28 @@ const REAL_LUNG_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
 };
 
-const getSeriesDicomUrl = (sliceIndex: number) =>
-    `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
+const REALISTIC_SCOUT_SERIES = {
+    seriesName: "scout",
+    count: 1,
+    firstImageNumber: 2,
+    rows: 1595,
+    cols: 888,
+    thickness: "870.0 mm",
+    kV: "120",
+    mAs: "N/A",
+    fov: "529.5 mm",
+    matrix: "888",
+    kernel: "LOCALIZER",
+    basePath: "/daae3df7f522b56724aed7e3e544c0fe/series-000002",
+};
+
+const getSeriesDicomUrl = (sliceIndex: number, seriesType?: SeriesType) => {
+    if (seriesType === "topogram") {
+        const imageNumber = REALISTIC_SCOUT_SERIES.firstImageNumber + sliceIndex;
+        return `${REALISTIC_SCOUT_SERIES.basePath}/image-${String(imageNumber).padStart(6, "0")}.dcm`;
+    }
+    return `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
+};
 
 const mapCornerstoneTool = (toolMode: "pan" | "wl" | "measure" | "annotate" | "eraser") => {
     if (toolMode === "wl") return "window";
@@ -406,17 +426,17 @@ const ViewScreen = () => {
                     series: [{
                         id: `${prefix}-topo`,
                         name: s.series_label || "定位像",
-                        count: REAL_LUNG_SERIES.count,
-                        kernel: "—",
-                        thickness: p ? `${p.scan_length} mm` : "—",
+                        count: REALISTIC_SCOUT_SERIES.count,
+                        kernel: REALISTIC_SCOUT_SERIES.kernel,
+                        thickness: REALISTIC_SCOUT_SERIES.thickness,
                         kV: p ? String(p.kv) : "—",
                         mAs: p ? String(p.ma) : "—",
                         fov: p ? `${p.fov} mm` : "—",
-                        matrix: "512",
+                        matrix: REALISTIC_SCOUT_SERIES.matrix,
                         seriesType: type,
-                        images: makeImages(REAL_LUNG_SERIES.count, `${prefix}-topo`),
-                        defaultWw: 1500,
-                        defaultWl: -600,
+                        images: makeImages(REALISTIC_SCOUT_SERIES.count, `${prefix}-topo`),
+                        defaultWw: 500,
+                        defaultWl: 50,
                     }],
                 });
             } else {
@@ -674,8 +694,8 @@ const ViewScreen = () => {
     }, [scanSession]);
 
     const seriesImageUrls = useMemo(
-        () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index)),
-        [totalSlices]
+        () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index, selectedSeries.seriesType)),
+        [selectedSeries.seriesType, totalSlices]
     );
     const handleSeriesSelect = useCallback((seriesId: string) => {
         const nextSeries = safeSeriesList.find((series) => series.id === seriesId);
@@ -828,11 +848,10 @@ const ViewScreen = () => {
     useEffect(() => {
         const loadSlice = async () => {
             try {
-                const fileName = `1-${String(clampSliceIndex(sliceIndex) + 1).padStart(3, "0")}.dcm`;
-                const url = `${REAL_LUNG_SERIES.basePath}/${fileName}`;
+                const url = getSeriesDicomUrl(clampSliceIndex(sliceIndex), selectedSeries.seriesType);
                 const response = await fetch(url);
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch ${fileName}`);
+                    throw new Error(`Failed to fetch ${url}`);
                 }
                 const arrayBuffer = await response.arrayBuffer();
                 const byteArray = new Uint8Array(arrayBuffer);
@@ -905,7 +924,7 @@ const ViewScreen = () => {
         };
 
         loadSlice();
-    }, [sliceIndex, selectedSeriesId, selectedSeries.name, clampSliceIndex]);
+    }, [sliceIndex, selectedSeriesId, selectedSeries.name, selectedSeries.seriesType, clampSliceIndex]);
 
     // (3D canvas renderCurrentSlice removed — now handled by CornerstoneMPRViewport)
 
