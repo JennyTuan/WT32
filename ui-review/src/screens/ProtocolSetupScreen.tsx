@@ -871,6 +871,15 @@ const fetchProtocolDetailWithFallback = async (protocolId: number) => {
     throw lastError ?? new Error(`Failed to load protocol ${protocolId}`);
 };
 
+const PositionIcon = ({ pos }: { pos: string }) => (
+    <img
+        src={`/positions/${pos}.png`}
+        alt={pos}
+        className="w-full h-full object-contain"
+        draggable={false}
+    />
+);
+
 const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps) => {
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
@@ -2477,7 +2486,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                     <ArrowLeftRight size={12} />
                                 </button>
                             </div>
-                            <div className="grid grid-cols-4 gap-3 h-[52px]">
+                            <div className="grid grid-cols-4 gap-2 h-[88px]">
                                 {(positionGroupIndex === 0
                                     ? (["HFS", "FFS", "HFP", "FFP"] as const)
                                     : (["HFDR", "FFDR", "HFDL", "FFDL"] as const)
@@ -2486,12 +2495,13 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                         key={pos}
                                         type="button"
                                         onClick={() => void handlePositioningChange(pos)}
-                                        className={`h-full rounded-md border-2 font-black text-[13px] shadow-sm transition-all flex items-center justify-center outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4D94FF]/20 ${activePositioning === pos
+                                        className={`h-full rounded-md border-2 shadow-sm transition-all flex flex-col items-center justify-center gap-1 outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4D94FF]/20 ${activePositioning === pos
                                             ? "bg-white border-[#4D94FF] text-[#4D94FF] ring-2 ring-[#4D94FF]/10"
                                             : "bg-white border-[#B0C4DE]/40 text-[#B0C4DE] hover:border-[#B0C4DE]"
                                             }`}
                                     >
-                                        {pos}
+                                        <PositionIcon pos={pos} />
+                                        <span className="font-black text-[12px] leading-none">{pos}</span>
                                     </button>
                                 ))}
                             </div>
