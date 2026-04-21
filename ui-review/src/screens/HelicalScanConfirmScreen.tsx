@@ -18,10 +18,8 @@ import {
     Siren,
     Zap,
     Hand,
-    SlidersHorizontal,
     ZoomIn,
     ZoomOut,
-    Maximize2,
     RotateCcw,
 } from "lucide-react";
 import { fetchSelectedScanSession, updateSelectedScanSessionHelicalParam } from "../lib/scanSession";
@@ -43,6 +41,27 @@ const FOUR_D_SCOUT_SERIES = {
     fallbackWindowWidth: 500,
     fallbackWindowLevel: 50,
 };
+
+function WindowLevelIcon({ size = 14 }: { size?: number }) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+        >
+            <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+            <path d="M12 6.25v11.5" />
+            <path d="M12 6.25a5.75 5.75 0 0 0 0 11.5" fill="currentColor" stroke="none" opacity="0.32" />
+            <path d="M12 6.25a5.75 5.75 0 0 1 0 11.5" />
+        </svg>
+    );
+}
 
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
@@ -333,19 +352,21 @@ export function FourDScoutViewport({
             <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
             {loadState === "loading" && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#9FB2C5]">载入 DICOM 影像...</div>}
             {enableImageTools && (
-                <div className="absolute right-0 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-lg border border-r-0 border-[#B0C4DE]/60 bg-[#0F172A]/78 px-1.5 py-2 text-white shadow-md backdrop-blur-sm">
+                <div className="absolute right-0 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-lg border border-r-0 border-[#334155] bg-[#0F172A]/92 px-1.5 py-2 shadow-md backdrop-blur-sm">
                     <button
                         type="button"
                         onClick={(e) => {
                             e.stopPropagation();
                             setInteractionMode("pan");
                         }}
-                        className={`h-8 w-8 rounded-md border flex items-center justify-center transition-colors ${
-                            interactionMode === "pan" ? "border-[#60A5FA] bg-[#1D4ED8]/70" : "border-white/25 hover:bg-white/15"
+                        className={`h-8 w-8 rounded-md flex items-center justify-center transition-colors ${
+                            interactionMode === "pan"
+                                ? "bg-[#3B82F6] text-white shadow-[0_0_12px_rgba(59,130,246,0.55)]"
+                                : "bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0]"
                         }`}
                         title="平移浏览"
                     >
-                        <Hand size={14} />
+                        <Hand size={14} strokeWidth={1.8} />
                     </button>
                     <button
                         type="button"
@@ -353,24 +374,26 @@ export function FourDScoutViewport({
                             e.stopPropagation();
                             setInteractionMode("wl");
                         }}
-                        className={`h-8 w-8 rounded-md border flex items-center justify-center transition-colors ${
-                            interactionMode === "wl" ? "border-[#60A5FA] bg-[#1D4ED8]/70" : "border-white/25 hover:bg-white/15"
+                        className={`h-8 w-8 rounded-md flex items-center justify-center transition-colors ${
+                            interactionMode === "wl"
+                                ? "bg-[#3B82F6] text-white shadow-[0_0_12px_rgba(59,130,246,0.55)]"
+                                : "bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0]"
                         }`}
                         title="窗宽窗位"
                     >
-                        <SlidersHorizontal size={14} />
+                        <WindowLevelIcon size={15} />
                     </button>
-                    <div className="my-0.5 h-px w-6 bg-white/20" />
+                    <div className="my-0.5 h-px w-6 bg-white/10" />
                     <button
                         type="button"
                         onClick={(e) => {
                             e.stopPropagation();
                             setZoomScale((prev) => clamp(prev / 1.1, 0.5, 3.5));
                         }}
-                        className="h-8 w-8 rounded-md border border-white/25 hover:bg-white/15 flex items-center justify-center"
+                        className="h-8 w-8 rounded-md bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0] flex items-center justify-center transition-colors"
                         title="缩小"
                     >
-                        <ZoomOut size={14} />
+                        <ZoomOut size={14} strokeWidth={1.8} />
                     </button>
                     <button
                         type="button"
@@ -378,22 +401,10 @@ export function FourDScoutViewport({
                             e.stopPropagation();
                             setZoomScale((prev) => clamp(prev * 1.1, 0.5, 3.5));
                         }}
-                        className="h-8 w-8 rounded-md border border-white/25 hover:bg-white/15 flex items-center justify-center"
+                        className="h-8 w-8 rounded-md bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0] flex items-center justify-center transition-colors"
                         title="放大"
                     >
-                        <ZoomIn size={14} />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setZoomScale(1);
-                            setPanOffset({ x: 0, y: 0 });
-                        }}
-                        className="h-8 w-8 rounded-md border border-white/25 hover:bg-white/15 flex items-center justify-center"
-                        title="适配窗口"
-                    >
-                        <Maximize2 size={14} />
+                        <ZoomIn size={14} strokeWidth={1.8} />
                     </button>
                     <button
                         type="button"
@@ -401,10 +412,10 @@ export function FourDScoutViewport({
                             e.stopPropagation();
                             resetImageTools();
                         }}
-                        className="h-8 w-8 rounded-md border border-white/25 hover:bg-white/15 flex items-center justify-center"
+                        className="h-8 w-8 rounded-md bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0] flex items-center justify-center transition-colors"
                         title="重置"
                     >
-                        <RotateCcw size={14} />
+                        <RotateCcw size={14} strokeWidth={1.8} />
                     </button>
                 </div>
             )}

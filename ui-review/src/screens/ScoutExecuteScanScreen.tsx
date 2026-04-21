@@ -9,6 +9,7 @@ import ScanConfirmScreen from "./ScanConfirmScreen";
 const HOLD_DURATION_MS = 3000;
 const EXPOSURE_DURATION_MS = 1200;
 const RENDER_DURATION_MS = 2200;
+const FOUR_D_AUTO_NEXT_STEP_DELAY_MS = 700;
 const SCOUT_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
     count: 118,
@@ -409,6 +410,7 @@ export default function ScoutExecuteScanScreen() {
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
     const exposureTimerRef = useRef<number | null>(null);
+    const autoNextTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -448,6 +450,21 @@ export default function ScoutExecuteScanScreen() {
     const isFourDScoutWorkflow = postScoutScanType === "4d";
     const scoutResultSeries = isFourDScoutWorkflow ? FOUR_D_SCOUT_SERIES : SCOUT_SERIES;
 
+    useEffect(() => {
+        if (!isFourDScoutWorkflow || stage !== "completed") return;
+
+        autoNextTimerRef.current = window.setTimeout(() => {
+            navigate(postScoutAction.route);
+        }, FOUR_D_AUTO_NEXT_STEP_DELAY_MS);
+
+        return () => {
+            if (autoNextTimerRef.current !== null) {
+                window.clearTimeout(autoNextTimerRef.current);
+                autoNextTimerRef.current = null;
+            }
+        };
+    }, [isFourDScoutWorkflow, navigate, postScoutAction.route, stage]);
+
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
             cancelAnimationFrame(rafRef.current);
@@ -460,6 +477,9 @@ export default function ScoutExecuteScanScreen() {
             clearHoldRaf();
             if (exposureTimerRef.current !== null) {
                 window.clearTimeout(exposureTimerRef.current);
+            }
+            if (autoNextTimerRef.current !== null) {
+                window.clearTimeout(autoNextTimerRef.current);
             }
         };
     }, []);

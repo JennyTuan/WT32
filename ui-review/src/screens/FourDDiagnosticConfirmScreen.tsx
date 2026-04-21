@@ -36,13 +36,15 @@ const FOURD_PARAMS = {
     mA: "215",
     kV: "120",
     rotationTime: "1.0",
-    collimation: "32×0.6",
+    focus: "Small",
     pitch: "0.500",
     fov: "500",
     phases: "10",
     acquisitionTime: "30 s",
     breathingMode: "自由呼吸",
     triggerThreshold: "50%",
+    ctdiVol: "40.95",
+    dlp: "1334.97",
 };
 
 type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "completed";
@@ -316,8 +318,10 @@ export default function FourDDiagnosticConfirmScreen() {
         { label: "mA", value: FOURD_PARAMS.mA, accent: true },
         { label: "KV", value: FOURD_PARAMS.kV, accent: true },
         { label: "旋转时间", value: FOURD_PARAMS.rotationTime, accent: true },
-        { label: "准直", value: FOURD_PARAMS.collimation, accent: false },
+        { label: "焦点", value: FOURD_PARAMS.focus, accent: true },
         { label: "FOV", value: dynamicParams.fov.toString(), accent: true },
+        { label: "CTDIvol", value: FOURD_PARAMS.ctdiVol, unit: "mGy", accent: false, dose: true },
+        { label: "DLP", value: FOURD_PARAMS.dlp, unit: "mGy·cm", accent: false, dose: true },
     ];
 
     const currentBedDisplay = scanCompleted ? bedSegmentCount : scanStarted ? Math.max(1, bedProgress) : 0;
@@ -325,7 +329,7 @@ export default function FourDDiagnosticConfirmScreen() {
     const waveformExposureX = Math.max(0, Math.min(800 - waveformExposureWidth, scanProgress * (800 - waveformExposureWidth)));
 
     const renderSteps = (sequence: Sequence, isActiveSequence: boolean, isCompletedSequence: boolean) => (
-        <div className="flex flex-col ml-12 mt-2 gap-4 relative pb-4">
+        <div className="flex flex-col ml-12 mt-1.5 gap-2.5 relative pb-2.5">
             <div className="absolute left-[7px] top-2 bottom-6 w-[1px] bg-[#B0C4DE]" />
             {sequence.steps.map((step, idx) => {
                 const isCompleted = isCompletedSequence || (isActiveSequence && idx < activeStepIdx);
@@ -360,7 +364,7 @@ export default function FourDDiagnosticConfirmScreen() {
         onChange: (value: number) => void,
         unit = ""
     ) => (
-        <label className="block">
+        <label className="block rounded-md border border-[#DCE6F2] bg-white px-1.5 py-1 shadow-sm">
             <div className="mb-px flex items-center justify-between text-[8px] font-bold leading-none text-[#546E7A]">
                 <span className="tracking-tight">{label}</span>
                 <span className="font-mono text-[#37474F]">
@@ -374,7 +378,7 @@ export default function FourDDiagnosticConfirmScreen() {
                 step={step}
                 value={value}
                 onChange={(event) => onChange(Number(event.target.value))}
-                className="w-full accent-[#4D94FF] h-3"
+                className="h-3 w-full accent-[#4D94FF]"
             />
         </label>
     );
@@ -445,7 +449,12 @@ export default function FourDDiagnosticConfirmScreen() {
                         </button>
                     </div>
 
-                    <div className={`overflow-y-auto p-2 flex flex-col gap-0 transition-all duration-300 ${isTreeCollapsed ? "h-[48px] opacity-40 grayscale overflow-hidden" : "flex-1 min-h-0"}`}>
+                    <div className={`border-b border-[#EEF2F9] transition-all duration-300 ${isTreeCollapsed ? "h-[48px] opacity-40 grayscale overflow-hidden" : "h-[220px] shrink-0"}`}>
+                        <div className="flex items-center justify-between px-3 pt-2 pb-1">
+                            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#64748B]">扫描队列</span>
+                            <span className="text-[9px] font-bold text-[#94A3B8]">{groups.length} 组</span>
+                        </div>
+                        <div className="h-[calc(100%-28px)] overflow-y-auto px-2 pb-2 flex flex-col gap-0">
                         {groups.map((group) => (
                             <div key={group.id} className="flex flex-col">
                                 <div className="flex items-center gap-2 px-2 py-1.5 text-[#37474F] cursor-pointer hover:bg-[#EEF2F9] rounded-md transition-all">
@@ -500,33 +509,43 @@ export default function FourDDiagnosticConfirmScreen() {
                                 </div>
                             </div>
                         ))}
+                        </div>
                     </div>
 
-                    <div className="h-[220px] shrink-0 border-t border-[#EEF2F9] bg-[#F8FAFC] flex flex-col overflow-hidden">
-                        <div className="flex-1 p-2 pt-2 flex flex-col gap-2 overflow-y-auto">
+                    <div className="min-h-0 flex-1 bg-[#F8FAFC] flex flex-col overflow-hidden">
+                        <div className="flex items-center justify-between px-3 pt-2 pb-1 shrink-0">
+                            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#64748B]">扫描参数</span>
+                            <span className="text-[9px] font-bold text-[#94A3B8]">4D</span>
+                        </div>
+                        <div className="flex-1 px-2 pb-2 flex flex-col gap-2 overflow-y-auto overscroll-contain">
                             <div className="grid grid-cols-2 gap-2">
-                                {sidebarParams.map(({ label, value, accent }) => (
+                                {sidebarParams.map(({ label, value, accent, unit, dose }) => (
                                     <div
                                         key={label}
-                                        className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm ${
+                                        className={`min-h-[38px] p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm ${
+                                            dose ? "border-[#F59E0B]/30 bg-[#FFF7ED]" : "border-[#B0C4DE]/40"
+                                        } ${
                                             accent ? "group hover:border-[#4D94FF] cursor-pointer" : ""
                                         }`}
                                     >
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</span>
+                                        <span className={`text-[9px] font-black uppercase tracking-tighter ${dose ? "text-[#B45309]/70" : "text-[#90A4AE]"}`}>{label}</span>
                                         {accent ? (
                                             <div className="flex items-center gap-1 mt-[1px]">
                                                 <span className="text-[13px] font-black text-[#37474F]">{value}</span>
                                                 <ChevronDown size={9} className="text-[#90A4AE] group-hover:text-[#4D94FF]" />
                                             </div>
                                         ) : (
-                                            <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{value}</span>
+                                            <div className="mt-[1px] flex items-baseline gap-1">
+                                                <span className={`text-[13px] font-black ${dose ? "text-[#B45309]" : "text-[#37474F]"}`}>{value}</span>
+                                                {unit && <span className={`text-[8px] font-bold ${dose ? "text-[#B45309]/65" : "text-[#90A4AE]"}`}>{unit}</span>}
+                                            </div>
                                         )}
                                     </div>
                                 ))}
                             </div>
                         </div>
 
-                        <div className="p-2 flex justify-center shrink-0">
+                        <div className="px-2 pb-2 flex justify-center shrink-0">
                             <button className="h-[32px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
                                 <Info size={14} /> 参数详情
                             </button>
@@ -534,10 +553,10 @@ export default function FourDDiagnosticConfirmScreen() {
                     </div>
                 </aside>
 
-                <section className="flex-1 flex flex-col gap-2">
-                    <div className="min-h-0 flex-[1.05] overflow-hidden rounded-md border border-[#B0C4DE]/30 bg-[#16202B]">
-                        <div className="flex h-full bg-[#F8FAFC] relative">
-                            <div className="flex-1 relative overflow-hidden bg-black">
+                <section className="flex-1 min-w-0 flex flex-col overflow-hidden rounded-md border border-[#B0C4DE]/40 bg-white shadow-sm">
+                    <div className="min-h-0 flex-1 overflow-hidden bg-black">
+                        <div className="relative h-full">
+                            <div className="absolute inset-0 overflow-hidden bg-black">
                                 <FourDScoutViewport
                                     onCropBoxChange={handleCropBoxChange}
                                     isScanning={scanStarted}
@@ -548,26 +567,28 @@ export default function FourDDiagnosticConfirmScreen() {
                         </div>
                     </div>
 
-                    <div className="h-[220px] shrink-0 bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex overflow-hidden">
+                    <div className="h-px shrink-0 bg-[#B0C4DE]/70" />
+
+                    <div className="h-[150px] shrink-0 bg-white flex overflow-hidden">
                         <div className="flex-1 relative overflow-hidden">
-                            <div className="pointer-events-none absolute left-3 top-2 text-[9px] font-black tracking-[0.2em] text-[#475569] opacity-80 uppercase">
+                            <div className="pointer-events-none absolute left-3 top-1.5 text-[8px] font-black tracking-[0.18em] text-[#475569] opacity-80 uppercase">
                                 RESP SIGNAL MONITORING
                             </div>
 
-                            <div className="absolute right-3 top-2 flex gap-2 z-10">
+                            <div className="absolute right-2 top-1.5 flex gap-1.5 z-10">
                                 {[
                                     { label: "BPM", value: metrics.bpm },
                                     { label: "PEAK ERR", value: `${metrics.peakErr}%` },
                                     { label: "FREQ ERR", value: `${metrics.freqErr}%` },
                                 ].map(({ label, value }) => (
-                                    <div key={label} className="px-2 py-1 rounded bg-white shadow-sm border border-[#B0C4DE]/50 flex flex-col items-center min-w-[56px]">
-                                        <span className="text-[8px] font-black text-[#94A3B8] uppercase tracking-wider">{label}</span>
-                                        <span className="text-[12px] font-bold text-[#1E293B]">{value}</span>
+                                    <div key={label} className="px-1.5 py-0.5 rounded bg-white shadow-sm border border-[#B0C4DE]/50 flex flex-col items-center min-w-[50px]">
+                                        <span className="text-[7px] font-black text-[#94A3B8] uppercase tracking-wider">{label}</span>
+                                        <span className="text-[11px] font-bold text-[#1E293B] leading-tight">{value}</span>
                                     </div>
                                 ))}
                             </div>
 
-                            <div className="absolute inset-x-2 top-8 bottom-8 flex flex-col justify-between pointer-events-none opacity-20">
+                            <div className="absolute inset-x-2 top-6 bottom-6 flex flex-col justify-between pointer-events-none opacity-20">
                                 {[1100, 800, 500, 200, 0].map((value) => (
                                     <div key={value} className="flex items-center gap-2">
                                         <span className="text-[9px] w-7 text-right font-mono font-black text-[#64748B]">{value}</span>
@@ -576,7 +597,7 @@ export default function FourDDiagnosticConfirmScreen() {
                                 ))}
                             </div>
 
-                            <div className="absolute left-0 right-0 top-6 bottom-8 flex flex-col justify-end px-3">
+                            <div className="absolute left-0 right-0 top-5 bottom-6 flex flex-col justify-end px-3">
                                 <svg viewBox="0 0 800 120" className="w-full h-full overflow-visible" preserveAspectRatio="none">
                                     <defs>
                                         <linearGradient id="fourd-wave-fill" x1="0" y1="0" x2="0" y2="1">
@@ -618,15 +639,15 @@ export default function FourDDiagnosticConfirmScreen() {
                                 </svg>
                             </div>
 
-                            <div className="absolute inset-x-3 bottom-1 flex items-center gap-2">
+                            <div className="absolute inset-x-3 bottom-0.5 flex items-center gap-2">
                                 <span className="text-[8px] font-black text-[#475569] uppercase opacity-70 shrink-0">床位进度</span>
-                                <div className="flex flex-1 gap-1 items-end h-4">
+                                <div className="flex flex-1 gap-1 items-end h-3">
                                     {Array.from({ length: bedSegmentCount }, (_, index) => {
                                         const isCompletedSegment = scanCompleted || index < bedProgress;
                                         const isActiveSegment = scanStarted && !scanCompleted && index === bedProgress;
                                         return (
                                             <div key={index} className="flex-1 flex flex-col gap-0.5">
-                                                <div className={`h-2.5 w-full rounded-sm transition-all duration-500 ${
+                                                <div className={`h-1.5 w-full rounded-sm transition-all duration-500 ${
                                                     isCompletedSegment
                                                         ? "bg-[#3B82F6]"
                                                         : isActiveSegment
@@ -648,8 +669,8 @@ export default function FourDDiagnosticConfirmScreen() {
                             </div>
                         </div>
 
-                        <div className="w-[216px] shrink-0 border-l border-[#B0C4DE]/60 bg-[#F8FAFC] px-2 py-1.5 flex flex-col justify-between">
-                            <div className="space-y-1">
+                        <div className="w-[230px] shrink-0 border-l border-[#B0C4DE]/60 bg-[#F8FAFC] px-2 py-1 flex flex-col justify-center">
+                            <div className="grid grid-cols-2 gap-1">
                                 {renderControlSlider("最小间距", breathingControls.minSpacing, 0.5, 5, 0.1, (value) => {
                                     setBreathingControls((prev) => ({ ...prev, minSpacing: value }));
                                 }, " s")}
