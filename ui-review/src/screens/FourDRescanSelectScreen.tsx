@@ -2,11 +2,10 @@
  * FourDRescanSelectScreen - 4D 扫描后的重扫数据选择页面
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Flame,
@@ -31,78 +30,6 @@ const WAVEFORM_DURATION_SEC = 30;
 // 相位分箱数（临床标准 10 相位：0%=吸气末，50%=呼气末）
 const PHASE_BIN_COUNT = 10;
 
-interface BedTimelineProps {
-  bedCount: number;
-  rescanRange: [number, number];
-  choices: RescanChoices;
-  onBedClick: (bedIdx: number) => void;
-}
-
-function BedTimeline({ bedCount, rescanRange, choices, onBedClick }: BedTimelineProps) {
-  const [start, end] = rescanRange;
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-end gap-1">
-        {Array.from({ length: bedCount }, (_, bedIdx) => {
-          const inRescan = bedIdx >= start && bedIdx <= end;
-          const choice = choices[bedIdx];
-
-          return (
-            <div key={bedIdx} className="flex flex-1 flex-col items-center gap-1">
-              <button
-                type="button"
-                onClick={() => inRescan && onBedClick(bedIdx)}
-                disabled={!inRescan}
-                title={inRescan ? `床位 ${bedIdx + 1}：点击切换重扫选择` : `床位 ${bedIdx + 1}`}
-                className={`w-full rounded transition-all ${
-                  inRescan
-                    ? choice === "rescan"
-                      ? "h-[52px] cursor-pointer border-2 border-[#2563EB] bg-[#4D94FF] hover:brightness-110 active:scale-95"
-                      : "h-[52px] cursor-pointer border-2 border-[#D97706] bg-[#F59E0B] hover:brightness-110 active:scale-95"
-                    : "h-[44px] cursor-default border border-[#94A3B8] bg-[#CBD5E1]"
-                }`}
-              >
-                {inRescan && (
-                  <div className="flex h-full items-center justify-center">
-                    <div className="flex flex-col items-center leading-none text-white">
-                      <span className="text-[9px] font-black">
-                        {choice === "rescan" ? "采集 2" : "采集 1"}
-                      </span>
-                      <span className="mt-1 text-[8px] font-semibold opacity-90">
-                        {choice === "rescan" ? SECOND_ACQUISITION_EXPOSURE : FIRST_ACQUISITION_EXPOSURE}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </button>
-
-              <span className={`text-[9px] font-bold ${inRescan ? "text-slate-700" : "text-slate-400"}`}>
-                {bedIdx + 1}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="mt-1 flex items-center justify-center gap-4">
-        <div className="flex items-center gap-1.5">
-          <div className="h-3.5 w-3.5 rounded border border-[#94A3B8] bg-[#CBD5E1]" />
-          <span className="text-[10px] text-slate-500">正常单次采集</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="h-3.5 w-3.5 rounded border-2 border-[#D97706] bg-[#F59E0B]" />
-          <span className="text-[10px] text-slate-500">使用采集 1：{FIRST_ACQUISITION_EXPOSURE}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="h-3.5 w-3.5 rounded border-2 border-[#2563EB] bg-[#4D94FF]" />
-          <span className="text-[10px] text-slate-500">使用采集 2：{SECOND_ACQUISITION_EXPOSURE}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 interface BedTableProps {
   rescanRange: [number, number];
   choices: RescanChoices;
@@ -119,9 +46,7 @@ function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
         <thead>
           <tr className="bg-[#F1F5F9]">
             <th className="px-4 py-2.5 text-left font-bold text-slate-600">床位</th>
-            <th className="px-4 py-2.5 text-left font-bold text-slate-600">扫描位置范围</th>
-            <th className="px-4 py-2.5 text-center font-bold text-amber-600">采集 1（初扫 · {FIRST_ACQUISITION_EXPOSURE}）</th>
-            <th className="px-4 py-2.5 text-center font-bold text-[#4D94FF]">采集 2（重扫 · {SECOND_ACQUISITION_EXPOSURE}）</th>
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">起-止位置</th>
           </tr>
         </thead>
         <tbody>
@@ -131,42 +56,42 @@ function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
             const choice = choices[bedIdx];
 
             return (
-              <tr key={bedIdx} className="border-t border-slate-100 hover:bg-slate-50">
-                <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1}</td>
-                <td className="px-4 py-3 font-mono text-[11px] text-slate-500">
-                  {posStart} - {posEnd} mm
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <label className="inline-flex cursor-pointer items-center gap-2">
-                    <input
-                      type="radio"
-                      name={`bed-${bedIdx}`}
-                      checked={choice === "first"}
-                      onChange={() => onChange(bedIdx, "first")}
-                      className="h-4 w-4 accent-amber-500"
-                    />
-                    <span className={`font-bold ${choice === "first" ? "text-amber-600" : "text-slate-400"}`}>
-                      {choice === "first" && <CheckCircle2 size={12} className="mr-1 inline text-amber-500" />}
-                      采集 1：{FIRST_ACQUISITION_EXPOSURE}
-                    </span>
-                  </label>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <label className="inline-flex cursor-pointer items-center gap-2">
-                    <input
-                      type="radio"
-                      name={`bed-${bedIdx}`}
-                      checked={choice === "rescan"}
-                      onChange={() => onChange(bedIdx, "rescan")}
-                      className="h-4 w-4 accent-[#4D94FF]"
-                    />
-                    <span className={`font-bold ${choice === "rescan" ? "text-[#4D94FF]" : "text-slate-400"}`}>
-                      {choice === "rescan" && <CheckCircle2 size={12} className="mr-1 inline text-[#4D94FF]" />}
-                      采集 2：{SECOND_ACQUISITION_EXPOSURE}
-                    </span>
-                  </label>
-                </td>
-              </tr>
+              <Fragment key={bedIdx}>
+                <tr className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1} · 采集 1</td>
+                  <td className="px-4 py-3">
+                    <label className="inline-flex cursor-pointer items-center gap-2">
+                      <input
+                        type="radio"
+                        name={`bed-${bedIdx}`}
+                        checked={choice === "first"}
+                        onChange={() => onChange(bedIdx, "first")}
+                        className="h-4 w-4 accent-amber-500"
+                      />
+                      <span className={`font-mono text-[11px] font-semibold ${choice === "first" ? "text-amber-600" : "text-slate-500"}`}>
+                        {posStart} - {posEnd} mm（初扫 · {FIRST_ACQUISITION_EXPOSURE}）
+                      </span>
+                    </label>
+                  </td>
+                </tr>
+                <tr className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1} · 采集 2</td>
+                  <td className="px-4 py-3">
+                    <label className="inline-flex cursor-pointer items-center gap-2">
+                      <input
+                        type="radio"
+                        name={`bed-${bedIdx}`}
+                        checked={choice === "rescan"}
+                        onChange={() => onChange(bedIdx, "rescan")}
+                        className="h-4 w-4 accent-[#4D94FF]"
+                      />
+                      <span className={`font-mono text-[11px] font-semibold ${choice === "rescan" ? "text-[#4D94FF]" : "text-slate-500"}`}>
+                        {posStart} - {posEnd} mm（重扫 · {SECOND_ACQUISITION_EXPOSURE}）
+                      </span>
+                    </label>
+                  </td>
+                </tr>
+              </Fragment>
             );
           })}
         </tbody>
@@ -1017,25 +942,8 @@ export default function FourDRescanSelectScreen() {
     nextPointIdRef.current = initialWavePoints.length + 1;
   }, [initialWavePoints]);
 
-  const handleBulkSelect = (choice: "first" | "rescan") => {
-    if (!rescanRange) return;
-
-    const nextChoices: RescanChoices = {};
-    for (let bedIdx = rescanRange[0]; bedIdx <= rescanRange[1]; bedIdx += 1) {
-      nextChoices[bedIdx] = choice;
-    }
-    setChoices(nextChoices);
-  };
-
   const handleBedChange = (bedIdx: number, choice: "first" | "rescan") => {
     setChoices((prev) => ({ ...prev, [bedIdx]: choice }));
-  };
-
-  const handleBedClick = (bedIdx: number) => {
-    setChoices((prev) => ({
-      ...prev,
-      [bedIdx]: prev[bedIdx] === "rescan" ? "first" : "rescan",
-    }));
   };
 
   const handleWavePointMove = (id: number, t: number, value: number) => {
@@ -1063,7 +971,6 @@ export default function FourDRescanSelectScreen() {
   };
 
   const rescanCount = rescanRange ? rescanRange[1] - rescanRange[0] + 1 : 0;
-  const rescanSelectedCount = Object.values(choices).filter((choice) => choice === "rescan").length;
 
   const handleConfirm = () => {
     if (!scanResult) return;
@@ -1138,59 +1045,11 @@ export default function FourDRescanSelectScreen() {
         </div>
       </header>
 
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
-        <div className="flex items-center gap-3">
-          <AlertTriangle size={16} className="text-amber-500" />
-          <span className="text-[13px] font-bold text-slate-700">
-            床位 {rescanRange[0] + 1}-{rescanRange[1] + 1} 存在重扫重叠
-            <span className="ml-2 text-[11px] font-normal text-slate-400">
-              共 {rescanCount} 个床位存在两套采集数据，请为每个床位选择使用哪一套
-            </span>
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => handleBulkSelect("first")}
-            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-700 transition-colors hover:bg-amber-100"
-          >
-            全选采集 1
-          </button>
-          <button
-            type="button"
-            onClick={() => handleBulkSelect("rescan")}
-            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-bold text-[#4D94FF] transition-colors hover:bg-blue-100"
-          >
-            全选重扫
-          </button>
-
-        </div>
-      </div>
-
       <div className="flex flex-1 flex-col gap-5 overflow-auto px-6 py-5">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <div className="text-[12px] font-black text-slate-700">扫描床位总览</div>
-            <div className="text-[11px] text-slate-400">
-              总扫描长度 {scanResult.scanLength.toFixed(1)} mm · {bedCount} 个床位
-            </div>
-          </div>
-
-          <BedTimeline
-            bedCount={bedCount}
-            rescanRange={rescanRange}
-            choices={choices}
-            onBedClick={handleBedClick}
-          />
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
             <div className="text-[12px] font-black text-slate-700">重扫床位逐一选择</div>
-            <div className="text-[11px] text-slate-400">
-              已选重扫 {rescanSelectedCount}/{rescanCount} 个床位
-            </div>
+            <div className="text-[11px] text-slate-400">共 {rescanCount} 个床位</div>
           </div>
 
           <BedTable rescanRange={rescanRange} choices={choices} onChange={handleBedChange} />
