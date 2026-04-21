@@ -737,7 +737,7 @@ const ScoutScanScreen = ({
     // Waveform simulation state (increased buffer for longer period)
     const [rawWaveData, setRawWaveData] = useState<number[]>(new Array(500).fill(100));
     const [filteredWaveData, setFilteredWaveData] = useState<number[]>(new Array(500).fill(100));
-    const [metrics, setMetrics] = useState({ bpm: "14.8", peakErr: "1.7", freqErr: "1.9" });
+    const [metrics, setMetrics] = useState({ rawMainFreq: "0.25", bpm: "14.8", peakErr: "1.7", freqErr: "1.9" });
     const timerRef = useRef<number | null>(null);
     const tRef = useRef(0); // Persistent time counter to prevent resets on re-render
     const latestSignalValue = filteredWaveData[filteredWaveData.length - 1] ?? 0;
@@ -781,9 +781,10 @@ const ScoutScanScreen = ({
                     }
                     const baseBpm = (peakCount / 500) * 1200;
                     const bpm = Math.max(14.2, Math.min(15.8, baseBpm + (Math.random() - 0.5) * 0.2));
+                    const rawMainFreq = (bpm / 60).toFixed(2);
                     const peakErr = (1.2 + Math.random() * 0.6).toFixed(1);
                     const freqErr = (1.5 + Math.random() * 0.5).toFixed(1);
-                    setMetrics(() => ({ bpm: bpm.toFixed(1), peakErr, freqErr }));
+                    setMetrics(() => ({ rawMainFreq, bpm: bpm.toFixed(1), peakErr, freqErr }));
 
                     // Track peaks for stability check
                     if (latestPeakVal > 0 && isBreathingAcquisitionStep) {
@@ -857,7 +858,7 @@ const ScoutScanScreen = ({
 
         setRawWaveData(new Array(500).fill(100));
         setFilteredWaveData(new Array(500).fill(100));
-        setMetrics({ bpm: "14.8", peakErr: "1.7", freqErr: "1.9" });
+        setMetrics({ rawMainFreq: "0.25", bpm: "14.8", peakErr: "1.7", freqErr: "1.9" });
         tRef.current = 0;
     }, [bottomPanelMode]);
 
@@ -1303,13 +1304,9 @@ const ScoutScanScreen = ({
                             <div className="text-[10px] font-black text-[#90A4AE] uppercase tracking-wider px-0.5">呼吸参数</div>
                             <div className="grid grid-cols-2 gap-1.5 overflow-y-auto">
                                 {[
-                                    { label: "呼吸模式", value: "自由呼吸" },
-                                    { label: "采集相位", value: "10" },
-                                    { label: "采集时间", value: "30s" },
-                                    { label: "触发阈值", value: "50%" },
-                                    { label: "采集窗口", value: "30%" },
-                                    { label: "相位间隔", value: "0°" },
-                                    { label: "BPM", value: metrics.bpm },
+                                    { label: "原始数据主频率", value: `${metrics.rawMainFreq} Hz` },
+                                    { label: "峰值误差", value: `${metrics.peakErr}%` },
+                                    { label: "呼吸频率", value: `${metrics.bpm} BPM` },
                                     { label: "频率误差", value: `${metrics.freqErr}%` },
                                 ].map(({ label, value }) => (
                                     <div key={label} className="px-1.5 py-1 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
@@ -1409,11 +1406,11 @@ const ScoutScanScreen = ({
                                 </div>
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                                     <SliderField label="最小间距" min={0.5} max={5} step={0.1} value={breathingAcquisitionParams.minSpacing} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, minSpacing: v }))} />
-                                    <SliderField label="滤波阈值" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.filterThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, filterThreshold: v }))} />
+                                    <SliderField label="滤波范围" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.filterThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, filterThreshold: v }))} />
                                     <SliderField label="峰值阈值" min={0.5} max={2.5} step={0.05} value={breathingAcquisitionParams.peakThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, peakThreshold: v }))} />
                                     <SliderField label="谷值阈值" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.valleyThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, valleyThreshold: v }))} />
                                     <SliderField label="增益" min={0.5} max={3} step={0.1} value={breathingAcquisitionParams.gain} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, gain: v }))} />
-                                    <SliderField label="触发延迟(ms)" min={0} max={500} step={10} value={breathingAcquisitionParams.triggerDelay} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, triggerDelay: v }))} />
+                                    
                                 </div>
                             </div>
                             <div className="min-h-0 flex-1 bg-white rounded-md border border-[#B0C4DE]/40 shadow-inner p-3 relative overflow-hidden">
@@ -1725,10 +1722,6 @@ const ScoutScanScreen = ({
                                     </svg>
                                 </div>
 
-                                <div className="absolute right-4 top-4 rounded border border-[#B0C4DE]/50 bg-white p-2 shadow-xl z-10 scale-90">
-                                    <div className="text-[10px] font-bold text-[#546E7A]">实时数据</div>
-                                    <div className="text-[10px] text-[#90A4AE]">采样值 : {filteredWaveData[filteredWaveData.length - 1].toFixed(1)}</div>
-                                </div>
                             </div>
                         </div>
                     ) : (

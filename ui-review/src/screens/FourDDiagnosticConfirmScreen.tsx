@@ -661,7 +661,7 @@ export default function FourDDiagnosticConfirmScreen() {
                                 {renderControlSlider("增益", breathingControls.gain, 0.5, 3, 0.1, (value) => {
                                     setBreathingControls((prev) => ({ ...prev, gain: value }));
                                 })}
-                                {renderControlSlider("延迟", breathingControls.triggerDelay, 0, 500, 10, (value) => {
+                                {renderControlSlider("谷值阈", breathingControls.triggerDelay, 0, 500, 10, (value) => {
                                     setBreathingControls((prev) => ({ ...prev, triggerDelay: value }));
                                 }, " ms")}
                             </div>
