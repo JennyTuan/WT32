@@ -24,6 +24,7 @@ import {
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
+import { PatientConfirmationModal } from "./ScanConfirmScreen";
 
 const HOLD_DURATION_MS = 3000;
 const SCAN_DURATION_MS = 16000;
@@ -70,6 +71,7 @@ export default function FourDDiagnosticConfirmScreen() {
     const [laserActive, setLaserActive] = useState(false);
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
+    const [showPatientConfirm, setShowPatientConfirm] = useState(false);
     const [guideVisible, setGuideVisible] = useState(false);
 
     const [scanStage, setScanStage] = useState<ScanStage>("idle");
@@ -719,7 +721,7 @@ export default function FourDDiagnosticConfirmScreen() {
                                 handlePostScanNavigate();
                                 return;
                             }
-                            setGuideVisible(true);
+                            setShowPatientConfirm(true);
                         }}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md shadow-lg transition-all uppercase text-[13px] active:scale-95 ${
                             scanStarted
@@ -791,6 +793,28 @@ export default function FourDDiagnosticConfirmScreen() {
                     </div>
                 </div>
             </div>
+
+            <PatientConfirmationModal
+                isOpen={showPatientConfirm}
+                onClose={() => setShowPatientConfirm(false)}
+                onConfirm={() => {
+                    setShowPatientConfirm(false);
+                    setGuideVisible(true);
+                }}
+                patientData={selectedPatient ? {
+                    name: selectedPatient.name,
+                    age: selectedPatient.age,
+                    gender: selectedPatient.gender,
+                    idNumber: "--",
+                    patientId: selectedPatient.patientId,
+                    checkType: selectedPatient.checkType ?? "4D扫描",
+                } : undefined}
+                scanData={{
+                    ctdi: FOURD_PARAMS.ctdiVol,
+                    dlp: FOURD_PARAMS.dlp,
+                    protocol: "4D扫描",
+                }}
+            />
 
             {showAbortConfirm && (
                 <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-50">
