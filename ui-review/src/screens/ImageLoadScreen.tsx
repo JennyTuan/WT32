@@ -4,11 +4,6 @@ import {
   Info,
   AlertTriangle,
   ChevronRight,
-  MousePointer2,
-  Move,
-  Sun,
-  Pencil,
-  RotateCcw,
 } from "lucide-react";
 import { getFourDImageUrl } from "../lib/fourDImageSource";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
@@ -282,8 +277,8 @@ export default function ImageLoadScreen() {
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
           <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-[#B0C4DE] bg-black">
-            <div className="grid min-h-0 flex-1 grid-cols-2 gap-px bg-[#B0C4DE]">
-              <div className="min-h-0">
+            <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-px bg-[#B0C4DE]">
+              <div className="row-span-2 min-h-0">
                 <MprTile label="Coronal" rightLabel="H" accent="green">
                   <div className="relative h-full w-full bg-[#05090f]">
                     <FourDPreviewImage src={previewUrls.coronal} />
@@ -291,42 +286,21 @@ export default function ImageLoadScreen() {
                   </div>
                 </MprTile>
               </div>
-              <div className="grid min-h-0 grid-rows-2 gap-px">
-                <MprTile label="Sagittal" rightLabel="H" accent="red">
-                  <div className="relative h-full w-full bg-[#05090f]">
-                    <FourDPreviewImage src={previewUrls.sagittal} />
-                    <CrossHair />
-                    <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">A</div>
-                  </div>
-                </MprTile>
-                <MprTile label="Axial" rightLabel="A" accent="green">
-                  <div className="relative h-full w-full">
-                    <FourDPreviewImage src={previewUrls.axial} />
-                    <CrossHair />
-                    <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">R</div>
-                  </div>
-                </MprTile>
-              </div>
+              <MprTile label="Sagittal" rightLabel="H" accent="red">
+                <div className="relative h-full w-full bg-[#05090f]">
+                  <FourDPreviewImage src={previewUrls.sagittal} />
+                  <CrossHair />
+                  <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">A</div>
+                </div>
+              </MprTile>
+              <MprTile label="Axial" rightLabel="A" accent="green">
+                <div className="relative h-full w-full">
+                  <FourDPreviewImage src={previewUrls.axial} />
+                  <CrossHair />
+                  <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">R</div>
+                </div>
+              </MprTile>
             </div>
-
-            <aside className="flex w-[48px] shrink-0 flex-col items-center gap-1 border-l border-[#B0C4DE] bg-[#0F172A] py-2">
-              {[MousePointer2, Move, Sun, Pencil, RotateCcw].map((Icon, i) => {
-                const active = i === 0;
-                return (
-                  <button
-                    key={i}
-                    className="flex h-9 w-9 items-center justify-center rounded-[8px] transition-all"
-                    style={{
-                      background: active ? "#3B82F6" : "transparent",
-                      color: active ? "#ffffff" : "#94A3B8",
-                      boxShadow: active ? "0 0 12px rgba(59,130,246,0.55)" : "none",
-                    }}
-                  >
-                    <Icon size={16} strokeWidth={1.5} />
-                  </button>
-                );
-              })}
-            </aside>
           </div>
         </section>
       </div>
