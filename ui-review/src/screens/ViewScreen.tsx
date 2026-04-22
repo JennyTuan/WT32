@@ -24,7 +24,7 @@ import {
 import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import { FourDPhaseReviewModal } from "./FourDPhaseReviewModal";
-import { generateMockScanResult, hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
+import { hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
 import FourDMprGrid, { type FourDMprGridHandle } from "../components/FourDMprGrid";
@@ -319,6 +319,7 @@ const ViewScreen = () => {
     const [fourDManifest, setFourDManifest] = useState<FourDManifest | null>(null);
     const [fourDManifestError, setFourDManifestError] = useState<string | null>(null);
     const [sliceLoadingCount, setSliceLoadingCount] = useState(0);
+    const [isSliceLoadingInline, setIsSliceLoadingInline] = useState(shouldShowSliceLoadingBridge);
 
     // ─── Live clock ───────────────────────────────────────────────────────────
     const buildClock = () => {
@@ -628,6 +629,10 @@ const ViewScreen = () => {
     }, [isFourDLungReconSeries, isFourDEntryLoadingFlow, fourDManifest, fourDManifestError]);
 
     useEffect(() => {
+        setIsSliceLoadingInline(shouldShowSliceLoadingBridge);
+    }, [shouldShowSliceLoadingBridge]);
+
+    useEffect(() => {
         if (!shouldShowSliceLoadingBridge || !fourDManifest) return;
         const totalSlices = fourDManifest.views.axial.slices;
         setSliceLoadingCount(0);
@@ -637,19 +642,13 @@ const ViewScreen = () => {
             if (current >= totalSlices) {
                 window.clearInterval(timer);
                 setSliceLoadingCount(totalSlices);
-                navigate("/image-load", {
-                    state: {
-                        ...(fourDState ?? { scanResult: generateMockScanResult(9, 10, 165.0) }),
-                        showSliceLoadingBeforeImageLoad: false,
-                    } as FourDPostScanState,
-                    replace: true,
-                });
+                setIsSliceLoadingInline(false);
                 return;
             }
             setSliceLoadingCount(current);
         }, 28);
         return () => window.clearInterval(timer);
-    }, [fourDManifest, fourDState, navigate, shouldShowSliceLoadingBridge]);
+    }, [fourDManifest, shouldShowSliceLoadingBridge]);
 
     // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
     // (clinical convention: cine cycles phases at a locked anatomical slice).
@@ -1530,7 +1529,9 @@ const ViewScreen = () => {
                             </div>
                             <div className="absolute top-2 right-2 text-[10px] text-[#CFD8DC] font-mono text-right leading-[1.35] pointer-events-none">
                                 <div className="font-bold">{meta.seriesDescription}</div>
-                                <div>Image {sliceIndex + 1}/{selectedSeries.count}</div>
+                                <div>
+                                    Image {isSliceLoadingInline ? Math.max(1, sliceLoadingCount) : sliceIndex + 1}/{selectedSeries.count}
+                                </div>
                                 <div>KV {meta.kvp} | mAs {meta.mas}</div>
                             </div>
                             <div className="absolute bottom-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35] pointer-events-none">
@@ -1539,10 +1540,17 @@ const ViewScreen = () => {
                                 <div>{meta.rows > 0 ? `${meta.rows} × ${meta.cols}` : "—"}</div>
                             </div>
                             <div className="absolute bottom-2 right-2 text-[10px] text-[#CFD8DC] font-mono text-right leading-[1.35] pointer-events-none">
-                                <div>Slice {sliceIndex + 1}/{selectedSeries.count} | Thick {meta.thickness}</div>
+                                <div>
+                                    Slice {isSliceLoadingInline ? Math.max(1, sliceLoadingCount) : sliceIndex + 1}/{selectedSeries.count} | Thick {meta.thickness}
+                                </div>
                                 <div>Location {meta.sliceLocation}</div>
                                 <div>{meta.institution} | {meta.manufacturer}</div>
                             </div>
+                            {isSliceLoadingInline && (
+                                <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-[#4D94FF]/50 bg-[#081220]/85 px-3 py-1 text-[11px] font-bold text-[#BFDBFE] shadow-md">
+                                    正在重建图像 {Math.max(1, sliceLoadingCount)} / {selectedSeries.count}
+                                </div>
+                            )}
                         </section>
                     )}
                 </div>
@@ -1768,23 +1776,6 @@ const ViewScreen = () => {
                             {fourDManifestError}
                         </div>
                     )}
-                </div>
-            )}
-            {shouldShowSliceLoadingBridge && fourDManifest && (
-                <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center gap-6 bg-[#05070B] text-white pointer-events-auto">
-                    <div className="text-[12px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">
-                        4D Slice Loading
-                    </div>
-                    <div className="h-2 w-[460px] overflow-hidden rounded-full bg-white/10">
-                        <div
-                            className="h-full rounded-full bg-[#4D94FF] transition-all duration-100"
-                            style={{ width: `${(sliceLoadingCount / Math.max(1, fourDManifest.views.axial.slices)) * 100}%` }}
-                        />
-                    </div>
-                    <div className="text-[22px] font-black tracking-wide">
-                        {sliceLoadingCount} / {fourDManifest.views.axial.slices}
-                    </div>
-                    <div className="text-[12px] font-semibold text-slate-300">正在加载图像切片，请稍候…</div>
                 </div>
             )}
         </div>
