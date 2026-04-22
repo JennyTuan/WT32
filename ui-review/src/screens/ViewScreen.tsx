@@ -1329,18 +1329,6 @@ const ViewScreen = () => {
                                     className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden"
                                 />
                             )}
-                            {isFourDLungReconSeries && (
-                                <>
-                                    {/* 右下第 4 窗：跨相位 MIP/MinIP/Avg —— ITV 可视化 */}
-                                    <div className="pointer-events-none absolute right-3 bottom-3 z-20 rounded-md border border-[#F59E0B]/50 bg-[#0F172A]/90 px-2.5 py-1.5 shadow-lg backdrop-blur-sm">
-                                        <div className="flex items-baseline gap-1.5">
-                                            <span className="text-[8px] font-black uppercase tracking-[0.16em] text-[#FBBF24]">跨相位</span>
-                                            <span className="text-[13px] font-black leading-none text-white tabular-nums">{phaseMipMode}</span>
-                                        </div>
-                                        <div className="text-[8px] font-bold text-[#FBBF24]/80 mt-0.5">10 相位聚合 · ITV</div>
-                                    </div>
-                                </>
-                            )}
                         </div>
                     )}
                     {/* ── 2D mode: single Cornerstone stack viewport ── */}
