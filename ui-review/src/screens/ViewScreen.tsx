@@ -31,8 +31,8 @@ import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
 import FourDMprGrid, { type FourDMprGridHandle } from "../components/FourDMprGrid";
 import {
+    getFourDImageUrl,
     loadFourDManifest,
-    preloadPhaseFirstFrames,
     type FourDManifest,
 } from "../lib/fourDImageSource";
 import {
@@ -242,26 +242,17 @@ const ViewScreen = () => {
     const isFourDEntry = !!fourDState?.scanResult;
 
     /** "idle" → 非4D入口/等待图像加载；"review" → 相位审核弹窗；"done" → 审核完成 */
-    const [fourDStage, setFourDStage] = useState<"idle" | "review" | "done">("idle");
-    const [viewerLoadStatus, setViewerLoadStatus] = useState<"loading" | "ready" | "error">(
+    const [fourDStage, setFourDStage] = useState<"idle" | "phaseLoading" | "reviewReady" | "review" | "done">(
+        isFourDEntry ? "phaseLoading" : "idle"
+    );
+    const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">(
         isFourDEntry ? "loading" : "ready"
     );
-    const fourDReviewTriggeredRef = useRef(false);
-
-    // 4D 入口下，等图像浏览界面的真实加载完成后，再决定是否弹出相位审核
-    useEffect(() => {
-        if (!isFourDEntry) return;
-        if (fourDReviewTriggeredRef.current) return;
-        if (viewerLoadStatus !== "ready") return;
-
-        fourDReviewTriggeredRef.current = true;
-        const scanResult = fourDState!.scanResult;
-        if (hasPhaseConflicts(scanResult)) {
-            setFourDStage("review");
-        } else {
-            setFourDStage("done");
-        }
-    }, [fourDState, isFourDEntry, viewerLoadStatus]);
+    const handleFourDPhaseGridComplete = useCallback(() => {
+        if (!isFourDEntry || !fourDState?.scanResult) return;
+        setViewerLoadStatus("ready");
+        setFourDStage(hasPhaseConflicts(fourDState.scanResult) ? "reviewReady" : "done");
+    }, [fourDState, isFourDEntry]);
 
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
@@ -604,8 +595,6 @@ const ViewScreen = () => {
                 setWl(m.defaults.wl);
                 setDisplayWw(m.defaults.ww);
                 setDisplayWl(m.defaults.wl);
-                // Best-effort warm; ignore failure
-                preloadPhaseFirstFrames(m, "axial").catch(() => {});
             })
             .catch((err: Error) => {
                 if (!cancelled) setFourDManifestError(err.message);
@@ -1278,7 +1267,14 @@ const ViewScreen = () => {
                         <div className="relative flex-1 min-w-0 overflow-hidden">
                             {/* 4D entry: drive the grid from pre-rendered WebP stacks so
                                 the phase slider actually changes the image. */}
-                            {isFourDLungReconSeries && fourDManifest ? (
+                            {isFourDLungReconSeries && fourDManifest && isFourDEntry && fourDStage !== "done" ? (
+                                <FourDPhaseLoadingGrid
+                                    manifest={fourDManifest}
+                                    onComplete={handleFourDPhaseGridComplete}
+                                    showReviewButton={fourDStage === "reviewReady"}
+                                    onReviewClick={() => setFourDStage("review")}
+                                />
+                            ) : isFourDLungReconSeries && fourDManifest ? (
                                 <FourDMprGrid
                                     ref={fourDGridRef}
                                     manifest={fourDManifest}
@@ -1798,6 +1794,114 @@ function PhaseTimelineBar(props: {
                         })}
                     </div>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function FourDPhaseLoadingGrid({
+    manifest,
+    onComplete,
+    showReviewButton,
+    onReviewClick,
+}: {
+    manifest: FourDManifest;
+    onComplete: () => void;
+    showReviewButton: boolean;
+    onReviewClick: () => void;
+}) {
+    const phaseIndexes = useMemo(
+        () => Array.from({ length: Math.min(9, manifest.phases) }, (_, index) => index),
+        [manifest.phases]
+    );
+    const midAxialSlice = useMemo(
+        () => Math.floor(manifest.views.axial.slices / 2) + 1,
+        [manifest.views.axial.slices]
+    );
+    const [loadedCount, setLoadedCount] = useState(0);
+    const [loadedUrls, setLoadedUrls] = useState<Record<number, string>>({});
+    const completedRef = useRef(false);
+
+    useEffect(() => {
+        setLoadedCount(0);
+        setLoadedUrls({});
+        completedRef.current = false;
+    }, [manifest]);
+
+    useEffect(() => {
+        if (completedRef.current) return;
+        if (loadedCount >= phaseIndexes.length) {
+            completedRef.current = true;
+            onComplete();
+            return;
+        }
+
+        let cancelled = false;
+        const phaseIndex = phaseIndexes[loadedCount];
+        const url = getFourDImageUrl(phaseIndex, "axial", midAxialSlice);
+        const img = new Image();
+        const finish = () => {
+            if (cancelled) return;
+            setLoadedUrls((prev) => ({ ...prev, [phaseIndex]: url }));
+            window.setTimeout(() => {
+                if (!cancelled) setLoadedCount((prev) => prev + 1);
+            }, 160);
+        };
+        img.onload = finish;
+        img.onerror = finish;
+        img.src = url;
+
+        return () => {
+            cancelled = true;
+        };
+    }, [loadedCount, midAxialSlice, onComplete, phaseIndexes]);
+
+    const progress = phaseIndexes.length === 0 ? 1 : loadedCount / phaseIndexes.length;
+
+    return (
+        <div className="absolute inset-0 flex flex-col bg-[#05070B]">
+            <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
+                <div>
+                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">4D Axial Reconstruction</div>
+                    <div className="text-[10px] font-bold text-white/55">九宫格相位数据加载 · {Math.min(loadedCount, phaseIndexes.length)}/{phaseIndexes.length}</div>
+                </div>
+                <div className="flex items-center gap-3">
+                    <div className="h-1.5 w-40 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-[#4D94FF] transition-all duration-200" style={{ width: `${progress * 100}%` }} />
+                    </div>
+                    {showReviewButton && (
+                        <button
+                            type="button"
+                            onClick={onReviewClick}
+                            className="h-8 rounded-md bg-[#4D94FF] px-4 text-[11px] font-black text-white shadow-lg shadow-blue-500/20 transition-all hover:bg-blue-600 active:scale-95"
+                        >
+                            相位审核
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            <div className="grid min-h-0 flex-1 grid-cols-3 grid-rows-3 gap-px bg-white/10 p-px">
+                {phaseIndexes.map((phaseIndex, index) => {
+                    const loadedUrl = loadedUrls[phaseIndex];
+                    const active = index === loadedCount && !loadedUrl;
+                    const phaseValue = manifest.phase_values?.[phaseIndex] ?? phaseIndex * 10;
+                    return (
+                        <div key={phaseIndex} className="relative overflow-hidden bg-black">
+                            {loadedUrl ? (
+                                <img src={loadedUrl} alt={`phase ${phaseValue}`} className="h-full w-full object-contain" />
+                            ) : (
+                                <div className="flex h-full w-full items-center justify-center bg-[#0B1220]">
+                                    <div className={`h-7 w-7 rounded-full border-2 border-white/20 border-t-[#4D94FF] ${active ? "animate-spin" : ""}`} />
+                                </div>
+                            )}
+                            <div className="absolute left-2 top-2 rounded bg-black/65 px-2 py-1 text-[10px] font-black text-white">
+                                Phase {phaseValue}%
+                            </div>
+                            <div className={`absolute right-2 top-2 h-2.5 w-2.5 rounded-full ${loadedUrl ? "bg-[#22C55E]" : active ? "bg-[#4D94FF]" : "bg-white/25"}`} />
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );
