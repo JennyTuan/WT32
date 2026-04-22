@@ -183,7 +183,7 @@ export default function FourDDiagnosticConfirmScreen() {
             navigate("/fourd-rescan-select", { state: postScanState });
         } else {
             // 直接进图像浏览，若有相位冲突在那里弹窗处理
-            navigate("/image-viewer", { state: postScanState });
+            navigate("/image-load", { state: postScanState });
         }
     }, [bedSegmentCount, dynamicParams.scanLength, navigate]);
 

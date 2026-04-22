@@ -265,7 +265,7 @@ const ViewScreen = () => {
     const phaseCineDirectionRef = useRef<1 | -1>(1);
     // Across-phase aggregation for the MPR 4th panel (ITV visualisation)
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
-    const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
+    const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry ? "3D" : "2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
     const [toolMode, setToolMode] = useState<"wl" | "measure" | "annotate" | "eraser">("wl");
     const [ww, setWw] = useState(350);
@@ -518,6 +518,7 @@ const ViewScreen = () => {
     const isMprViewActive = !isTopogramSeries && imageMode === "3D";
     const isFourDMprViewActive = isMprViewActive && isFourDLungReconSeries;
     const isFourDPlaybackBlockedByReview = isFourDLungReconSeries && isFourDEntry && fourDStage !== "done";
+    const isFourDEntryLoadingFlow = isFourDEntry && fourDStage !== "done" && fourDStage !== "review";
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
     const isToolSupportedInCurrentView = (mode: "wl" | "measure" | "annotate" | "eraser") => {
         if (!isMprViewActive) return true;
@@ -572,7 +573,7 @@ const ViewScreen = () => {
     // Load 4D manifest + preload each phase's first frame (mid axial) so
     // phase switches are instant after the initial warm.
     useEffect(() => {
-        if (!isFourDLungReconSeries) return;
+        if (!isFourDLungReconSeries && !isFourDEntryLoadingFlow) return;
         if (fourDManifest || fourDManifestError) return;
         let cancelled = false;
         loadFourDManifest()
@@ -591,7 +592,7 @@ const ViewScreen = () => {
         return () => {
             cancelled = true;
         };
-    }, [isFourDLungReconSeries, fourDManifest, fourDManifestError]);
+    }, [isFourDLungReconSeries, isFourDEntryLoadingFlow, fourDManifest, fourDManifestError]);
 
     // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
     // (clinical convention: cine cycles phases at a locked anatomical slice).
@@ -1300,7 +1301,7 @@ const ViewScreen = () => {
                 <div className="flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE]">
                 <div className={viewportContainerClassName}>
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
-                    {!isTopogramSeries && imageMode === "3D" && (
+                    {!isFourDEntryLoadingFlow && !isTopogramSeries && imageMode === "3D" && (
                         <div className="relative flex-1 min-w-0 overflow-hidden">
                             {/* 4D entry: drive the grid from pre-rendered WebP stacks so
                                 the phase slider actually changes the image. */}
@@ -1349,7 +1350,7 @@ const ViewScreen = () => {
                         </div>
                     )}
                     {/* ── 2D mode: single Cornerstone stack viewport ── */}
-                    {(imageMode === "2D" || isTopogramSeries) && (
+                    {!isFourDEntryLoadingFlow && (imageMode === "2D" || isTopogramSeries) && (
                         <section
                             ref={viewportRef}
                             className={`flex-1 min-w-0 bg-black overflow-hidden relative ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : "cursor-default"}`}
@@ -1643,7 +1644,7 @@ const ViewScreen = () => {
                     }}
                 />
             )}
-            {isFourDLungReconSeries && fourDManifest && isFourDEntry && fourDStage !== "done" && fourDStage !== "review" && (
+            {isFourDEntryLoadingFlow && fourDManifest && (
                 <FourDPhaseLoadingGrid
                     manifest={fourDManifest}
                     onComplete={handleFourDPhaseGridComplete}
@@ -1652,7 +1653,7 @@ const ViewScreen = () => {
                     className="absolute inset-0 z-50 flex flex-col bg-[#05070B] pointer-events-auto"
                 />
             )}
-            {isFourDLungReconSeries && !fourDManifest && isFourDEntry && fourDStage !== "done" && fourDStage !== "review" && (
+            {isFourDEntryLoadingFlow && !fourDManifest && (
                 <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#05070B] text-white pointer-events-auto">
                     <div className="h-10 w-10 rounded-full border-2 border-white/20 border-t-[#4D94FF] animate-spin" />
                     <div className="text-[12px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">

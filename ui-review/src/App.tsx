@@ -19,6 +19,7 @@ import FourDDiagnosticConfirmScreen from "./screens/FourDDiagnosticConfirmScreen
 import FourDPhaseReviewScreen from "./screens/FourDPhaseReviewScreen";
 import FourDRescanSelectScreen from "./screens/FourDRescanSelectScreen";
 import ViewScreen from "./screens/ViewScreen";
+import ImageLoadScreen from "./screens/ImageLoadScreen";
 import ManualScanScreen from "./screens/ManualScanScreen";
 import MockScanScreen from "./screens/MockScanScreen";
 import TubeWarmupScreen from "./screens/TubeWarmupScreen";
@@ -117,6 +118,7 @@ export default function App() {
               <Route path="/fourd-confirm" element={<FourDDiagnosticConfirmScreen />} />
               <Route path="/fourd-phase-review" element={<FourDPhaseReviewScreen />} />
               <Route path="/fourd-rescan-select" element={<FourDRescanSelectScreen />} />
+              <Route path="/image-load" element={<ImageLoadScreen />} />
               <Route path="/image-viewer" element={<ViewScreen />} />
 
               <Route path="/mobile/manual-scan" element={<ManualScanScreen />} />

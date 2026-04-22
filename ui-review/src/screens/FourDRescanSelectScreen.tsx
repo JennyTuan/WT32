@@ -975,7 +975,7 @@ export default function FourDRescanSelectScreen() {
   const handleConfirm = () => {
     if (!scanResult) return;
 
-    navigate("/image-viewer", {
+    navigate("/image-load", {
       state: { ...state, scanResult, rescanChoices: choices } as FourDPostScanState,
     });
   };
