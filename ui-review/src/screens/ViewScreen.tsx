@@ -261,7 +261,7 @@ const ViewScreen = () => {
     const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("phase");
     const [sliceCineTick, setSliceCineTick] = useState(0);
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<PhaseCineSpeed>(1); // multiplier; 1× = 500 ms/phase
-    const [phaseCineMode, setPhaseCineMode] = useState<PhaseCineMode>("forward");
+    const [phaseCineMode] = useState<PhaseCineMode>("forward");
     const phaseCineDirectionRef = useRef<1 | -1>(1);
     // Across-phase aggregation for the MPR 4th panel (ITV visualisation)
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
@@ -1652,23 +1652,26 @@ function FourDPhaseLoadingGrid({
     showReviewButton: boolean;
     onReviewClick: () => void;
 }) {
-    // 4D 重建通常需要一定时间，这里保留一个更长的模拟步进时间，避免“秒开”观感。
-    const SIMULATED_PHASE_LOAD_DELAY_MS = 800;
+    const SIMULATED_PHASE_LOAD_DELAY_MS = 650;
     const phaseIndexes = useMemo(
         () => Array.from({ length: Math.min(10, manifest.phases) }, (_, index) => index),
         [manifest.phases]
     );
-    const midAxialSlice = useMemo(
-        () => Math.floor(manifest.views.axial.slices / 2) + 1,
-        [manifest.views.axial.slices]
-    );
+    const midAxialSlice = useMemo(() => Math.floor(manifest.views.axial.slices / 2) + 1, [manifest.views.axial.slices]);
+    const midCoronalSlice = useMemo(() => Math.floor(manifest.views.coronal.slices / 2) + 1, [manifest.views.coronal.slices]);
+    const midSagittalSlice = useMemo(() => Math.floor(manifest.views.sagittal.slices / 2) + 1, [manifest.views.sagittal.slices]);
+
     const [loadedCount, setLoadedCount] = useState(0);
-    const [loadedUrls, setLoadedUrls] = useState<Record<number, string>>({});
+    const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
+    const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(0);
+    const [loadedUrls, setLoadedUrls] = useState<Record<number, { axial: string; coronal: string; sagittal: string }>>({});
     const completedRef = useRef(false);
 
     useEffect(() => {
         setLoadedCount(0);
         setLoadedUrls({});
+        setSelectedPhaseIndex(0);
+        setSelectedSegmentIndex(0);
         completedRef.current = false;
     }, [manifest]);
 
@@ -1682,37 +1685,150 @@ function FourDPhaseLoadingGrid({
 
         let cancelled = false;
         const phaseIndex = phaseIndexes[loadedCount];
-        const url = getFourDImageUrl(phaseIndex, "axial", midAxialSlice);
-        const img = new Image();
-        const finish = () => {
+        const urls = {
+            axial: getFourDImageUrl(phaseIndex, "axial", midAxialSlice),
+            coronal: getFourDImageUrl(phaseIndex, "coronal", midCoronalSlice),
+            sagittal: getFourDImageUrl(phaseIndex, "sagittal", midSagittalSlice),
+        };
+
+        const preloadImage = (url: string) =>
+            new Promise<void>((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve();
+                img.onerror = () => resolve();
+                img.src = url;
+            });
+
+        Promise.all([preloadImage(urls.axial), preloadImage(urls.coronal), preloadImage(urls.sagittal)]).then(() => {
             if (cancelled) return;
-            setLoadedUrls((prev) => ({ ...prev, [phaseIndex]: url }));
+            setLoadedUrls((prev) => ({ ...prev, [phaseIndex]: urls }));
             window.setTimeout(() => {
                 if (!cancelled) setLoadedCount((prev) => prev + 1);
             }, SIMULATED_PHASE_LOAD_DELAY_MS);
-        };
-        img.onload = finish;
-        img.onerror = finish;
-        img.src = url;
+        });
 
         return () => {
             cancelled = true;
         };
-    }, [loadedCount, midAxialSlice, onComplete, phaseIndexes]);
+    }, [loadedCount, midAxialSlice, midCoronalSlice, midSagittalSlice, onComplete, phaseIndexes]);
 
     const progress = phaseIndexes.length === 0 ? 1 : loadedCount / phaseIndexes.length;
+    const duplicateSegments = [
+        { id: 1, time: "12:34:56.78", quality: "优秀", color: "text-emerald-400" },
+        { id: 2, time: "12:45:12.34", quality: "良好", color: "text-amber-300" },
+        { id: 3, time: "12:55:45.67", quality: "一般", color: "text-orange-300" },
+    ];
+    const selectedPhaseUrls = loadedUrls[selectedPhaseIndex];
 
     return (
-        <div className="absolute inset-0 flex flex-col bg-[#05070B]">
-            <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
-                <div>
-                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">4D Axial Reconstruction</div>
-                   
+        <div className="absolute inset-0 flex min-h-0 gap-2 bg-[#070D18] p-2 text-white">
+            <section className="flex min-w-0 flex-[1.2] flex-col rounded-xl border border-[#22344F] bg-gradient-to-b from-[#0B1729] to-[#081220]">
+                <div className="flex h-11 items-center justify-between border-b border-white/10 px-3">
+                    <h3 className="text-[14px] font-bold">选择要重建的相位</h3>
+                    <span className="text-[11px] text-slate-300">{loadedCount}/{phaseIndexes.length} 已加载</span>
                 </div>
-                <div className="flex items-center gap-3">
-                    <div className="h-1.5 w-40 overflow-hidden rounded-full bg-white/10">
-                        <div className="h-full rounded-full bg-[#4D94FF] transition-all duration-200" style={{ width: `${progress * 100}%` }} />
+
+                <div className="grid flex-1 min-h-0 grid-cols-5 grid-rows-2 gap-2 overflow-auto p-3">
+                    {phaseIndexes.map((phaseIndex, idx) => {
+                        const phaseValue = manifest.phase_values?.[phaseIndex] ?? phaseIndex * 10;
+                        const urls = loadedUrls[phaseIndex];
+                        const isLoaded = !!urls;
+                        const isActiveLoading = idx === loadedCount && !isLoaded;
+                        const hasDuplicate = phaseIndex === 0;
+                        const selected = selectedPhaseIndex === phaseIndex;
+                        return (
+                            <button
+                                key={phaseIndex}
+                                type="button"
+                                onClick={() => isLoaded && setSelectedPhaseIndex(phaseIndex)}
+                                className={`group relative overflow-hidden rounded-lg border text-left transition-all ${selected ? "border-[#4D94FF] shadow-[0_0_0_2px_rgba(77,148,255,0.3)]" : "border-[#1F2E46]"}`}
+                            >
+                                <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-black/70 px-2 py-1">
+                                    <span className="text-[10px] font-black">Phase {phaseValue}%</span>
+                                    <span className={`h-2.5 w-2.5 rounded-full ${isLoaded ? "bg-emerald-400" : isActiveLoading ? "bg-[#4D94FF]" : "bg-slate-500"}`} />
+                                </div>
+                                <div className="h-full w-full bg-black pt-7">
+                                    {isLoaded ? (
+                                        <img src={urls.axial} alt={`phase-${phaseValue}`} className="h-full w-full object-cover opacity-90" />
+                                    ) : (
+                                        <div className="flex h-full items-center justify-center bg-[#0B1220]">
+                                            <div className={`h-6 w-6 rounded-full border-2 border-white/20 border-t-[#4D94FF] ${isActiveLoading ? "animate-spin" : ""}`} />
+                                        </div>
+                                    )}
+                                </div>
+                                {hasDuplicate && (
+                                    <div className="absolute bottom-2 left-2 rounded bg-amber-500/85 px-1.5 py-0.5 text-[10px] font-bold text-black">重复数据: 3 段</div>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div className="flex h-12 items-center gap-6 border-t border-white/10 px-4 text-[11px] text-slate-300">
+                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />数据充足</span>
+                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" />存在重复数据</span>
+                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-rose-400" />数据缺失</span>
+                </div>
+            </section>
+
+            <section className="flex min-w-0 flex-1 flex-col rounded-xl border border-[#22344F] bg-gradient-to-b from-[#0B1729] to-[#081220]">
+                <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-[14px] font-bold">相位 0% - 存在重复数据，请选择数据段</h3>
+                        <span className="rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">3 段可用</span>
                     </div>
+                    <div className="h-1.5 w-36 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-[#4D94FF]" style={{ width: `${progress * 100}%` }} />
+                    </div>
+                </div>
+
+                <div className="flex min-h-0 flex-1 gap-2 p-2">
+                    <div className="w-[180px] shrink-0 space-y-2">
+                        {duplicateSegments.map((seg, idx) => (
+                            <button
+                                key={seg.id}
+                                type="button"
+                                onClick={() => setSelectedSegmentIndex(idx)}
+                                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${selectedSegmentIndex === idx ? "border-[#4D94FF] bg-[#132944]" : "border-[#24374F] bg-[#0D182B] hover:bg-[#132944]"}`}
+                            >
+                                <div className="text-[12px] font-bold">数据段 {seg.id}</div>
+                                <div className="mt-1 text-[11px] text-slate-300">{seg.time}</div>
+                                <div className={`mt-1 text-[11px] font-bold ${seg.color}`}>质量评分: {seg.quality}</div>
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-1 overflow-hidden rounded-lg border border-[#24374F] bg-black">
+                        {([
+                            { key: "axial", label: "Axial" },
+                            { key: "coronal", label: "Coronal" },
+                            { key: "sagittal", label: "Sagittal" },
+                            { key: "preview", label: "3D Preview" },
+                        ] as const).map((pane) => (
+                            <div key={pane.key} className="relative overflow-hidden border border-white/5">
+                                <div className="absolute left-2 top-1 z-10 text-[11px] font-bold text-white/85">{pane.label}</div>
+                                {pane.key !== "preview" && selectedPhaseUrls ? (
+                                    <img
+                                        src={selectedPhaseUrls[pane.key]}
+                                        alt={pane.label}
+                                        className="h-full w-full object-cover opacity-95"
+                                    />
+                                ) : pane.key === "preview" ? (
+                                    <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_50%_40%,#1F2937_0%,#020617_70%)] text-[12px] text-slate-300">
+                                        3D 预览加载中…
+                                    </div>
+                                ) : (
+                                    <div className="flex h-full items-center justify-center bg-[#0B1220]">
+                                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-[#4D94FF]" />
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-white/10 px-3 py-2">
+                    <p className="text-[11px] text-slate-300">建议：选择图像清晰、运动伪影少的数据段以获得最佳重建效果。</p>
                     {showReviewButton && (
                         <button
                             type="button"
@@ -1723,33 +1839,11 @@ function FourDPhaseLoadingGrid({
                         </button>
                     )}
                 </div>
-            </div>
-
-            <div className="grid min-h-0 flex-1 grid-cols-5 grid-rows-2 gap-px bg-white/10 p-px">
-                {phaseIndexes.map((phaseIndex, index) => {
-                    const loadedUrl = loadedUrls[phaseIndex];
-                    const active = index === loadedCount && !loadedUrl;
-                    const phaseValue = manifest.phase_values?.[phaseIndex] ?? phaseIndex * 10;
-                    return (
-                        <div key={phaseIndex} className="relative overflow-hidden bg-black">
-                            {loadedUrl ? (
-                                <img src={loadedUrl} alt={`phase ${phaseValue}`} className="h-full w-full object-contain" />
-                            ) : (
-                                <div className="flex h-full w-full items-center justify-center bg-[#0B1220]">
-                                    <div className={`h-7 w-7 rounded-full border-2 border-white/20 border-t-[#4D94FF] ${active ? "animate-spin" : ""}`} />
-                                </div>
-                            )}
-                            <div className="absolute left-2 top-2 rounded bg-black/65 px-2 py-1 text-[10px] font-black text-white">
-                                Phase {phaseValue}%
-                            </div>
-                            <div className={`absolute right-2 top-2 h-2.5 w-2.5 rounded-full ${loadedUrl ? "bg-[#22C55E]" : active ? "bg-[#4D94FF]" : "bg-white/25"}`} />
-                        </div>
-                    );
-                })}
-            </div>
+            </section>
         </div>
     );
 }
+
 
 const Param = ({ label, value }: { label: string; value: string }) => (
     <div className="p-2 bg-white border border-[#B0C4DE]/30 rounded-md flex flex-col items-center justify-center shadow-sm min-h-[56px]">
