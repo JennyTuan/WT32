@@ -10,6 +10,7 @@ import {
   Pencil,
   RotateCcw,
 } from "lucide-react";
+import { getFourDImageUrl } from "../lib/fourDImageSource";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
 
 type PhaseStatus = "ok" | "duplicate" | "missing";
@@ -42,6 +43,11 @@ interface PhaseData {
 }
 
 const PHASE_LABELS = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"];
+const PREVIEW_SLICES = {
+  axial: 71,
+  coronal: 256,
+  sagittal: 256,
+} as const;
 
 function makeSegment(idx: number, phaseIdx: number, bedIdx: number): DataSegment {
   const times = ["12:34:56.78", "12:45:12.34", "12:55:45.67", "13:02:18.22"];
@@ -95,36 +101,6 @@ function buildMockPhases(): PhaseData[] {
   });
 }
 
-function LungThumb({ phaseIdx, size = 140 }: { phaseIdx: number; size?: number }) {
-  const breath = Math.sin((phaseIdx / 10) * Math.PI * 2) * 3;
-  const dots = useMemo(() => {
-    const arr: { x: number; y: number; r: number; o: number }[] = [];
-    let seed = phaseIdx * 97 + 7;
-    const rng = () => {
-      seed = (seed * 1664525 + 1013904223) & 0xffffffff;
-      return (seed >>> 0) / 0xffffffff;
-    };
-    for (let i = 0; i < 40; i++) arr.push({ x: rng() * 100, y: rng() * 100, r: rng() * 0.8 + 0.2, o: rng() * 0.25 + 0.1 });
-    return arr;
-  }, [phaseIdx]);
-
-  return (
-    <svg width={size} height={size} viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-      <rect width="100" height="100" fill="#05090f" />
-      <ellipse cx={50} cy={52 + breath} rx={40} ry={36} fill="#b8bfc6" />
-      <ellipse cx={35} cy={48 + breath} rx={14} ry={22} fill="#0a1420" />
-      <ellipse cx={65} cy={48 + breath} rx={14} ry={22} fill="#0a1420" />
-      <path d={`M30 ${42 + breath} Q34 ${50 + breath} 32 ${58 + breath}`} stroke="#e2e8f0" strokeWidth="0.6" fill="none" opacity="0.8" />
-      <path d={`M70 ${42 + breath} Q66 ${50 + breath} 68 ${58 + breath}`} stroke="#e2e8f0" strokeWidth="0.6" fill="none" opacity="0.8" />
-      <circle cx={50} cy={58 + breath} r={5} fill="#6b7280" opacity="0.8" />
-      <ellipse cx={50} cy={82} rx={38} ry={6} fill="#1e293b" opacity="0.6" />
-      {dots.map((d, i) => (
-        <circle key={i} cx={d.x} cy={d.y} r={d.r} fill="white" opacity={d.o} />
-      ))}
-    </svg>
-  );
-}
-
 function MprTile({
   label,
   rightLabel,
@@ -159,6 +135,17 @@ function CrossHair() {
   );
 }
 
+function FourDPreviewImage({ src }: { src: string }) {
+  return (
+    <img
+      src={src}
+      alt=""
+      draggable={false}
+      className="h-full w-full object-contain"
+    />
+  );
+}
+
 export default function ImageLoadScreen() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -171,6 +158,14 @@ export default function ImageLoadScreen() {
   const [phases, setPhases] = useState<PhaseData[]>(() => buildMockPhases());
   const [selectedPhaseIdx, setSelectedPhaseIdx] = useState(0);
   const [selectedBedId, setSelectedBedId] = useState("bed-0-03");
+  const previewUrls = useMemo(
+    () => ({
+      axial: getFourDImageUrl(selectedPhaseIdx, "axial", PREVIEW_SLICES.axial),
+      coronal: getFourDImageUrl(selectedPhaseIdx, "coronal", PREVIEW_SLICES.coronal),
+      sagittal: getFourDImageUrl(selectedPhaseIdx, "sagittal", PREVIEW_SLICES.sagittal),
+    }),
+    [selectedPhaseIdx],
+  );
 
   const setSegmentForBed = (phaseIdx: number, bedId: string, segId: string) => {
     setPhases((prev) =>
@@ -238,20 +233,31 @@ export default function ImageLoadScreen() {
                               {bed.segments.map((seg) => {
                                 const active = seg.id === bed.selectedSegmentId;
                                 return (
-                                  <button
+                                  <label
                                     key={seg.id}
-                                    type="button"
+                                    className={`mb-1 flex h-7 w-full cursor-pointer items-center justify-between rounded border px-2 text-left transition-colors ${
+                                      active ? "border-[#4D94FF] bg-blue-50 text-[#1565C0]" : "border-slate-200 bg-white text-slate-600 hover:bg-blue-50"
+                                    }`}
                                     onClick={() => {
                                       setSelectedBedId(bed.id);
                                       setSegmentForBed(i, bed.id, seg.id);
                                     }}
-                                    className={`mb-1 flex h-7 w-full items-center justify-between rounded px-2 text-left transition-colors ${
-                                      active ? "bg-[#4D94FF] text-white" : "bg-white text-slate-600 hover:bg-blue-50"
-                                    }`}
                                   >
-                                    <span className="text-[10px] font-bold">{seg.candidateLabel}</span>
-                                    <span className={`text-[9px] ${active ? "text-white/80" : "text-slate-400"}`}>{seg.time}</span>
-                                  </button>
+                                    <span className="flex min-w-0 items-center gap-1.5">
+                                      <input
+                                        type="radio"
+                                        name={`segment-${bed.id}`}
+                                        checked={active}
+                                        onChange={() => {
+                                          setSelectedBedId(bed.id);
+                                          setSegmentForBed(i, bed.id, seg.id);
+                                        }}
+                                        className="h-3 w-3 accent-[#4D94FF]"
+                                      />
+                                      <span className="truncate text-[10px] font-bold">{seg.candidateLabel}</span>
+                                    </span>
+                                    <span className={`shrink-0 text-[9px] ${active ? "text-[#4D94FF]" : "text-slate-400"}`}>{seg.time}</span>
+                                  </label>
                                 );
                               })}
                             </div>
@@ -276,48 +282,31 @@ export default function ImageLoadScreen() {
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
           <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-[#B0C4DE] bg-black">
-            <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-px bg-[#B0C4DE]">
-              <MprTile label="Axial" rightLabel="A" accent="green">
-                <div className="relative h-full w-full">
-                  <LungThumb phaseIdx={selectedPhaseIdx} size={180} />
-                  <CrossHair />
-                  <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">R</div>
-                </div>
-              </MprTile>
-              <MprTile label="Coronal" rightLabel="H" accent="green">
-                <div className="relative h-full w-full bg-[#05090f]">
-                  <svg width="100%" height="100%" viewBox="0 0 100 100">
-                    <rect width="100" height="100" fill="#05090f" />
-                    <rect x="20" y="15" width="60" height="70" fill="#b8bfc6" rx="6" />
-                    <rect x="28" y="22" width="18" height="55" fill="#0a1420" />
-                    <rect x="54" y="22" width="18" height="55" fill="#0a1420" />
-                  </svg>
-                  <CrossHair />
-                </div>
-              </MprTile>
-              <MprTile label="Sagittal" rightLabel="H" accent="red">
-                <div className="relative h-full w-full bg-[#05090f]">
-                  <svg width="100%" height="100%" viewBox="0 0 100 100">
-                    <rect width="100" height="100" fill="#05090f" />
-                    <ellipse cx="50" cy="52" rx="32" ry="38" fill="#b8bfc6" />
-                    <ellipse cx="52" cy="48" rx="16" ry="26" fill="#0a1420" />
-                  </svg>
-                  <CrossHair />
-                  <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">A</div>
-                </div>
-              </MprTile>
-              <MprTile label="3D Preview">
-                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#0f1620] via-[#0a0f17] to-[#1a0806]">
-                  <svg width="70%" height="70%" viewBox="0 0 100 100">
-                    <path
-                      d="M50 20 C30 25 22 45 25 65 C28 80 42 85 50 80 C58 85 72 80 75 65 C78 45 70 25 50 20 Z"
-                      fill="#c44a3a"
-                      opacity="0.9"
-                    />
-                    <path d="M35 40 Q30 55 35 70 M65 40 Q70 55 65 70 M50 30 V78" stroke="#8b2a1e" strokeWidth="1" fill="none" />
-                  </svg>
-                </div>
-              </MprTile>
+            <div className="grid min-h-0 flex-1 grid-cols-2 gap-px bg-[#B0C4DE]">
+              <div className="min-h-0">
+                <MprTile label="Coronal" rightLabel="H" accent="green">
+                  <div className="relative h-full w-full bg-[#05090f]">
+                    <FourDPreviewImage src={previewUrls.coronal} />
+                    <CrossHair />
+                  </div>
+                </MprTile>
+              </div>
+              <div className="grid min-h-0 grid-rows-2 gap-px">
+                <MprTile label="Sagittal" rightLabel="H" accent="red">
+                  <div className="relative h-full w-full bg-[#05090f]">
+                    <FourDPreviewImage src={previewUrls.sagittal} />
+                    <CrossHair />
+                    <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">A</div>
+                  </div>
+                </MprTile>
+                <MprTile label="Axial" rightLabel="A" accent="green">
+                  <div className="relative h-full w-full">
+                    <FourDPreviewImage src={previewUrls.axial} />
+                    <CrossHair />
+                    <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">R</div>
+                  </div>
+                </MprTile>
+              </div>
             </div>
 
             <aside className="flex w-[48px] shrink-0 flex-col items-center gap-1 border-l border-[#B0C4DE] bg-[#0F172A] py-2">
