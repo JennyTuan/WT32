@@ -1810,6 +1810,8 @@ function FourDPhaseLoadingGrid({
     showReviewButton: boolean;
     onReviewClick: () => void;
 }) {
+    // 4D 重建通常需要一定时间，这里保留一个更长的模拟步进时间，避免“秒开”观感。
+    const SIMULATED_PHASE_LOAD_DELAY_MS = 800;
     const phaseIndexes = useMemo(
         () => Array.from({ length: Math.min(9, manifest.phases) }, (_, index) => index),
         [manifest.phases]
@@ -1845,7 +1847,7 @@ function FourDPhaseLoadingGrid({
             setLoadedUrls((prev) => ({ ...prev, [phaseIndex]: url }));
             window.setTimeout(() => {
                 if (!cancelled) setLoadedCount((prev) => prev + 1);
-            }, 160);
+            }, SIMULATED_PHASE_LOAD_DELAY_MS);
         };
         img.onload = finish;
         img.onerror = finish;
