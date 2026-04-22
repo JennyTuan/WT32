@@ -13,7 +13,6 @@ import {
     Move,
     Ruler,
     Pencil,
-    Trash2,
     Maximize,
     RefreshCw,
     Play,
@@ -714,13 +713,6 @@ const ViewScreen = () => {
             defaultWindowRef.current = { ww: nextSeries.defaultWw, wl: nextSeries.defaultWl };
         }
     }, [seriesList]);
-    const handleClearAllAnnotations = () => {
-        dicomViewerRef.current?.clearAnnotations();
-        setAnnotations([]);
-        setDraftMeasure(null);
-        measureStartRef.current = null;
-    };
-
     const screenPointInViewport = (clientX: number, clientY: number) => {
         const viewport = viewportRef.current;
         if (!viewport) return null;
@@ -1561,28 +1553,6 @@ const ViewScreen = () => {
                                 );
                             })}
 
-                            {isFourDLungReconSeries && (
-                                <div
-                                    title={fourDBrowseMode === "phase" ? "相位速度" : "浏览速度"}
-                                    className="h-[44px] w-[44px] overflow-hidden rounded-[10px] bg-white/5 ring-1 ring-white/10"
-                                >
-                                    {([0.5, 1, 2] as const).map((speed) => (
-                                        <button
-                                            key={speed}
-                                            type="button"
-                                            onClick={() => setPhaseCineSpeed(speed)}
-                                            className={`block h-[14.67px] w-full text-[9px] font-black leading-[14px] transition-colors ${
-                                                phaseCineSpeed === speed
-                                                    ? "bg-[#3B82F6] text-white"
-                                                    : "text-[#94A3B8] hover:bg-white/10 hover:text-white"
-                                            }`}
-                                        >
-                                            {speed}×
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-
                             <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
 
                             {[
@@ -1698,25 +1668,27 @@ const ViewScreen = () => {
 
                             <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
 
-                            <button
-                                title="Clear All"
-                                onClick={handleClearAllAnnotations}
-                                style={{
-                                    width: "44px",
-                                    height: "44px",
-                                    borderRadius: "10px",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    border: "none",
-                                    cursor: "pointer",
-                                    transition: "all 0.15s ease",
-                                    background: "transparent",
-                                    color: "#FCA5A5",
-                                }}
-                            >
-                                <Trash2 size={20} strokeWidth={1.5} />
-                            </button>
+                            {isFourDLungReconSeries && (
+                                <div
+                                    title={fourDBrowseMode === "phase" ? "相位速度" : "浏览速度"}
+                                    className="h-[44px] w-[44px] overflow-hidden rounded-[10px] bg-white/5 ring-1 ring-white/10"
+                                >
+                                    {([0.5, 1, 2] as const).map((speed) => (
+                                        <button
+                                            key={speed}
+                                            type="button"
+                                            onClick={() => setPhaseCineSpeed(speed)}
+                                            className={`block h-[14.67px] w-full text-[9px] font-black leading-[14px] transition-colors ${
+                                                phaseCineSpeed === speed
+                                                    ? "bg-[#3B82F6] text-white"
+                                                    : "text-[#94A3B8] hover:bg-white/10 hover:text-white"
+                                            }`}
+                                        >
+                                            {speed}×
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </aside>
                 </div>
