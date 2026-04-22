@@ -1250,10 +1250,10 @@ const ViewScreen = () => {
                                                 )}
                                             </div>
                                             <div className="flex items-start gap-2">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">播放</span>
+                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">Speed</span>
                                                 <div className="flex-1 space-y-2">
                                                     <div className="flex flex-col gap-1">
-                                                        <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#4D94FF]">Speed</span>
+                                                        
                                                         <div className="flex items-center rounded-md border border-[#DCE6F2] bg-white overflow-hidden">
                                                             {([0.5, 1, 2] as const).map((s) => (
                                                                 <button
@@ -1268,26 +1268,7 @@ const ViewScreen = () => {
                                                             ))}
                                                         </div>
                                                     </div>
-                                                    <div className="flex flex-col gap-1">
-                                                        <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#4D94FF]">Loop</span>
-                                                        <div className="flex items-center rounded-md border border-[#DCE6F2] bg-white overflow-hidden">
-                                                            {([
-                                                                { k: "forward" as const, l: "正向" },
-                                                                { k: "bounce" as const, l: "往返" },
-                                                            ]).map(({ k, l }) => (
-                                                                <button
-                                                                    key={k}
-                                                                    onClick={() => setPhaseCineMode(k)}
-                                                                    disabled={fourDBrowseMode === "slice"}
-                                                                    className={`px-2 h-[24px] text-[10px] font-black transition-all ${
-                                                                        phaseCineMode === k ? "bg-[#4D94FF] text-white" : "text-[#546E7A] hover:text-[#37474F]"
-                                                                    } ${fourDBrowseMode === "slice" ? "opacity-40 cursor-not-allowed" : ""}`}
-                                                                >
-                                                                    {l}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    </div>
+                                                    
                                                 </div>
                                             </div>
                                         </>
@@ -1726,7 +1707,7 @@ function FourDPhaseLoadingGrid({
             <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
                 <div>
                     <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">4D Axial Reconstruction</div>
-                    <div className="text-[10px] font-bold text-white/55">十相位数据加载 · {Math.min(loadedCount, phaseIndexes.length)}/{phaseIndexes.length}</div>
+                   
                 </div>
                 <div className="flex items-center gap-3">
                     <div className="h-1.5 w-40 overflow-hidden rounded-full bg-white/10">
