@@ -640,15 +640,18 @@ const ViewScreen = () => {
             null
         );
     }, [isFourDEntry, safeSeriesList]);
+    const isFourDEntrySeriesResolved = !isFourDEntry || !preferredSeriesForFourDEntry || selectedSeries.id === preferredSeriesForFourDEntry.id;
 
     // Auto-select first series when session data loads (or series list changes)
     useEffect(() => {
         const first = safeSeriesList[0];
+        const preferred = isFourDEntry ? preferredSeriesForFourDEntry : null;
+        const target = preferred ?? first;
         if (!first) return;
         setSelectedSeriesId((prev) => {
             // 4D 图像重建入口：优先切到 4D 重建序列，而不是默认 Topogram
-            if (isFourDEntry && preferredSeriesForFourDEntry && prev !== preferredSeriesForFourDEntry.id) {
-                return preferredSeriesForFourDEntry.id;
+            if (isFourDEntry && preferred && prev !== preferred.id) {
+                return preferred.id;
             }
             // If current ID is still the static placeholder and we now have session data, switch to first session series
             if (prev === REAL_LUNG_SERIES.seriesId && scanSession) return first.id;
@@ -656,13 +659,13 @@ const ViewScreen = () => {
             if (!safeSeriesList.find((s) => s.id === prev)) return first.id;
             return prev;
         });
-        // Apply first series WW/WL preset on session load
-        if (scanSession && first.defaultWw != null && first.defaultWl != null) {
-            setWw(first.defaultWw);
-            setWl(first.defaultWl);
-            setDisplayWw(first.defaultWw);
-            setDisplayWl(first.defaultWl);
-            defaultWindowRef.current = { ww: first.defaultWw, wl: first.defaultWl };
+        // Apply target series WW/WL preset on session load (4D入口优先使用4D重建序列预设)
+        if (scanSession && target?.defaultWw != null && target.defaultWl != null) {
+            setWw(target.defaultWw);
+            setWl(target.defaultWl);
+            setDisplayWw(target.defaultWw);
+            setDisplayWl(target.defaultWl);
+            defaultWindowRef.current = { ww: target.defaultWw, wl: target.defaultWl };
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [scanSession, isFourDEntry, preferredSeriesForFourDEntry]);
@@ -955,6 +958,14 @@ const ViewScreen = () => {
 
     return (
         <div className="relative flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl">
+            {isFourDEntry && !isFourDEntrySeriesResolved && (
+                <div className="absolute inset-0 z-[70] flex items-center justify-center bg-[#05070B] text-white">
+                    <div className="flex items-center gap-3 text-[12px] font-black uppercase tracking-[0.16em] text-[#60A5FA]">
+                        <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-[#4D94FF] animate-spin" />
+                        Preparing 4D Reconstruction Workspace
+                    </div>
+                </div>
+            )}
             <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-3 py-1.5 px-4 bg-[#DCE6F2] border border-[#B0C4DE] rounded-sm min-w-[210px]">
