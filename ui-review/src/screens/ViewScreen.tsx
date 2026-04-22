@@ -24,7 +24,7 @@ import {
 import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import { FourDPhaseReviewModal } from "./FourDPhaseReviewModal";
-import { hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
+import { generateMockScanResult, hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
 import FourDMprGrid, { type FourDMprGridHandle } from "../components/FourDMprGrid";
@@ -265,6 +265,7 @@ const ViewScreen = () => {
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
     const fourDState = location.state as FourDPostScanState | null;
     const isFourDEntry = !!fourDState?.scanResult;
+    const shouldShowSliceLoadingBridge = isFourDEntry && !!fourDState?.showSliceLoadingBeforeImageLoad;
 
     /** "idle" → 非4D入口/等待图像加载；"review" → 相位审核弹窗；"done" → 审核完成 */
     const [fourDStage, setFourDStage] = useState<"idle" | "phaseLoading" | "reviewReady" | "review" | "done">(
@@ -317,6 +318,7 @@ const ViewScreen = () => {
     // ─── 4D manifest (pre-rendered WebP dataset) ───────────────────────────
     const [fourDManifest, setFourDManifest] = useState<FourDManifest | null>(null);
     const [fourDManifestError, setFourDManifestError] = useState<string | null>(null);
+    const [sliceLoadingCount, setSliceLoadingCount] = useState(0);
 
     // ─── Live clock ───────────────────────────────────────────────────────────
     const buildClock = () => {
@@ -624,6 +626,30 @@ const ViewScreen = () => {
             cancelled = true;
         };
     }, [isFourDLungReconSeries, isFourDEntryLoadingFlow, fourDManifest, fourDManifestError]);
+
+    useEffect(() => {
+        if (!shouldShowSliceLoadingBridge || !fourDManifest) return;
+        const totalSlices = fourDManifest.views.axial.slices;
+        setSliceLoadingCount(0);
+        let current = 0;
+        const timer = window.setInterval(() => {
+            current += 1;
+            if (current >= totalSlices) {
+                window.clearInterval(timer);
+                setSliceLoadingCount(totalSlices);
+                navigate("/image-load", {
+                    state: {
+                        ...(fourDState ?? { scanResult: generateMockScanResult(9, 10, 165.0) }),
+                        showSliceLoadingBeforeImageLoad: false,
+                    } as FourDPostScanState,
+                    replace: true,
+                });
+                return;
+            }
+            setSliceLoadingCount(current);
+        }, 28);
+        return () => window.clearInterval(timer);
+    }, [fourDManifest, fourDState, navigate, shouldShowSliceLoadingBridge]);
 
     // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
     // (clinical convention: cine cycles phases at a locked anatomical slice).
@@ -1742,6 +1768,23 @@ const ViewScreen = () => {
                             {fourDManifestError}
                         </div>
                     )}
+                </div>
+            )}
+            {shouldShowSliceLoadingBridge && fourDManifest && (
+                <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center gap-6 bg-[#05070B] text-white pointer-events-auto">
+                    <div className="text-[12px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">
+                        4D Slice Loading
+                    </div>
+                    <div className="h-2 w-[460px] overflow-hidden rounded-full bg-white/10">
+                        <div
+                            className="h-full rounded-full bg-[#4D94FF] transition-all duration-100"
+                            style={{ width: `${(sliceLoadingCount / Math.max(1, fourDManifest.views.axial.slices)) * 100}%` }}
+                        />
+                    </div>
+                    <div className="text-[22px] font-black tracking-wide">
+                        {sliceLoadingCount} / {fourDManifest.views.axial.slices}
+                    </div>
+                    <div className="text-[12px] font-semibold text-slate-300">正在加载图像切片，请稍候…</div>
                 </div>
             )}
         </div>
