@@ -276,6 +276,9 @@ const ViewScreen = () => {
         setViewerLoadStatus("ready");
         setFourDStage(hasPhaseConflicts(fourDState.scanResult) ? "reviewReady" : "done");
     }, [fourDState, isFourDEntry]);
+    const handleAdvancedProcessing = useCallback(() => {
+        navigate("/image-load", { state: fourDState ?? undefined });
+    }, [fourDState, navigate]);
 
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
@@ -1692,7 +1695,10 @@ const ViewScreen = () => {
 
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
                 <div className="flex-1">
-                    <button className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95">
+                    <button
+                        onClick={handleAdvancedProcessing}
+                        className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95"
+                    >
                         <ChevronLeft size={20} /> 高级处理
                     </button>
                 </div>
