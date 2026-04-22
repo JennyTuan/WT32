@@ -1,7 +1,7 @@
 /**
  * ImageLoadScreen — 图像加载 4 步向导
  *
- * Step 1 选择相位 → Step 2 检查重复数据 → Step 3 确认重建 → Step 4 重建中
+ * Step 1 选择相位 → Step 2 检查床位候选 → Step 3 确认重建 → Step 4 重建中
  * 完成后进入 /image-viewer。
  */
 
@@ -31,7 +31,8 @@ interface DataSegment {
   id: string;
   time: string;
   quality: "优秀" | "良好" | "一般";
-  bedPosition: string;
+  candidateLabel: string;
+  range: string;
   sliceCount: number;
   avgDose: string;
   clarity: number; // 0-10
@@ -39,11 +40,18 @@ interface DataSegment {
   motion: number;  // 0-10
 }
 
+interface BedPhaseData {
+  id: string;
+  label: string;
+  range: string;
+  segments: DataSegment[];
+  selectedSegmentId?: string;
+}
+
 interface PhaseData {
   label: string;           // "0%" ~ "90%"
   status: PhaseStatus;
-  segments: DataSegment[]; // duplicate 时 >=2 段；ok 时 1 段；missing 时 0 段
-  selectedSegmentId?: string;
+  beds: BedPhaseData[];
 }
 
 // ─── Mock 数据 ────────────────────────────────────────────────────────────────
@@ -60,7 +68,8 @@ function makeSegment(idx: number, phaseIdx: number): DataSegment {
     id: `seg-${phaseIdx}-${idx}`,
     time: times[idx] ?? "—",
     quality: qualities[idx] ?? "良好",
-    bedPosition: "450.0 - 500.0 mm",
+    candidateLabel: `候选 ${idx + 1}`,
+    range: "450.0 - 500.0 mm",
     sliceCount: 280,
     avgDose: "CTDIvol 8.5 mGy",
     clarity: clarities[idx] ?? 8,
@@ -72,13 +81,21 @@ function makeSegment(idx: number, phaseIdx: number): DataSegment {
 function buildMockPhases(): PhaseData[] {
   return PHASE_LABELS.map((label, i) => {
     const status: PhaseStatus = i === 0 ? "duplicate" : "ok";
-    const segCount = status === "duplicate" ? 3 : 1;
-    const segments = Array.from({ length: segCount }, (_, si) => makeSegment(si, i));
+    const candidateCount = status === "duplicate" ? 3 : 1;
+    const segments = Array.from({ length: candidateCount }, (_, si) => makeSegment(si, i));
+    const beds: BedPhaseData[] = [
+      {
+        id: `bed-${i}-03`,
+        label: "床位 03",
+        range: "450.0 - 500.0 mm",
+        segments,
+        selectedSegmentId: segments[0]?.id,
+      },
+    ];
     return {
       label,
       status,
-      segments,
-      selectedSegmentId: segments[0]?.id,
+      beds,
     };
   });
 }
@@ -114,7 +131,7 @@ function LungThumb({ phaseIdx, size = 140 }: { phaseIdx: number; size?: number }
 
 // ─── 步骤条 ───────────────────────────────────────────────────────────────────
 
-const STEPS = ["选择相位", "检查重复数据", "确认重建", "重建中"];
+const STEPS = ["选择相位", "检查床位候选", "确认重建", "重建中"];
 
 function StepBar({ current }: { current: number }) {
   return (
@@ -156,65 +173,6 @@ function StepBar({ current }: { current: number }) {
 
 // ─── 相位卡片 ─────────────────────────────────────────────────────────────────
 
-function StatusDot({ status }: { status: PhaseStatus }) {
-  const color =
-    status === "ok" ? "bg-green-500"
-    : status === "duplicate" ? "bg-yellow-400"
-    : "bg-red-500";
-  return <div className={`h-2.5 w-2.5 rounded-full ${color}`} />;
-}
-
-interface PhaseCardProps {
-  phase: PhaseData;
-  phaseIdx: number;
-  selected: boolean;
-  onClick: () => void;
-}
-
-function PhaseCard({ phase, phaseIdx, selected, onClick }: PhaseCardProps) {
-  return (
-    <button
-      onClick={onClick}
-      className={`relative flex flex-col overflow-hidden rounded-lg border-2 bg-white text-left transition-all active:scale-[0.98] ${
-        selected
-          ? "border-[#4D94FF] shadow-[0_0_0_3px_rgba(77,148,255,0.15)]"
-          : "border-slate-200 hover:border-slate-300"
-      }`}
-    >
-      {/* 顶部信息条 */}
-      <div className="flex items-center justify-between px-2.5 py-2">
-        <span className="text-[12px] font-bold text-slate-700">Phase {phase.label}</span>
-        {selected ? (
-          <div className="flex h-4 w-4 items-center justify-center rounded-full bg-[#4D94FF]">
-            <Check size={10} className="text-white" />
-          </div>
-        ) : (
-          <StatusDot status={phase.status} />
-        )}
-      </div>
-
-      {/* 冲突警告图标（选中时也显示） */}
-      {phase.status === "duplicate" && selected && (
-        <div className="absolute left-2 top-8 rounded-full bg-amber-100 p-1">
-          <AlertTriangle size={10} className="text-amber-500" />
-        </div>
-      )}
-
-      {/* 缩略图 */}
-      <div className="flex items-center justify-center bg-black">
-        <LungThumb phaseIdx={phaseIdx} size={140} />
-      </div>
-
-      {/* 选中且冲突时底部提示 */}
-      {phase.status === "duplicate" && selected && (
-        <div className="border-t border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[10px] text-slate-600">
-          重复数据: <span className="font-bold text-amber-600">{phase.segments.length} 段</span>
-        </div>
-      )}
-    </button>
-  );
-}
-
 // ─── MPR 预览小格 ─────────────────────────────────────────────────────────────
 
 function MprTile({
@@ -250,19 +208,6 @@ function CrossHair() {
 }
 
 // ─── 进度条 ───────────────────────────────────────────────────────────────────
-
-function ScoreBar({ label, value }: { label: string; value: number }) {
-  const pct = (value / 10) * 100;
-  return (
-    <div className="flex items-center gap-3">
-      <span className="w-[64px] shrink-0 text-[11px] text-slate-500">{label}</span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200">
-        <div className="h-full rounded-full bg-green-500" style={{ width: `${pct}%` }} />
-      </div>
-      <span className="w-[32px] shrink-0 text-right text-[11px] font-bold text-slate-700">{value}/10</span>
-    </div>
-  );
-}
 
 // ─── 床位加载缩略图网格（子阶段 1A） ─────────────────────────────────────────
 
@@ -383,6 +328,7 @@ export default function ImageLoadScreen() {
   const [step, setStep] = useState(0);
   const [phases, setPhases] = useState<PhaseData[]>(() => buildMockPhases());
   const [selectedPhaseIdx, setSelectedPhaseIdx] = useState(0);
+  const [selectedBedId, setSelectedBedId] = useState("bed-0-03");
   const [rebuildProgress, setRebuildProgress] = useState(0);
 
   // ─ 床位加载子阶段 ─
@@ -391,13 +337,11 @@ export default function ImageLoadScreen() {
   const TOTAL_SLICES = BED_COUNT * SLICES_PER_BED;
   const [loadedSlices, setLoadedSlices] = useState(0);
   const loading = loadedSlices < TOTAL_SLICES;
-  const loadingBedIdx = Math.min(Math.floor(loadedSlices / SLICES_PER_BED), BED_COUNT - 1);
-  const loadingInBedIdx = loadedSlices % SLICES_PER_BED;
 
   // Step 0 进入时驱动加载动画
   useEffect(() => {
     if (step !== 0) return;
-    setLoadedSlices(0);
+    queueMicrotask(() => setLoadedSlices(0));
     const timer = window.setInterval(() => {
       setLoadedSlices((n) => {
         if (n >= TOTAL_SLICES) {
@@ -411,24 +355,21 @@ export default function ImageLoadScreen() {
   }, [step, TOTAL_SLICES]);
 
   const selectedPhase = phases[selectedPhaseIdx];
-  const selectedSegment = selectedPhase?.segments.find(
-    (s) => s.id === selectedPhase.selectedSegmentId
-  );
+  const selectedBed = selectedPhase?.beds.find((bed) => bed.id === selectedBedId) ?? selectedPhase?.beds[0];
+  const selectedSegment = selectedBed?.segments.find((s) => s.id === selectedBed.selectedSegmentId) ?? selectedBed?.segments[0];
+  const conflictBedPosition = selectedBed ? `${selectedBed.label} · ${selectedBed.range}` : "当前床位";
 
-  const setSegmentForPhase = (phaseIdx: number, segId: string) => {
+  const setSegmentForBed = (phaseIdx: number, bedId: string, segId: string) => {
     setPhases((prev) =>
-      prev.map((p, i) => (i === phaseIdx ? { ...p, selectedSegmentId: segId } : p))
-    );
-  };
-
-  const applySelectionToAll = () => {
-    if (!selectedPhase || !selectedSegment) return;
-    // 对每个冲突相位选用首个最优段（这里简单演示：每个相位选择自己 segments[0]）
-    setPhases((prev) =>
-      prev.map((p) =>
-        p.status === "duplicate" && p.segments.length > 0
-          ? { ...p, selectedSegmentId: p.segments[0].id }
-          : p
+      prev.map((phase, i) =>
+        i === phaseIdx
+          ? {
+              ...phase,
+              beds: phase.beds.map((bed) =>
+                bed.id === bedId ? { ...bed, selectedSegmentId: segId } : bed
+              ),
+            }
+          : phase
       )
     );
   };
@@ -449,10 +390,10 @@ export default function ImageLoadScreen() {
   // Step 4 自动进度
   useEffect(() => {
     if (step !== 3) {
-      setRebuildProgress(0);
+      queueMicrotask(() => setRebuildProgress(0));
       return;
     }
-    setRebuildProgress(0);
+    queueMicrotask(() => setRebuildProgress(0));
     const timer = window.setInterval(() => {
       setRebuildProgress((p) => {
         if (p >= 100) {
@@ -496,31 +437,87 @@ export default function ImageLoadScreen() {
         )}
         {step === 0 && !loading && (
           <>
-            {/* ─── 左：相位网格 ─── */}
-            <section className="flex w-[200px] shrink-0 flex-col border-r border-slate-200 bg-white px-3 py-4">
+            {/* ─── 左：相位 / 床位 / 候选菜单 ─── */}
+            <section className="flex w-[260px] shrink-0 flex-col border-r border-slate-200 bg-white px-3 py-4">
               <div className="mb-3 flex items-center gap-2">
-                <h2 className="text-[13px] font-bold text-slate-700">需处理的相位</h2>
+                <h2 className="text-[13px] font-bold text-slate-700">相位数据选择</h2>
                 <Info size={12} className="text-slate-400" />
               </div>
 
-              <div className="flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
+              <div className="flex flex-1 flex-col gap-1 overflow-y-auto pr-1">
                 {phases
                   .map((p, i) => ({ p, i }))
                   .filter(({ p }) => p.status !== "ok")
-                  .map(({ p, i }) => (
-                    <PhaseCard
-                      key={p.label}
-                      phase={p}
-                      phaseIdx={i}
-                      selected={selectedPhaseIdx === i}
-                      onClick={() => setSelectedPhaseIdx(i)}
-                    />
-                  ))}
+                  .map(({ p, i }) => {
+                    const phaseActive = selectedPhaseIdx === i;
+                    return (
+                      <div key={p.label} className="rounded-md border border-slate-200 bg-white">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedPhaseIdx(i);
+                            setSelectedBedId(p.beds[0]?.id ?? "");
+                          }}
+                          className={`flex h-9 w-full items-center justify-between px-2.5 text-left transition-colors ${
+                            phaseActive ? "bg-blue-50 text-[#1565C0]" : "hover:bg-slate-50 text-slate-700"
+                          }`}
+                        >
+                          <span className="text-[12px] font-black">Phase {p.label}</span>
+                          <span className="flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                            <AlertTriangle size={10} /> 待选择
+                          </span>
+                        </button>
+
+                        {phaseActive && (
+                          <div className="border-t border-slate-100 bg-slate-50 py-1">
+                            {p.beds.map((bed) => {
+                              const bedActive = selectedBedId === bed.id;
+                              return (
+                                <div key={bed.id} className="mx-1 rounded">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedBedId(bed.id)}
+                                    className={`flex h-8 w-full items-center justify-between rounded px-2 text-left ${
+                                      bedActive ? "bg-white text-[#37474F] shadow-sm" : "text-slate-600 hover:bg-white"
+                                    }`}
+                                  >
+                                    <span className="text-[11px] font-bold">{bed.label}</span>
+                                    <span className="text-[9px] text-slate-400">{bed.range}</span>
+                                  </button>
+
+                                  {bedActive && (
+                                    <div className="ml-3 border-l border-slate-200 py-1 pl-2">
+                                      {bed.segments.map((seg) => {
+                                        const active = seg.id === bed.selectedSegmentId;
+                                        return (
+                                          <button
+                                            key={seg.id}
+                                            type="button"
+                                            onClick={() => setSegmentForBed(i, bed.id, seg.id)}
+                                            className={`mb-1 flex h-7 w-full items-center justify-between rounded px-2 text-left transition-colors ${
+                                              active ? "bg-[#4D94FF] text-white" : "bg-white text-slate-600 hover:bg-blue-50"
+                                            }`}
+                                          >
+                                            <span className="text-[10px] font-bold">{seg.candidateLabel}</span>
+                                            <span className={`text-[9px] ${active ? "text-white/80" : "text-slate-400"}`}>{seg.time}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
               {/* 图例 */}
               <div className="mt-3 flex flex-col gap-1.5 text-[11px] text-slate-500">
                 <div className="flex items-center gap-1.5">
-                  <AlertTriangle size={11} className="text-amber-500" /> 存在重复数据
+                  <AlertTriangle size={11} className="text-amber-500" /> 存在床位相位重复
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="h-2 w-2 rounded-full bg-red-500" /> 数据缺失
@@ -530,101 +527,11 @@ export default function ImageLoadScreen() {
 
             {/* ─── 右：详情 ─── */}
             <section className="flex flex-1 flex-col overflow-auto px-5 py-4">
-              {/* 顶部标题条 */}
-              <div className="mb-3 flex items-center gap-2">
-                <span className="text-[13px] font-bold text-slate-700">
-                  相位 {selectedPhase?.label} -
-                  {selectedPhase?.status === "duplicate"
-                    ? " 存在重复数据，请选择数据段"
-                    : " 数据充足"}
-                </span>
-                {selectedPhase?.status === "duplicate" && (
-                  <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                    {selectedPhase.segments.length} 段可用
-                  </span>
-                )}
-              </div>
-
-              {/* 黄色提示 */}
-              {selectedPhase?.status === "duplicate" && (
-                <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-500" />
-                  <p className="text-[11px] text-amber-700">
-                    该相位检测到 {selectedPhase.segments.length} 段重复数据，通过对多平面重建（MPR）比对后选择最优数据段用于重建。
-                  </p>
-                </div>
-              )}
-
-              {/* 段列表 + MPR */}
+              {/* MPR */}
               <div className="mb-3 flex gap-3">
-                {/* 左：段列表 */}
-                <div className="flex w-[160px] shrink-0 flex-col gap-2">
-                  {selectedPhase?.segments.map((seg, idx) => {
-                    const active = seg.id === selectedPhase.selectedSegmentId;
-                    return (
-                      <button
-                        key={seg.id}
-                        onClick={() => setSegmentForPhase(selectedPhaseIdx, seg.id)}
-                        className={`flex flex-col gap-1.5 rounded-md border p-2.5 text-left transition-colors ${
-                          active
-                            ? "border-[#4D94FF] bg-blue-50"
-                            : "border-slate-200 bg-white hover:border-slate-300"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-[12px] font-bold text-slate-700">数据段 {idx + 1}</span>
-                          <div
-                            className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 ${
-                              active ? "border-[#4D94FF] bg-[#4D94FF]" : "border-slate-300"
-                            }`}
-                          >
-                            {active && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 text-[10px] text-slate-500">
-                          <span>🕒</span> {seg.time}
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          质量评分:{" "}
-                          <span
-                            className={
-                              seg.quality === "优秀"
-                                ? "font-bold text-green-600"
-                                : seg.quality === "良好"
-                                  ? "font-bold text-amber-600"
-                                  : "font-bold text-slate-500"
-                            }
-                          >
-                            {seg.quality}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* 右：MPR 预览 + 工具栏 */}
                 <div className="flex flex-1 gap-2">
                   <div className="flex flex-1 flex-col">
-                    <div className="mb-1.5 flex items-center justify-between">
-                      <span className="text-[11px] text-slate-600">
-                        当前预览: 数据段{" "}
-                        {(selectedPhase?.segments.findIndex(
-                          (s) => s.id === selectedPhase?.selectedSegmentId
-                        ) ?? 0) + 1}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button className="flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50">
-                          MPR <ChevronDown size={10} />
-                        </button>
-                        <button className="rounded border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50">
-                          <LayoutGrid size={11} />
-                        </button>
-                        <button className="rounded border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50">
-                          <Square size={11} />
-                        </button>
-                      </div>
-                    </div>
+                    
 
                     <div className="grid flex-1 grid-cols-2 grid-rows-2 gap-1.5" style={{ minHeight: 280 }}>
                       <MprTile label="Axial" rightLabel="A" accent="green">
@@ -699,8 +606,8 @@ export default function ImageLoadScreen() {
 
         {step === 1 && (
           <PlaceholderStep
-            title="检查重复数据"
-            description="系统正在核对所有相位的数据选择，确认无冲突后可进入下一步。"
+            title="检查床位候选"
+            description="系统正在核对每个相位中各床位的数据选择，确认无冲突后可进入下一步。"
           />
         )}
 
@@ -730,7 +637,7 @@ export default function ImageLoadScreen() {
         <div className="flex items-center gap-2 text-[11px] text-slate-500">
           <Info size={12} />
           {step === 0 && loading && `提示: 正在按床位加载图像，共 ${BED_COUNT} 个床位，完成后可进行相位选择。`}
-          {step === 0 && !loading && "提示: 黄色标识表示该相位存在重复数据，需要您选择最优数据段进行重建。"}
+          {step === 0 && !loading && "提示: 黄色标识表示该相位中某个床位存在多个候选数据，需要您选择该床位用于重建的数据。"}
           {step === 1 && "提示: 系统自动检查选择，发现异常会在此提醒。"}
           {step === 2 && "提示: 请再次确认所选数据和重建参数。"}
           {step === 3 && "提示: 重建完成后将自动进入图像浏览。"}
@@ -752,15 +659,6 @@ export default function ImageLoadScreen() {
           </button>
         </div>
       </footer>
-    </div>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center gap-3 text-[11px]">
-      <span className="w-[64px] shrink-0 text-slate-500">{label}</span>
-      <span className="font-bold text-slate-700">{value}</span>
     </div>
   );
 }

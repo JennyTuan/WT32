@@ -1695,7 +1695,7 @@ function FourDPhaseLoadingGridBroken({
 
     const [loadedCount, setLoadedCount] = useState(0);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(0);
+    const [selectedBedCandidateIndex, setSelectedBedCandidateIndex] = useState(0);
     const [loadedUrls, setLoadedUrls] = useState<Record<number, { axial: string; coronal: string; sagittal: string }>>({});
     const completedRef = useRef(false);
 
@@ -1705,7 +1705,7 @@ function FourDPhaseLoadingGridBroken({
             setLoadedCount(0);
             setLoadedUrls({});
             setSelectedPhaseIndex(0);
-            setSelectedSegmentIndex(0);
+            setSelectedBedCandidateIndex(0);
         });
     }, [manifest]);
 
@@ -1914,7 +1914,7 @@ function FourDPhaseLoadingGrid({
 
     const [loadedCount, setLoadedCount] = useState(0);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(0);
+    const [selectedBedCandidateIndex, setSelectedBedCandidateIndex] = useState(0);
     const [loadedUrls, setLoadedUrls] = useState<Record<number, { axial: string; coronal: string; sagittal: string }>>({});
     const completedRef = useRef(false);
 
@@ -1924,7 +1924,7 @@ function FourDPhaseLoadingGrid({
             setLoadedCount(0);
             setLoadedUrls({});
             setSelectedPhaseIndex(0);
-            setSelectedSegmentIndex(0);
+            setSelectedBedCandidateIndex(0);
         });
     }, [manifest]);
 
@@ -1968,11 +1968,12 @@ function FourDPhaseLoadingGrid({
     const progress = phaseIndexes.length === 0 ? 1 : loadedCount / phaseIndexes.length;
     const selectedPhaseUrls = loadedUrls[selectedPhaseIndex];
     const selectedPhaseValue = manifest.phase_values?.[selectedPhaseIndex] ?? selectedPhaseIndex * 10;
-    const duplicateSegments = [
-        { id: 1, time: "12:34:56.78", quality: "Excellent", color: "text-emerald-400" },
-        { id: 2, time: "12:45:12.34", quality: "Good", color: "text-amber-300" },
-        { id: 3, time: "12:55:45.67", quality: "Fair", color: "text-orange-300" },
+    const bedPhaseCandidates = [
+        { id: 1, bed: "床位 03", label: "候选 1", time: "12:34:56.78", quality: "推荐", color: "text-emerald-400" },
+        { id: 2, bed: "床位 03", label: "候选 2", time: "12:45:12.34", quality: "可用", color: "text-amber-300" },
+        { id: 3, bed: "床位 03", label: "候选 3", time: "12:55:45.67", quality: "运动偏大", color: "text-orange-300" },
     ];
+    const conflictedBedLabel = bedPhaseCandidates[0]?.bed ?? "床位";
 
     return (
         <div className={className}>
@@ -2027,7 +2028,7 @@ function FourDPhaseLoadingGrid({
                                     </div>
                                     {hasDuplicate && (
                                         <div className="absolute bottom-2 left-2 rounded bg-amber-500/85 px-1.5 py-0.5 text-[10px] font-bold text-black">
-                                            3 segments
+                                            {conflictedBedLabel} 多个0%候选
                                         </div>
                                     )}
                                 </button>
@@ -2036,7 +2037,7 @@ function FourDPhaseLoadingGrid({
                     </div>
                     <div className="flex h-10 items-center gap-5 border-t border-white/10 px-3 text-[11px] text-slate-300">
                         <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />Ready</span>
-                        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" />Duplicate data</span>
+                        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" />床位相位重复</span>
                         <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-slate-500" />Pending</span>
                     </div>
                 </section>
@@ -2044,22 +2045,28 @@ function FourDPhaseLoadingGrid({
                 <section className="flex min-w-0 flex-1 flex-col rounded-xl border border-[#22344F] bg-gradient-to-b from-[#0B1729] to-[#081220]">
                     <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
                         <div className="flex items-center gap-2">
-                            <h3 className="text-[14px] font-bold text-white">Phase {selectedPhaseValue}% Review</h3>
-                            <span className="rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">3 segments</span>
+                            <h3 className="text-[14px] font-bold text-white">{selectedPhaseValue}% 相位床位数据选择</h3>
+                            <span className="rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+                                {conflictedBedLabel}: {bedPhaseCandidates.length} 个0%候选
+                            </span>
                         </div>
+                    </div>
+                    <div className="border-b border-white/10 px-3 py-2 text-[11px] leading-relaxed text-slate-300">
+                        0% 相位由所有床位的 0% 数据合成。检测到 {conflictedBedLabel} 出现多个 0% 相位数据，请选择该床位用于重建的候选数据。
                     </div>
                     <div className="flex min-h-0 flex-1 gap-2 p-2">
                         <div className="w-[180px] shrink-0 space-y-2">
-                            {duplicateSegments.map((seg, idx) => (
+                            {bedPhaseCandidates.map((candidate, idx) => (
                                 <button
-                                    key={seg.id}
+                                    key={candidate.id}
                                     type="button"
-                                    onClick={() => setSelectedSegmentIndex(idx)}
-                                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${selectedSegmentIndex === idx ? "border-[#4D94FF] bg-[#132944]" : "border-[#24374F] bg-[#0D182B] hover:bg-[#132944]"}`}
+                                    onClick={() => setSelectedBedCandidateIndex(idx)}
+                                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${selectedBedCandidateIndex === idx ? "border-[#4D94FF] bg-[#132944]" : "border-[#24374F] bg-[#0D182B] hover:bg-[#132944]"}`}
                                 >
-                                    <div className="text-[12px] font-bold text-white">Segment {seg.id}</div>
-                                    <div className="mt-1 text-[11px] text-slate-300">{seg.time}</div>
-                                    <div className={`mt-1 text-[11px] font-bold ${seg.color}`}>Quality: {seg.quality}</div>
+                                    <div className="text-[12px] font-bold text-white">{candidate.bed}</div>
+                                    <div className="mt-1 text-[11px] font-semibold text-slate-300">{candidate.label} · 0%相位</div>
+                                    <div className="mt-1 text-[11px] text-slate-400">{candidate.time}</div>
+                                    <div className={`mt-1 text-[11px] font-bold ${candidate.color}`}>质量: {candidate.quality}</div>
                                 </button>
                             ))}
                         </div>
@@ -2092,14 +2099,16 @@ function FourDPhaseLoadingGrid({
                         </div>
                     </div>
                     <div className="flex items-center justify-between border-t border-white/10 px-3 py-2">
-                        <p className="text-[11px] text-slate-300">Select the clearest segment before entering phase review.</p>
+                        <p className="text-[11px] text-slate-300">
+                            确认后，所选候选将作为 {conflictedBedLabel} 的 0% 数据参与整体 0% 相位重建。
+                        </p>
                         {showReviewButton && (
                             <button
                                 type="button"
                                 onClick={onReviewClick}
                                 className="h-8 rounded-md bg-[#4D94FF] px-4 text-[11px] font-black text-white shadow-lg shadow-blue-500/20 transition-all hover:bg-blue-600 active:scale-95"
                             >
-                                Phase Review
+                                确认相位选择
                             </button>
                         )}
                     </div>
