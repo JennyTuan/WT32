@@ -130,7 +130,7 @@ function FourDPreviewImage({ src }: { src: string }) {
       src={src}
       alt=""
       draggable={false}
-      className="h-full w-full object-cover"
+      className="h-full w-full object-contain"
     />
   );
 }
