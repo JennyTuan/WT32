@@ -176,14 +176,17 @@ export default function FourDDiagnosticConfirmScreen() {
             Number(FOURD_PARAMS.phases),
             dynamicParams.scanLength
         );
-        const postScanState: FourDPostScanState = { scanResult };
+        const postScanState: FourDPostScanState = {
+            scanResult,
+            showSliceLoadingBeforeImageLoad: true,
+        };
 
         if (scanResult.rescanOccurred) {
             // 先做重扫区域选择，再进图像浏览
             navigate("/fourd-rescan-select", { state: postScanState });
         } else {
-            // 直接进图像浏览，若有相位冲突在那里弹窗处理
-            navigate("/image-load", { state: postScanState });
+            // 先进入图示界面展示切片加载过程，完成后再进入 image-load
+            navigate("/image-viewer", { state: postScanState });
         }
     }, [bedSegmentCount, dynamicParams.scanLength, navigate]);
 

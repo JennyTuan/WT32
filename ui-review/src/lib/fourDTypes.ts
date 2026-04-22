@@ -51,6 +51,8 @@ export interface FourDPostScanState {
   phaseSelections?: PhaseSelections;
   /** 重扫选择完成后填充 */
   rescanChoices?: RescanChoices;
+  /** 4D 扫描结束后是否先在图示界面展示切片加载过程，再跳转至 image-load */
+  showSliceLoadingBeforeImageLoad?: boolean;
 }
 
 // ─── 工具函数 ──────────────────────────────────────────────────────────────────

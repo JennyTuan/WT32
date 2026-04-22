@@ -318,7 +318,12 @@ export default function FourDPhaseReviewScreen() {
         if (cell.frameCount > 1) phaseSelections[`${bi}-${pi}`] = cell.selectedFrame;
       });
     });
-    const nextState: FourDPostScanState = { ...state, scanResult, phaseSelections };
+    const nextState: FourDPostScanState = {
+      ...state,
+      scanResult,
+      phaseSelections,
+      showSliceLoadingBeforeImageLoad: true,
+    };
     navigate(
       scanResult.rescanOccurred ? "/fourd-rescan-select" : "/image-viewer",
       { state: nextState }
