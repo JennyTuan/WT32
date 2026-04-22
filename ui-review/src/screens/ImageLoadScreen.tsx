@@ -98,34 +98,28 @@ function buildMockPhases(): PhaseData[] {
 
 function MprTile({
   label,
-  rightLabel,
-  accent,
   children,
 }: {
   label: string;
-  rightLabel?: string;
-  accent?: "green" | "red";
   children: React.ReactNode;
 }) {
-  const accentClass = accent === "green" ? "text-green-400" : "text-red-400";
   return (
-    <div className="relative overflow-hidden bg-black">
-      <div className="pointer-events-none absolute left-2 top-1.5 z-10 text-[10px] font-bold tracking-wide text-[#CFD8DC]">{label}</div>
-      {rightLabel && (
-        <div className={`pointer-events-none absolute right-2 top-1.5 z-10 text-[10px] font-bold ${accentClass}`}>
-          {rightLabel}
-        </div>
-      )}
+    <div className="relative h-full overflow-hidden bg-black">
+      <div className="pointer-events-none absolute left-3 top-2 z-10 text-[18px] font-black tracking-[0.16em] text-white">{label}</div>
+      <div className="pointer-events-none absolute right-3 top-2 z-10 rounded-md border border-[#1E3A8A] bg-black/75 px-3 py-1 text-[20px] font-black text-[#4EA2FF]">
+        Phase 0%
+      </div>
       <div className="flex h-full w-full items-center justify-center">{children}</div>
     </div>
   );
 }
 
-function CrossHair() {
+function CrossHair({ horizontalClass, verticalClass }: { horizontalClass: string; verticalClass: string }) {
   return (
     <>
-      <div className="absolute left-0 right-0 top-1/2 h-px bg-green-500/60" />
-      <div className="absolute bottom-0 top-0 left-1/2 w-px bg-red-500/60" />
+      <div className={`absolute left-0 right-0 top-1/2 h-px ${horizontalClass}`} />
+      <div className={`absolute bottom-0 top-0 left-1/2 w-px ${verticalClass}`} />
+      <div className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/90" />
     </>
   );
 }
@@ -136,7 +130,7 @@ function FourDPreviewImage({ src }: { src: string }) {
       src={src}
       alt=""
       draggable={false}
-      className="h-full w-full object-contain"
+      className="h-full w-full object-cover"
     />
   );
 }
@@ -276,30 +270,35 @@ export default function ImageLoadScreen() {
         </section>
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
-          <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-[#B0C4DE] bg-black">
-            <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-px bg-[#B0C4DE]">
-              <div className="row-span-2 min-h-0">
-                <MprTile label="Coronal" rightLabel="H" accent="green">
-                  <div className="relative h-full w-full bg-[#05090f]">
+          <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-[#1E3A8A] bg-black">
+            <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-px bg-[#1E3A8A]">
+              <div className="row-span-2 min-h-0 bg-black">
+                <MprTile label="CORONAL">
+                  <div className="relative h-full w-full bg-black">
                     <FourDPreviewImage src={previewUrls.coronal} />
-                    <CrossHair />
+                    <CrossHair horizontalClass="bg-red-500/85" verticalClass="bg-yellow-300/85" />
+                    <div className="absolute bottom-3 left-3 text-[16px] font-bold leading-tight text-[#E6ECFF]">W 400<br />WL 40</div>
                   </div>
                 </MprTile>
               </div>
-              <MprTile label="Sagittal" rightLabel="H" accent="red">
-                <div className="relative h-full w-full bg-[#05090f]">
-                  <FourDPreviewImage src={previewUrls.sagittal} />
-                  <CrossHair />
-                  <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">A</div>
-                </div>
-              </MprTile>
-              <MprTile label="Axial" rightLabel="A" accent="green">
-                <div className="relative h-full w-full">
-                  <FourDPreviewImage src={previewUrls.axial} />
-                  <CrossHair />
-                  <div className="absolute bottom-1 left-2 text-[9px] text-slate-400">R</div>
-                </div>
-              </MprTile>
+              <div className="min-h-0 bg-black">
+                <MprTile label="SAGITTAL">
+                  <div className="relative h-full w-full bg-black">
+                    <FourDPreviewImage src={previewUrls.sagittal} />
+                    <CrossHair horizontalClass="bg-red-500/85" verticalClass="bg-emerald-400/85" />
+                    <div className="absolute bottom-3 left-3 text-[16px] font-bold leading-tight text-[#E6ECFF]">W 400<br />WL 40</div>
+                  </div>
+                </MprTile>
+              </div>
+              <div className="min-h-0 bg-black">
+                <MprTile label="AXIAL">
+                  <div className="relative h-full w-full bg-black">
+                    <FourDPreviewImage src={previewUrls.axial} />
+                    <CrossHair horizontalClass="bg-emerald-400/85" verticalClass="bg-yellow-300/85" />
+                    <div className="absolute bottom-3 left-3 text-[16px] font-bold leading-tight text-[#E6ECFF]">W 400<br />WL 40</div>
+                  </div>
+                </MprTile>
+              </div>
             </div>
           </div>
         </section>
