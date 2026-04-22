@@ -8,8 +8,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Settings,
-  HelpCircle,
   Info,
   AlertTriangle,
   Check,
@@ -343,19 +341,10 @@ export default function ImageLoadScreen() {
       {/* ═══ Header ═══ */}
       <header className="flex h-[56px] shrink-0 items-center justify-between border-b border-slate-800 px-5">
         <div className="flex items-center gap-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-500 text-white">
-            <span className="text-[13px] font-black">M</span>
-          </div>
+         
           <StepBar current={step} />
         </div>
-        <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/40 px-3 py-1.5 text-[11px] font-bold text-slate-200 hover:bg-slate-800">
-            <Settings size={13} /> 重建参数
-          </button>
-          <button className="flex items-center gap-1.5 rounded-md bg-blue-500 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-600">
-            <HelpCircle size={13} /> 帮助
-          </button>
-        </div>
+        
       </header>
 
       {/* ═══ Body ═══ */}
@@ -559,48 +548,6 @@ export default function ImageLoadScreen() {
                     ))}
                   </div>
                 </div>
-              </div>
-
-              {/* 数据段信息 */}
-              <div className="mb-3 rounded-md border border-slate-700/60 bg-slate-800/30 px-4 py-3">
-                <h3 className="mb-2 text-[12px] font-bold text-slate-200">数据段信息</h3>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-                  <InfoRow label="采集时间:" value={selectedSegment?.time ?? "—"} />
-                  <ScoreBar label="图像清晰度" value={selectedSegment?.clarity ?? 0} />
-                  <InfoRow label="床位位置:" value={selectedSegment?.bedPosition ?? "—"} />
-                  <ScoreBar label="噪声水平" value={selectedSegment?.noise ?? 0} />
-                  <InfoRow label="原始层数:" value={String(selectedSegment?.sliceCount ?? "—")} />
-                  <ScoreBar label="运动伪影" value={selectedSegment?.motion ?? 0} />
-                  <InfoRow label="平均剂量:" value={selectedSegment?.avgDose ?? "—"} />
-                  <div className="flex items-center gap-3">
-                    <span className="w-[64px] shrink-0 text-[11px] text-slate-400">整体质量:</span>
-                    <span
-                      className={
-                        selectedSegment?.quality === "优秀"
-                          ? "text-[11px] font-bold text-green-400"
-                          : "text-[11px] font-bold text-yellow-400"
-                      }
-                    >
-                      {selectedSegment?.quality ?? "—"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* 蓝色建议 + 批量 */}
-              <div className="flex items-center justify-between rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <Info size={13} className="text-blue-300" />
-                  <span className="text-[11px] text-blue-100">
-                    建议: 选择图像清晰、运动伪影少的数据段以获得最佳重建效果。
-                  </span>
-                </div>
-                <button
-                  onClick={applySelectionToAll}
-                  className="rounded-md bg-blue-500 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-600"
-                >
-                  应用选择到所有相位
-                </button>
               </div>
             </section>
           </>
