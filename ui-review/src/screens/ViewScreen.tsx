@@ -635,20 +635,23 @@ const ViewScreen = () => {
     useEffect(() => {
         if (!shouldShowSliceLoadingBridge || !fourDManifest) return;
         const totalSlices = fourDManifest.views.axial.slices;
-        setSliceLoadingCount(0);
-        let current = 0;
+        setSliceLoadingCount(1);
+        setSliceIndex(0);
+        let current = 1;
         const timer = window.setInterval(() => {
-            current += 1;
             if (current >= totalSlices) {
                 window.clearInterval(timer);
                 setSliceLoadingCount(totalSlices);
+                setSliceIndex(clampSliceIndex(totalSlices - 1));
                 setIsSliceLoadingInline(false);
                 return;
             }
+            current += 1;
             setSliceLoadingCount(current);
+            setSliceIndex(clampSliceIndex(current - 1));
         }, 28);
         return () => window.clearInterval(timer);
-    }, [fourDManifest, shouldShowSliceLoadingBridge]);
+    }, [clampSliceIndex, fourDManifest, shouldShowSliceLoadingBridge]);
 
     // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
     // (clinical convention: cine cycles phases at a locked anatomical slice).
