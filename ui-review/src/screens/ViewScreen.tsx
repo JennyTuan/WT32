@@ -10,7 +10,6 @@ import {
     SlidersHorizontal,
     ZoomIn,
     ZoomOut,
-    Hand,
     Ruler,
     Pencil,
     Eraser,
@@ -225,12 +224,12 @@ const getSeriesDicomUrl = (sliceIndex: number, seriesType?: SeriesType) => {
     return `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
 };
 
-const mapCornerstoneTool = (toolMode: "pan" | "wl" | "measure" | "annotate" | "eraser") => {
+const mapCornerstoneTool = (toolMode: "wl" | "measure" | "annotate" | "eraser") => {
     if (toolMode === "wl") return "window";
     if (toolMode === "measure") return "ruler";
     if (toolMode === "eraser") return "eraser";
     if (toolMode === "annotate") return "annotate";
-    return "pan";
+    return "window";
 };
 
 const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count / 2));
@@ -268,7 +267,7 @@ const ViewScreen = () => {
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
     const [imageMode, setImageMode] = useState<"2D" | "3D">("2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
-    const [toolMode, setToolMode] = useState<"pan" | "wl" | "measure" | "annotate" | "eraser">("pan");
+    const [toolMode, setToolMode] = useState<"wl" | "measure" | "annotate" | "eraser">("wl");
     const [ww, setWw] = useState(350);
     const [wl, setWl] = useState(45);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -520,12 +519,12 @@ const ViewScreen = () => {
     const isFourDMprViewActive = isMprViewActive && isFourDLungReconSeries;
     const isFourDPlaybackBlockedByReview = isFourDLungReconSeries && isFourDEntry && fourDStage !== "done";
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
-    const isToolSupportedInCurrentView = (mode: "pan" | "wl" | "measure" | "annotate" | "eraser") => {
+    const isToolSupportedInCurrentView = (mode: "wl" | "measure" | "annotate" | "eraser") => {
         if (!isMprViewActive) return true;
         if (isFourDMprViewActive) {
-            return mode === "pan" || mode === "wl";
+            return mode === "wl";
         }
-        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "eraser";
+        return mode === "wl" || mode === "measure" || mode === "eraser";
     };
 
 
@@ -567,7 +566,7 @@ const ViewScreen = () => {
 
     useEffect(() => {
         if (isToolSupportedInCurrentView(toolMode)) return;
-        setToolMode("pan");
+        setToolMode("wl");
     }, [toolMode, isMprViewActive, isFourDMprViewActive]);
 
     // Load 4D manifest + preload each phase's first frame (mid axial) so
@@ -1366,7 +1365,7 @@ const ViewScreen = () => {
                     {(imageMode === "2D" || isTopogramSeries) && (
                         <section
                             ref={viewportRef}
-                            className={`flex-1 min-w-0 bg-black overflow-hidden relative ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : toolMode === "pan" ? "cursor-grab" : "cursor-default"}`}
+                            className={`flex-1 min-w-0 bg-black overflow-hidden relative ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : "cursor-default"}`}
                         >
                             {/* Cornerstone DICOM viewer */}
                             <DicomViewer
@@ -1456,15 +1455,14 @@ const ViewScreen = () => {
                 </div>
                 <aside className="w-[72px] bg-[#0F172A] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3" onPointerDown={(e) => e.stopPropagation()}>
-                            {(["pan", "wl", "measure", "annotate", "eraser"] as const).map((mode, i) => {
+                            {(["wl", "measure", "annotate", "eraser"] as const).map((mode, i) => {
                                 const icons = [
-                                    <Hand size={20} strokeWidth={1.5} key="hand" />,
                                     <SlidersHorizontal size={20} strokeWidth={1.5} key="sliders" />,
                                     <Ruler size={20} strokeWidth={1.5} key="ruler" />,
                                     <Pencil size={20} strokeWidth={1.5} key="pencil" />,
                                     <Eraser size={20} strokeWidth={1.5} key="eraser" />,
                                 ];
-                                const titles = ["Pan", "WW/WL", "Measure", "Annotate", "Eraser"];
+                                const titles = ["WW/WL", "Measure", "Annotate", "Eraser"];
                                 const active = toolMode === mode;
                                 const supported = isToolSupportedInCurrentView(mode);
                                 return (
