@@ -244,11 +244,9 @@ const ViewScreen = () => {
 
     /** "idle" → 非4D入口/等待图像加载；"review" → 相位审核弹窗；"done" → 审核完成 */
     const [fourDStage, setFourDStage] = useState<"idle" | "phaseLoading" | "reviewReady" | "review" | "done">(
-        isFourDEntry ? "phaseLoading" : "idle"
+        isFourDEntry ? "done" : "idle"
     );
-    const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">(
-        isFourDEntry ? "loading" : "ready"
-    );
+    const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">("ready");
     const handleFourDPhaseGridComplete = useCallback(() => {
         if (!isFourDEntry || !fourDState?.scanResult) return;
         setViewerLoadStatus("ready");
@@ -1312,6 +1310,7 @@ const ViewScreen = () => {
                                     ref={fourDGridRef}
                                     manifest={fourDManifest}
                                     phase={selectedPhaseIndex}
+                                    onPhaseChange={setSelectedPhaseIndex}
                                     sliceCineTick={sliceCineTick}
                                     mipMode={phaseMipMode}
                                     activeTool={mapCornerstoneTool(toolMode)}
