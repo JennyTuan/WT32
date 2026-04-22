@@ -11,7 +11,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import {
-    buildFourDImageUrls,
+    buildFourDMipUrls,
     type FourDAggregateMode,
     type FourDManifest,
 } from "../lib/fourDImageSource";
@@ -26,10 +26,38 @@ export interface FourDMprGridHandle {
     clearAnnotations: () => void;
 }
 
+type MprPanel = "axial" | "coronal" | "sagittal";
+type InitialLayout = "mpr" | "axial-single";
+
+interface FourDCornerInfo {
+    patientName?: string;
+    patientId?: string;
+    patientSex?: string;
+    patientAge?: string;
+    modality?: string;
+    studyDate?: string;
+    studyTime?: string;
+    seriesDescription?: string;
+    kvp?: string;
+    mas?: string;
+    pixelSpacing?: string;
+    thickness?: string;
+    institution?: string;
+    manufacturer?: string;
+    rows?: number;
+    cols?: number;
+    ww?: number;
+    wl?: number;
+}
+
 interface FourDMprGridProps {
     manifest: FourDManifest;
     phase: number;                    // 0..9
     onPhaseChange?: (phase: number) => void;
+    showPhaseBadge?: boolean;
+    showCornerInfo?: boolean;
+    cornerInfo?: FourDCornerInfo;
+    initialLayout?: InitialLayout;
     sliceCineTick?: number;
     mipMode?: FourDAggregateMode;
     activeTool?: string;
@@ -88,6 +116,10 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
         manifest,
         phase,
         onPhaseChange,
+        showPhaseBadge = true,
+        showCornerInfo = false,
+        cornerInfo,
+        initialLayout = "mpr",
         sliceCineTick = 0,
         mipMode = "MIP",
         activeTool = "pan",
@@ -108,8 +140,14 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
 
     // Single-view (maximized) panel — double-click a panel to enter single-view
     // mode and double-click again to return to the MPR layout.
-    const [maximizedPanel, setMaximizedPanel] = useState<"axial" | "coronal" | "sagittal" | null>(null);
-    const toggleMaximize = useCallback((panel: "axial" | "coronal" | "sagittal") => {
+    const [maximizedPanel, setMaximizedPanel] = useState<MprPanel | null>(initialLayout === "axial-single" ? "axial" : null);
+    useEffect(() => {
+        queueMicrotask(() => {
+            setMaximizedPanel(initialLayout === "axial-single" ? "axial" : null);
+        });
+    }, [initialLayout]);
+
+    const toggleMaximize = useCallback((panel: MprPanel) => {
         setMaximizedPanel((prev) => (prev === panel ? null : panel));
     }, []);
 
@@ -118,18 +156,28 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     const [coronalIdx, setCoronalIdx] = useState(() => Math.floor(manifest.views.coronal.slices / 2));
     const [sagittalIdx, setSagittalIdx] = useState(() => Math.floor(manifest.views.sagittal.slices / 2));
 
-    // Rebuild URL lists when phase or manifest changes. buildFourDImageUrls is
-    // cheap (just string concat) so we don't aggressively memo-key.
-    const axialUrls    = useMemo(() => buildFourDImageUrls(manifest, phase, "axial"),    [manifest, phase]);
-    const coronalUrls  = useMemo(() => buildFourDImageUrls(manifest, phase, "coronal"),  [manifest, phase]);
-    const sagittalUrls = useMemo(() => buildFourDImageUrls(manifest, phase, "sagittal"), [manifest, phase]);
+    // The volume-rendering selector drives the displayed stack directly:
+    // MIP / MinIP / Avg are pre-rendered across phases for all three views.
+    const axialUrls    = useMemo(() => buildFourDMipUrls(manifest, "axial", mipMode),    [manifest, mipMode]);
+    const coronalUrls  = useMemo(() => buildFourDMipUrls(manifest, "coronal", mipMode),  [manifest, mipMode]);
+    const sagittalUrls = useMemo(() => buildFourDMipUrls(manifest, "sagittal", mipMode), [manifest, mipMode]);
+
+    useEffect(() => {
+        queueMicrotask(() => {
+            setAxialIdx((prev) => Math.min(prev, Math.max(0, axialUrls.length - 1)));
+            setCoronalIdx((prev) => Math.min(prev, Math.max(0, coronalUrls.length - 1)));
+            setSagittalIdx((prev) => Math.min(prev, Math.max(0, sagittalUrls.length - 1)));
+        });
+    }, [axialUrls.length, coronalUrls.length, sagittalUrls.length]);
 
     // Slice-cine: whenever parent bumps tick, advance spatial slices (phase remains locked).
     useEffect(() => {
         if (sliceCineTick <= 0) return;
-        setAxialIdx((prev) => (prev + 1) % Math.max(1, axialUrls.length));
-        setCoronalIdx((prev) => (prev + 1) % Math.max(1, coronalUrls.length));
-        setSagittalIdx((prev) => (prev + 1) % Math.max(1, sagittalUrls.length));
+        queueMicrotask(() => {
+            setAxialIdx((prev) => (prev + 1) % Math.max(1, axialUrls.length));
+            setCoronalIdx((prev) => (prev + 1) % Math.max(1, coronalUrls.length));
+            setSagittalIdx((prev) => (prev + 1) % Math.max(1, sagittalUrls.length));
+        });
     }, [sliceCineTick, axialUrls.length, coronalUrls.length, sagittalUrls.length]);
 
     // Bubble status: ready once axial plane has loaded at least one frame.
@@ -160,8 +208,14 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
         }));
     }, [manifest.phases, manifest.phase_values]);
 
-    const [phasePickerPanel, setPhasePickerPanel] = useState<"axial" | "coronal" | "sagittal" | null>(null);
+    const [phasePickerPanel, setPhasePickerPanel] = useState<MprPanel | null>(null);
     const phasePickerRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!showPhaseBadge) {
+            queueMicrotask(() => setPhasePickerPanel(null));
+        }
+    }, [showPhaseBadge]);
+
     useEffect(() => {
         if (!phasePickerPanel) return;
         const handle = (e: MouseEvent) => {
@@ -173,7 +227,9 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
         return () => window.removeEventListener("pointerdown", handle);
     }, [phasePickerPanel]);
 
-    const renderPhaseBadge = (panel: "axial" | "coronal" | "sagittal") => {
+    const renderPhaseBadge = (panel: MprPanel) => {
+        if (!showPhaseBadge) return null;
+
         const open = phasePickerPanel === panel;
         return (
             <div ref={open ? phasePickerRef : undefined} className="absolute top-2 right-2 z-[3]">
@@ -239,6 +295,77 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
         );
     };
 
+    const textOrDash = (value: unknown) => {
+        if (value === null || value === undefined || value === "" || value === "N/A") return "-";
+        return String(value);
+    };
+
+    const getPanelSliceInfo = (panel: MprPanel) => {
+        if (panel === "axial") {
+            return {
+                label: "AXIAL",
+                index: axialIdx,
+                count: axialUrls.length,
+                viewMeta: manifest.views.axial,
+            };
+        }
+        if (panel === "coronal") {
+            return {
+                label: "CORONAL",
+                index: coronalIdx,
+                count: coronalUrls.length,
+                viewMeta: manifest.views.coronal,
+            };
+        }
+        return {
+            label: "SAGITTAL",
+            index: sagittalIdx,
+            count: sagittalUrls.length,
+            viewMeta: manifest.views.sagittal,
+        };
+    };
+
+    const renderCornerInfo = (panel: MprPanel) => {
+        if (!showCornerInfo || maximizedPanel !== panel) return null;
+
+        const slice = getPanelSliceInfo(panel);
+        const rows = cornerInfo?.rows && cornerInfo.rows > 0 ? cornerInfo.rows : slice.viewMeta.height;
+        const cols = cornerInfo?.cols && cornerInfo.cols > 0 ? cornerInfo.cols : slice.viewMeta.width;
+        const spacing = cornerInfo?.pixelSpacing && cornerInfo.pixelSpacing !== "N/A"
+            ? cornerInfo.pixelSpacing
+            : `${manifest.spacing.x.toFixed(2)}\\${manifest.spacing.y.toFixed(2)} mm`;
+        const thickness = cornerInfo?.thickness && cornerInfo.thickness !== "N/A"
+            ? cornerInfo.thickness
+            : `${manifest.spacing.z.toFixed(2)} mm`;
+
+        const commonClass = "pointer-events-none absolute z-[4] font-mono text-[10px] leading-[1.35] text-[#CFD8DC] drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]";
+
+        return (
+            <>
+                <div className={`${commonClass} left-2 top-2`}>
+                    <div className="font-bold">{textOrDash(cornerInfo?.patientName)}</div>
+                    <div>ID {textOrDash(cornerInfo?.patientId)} | {textOrDash(cornerInfo?.patientSex)} {textOrDash(cornerInfo?.patientAge)}</div>
+                    <div>{textOrDash(cornerInfo?.modality ?? "CT")} | {textOrDash(cornerInfo?.studyDate)} {textOrDash(cornerInfo?.studyTime)}</div>
+                </div>
+                <div className={`${commonClass} right-2 top-2 text-right`}>
+                    <div className="font-bold">{textOrDash(cornerInfo?.seriesDescription ?? manifest.study)}</div>
+                    <div>Image {slice.index + 1}/{Math.max(1, slice.count)}</div>
+                    <div>KV {textOrDash(cornerInfo?.kvp)} | mAs {textOrDash(cornerInfo?.mas)}</div>
+                </div>
+                <div className={`${commonClass} bottom-2 left-2`}>
+                    <div>WW/WL {Math.round(cornerInfo?.ww ?? windowWidth ?? baselineWW)} / {Math.round(cornerInfo?.wl ?? windowCenter ?? baselineWC)}</div>
+                    <div>Spacing {spacing}</div>
+                    <div>{rows} x {cols}</div>
+                </div>
+                <div className={`${commonClass} bottom-2 right-2 text-right`}>
+                    <div>Slice {slice.index + 1}/{Math.max(1, slice.count)} | Thick {thickness}</div>
+                    <div>{manifest.case}</div>
+                    <div>{textOrDash(cornerInfo?.institution)} | {textOrDash(cornerInfo?.manufacturer)}</div>
+                </div>
+            </>
+        );
+    };
+
     const baselineWC = manifest.defaults.wl;
     const baselineWW = manifest.defaults.ww;
 
@@ -249,13 +376,14 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
         windowCenter: windowCenter ?? baselineWC,
         windowWidth: windowWidth ?? baselineWW,
         onWindowLevelChange,
+        showWindowLevelOverlay: !showCornerInfo,
     };
 
     const panelBase =
         "relative bg-black overflow-hidden border border-[#0F172A]";
 
     const updateCrosshairFromPointer = useCallback((
-        panel: "axial" | "coronal" | "sagittal",
+        panel: MprPanel,
         clientX: number,
         clientY: number,
     ) => {
@@ -289,7 +417,7 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
         setAxialIdx(toIndex(yRatio, manifest.views.axial.slices));
     }, [manifest.views.axial.slices, manifest.views.coronal.slices, manifest.views.sagittal.slices]);
 
-    const dragPanelRef = useRef<"axial" | "coronal" | "sagittal" | null>(null);
+    const dragPanelRef = useRef<MprPanel | null>(null);
     useEffect(() => {
         const handleMove = (event: PointerEvent) => {
             if (!dragPanelRef.current) return;
@@ -320,7 +448,7 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     };
 
     const bindCrosshairDrag = useCallback(
-        (panel: "axial" | "coronal" | "sagittal") => ({
+        (panel: MprPanel) => ({
             onPointerDownCapture: (event: React.PointerEvent<HTMLDivElement>) => {
                 // Keep regular pan/WL mouse gestures available; use Shift+drag
                 // when the operator wants to reposition MPR crosshairs.
@@ -334,13 +462,14 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
         [updateCrosshairFromPointer],
     );
 
-    const panelLayoutClass = (panel: "axial" | "coronal" | "sagittal") => {
+    const panelLayoutClass = (panel: MprPanel) => {
         if (maximizedPanel === panel) return "col-span-2 row-span-2";
         if (maximizedPanel !== null) return "hidden";
         return panel === "coronal" ? "row-span-2" : "";
     };
 
     const showCrosshair = maximizedPanel === null;
+    const showPanelLabels = maximizedPanel === null || !showCornerInfo;
 
     return (
         <div className={className}>
@@ -365,8 +494,9 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
                         verticalColor={SAGITTAL_COLOR}
                     />
                 )}
-                <div className={PANEL_LABEL_STYLE}>CORONAL</div>
+                {showPanelLabels && <div className={PANEL_LABEL_STYLE}>CORONAL</div>}
                 {renderPhaseBadge("coronal")}
+                {renderCornerInfo("coronal")}
             </div>
 
             {/* SAGITTAL */}
@@ -390,8 +520,9 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
                         verticalColor={CORONAL_COLOR}
                     />
                 )}
-                <div className={PANEL_LABEL_STYLE}>SAGITTAL</div>
+                {showPanelLabels && <div className={PANEL_LABEL_STYLE}>SAGITTAL</div>}
                 {renderPhaseBadge("sagittal")}
+                {renderCornerInfo("sagittal")}
             </div>
 
             {/* AXIAL */}
@@ -416,8 +547,9 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
                         verticalColor={SAGITTAL_COLOR}
                     />
                 )}
-                <div className={PANEL_LABEL_STYLE}>AXIAL</div>
+                {showPanelLabels && <div className={PANEL_LABEL_STYLE}>AXIAL</div>}
                 {renderPhaseBadge("axial")}
+                {renderCornerInfo("axial")}
             </div>
         </div>
     );

@@ -14,7 +14,6 @@ import {
     useCallback,
     useEffect,
     useImperativeHandle,
-    useLayoutEffect,
     useRef,
     useState,
 } from "react";
@@ -26,7 +25,7 @@ interface WebImageViewerProps {
     currentImageIndex?: number;
     onImageIndexChange?: (index: number) => void;
     onStatusChange?: (status: "loading" | "ready" | "error") => void;
-    activeTool?: string; // "pan" | "wl" | "measure" | "annotate" | "eraser"
+    activeTool?: string; // "pan" | "wl" | "window" | "measure" | "annotate" | "eraser"
     /** Baseline window center the WebPs were rendered with (e.g. lung WL=-600). */
     baselineWindowCenter?: number;
     /** Baseline window width the WebPs were rendered with (e.g. lung WW=1500). */
@@ -36,6 +35,7 @@ interface WebImageViewerProps {
     /** User-tweaked window width. Diff from baseline drives a CSS contrast shift. */
     windowWidth?: number;
     onWindowLevelChange?: (windowCenter: number, windowWidth: number) => void;
+    showWindowLevelOverlay?: boolean;
     className?: string;
 }
 
@@ -54,6 +54,7 @@ const WebImageViewer = forwardRef<DicomViewerHandle, WebImageViewerProps>(
             windowCenter = -600,
             windowWidth = 1500,
             onWindowLevelChange,
+            showWindowLevelOverlay = true,
             className = "w-full h-full relative overflow-hidden select-none",
         },
         ref,
@@ -78,10 +79,12 @@ const WebImageViewer = forwardRef<DicomViewerHandle, WebImageViewerProps>(
         } | null>(null);
 
         // Reset transform whenever the stack changes (different view/phase)
-        useLayoutEffect(() => {
-            setTx(0);
-            setTy(0);
-            setScale(1);
+        useEffect(() => {
+            queueMicrotask(() => {
+                setTx(0);
+                setTy(0);
+                setScale(1);
+            });
         }, [imageUrls]);
 
         // Fire status to parent. "loading" until first image load, then "ready".
@@ -97,7 +100,7 @@ const WebImageViewer = forwardRef<DicomViewerHandle, WebImageViewerProps>(
         const hasLoadedOnceRef = useRef(false);
         useEffect(() => {
             if (!hasLoadedOnceRef.current) {
-                setStatus("loading");
+                queueMicrotask(() => setStatus("loading"));
             }
         }, [imageUrls]);
 
@@ -131,8 +134,10 @@ const WebImageViewer = forwardRef<DicomViewerHandle, WebImageViewerProps>(
         );
 
         const onMouseDown = (e: React.MouseEvent) => {
+            if (e.button !== 0) return;
+            const isWindowTool = activeTool === "wl" || activeTool === "window";
             const mode: "pan" | "wl" | null =
-                activeTool === "pan" ? "pan" : activeTool === "wl" ? "wl" : null;
+                activeTool === "pan" ? "pan" : isWindowTool ? "wl" : null;
             if (!mode) return;
             e.preventDefault();
             dragRef.current = {
@@ -205,6 +210,7 @@ const WebImageViewer = forwardRef<DicomViewerHandle, WebImageViewerProps>(
             2.5,
         );
         const filter = `brightness(${brightness.toFixed(3)}) contrast(${contrast.toFixed(3)})`;
+        const isWindowTool = activeTool === "wl" || activeTool === "window";
 
         return (
             <div
@@ -214,7 +220,7 @@ const WebImageViewer = forwardRef<DicomViewerHandle, WebImageViewerProps>(
                 onMouseDown={onMouseDown}
                 style={{
                     cursor:
-                        activeTool === "pan" ? "grab" : activeTool === "wl" ? "ns-resize" : "default",
+                        activeTool === "pan" ? "grab" : isWindowTool ? "crosshair" : "default",
                     background: "#000",
                 }}
             >
@@ -247,6 +253,12 @@ const WebImageViewer = forwardRef<DicomViewerHandle, WebImageViewerProps>(
                 {status === "error" && (
                     <div className="absolute inset-0 flex items-center justify-center text-xs text-red-400 pointer-events-none">
                         图像加载失败
+                    </div>
+                )}
+                {showWindowLevelOverlay && isWindowTool && (
+                    <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 font-mono text-[10px] font-bold leading-tight text-white/85">
+                        <div>WW {Math.round(windowWidth)}</div>
+                        <div>WL {Math.round(windowCenter)}</div>
                     </div>
                 )}
             </div>

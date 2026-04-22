@@ -10,9 +10,9 @@ import {
     SlidersHorizontal,
     ZoomIn,
     ZoomOut,
+    Move,
     Ruler,
     Pencil,
-    Eraser,
     Trash2,
     Maximize,
     RefreshCw,
@@ -224,7 +224,10 @@ const getSeriesDicomUrl = (sliceIndex: number, seriesType?: SeriesType) => {
     return `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
 };
 
-const mapCornerstoneTool = (toolMode: "wl" | "measure" | "annotate" | "eraser") => {
+type ViewerToolMode = "pan" | "wl" | "measure" | "annotate" | "eraser";
+
+const mapCornerstoneTool = (toolMode: ViewerToolMode) => {
+    if (toolMode === "pan") return "pan";
     if (toolMode === "wl") return "window";
     if (toolMode === "measure") return "ruler";
     if (toolMode === "eraser") return "eraser";
@@ -233,6 +236,27 @@ const mapCornerstoneTool = (toolMode: "wl" | "measure" | "annotate" | "eraser") 
 };
 
 const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count / 2));
+
+function WindowLevelIcon({ size = 20 }: { size?: number }) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+        >
+            <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+            <path d="M12 6.25v11.5" />
+            <path d="M12 6.25a5.75 5.75 0 0 0 0 11.5" fill="currentColor" stroke="none" opacity="0.32" />
+            <path d="M12 6.25a5.75 5.75 0 0 1 0 11.5" />
+        </svg>
+    );
+}
 
 const ViewScreen = () => {
     const navigate = useNavigate();
@@ -263,9 +287,10 @@ const ViewScreen = () => {
     const phaseCineDirectionRef = useRef<1 | -1>(1);
     // Across-phase aggregation for the MPR 4th panel (ITV visualisation)
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
+    const [slabThickness, setSlabThickness] = useState(5);
     const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry ? "3D" : "2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
-    const [toolMode, setToolMode] = useState<"wl" | "measure" | "annotate" | "eraser">("wl");
+    const [toolMode, setToolMode] = useState<ViewerToolMode>("wl");
     const [ww, setWw] = useState(350);
     const [wl, setWl] = useState(45);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -518,12 +543,12 @@ const ViewScreen = () => {
     const isFourDPlaybackBlockedByReview = isFourDLungReconSeries && isFourDEntry && fourDStage !== "done";
     const isFourDEntryLoadingFlow = isFourDEntry && fourDStage !== "done" && fourDStage !== "review";
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
-    const isToolSupportedInCurrentView = (mode: "wl" | "measure" | "annotate" | "eraser") => {
+    const isToolSupportedInCurrentView = (mode: ViewerToolMode) => {
         if (!isMprViewActive) return true;
         if (isFourDMprViewActive) {
-            return mode === "wl";
+            return mode === "pan" || mode === "wl";
         }
-        return mode === "wl" || mode === "measure" || mode === "eraser";
+        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "eraser";
     };
 
 
@@ -618,13 +643,12 @@ const ViewScreen = () => {
         return () => window.clearInterval(timer);
     }, [isFourDLungReconSeries, isPlaying, phaseCineSpeed, phaseCineMode, fourDBrowseMode]);
 
-    // Slice cine: lock current phase, cycle spatial slices in all MPR planes.
+    // Conventional slice browsing: lock current phase, cycle spatial slices in all MPR planes.
     useEffect(() => {
         if (!isFourDLungReconSeries || !isPlaying || fourDBrowseMode !== "slice") return;
         const intervalMs = 220 / phaseCineSpeed;
         const timer = window.setInterval(() => {
             setSliceCineTick((prev) => prev + 1);
-            setSelectedPhaseIndex((prev) => (prev + 1) % FOUR_D_PHASE_LABELS.length);
         }, intervalMs);
         return () => window.clearInterval(timer);
     }, [isFourDLungReconSeries, isPlaying, phaseCineSpeed, fourDBrowseMode]);
@@ -1135,7 +1159,7 @@ const ViewScreen = () => {
                             ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
                                     {/* Layout Dropdown */}
-                                    <div className="flex items-center gap-2 relative">
+                                    <div className={`${isFourDLungReconSeries ? "hidden" : "flex"} items-center gap-2 relative`}>
                                         <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">布局</span>
                                         {isFourDLungReconSeries ? (
                                             <div
@@ -1235,7 +1259,7 @@ const ViewScreen = () => {
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isBrowseModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
                                                 >
                                                     <span className="text-[12px] font-medium text-[#37474F] truncate">
-                                                        {fourDBrowseMode === "phase" ? "4D Cine" : "Slice Cine"}
+                                                        {fourDBrowseMode === "phase" ? "4D Cine" : "常规浏览"}
                                                     </span>
                                                     <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isBrowseModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                 </div>
@@ -1243,12 +1267,18 @@ const ViewScreen = () => {
                                                     <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                         {([
                                                             { k: "phase" as const, l: "4D Cine" },
-                                                            { k: "slice" as const, l: "Slice Cine" },
+                                                            { k: "slice" as const, l: "常规浏览" },
                                                         ]).map(({ k, l }) => (
                                                             <div
                                                                 key={k}
                                                                 onClick={() => {
+                                                                    if (fourDBrowseMode !== k) {
+                                                                        setIsPlaying(false);
+                                                                    }
                                                                     setFourDBrowseMode(k);
+                                                                    if (k === "phase") {
+                                                                        phaseCineDirectionRef.current = 1;
+                                                                    }
                                                                     setIsBrowseModeOpen(false);
                                                                 }}
                                                                 className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${fourDBrowseMode === k ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
@@ -1259,26 +1289,52 @@ const ViewScreen = () => {
                                                     </div>
                                                 )}
                                             </div>
-                                            <div className="flex items-start gap-2">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">Speed</span>
-                                                <div className="flex-1 space-y-2">
-                                                    <div className="flex flex-col gap-1">
-                                                        
-                                                        <div className="flex items-center rounded-md border border-[#DCE6F2] bg-white overflow-hidden">
-                                                            {([0.5, 1, 2] as const).map((s) => (
-                                                                <button
-                                                                    key={s}
-                                                                    onClick={() => setPhaseCineSpeed(s)}
-                                                                    className={`px-2 h-[24px] text-[10px] font-black transition-all ${
-                                                                        phaseCineSpeed === s ? "bg-[#4D94FF] text-white" : "text-[#546E7A] hover:text-[#37474F]"
-                                                                    }`}
-                                                                >
-                                                                    {s}×
-                                                                </button>
-                                                            ))}
-                                                        </div>
+                                            <div className="flex items-center gap-2 relative">
+                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">体绘制</span>
+                                                <div
+                                                    onClick={() => setIsLayoutOpen(!isLayoutOpen)}
+                                                    className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isLayoutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                                >
+                                                    <span className="text-[12px] font-medium text-[#37474F] truncate">{phaseMipMode}</span>
+                                                    <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isLayoutOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                                </div>
+                                                {isLayoutOpen && (
+                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                        {(["MIP", "MinIP", "Avg"] as const).map((opt) => (
+                                                            <div
+                                                                key={opt}
+                                                                onClick={() => {
+                                                                    setPhaseMipMode(opt);
+                                                                    if (opt === "Avg") setSelectedRenderMode("MPR");
+                                                                    else setSelectedRenderMode(opt);
+                                                                    setIsLayoutOpen(false);
+                                                                }}
+                                                                className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${phaseMipMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                                title={opt === "MIP" ? "最大密度投影 - 肿瘤包络 / ITV" : opt === "MinIP" ? "最小密度投影 - 气道 / 低密度结构" : "10 相位平均"}
+                                                            >
+                                                                {opt}
+                                                            </div>
+                                                        ))}
                                                     </div>
-                                                    
+                                                )}
+                                            </div>
+                                            <div className="flex items-start gap-2">
+                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">厚度</span>
+                                                <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                                                    <div className="grid grid-cols-[minmax(0,1fr)_48px] items-center gap-2">
+                                                        <input
+                                                            type="range"
+                                                            min={0}
+                                                            max={100}
+                                                            step={1}
+                                                            value={slabThickness}
+                                                            onChange={(event) => setSlabThickness(Number(event.target.value))}
+                                                            className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]"
+                                                        />
+                                                        <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">
+                                                            {slabThickness} mm
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </>
@@ -1311,6 +1367,29 @@ const ViewScreen = () => {
                                     manifest={fourDManifest}
                                     phase={selectedPhaseIndex}
                                     onPhaseChange={setSelectedPhaseIndex}
+                                    showPhaseBadge={fourDBrowseMode === "phase"}
+                                    showCornerInfo={fourDBrowseMode === "slice"}
+                                    cornerInfo={{
+                                        patientName: meta.patientName,
+                                        patientId: meta.patientId,
+                                        patientSex: meta.patientSex,
+                                        patientAge: meta.patientAge,
+                                        modality: meta.modality,
+                                        studyDate: meta.studyDate,
+                                        studyTime: meta.studyTime,
+                                        seriesDescription: selectedSeries.name,
+                                        kvp: meta.kvp,
+                                        mas: meta.mas,
+                                        pixelSpacing: meta.pixelSpacing,
+                                        thickness: `${slabThickness} mm`,
+                                        institution: meta.institution,
+                                        manufacturer: meta.manufacturer,
+                                        rows: meta.rows,
+                                        cols: meta.cols,
+                                        ww: displayWw,
+                                        wl: displayWl,
+                                    }}
+                                    initialLayout={fourDBrowseMode === "slice" ? "axial-single" : "mpr"}
                                     sliceCineTick={sliceCineTick}
                                     mipMode={phaseMipMode}
                                     activeTool={mapCornerstoneTool(toolMode)}
@@ -1442,14 +1521,14 @@ const ViewScreen = () => {
                 </div>
                 <aside className="w-[72px] bg-[#0F172A] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3" onPointerDown={(e) => e.stopPropagation()}>
-                            {(["wl", "measure", "annotate", "eraser"] as const).map((mode, i) => {
+                            {(["pan", "wl", "measure", "annotate"] as const).map((mode, i) => {
                                 const icons = [
-                                    <SlidersHorizontal size={20} strokeWidth={1.5} key="sliders" />,
+                                    <Move size={20} strokeWidth={1.5} key="pan" />,
+                                    <WindowLevelIcon size={20} key="window-level" />,
                                     <Ruler size={20} strokeWidth={1.5} key="ruler" />,
                                     <Pencil size={20} strokeWidth={1.5} key="pencil" />,
-                                    <Eraser size={20} strokeWidth={1.5} key="eraser" />,
                                 ];
-                                const titles = ["WW/WL", "Measure", "Annotate", "Eraser"];
+                                const titles = ["移动", "窗宽/窗位", "测量", "标注"];
                                 const active = toolMode === mode;
                                 const supported = isToolSupportedInCurrentView(mode);
                                 return (
@@ -1481,6 +1560,28 @@ const ViewScreen = () => {
                                     </button>
                                 );
                             })}
+
+                            {isFourDLungReconSeries && (
+                                <div
+                                    title={fourDBrowseMode === "phase" ? "相位速度" : "浏览速度"}
+                                    className="h-[44px] w-[44px] overflow-hidden rounded-[10px] bg-white/5 ring-1 ring-white/10"
+                                >
+                                    {([0.5, 1, 2] as const).map((speed) => (
+                                        <button
+                                            key={speed}
+                                            type="button"
+                                            onClick={() => setPhaseCineSpeed(speed)}
+                                            className={`block h-[14.67px] w-full text-[9px] font-black leading-[14px] transition-colors ${
+                                                phaseCineSpeed === speed
+                                                    ? "bg-[#3B82F6] text-white"
+                                                    : "text-[#94A3B8] hover:bg-white/10 hover:text-white"
+                                            }`}
+                                        >
+                                            {speed}×
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
 
                             <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
 
@@ -1556,8 +1657,12 @@ const ViewScreen = () => {
                                     title: !isPlaybackEnabled
                                         ? "Play (available after phase review)"
                                         : isPlaying
-                                            ? "Pause"
-                                            : "Play",
+                                            ? isFourDLungReconSeries && fourDBrowseMode === "slice"
+                                                ? "暂停切片浏览"
+                                                : "Pause"
+                                            : isFourDLungReconSeries && fourDBrowseMode === "slice"
+                                                ? "播放切片浏览"
+                                                : "Play",
                                     icon: isPlaying ? <Pause size={20} strokeWidth={1.5} /> : <Play size={20} strokeWidth={1.5} />,
                                     action: () => setIsPlaying((prev) => !prev),
                                     active: isPlaying,
