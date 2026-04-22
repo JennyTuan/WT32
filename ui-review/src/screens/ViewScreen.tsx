@@ -648,11 +648,26 @@ const ViewScreen = () => {
         return () => window.clearInterval(timer);
     }, [isFourDLungReconSeries, isFourDBrowsePlaying, phaseCineSpeed, fourDBrowseMode, selectedSliceCinePhases]);
 
+    const preferredSeriesForFourDEntry = useMemo(() => {
+        if (!isFourDEntry) return null;
+        return (
+            safeSeriesList.find((series) => series.seriesType === "4d" && /肺/.test(series.name)) ??
+            safeSeriesList.find((series) => series.seriesType === "4d") ??
+            safeSeriesList.find((series) => series.seriesType !== "topogram") ??
+            safeSeriesList[0] ??
+            null
+        );
+    }, [isFourDEntry, safeSeriesList]);
+
     // Auto-select first series when session data loads (or series list changes)
     useEffect(() => {
         const first = safeSeriesList[0];
         if (!first) return;
         setSelectedSeriesId((prev) => {
+            // 4D 图像重建入口：优先切到 4D 重建序列，而不是默认 Topogram
+            if (isFourDEntry && preferredSeriesForFourDEntry && prev !== preferredSeriesForFourDEntry.id) {
+                return preferredSeriesForFourDEntry.id;
+            }
             // If current ID is still the static placeholder and we now have session data, switch to first session series
             if (prev === REAL_LUNG_SERIES.seriesId && scanSession) return first.id;
             // If selected ID is no longer in the list (series was removed), fall back to first
@@ -668,7 +683,7 @@ const ViewScreen = () => {
             defaultWindowRef.current = { ww: first.defaultWw, wl: first.defaultWl };
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [scanSession]);
+    }, [scanSession, isFourDEntry, preferredSeriesForFourDEntry]);
 
     const seriesImageUrls = useMemo(
         () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index, selectedSeries.seriesType)),
@@ -1813,7 +1828,7 @@ function FourDPhaseLoadingGrid({
     // 4D 重建通常需要一定时间，这里保留一个更长的模拟步进时间，避免“秒开”观感。
     const SIMULATED_PHASE_LOAD_DELAY_MS = 800;
     const phaseIndexes = useMemo(
-        () => Array.from({ length: Math.min(9, manifest.phases) }, (_, index) => index),
+        () => Array.from({ length: Math.min(10, manifest.phases) }, (_, index) => index),
         [manifest.phases]
     );
     const midAxialSlice = useMemo(
@@ -1865,7 +1880,7 @@ function FourDPhaseLoadingGrid({
             <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
                 <div>
                     <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">4D Axial Reconstruction</div>
-                    <div className="text-[10px] font-bold text-white/55">九宫格相位数据加载 · {Math.min(loadedCount, phaseIndexes.length)}/{phaseIndexes.length}</div>
+                    <div className="text-[10px] font-bold text-white/55">十相位数据加载 · {Math.min(loadedCount, phaseIndexes.length)}/{phaseIndexes.length}</div>
                 </div>
                 <div className="flex items-center gap-3">
                     <div className="h-1.5 w-40 overflow-hidden rounded-full bg-white/10">
@@ -1883,7 +1898,7 @@ function FourDPhaseLoadingGrid({
                 </div>
             </div>
 
-            <div className="grid min-h-0 flex-1 grid-cols-3 grid-rows-3 gap-px bg-white/10 p-px">
+            <div className="grid min-h-0 flex-1 grid-cols-5 grid-rows-2 gap-px bg-white/10 p-px">
                 {phaseIndexes.map((phaseIndex, index) => {
                     const loadedUrl = loadedUrls[phaseIndex];
                     const active = index === loadedCount && !loadedUrl;
