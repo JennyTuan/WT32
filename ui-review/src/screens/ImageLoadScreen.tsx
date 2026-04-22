@@ -127,26 +127,26 @@ function StepBar({ current }: { current: number }) {
             <div
               className={`flex items-center gap-2 rounded-full px-3 py-1.5 transition-colors ${
                 active
-                  ? "bg-blue-500/20 text-blue-300"
+                  ? "bg-blue-50 text-blue-600"
                   : done
-                    ? "text-blue-300/70"
+                    ? "text-blue-500"
                     : "text-slate-400"
               }`}
             >
               <div
                 className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${
                   active
-                    ? "bg-blue-500 text-white"
+                    ? "bg-[#4D94FF] text-white"
                     : done
-                      ? "bg-blue-500/40 text-blue-100"
-                      : "bg-slate-700 text-slate-300"
+                      ? "bg-blue-100 text-blue-600"
+                      : "bg-slate-200 text-slate-500"
                 }`}
               >
                 {done ? <Check size={12} /> : i + 1}
               </div>
               <span className="text-[12px] font-bold">{label}</span>
             </div>
-            {i < STEPS.length - 1 && <ChevronRight size={14} className="text-slate-500" />}
+            {i < STEPS.length - 1 && <ChevronRight size={14} className="text-slate-300" />}
           </div>
         );
       })}
@@ -175,17 +175,17 @@ function PhaseCard({ phase, phaseIdx, selected, onClick }: PhaseCardProps) {
   return (
     <button
       onClick={onClick}
-      className={`relative flex flex-col overflow-hidden rounded-lg border-2 bg-[#0a131f] text-left transition-all active:scale-[0.98] ${
+      className={`relative flex flex-col overflow-hidden rounded-lg border-2 bg-white text-left transition-all active:scale-[0.98] ${
         selected
-          ? "border-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.2)]"
-          : "border-slate-700/60 hover:border-slate-500"
+          ? "border-[#4D94FF] shadow-[0_0_0_3px_rgba(77,148,255,0.15)]"
+          : "border-slate-200 hover:border-slate-300"
       }`}
     >
       {/* 顶部信息条 */}
       <div className="flex items-center justify-between px-2.5 py-2">
-        <span className="text-[12px] font-bold text-white">Phase {phase.label}</span>
+        <span className="text-[12px] font-bold text-slate-700">Phase {phase.label}</span>
         {selected ? (
-          <div className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-500">
+          <div className="flex h-4 w-4 items-center justify-center rounded-full bg-[#4D94FF]">
             <Check size={10} className="text-white" />
           </div>
         ) : (
@@ -195,8 +195,8 @@ function PhaseCard({ phase, phaseIdx, selected, onClick }: PhaseCardProps) {
 
       {/* 冲突警告图标（选中时也显示） */}
       {phase.status === "duplicate" && selected && (
-        <div className="absolute left-2 top-8 rounded-full bg-yellow-400/20 p-1">
-          <AlertTriangle size={10} className="text-yellow-400" />
+        <div className="absolute left-2 top-8 rounded-full bg-amber-100 p-1">
+          <AlertTriangle size={10} className="text-amber-500" />
         </div>
       )}
 
@@ -207,8 +207,8 @@ function PhaseCard({ phase, phaseIdx, selected, onClick }: PhaseCardProps) {
 
       {/* 选中且冲突时底部提示 */}
       {phase.status === "duplicate" && selected && (
-        <div className="px-2.5 py-1.5 text-[10px] text-slate-300">
-          重复数据: <span className="font-bold text-yellow-400">{phase.segments.length} 段</span>
+        <div className="border-t border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[10px] text-slate-600">
+          重复数据: <span className="font-bold text-amber-600">{phase.segments.length} 段</span>
         </div>
       )}
     </button>
@@ -230,7 +230,7 @@ function MprTile({
 }) {
   const accentClass = accent === "green" ? "text-green-400" : "text-red-400";
   return (
-    <div className="relative overflow-hidden rounded border border-slate-700/60 bg-black">
+    <div className="relative overflow-hidden rounded border border-slate-300 bg-black">
       <div className="absolute left-2 top-1.5 text-[10px] font-bold text-slate-200">{label}</div>
       {rightLabel && (
         <div className={`absolute right-2 top-1.5 text-[10px] font-bold ${accentClass}`}>{rightLabel}</div>
@@ -255,11 +255,122 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
   const pct = (value / 10) * 100;
   return (
     <div className="flex items-center gap-3">
-      <span className="w-[64px] shrink-0 text-[11px] text-slate-400">{label}</span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-700/60">
+      <span className="w-[64px] shrink-0 text-[11px] text-slate-500">{label}</span>
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200">
         <div className="h-full rounded-full bg-green-500" style={{ width: `${pct}%` }} />
       </div>
-      <span className="w-[32px] shrink-0 text-right text-[11px] font-bold text-slate-200">{value}/10</span>
+      <span className="w-[32px] shrink-0 text-right text-[11px] font-bold text-slate-700">{value}/10</span>
+    </div>
+  );
+}
+
+// ─── 床位加载缩略图网格（子阶段 1A） ─────────────────────────────────────────
+
+interface BedLoadingGridProps {
+  bedCount: number;
+  slicesPerBed: number;
+  loadedSlices: number;
+}
+
+function BedLoadingGrid({ bedCount, slicesPerBed, loadedSlices }: BedLoadingGridProps) {
+  const total = bedCount * slicesPerBed;
+  const currentBed = Math.min(Math.floor(loadedSlices / slicesPerBed), bedCount - 1);
+  const allDone = loadedSlices >= total;
+  return (
+    <div className="flex flex-1 flex-col gap-3 overflow-hidden">
+      {/* 顶部状态行 */}
+      <div className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2">
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-2 animate-pulse rounded-full bg-[#4D94FF]" />
+          <span className="text-[12px] font-bold text-slate-700">
+            图像加载中 · 床 {Math.min(currentBed + 1, bedCount)} / {bedCount}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-[180px] overflow-hidden rounded-full bg-slate-200">
+            <div
+              className="h-full rounded-full bg-[#4D94FF] transition-all"
+              style={{ width: `${(loadedSlices / total) * 100}%` }}
+            />
+          </div>
+          <span className="text-[11px] font-bold text-slate-600">
+            {loadedSlices} / {total}
+          </span>
+        </div>
+      </div>
+
+      {/* 床位窗格网格：每床一个窗格，展示当前加载中的切片 */}
+      <div className="grid flex-1 grid-cols-5 grid-rows-2 gap-2">
+        {Array.from({ length: bedCount }, (_, bedIdx) => {
+          const bedStart = bedIdx * slicesPerBed;
+          const bedLoaded = Math.max(0, Math.min(loadedSlices - bedStart, slicesPerBed));
+          const isActive = bedIdx === currentBed && !allDone;
+          const isDone = bedLoaded >= slicesPerBed;
+          const isWaiting = bedLoaded === 0 && !isActive;
+          // 当前切片索引（加载中时正在填充这张；完成后定格在最后一张）
+          const currentSlice = isDone ? slicesPerBed : bedLoaded;
+          const pct = (bedLoaded / slicesPerBed) * 100;
+
+          return (
+            <div
+              key={bedIdx}
+              className={`relative flex flex-col overflow-hidden rounded-md border bg-white shadow-sm ${
+                isActive
+                  ? "border-[#4D94FF] shadow-[0_0_0_2px_rgba(77,148,255,0.18)]"
+                  : isDone
+                    ? "border-green-400"
+                    : "border-slate-200"
+              }`}
+            >
+              {/* 顶部标签 */}
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-2 py-1">
+                <span className="text-[10px] font-bold text-slate-700">床位 {bedIdx + 1}</span>
+                <span
+                  className={`rounded px-1 py-0.5 text-[9px] font-bold ${
+                    isDone
+                      ? "bg-green-100 text-green-600"
+                      : isActive
+                        ? "bg-blue-100 text-blue-600"
+                        : "bg-slate-200 text-slate-500"
+                  }`}
+                >
+                  {isDone ? "已完成" : isActive ? "加载中" : "等待中"}
+                </span>
+              </div>
+
+              {/* 图像显示区 */}
+              <div className="relative flex flex-1 items-center justify-center bg-black">
+                {isWaiting ? (
+                  <div className="text-[10px] text-slate-500">等待加载</div>
+                ) : (
+                  <LungThumb phaseIdx={(bedIdx * 3 + currentSlice) % 10} size={140} />
+                )}
+                {/* 右上：切片计数 */}
+                {!isWaiting && (
+                  <div className="absolute right-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-bold text-slate-100">
+                    {currentSlice}/{slicesPerBed}
+                  </div>
+                )}
+                {/* 扫描线动画（加载中） */}
+                {isActive && (
+                  <div
+                    className="pointer-events-none absolute inset-x-0 h-[2px] bg-blue-400/80 shadow-[0_0_8px_rgba(59,130,246,0.8)]"
+                    style={{ top: `${pct}%` }}
+                  />
+                )}
+              </div>
+
+              {/* 底部进度条 */}
+              <div className="h-1 w-full bg-slate-100">
+                <div
+                  className={`h-full transition-all ${isDone ? "bg-green-500" : "bg-[#4D94FF]"}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -273,6 +384,31 @@ export default function ImageLoadScreen() {
   const [phases, setPhases] = useState<PhaseData[]>(() => buildMockPhases());
   const [selectedPhaseIdx, setSelectedPhaseIdx] = useState(0);
   const [rebuildProgress, setRebuildProgress] = useState(0);
+
+  // ─ 床位加载子阶段 ─
+  const BED_COUNT = 10;
+  const SLICES_PER_BED = 32;
+  const TOTAL_SLICES = BED_COUNT * SLICES_PER_BED;
+  const [loadedSlices, setLoadedSlices] = useState(0);
+  const loading = loadedSlices < TOTAL_SLICES;
+  const loadingBedIdx = Math.min(Math.floor(loadedSlices / SLICES_PER_BED), BED_COUNT - 1);
+  const loadingInBedIdx = loadedSlices % SLICES_PER_BED;
+
+  // Step 0 进入时驱动加载动画
+  useEffect(() => {
+    if (step !== 0) return;
+    setLoadedSlices(0);
+    const timer = window.setInterval(() => {
+      setLoadedSlices((n) => {
+        if (n >= TOTAL_SLICES) {
+          window.clearInterval(timer);
+          return TOTAL_SLICES;
+        }
+        return n + 1;
+      });
+    }, 40);
+    return () => window.clearInterval(timer);
+  }, [step, TOTAL_SLICES]);
 
   const selectedPhase = phases[selectedPhaseIdx];
   const selectedSegment = selectedPhase?.segments.find(
@@ -337,9 +473,9 @@ export default function ImageLoadScreen() {
   }, [step, rebuildProgress, navigate]);
 
   return (
-    <div className="flex h-full flex-col bg-[#0b1220] text-slate-100 select-none">
+    <div className="flex h-full flex-col bg-[#EDF1F7] text-slate-700 select-none">
       {/* ═══ Header ═══ */}
-      <header className="flex h-[56px] shrink-0 items-center justify-between border-b border-slate-800 px-5">
+      <header className="flex h-[56px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5">
         <div className="flex items-center gap-3">
          
           <StepBar current={step} />
@@ -349,34 +485,42 @@ export default function ImageLoadScreen() {
 
       {/* ═══ Body ═══ */}
       <div className="flex flex-1 overflow-hidden">
-        {step === 0 && (
+        {step === 0 && loading && (
+          <section className="flex flex-1 flex-col px-5 py-4">
+            <BedLoadingGrid
+              bedCount={BED_COUNT}
+              slicesPerBed={SLICES_PER_BED}
+              loadedSlices={loadedSlices}
+            />
+          </section>
+        )}
+        {step === 0 && !loading && (
           <>
             {/* ─── 左：相位网格 ─── */}
-            <section className="flex w-[520px] shrink-0 flex-col border-r border-slate-800 px-5 py-4">
+            <section className="flex w-[200px] shrink-0 flex-col border-r border-slate-200 bg-white px-3 py-4">
               <div className="mb-3 flex items-center gap-2">
-                <h2 className="text-[14px] font-bold text-slate-100">选择要重建的相位</h2>
-                <Info size={13} className="text-slate-500" />
+                <h2 className="text-[13px] font-bold text-slate-700">需处理的相位</h2>
+                <Info size={12} className="text-slate-400" />
               </div>
 
-              <div className="grid flex-1 grid-cols-5 gap-2 content-start">
-                {phases.map((p, i) => (
-                  <PhaseCard
-                    key={p.label}
-                    phase={p}
-                    phaseIdx={i}
-                    selected={selectedPhaseIdx === i}
-                    onClick={() => setSelectedPhaseIdx(i)}
-                  />
-                ))}
+              <div className="flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
+                {phases
+                  .map((p, i) => ({ p, i }))
+                  .filter(({ p }) => p.status !== "ok")
+                  .map(({ p, i }) => (
+                    <PhaseCard
+                      key={p.label}
+                      phase={p}
+                      phaseIdx={i}
+                      selected={selectedPhaseIdx === i}
+                      onClick={() => setSelectedPhaseIdx(i)}
+                    />
+                  ))}
               </div>
-
               {/* 图例 */}
-              <div className="mt-3 flex items-center gap-5 text-[11px] text-slate-400">
+              <div className="mt-3 flex flex-col gap-1.5 text-[11px] text-slate-500">
                 <div className="flex items-center gap-1.5">
-                  <div className="h-2 w-2 rounded-full bg-green-500" /> 数据充足
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <AlertTriangle size={11} className="text-yellow-400" /> 存在重复数据
+                  <AlertTriangle size={11} className="text-amber-500" /> 存在重复数据
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="h-2 w-2 rounded-full bg-red-500" /> 数据缺失
@@ -388,14 +532,14 @@ export default function ImageLoadScreen() {
             <section className="flex flex-1 flex-col overflow-auto px-5 py-4">
               {/* 顶部标题条 */}
               <div className="mb-3 flex items-center gap-2">
-                <span className="text-[13px] font-bold text-slate-100">
+                <span className="text-[13px] font-bold text-slate-700">
                   相位 {selectedPhase?.label} -
                   {selectedPhase?.status === "duplicate"
                     ? " 存在重复数据，请选择数据段"
                     : " 数据充足"}
                 </span>
                 {selectedPhase?.status === "duplicate" && (
-                  <span className="rounded-md bg-yellow-500/20 px-2 py-0.5 text-[10px] font-bold text-yellow-300">
+                  <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
                     {selectedPhase.segments.length} 段可用
                   </span>
                 )}
@@ -403,9 +547,9 @@ export default function ImageLoadScreen() {
 
               {/* 黄色提示 */}
               {selectedPhase?.status === "duplicate" && (
-                <div className="mb-3 flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0 text-yellow-400" />
-                  <p className="text-[11px] text-yellow-100">
+                <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-500" />
+                  <p className="text-[11px] text-amber-700">
                     该相位检测到 {selectedPhase.segments.length} 段重复数据，通过对多平面重建（MPR）比对后选择最优数据段用于重建。
                   </p>
                 </div>
@@ -423,32 +567,32 @@ export default function ImageLoadScreen() {
                         onClick={() => setSegmentForPhase(selectedPhaseIdx, seg.id)}
                         className={`flex flex-col gap-1.5 rounded-md border p-2.5 text-left transition-colors ${
                           active
-                            ? "border-blue-500 bg-blue-500/10"
-                            : "border-slate-700/60 bg-slate-800/40 hover:border-slate-500"
+                            ? "border-[#4D94FF] bg-blue-50"
+                            : "border-slate-200 bg-white hover:border-slate-300"
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-[12px] font-bold text-slate-100">数据段 {idx + 1}</span>
+                          <span className="text-[12px] font-bold text-slate-700">数据段 {idx + 1}</span>
                           <div
                             className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 ${
-                              active ? "border-blue-500 bg-blue-500" : "border-slate-500"
+                              active ? "border-[#4D94FF] bg-[#4D94FF]" : "border-slate-300"
                             }`}
                           >
                             {active && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                        <div className="flex items-center gap-1 text-[10px] text-slate-500">
                           <span>🕒</span> {seg.time}
                         </div>
-                        <div className="text-[10px] text-slate-400">
+                        <div className="text-[10px] text-slate-500">
                           质量评分:{" "}
                           <span
                             className={
                               seg.quality === "优秀"
-                                ? "font-bold text-green-400"
+                                ? "font-bold text-green-600"
                                 : seg.quality === "良好"
-                                  ? "font-bold text-yellow-400"
-                                  : "font-bold text-slate-300"
+                                  ? "font-bold text-amber-600"
+                                  : "font-bold text-slate-500"
                             }
                           >
                             {seg.quality}
@@ -463,20 +607,20 @@ export default function ImageLoadScreen() {
                 <div className="flex flex-1 gap-2">
                   <div className="flex flex-1 flex-col">
                     <div className="mb-1.5 flex items-center justify-between">
-                      <span className="text-[11px] text-slate-300">
+                      <span className="text-[11px] text-slate-600">
                         当前预览: 数据段{" "}
                         {(selectedPhase?.segments.findIndex(
                           (s) => s.id === selectedPhase?.selectedSegmentId
                         ) ?? 0) + 1}
                       </span>
                       <div className="flex items-center gap-1">
-                        <button className="flex items-center gap-1 rounded border border-slate-700 bg-slate-800/40 px-2 py-0.5 text-[10px] text-slate-200">
+                        <button className="flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50">
                           MPR <ChevronDown size={10} />
                         </button>
-                        <button className="rounded border border-slate-700 bg-slate-800/40 p-1 text-slate-200">
+                        <button className="rounded border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50">
                           <LayoutGrid size={11} />
                         </button>
-                        <button className="rounded border border-slate-700 bg-slate-800/40 p-1 text-slate-200">
+                        <button className="rounded border border-slate-200 bg-white p-1 text-slate-600 hover:bg-slate-50">
                           <Square size={11} />
                         </button>
                       </div>
@@ -539,8 +683,8 @@ export default function ImageLoadScreen() {
                         key={i}
                         className={`flex h-8 w-8 items-center justify-center rounded border ${
                           i === 0
-                            ? "border-blue-500 bg-blue-500/20 text-blue-300"
-                            : "border-slate-700 bg-slate-800/40 text-slate-300 hover:bg-slate-700"
+                            ? "border-[#4D94FF] bg-blue-50 text-[#4D94FF]"
+                            : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                         }`}
                       >
                         <Icon size={14} />
@@ -569,23 +713,24 @@ export default function ImageLoadScreen() {
 
         {step === 3 && (
           <div className="flex flex-1 flex-col items-center justify-center gap-6 px-12">
-            <div className="text-[18px] font-bold text-slate-100">图像重建中…</div>
-            <div className="h-2 w-[520px] overflow-hidden rounded-full bg-slate-700/60">
+            <div className="text-[18px] font-bold text-slate-700">图像重建中…</div>
+            <div className="h-2 w-[520px] overflow-hidden rounded-full bg-slate-200">
               <div
-                className="h-full rounded-full bg-blue-500 transition-all"
+                className="h-full rounded-full bg-[#4D94FF] transition-all"
                 style={{ width: `${rebuildProgress}%` }}
               />
             </div>
-            <div className="text-[12px] text-slate-400">{rebuildProgress}%</div>
+            <div className="text-[12px] text-slate-500">{rebuildProgress}%</div>
           </div>
         )}
       </div>
 
       {/* ═══ Footer ═══ */}
-      <footer className="flex h-[72px] shrink-0 items-center justify-between border-t border-slate-800 bg-[#0a1018] px-5">
-        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+      <footer className="flex h-[72px] shrink-0 items-center justify-between border-t border-slate-200 bg-white px-5">
+        <div className="flex items-center gap-2 text-[11px] text-slate-500">
           <Info size={12} />
-          {step === 0 && "提示: 黄色标识表示该相位存在重复数据，需要您选择最优数据段进行重建。"}
+          {step === 0 && loading && `提示: 正在按床位加载图像，共 ${BED_COUNT} 个床位，完成后可进行相位选择。`}
+          {step === 0 && !loading && "提示: 黄色标识表示该相位存在重复数据，需要您选择最优数据段进行重建。"}
           {step === 1 && "提示: 系统自动检查选择，发现异常会在此提醒。"}
           {step === 2 && "提示: 请再次确认所选数据和重建参数。"}
           {step === 3 && "提示: 重建完成后将自动进入图像浏览。"}
@@ -594,14 +739,14 @@ export default function ImageLoadScreen() {
           <button
             onClick={handlePrev}
             disabled={step === 3 && rebuildProgress < 100}
-            className="flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/40 px-6 py-2 text-[12px] font-bold text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-md border-2 border-[#4D94FF] bg-white px-6 py-2 text-[12px] font-bold text-[#4D94FF] hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <ChevronLeft size={14} /> 上一步
           </button>
           <button
             onClick={handleNext}
-            disabled={step === 3 && rebuildProgress < 100}
-            className="flex items-center gap-1.5 rounded-md bg-blue-500 px-6 py-2 text-[12px] font-bold text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={(step === 0 && loading) || (step === 3 && rebuildProgress < 100)}
+            className="flex items-center gap-1.5 rounded-md bg-[#4D94FF] px-6 py-2 text-[12px] font-bold text-white shadow-sm hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
             下一步 <ChevronRight size={14} />
           </button>
@@ -614,8 +759,8 @@ export default function ImageLoadScreen() {
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-3 text-[11px]">
-      <span className="w-[64px] shrink-0 text-slate-400">{label}</span>
-      <span className="text-slate-100">{value}</span>
+      <span className="w-[64px] shrink-0 text-slate-500">{label}</span>
+      <span className="font-bold text-slate-700">{value}</span>
     </div>
   );
 }
@@ -623,8 +768,8 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function PlaceholderStep({ title, description }: { title: string; description: string }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-12 text-center">
-      <div className="text-[18px] font-bold text-slate-100">{title}</div>
-      <div className="max-w-[520px] text-[12px] text-slate-400">{description}</div>
+      <div className="text-[18px] font-bold text-slate-700">{title}</div>
+      <div className="max-w-[520px] text-[12px] text-slate-500">{description}</div>
     </div>
   );
 }
