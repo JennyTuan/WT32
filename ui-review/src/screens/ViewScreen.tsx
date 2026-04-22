@@ -100,6 +100,7 @@ type LayoutSpec = {
 type FourDBrowseMode = "phase" | "slice";
 type PhaseCineSpeed = 0.5 | 1 | 2;
 type PhaseCineMode = "forward" | "bounce";
+const PHASE_CINE_SPEED_OPTIONS: readonly PhaseCineSpeed[] = [0.5, 1, 2] as const;
 
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
 
@@ -283,6 +284,11 @@ const ViewScreen = () => {
     const [sliceCineTick, setSliceCineTick] = useState(0);
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<PhaseCineSpeed>(1); // multiplier; 1× = 500 ms/phase
     const [phaseCineMode] = useState<PhaseCineMode>("forward");
+    const cyclePhaseCineSpeed = useCallback(() => {
+        const currentIndex = PHASE_CINE_SPEED_OPTIONS.indexOf(phaseCineSpeed);
+        const nextIndex = (currentIndex + 1) % PHASE_CINE_SPEED_OPTIONS.length;
+        setPhaseCineSpeed(PHASE_CINE_SPEED_OPTIONS[nextIndex]);
+    }, [phaseCineSpeed]);
     const phaseCineDirectionRef = useRef<1 | -1>(1);
     // Across-phase aggregation for the MPR 4th panel (ITV visualisation)
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
@@ -1669,25 +1675,15 @@ const ViewScreen = () => {
                             <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
 
                             {isFourDLungReconSeries && (
-                                <div
-                                    title={fourDBrowseMode === "phase" ? "相位速度" : "浏览速度"}
-                                    className="h-[44px] w-[44px] overflow-hidden rounded-[10px] bg-white/5 ring-1 ring-white/10"
+                                <button
+                                    type="button"
+                                    title={`${fourDBrowseMode === "phase" ? "相位速度" : "浏览速度"}（点击切换）`}
+                                    onClick={cyclePhaseCineSpeed}
+                                    className="flex h-[44px] w-[44px] flex-col items-center justify-center rounded-[10px] bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white"
                                 >
-                                    {([0.5, 1, 2] as const).map((speed) => (
-                                        <button
-                                            key={speed}
-                                            type="button"
-                                            onClick={() => setPhaseCineSpeed(speed)}
-                                            className={`block h-[14.67px] w-full text-[9px] font-black leading-[14px] transition-colors ${
-                                                phaseCineSpeed === speed
-                                                    ? "bg-[#3B82F6] text-white"
-                                                    : "text-[#94A3B8] hover:bg-white/10 hover:text-white"
-                                            }`}
-                                        >
-                                            {speed}×
-                                        </button>
-                                    ))}
-                                </div>
+                                    <span className="text-[8px] leading-none uppercase tracking-[0.08em]">speed</span>
+                                    <span className="mt-1 text-[13px] font-black leading-none text-white">{phaseCineSpeed}×</span>
+                                </button>
                             )}
                         </div>
                     </aside>
