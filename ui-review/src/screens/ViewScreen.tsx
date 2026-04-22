@@ -1658,7 +1658,8 @@ const ViewScreen = () => {
     );
 };
 
-function FourDPhaseLoadingGrid({
+/*
+function FourDPhaseLoadingGridBroken({
     manifest,
     onComplete,
     showReviewButton,
@@ -1687,11 +1688,13 @@ function FourDPhaseLoadingGrid({
     const completedRef = useRef(false);
 
     useEffect(() => {
-        setLoadedCount(0);
-        setLoadedUrls({});
-        setSelectedPhaseIndex(0);
-        setSelectedSegmentIndex(0);
         completedRef.current = false;
+        queueMicrotask(() => {
+            setLoadedCount(0);
+            setLoadedUrls({});
+            setSelectedPhaseIndex(0);
+            setSelectedSegmentIndex(0);
+        });
     }, [manifest]);
 
     useEffect(() => {
@@ -1863,6 +1866,236 @@ function FourDPhaseLoadingGrid({
     );
 }
 
+
+*/
+
+function FourDPhaseLoadingGrid({
+    manifest,
+    onComplete,
+    showReviewButton,
+    onReviewClick,
+    className = "absolute inset-0 flex flex-col bg-[#05070B]",
+}: {
+    manifest: FourDManifest;
+    onComplete: () => void;
+    showReviewButton: boolean;
+    onReviewClick: () => void;
+    className?: string;
+}) {
+    const SIMULATED_PHASE_LOAD_DELAY_MS = 650;
+    const phaseIndexes = useMemo(
+        () => Array.from({ length: Math.min(10, manifest.phases) }, (_, index) => index),
+        [manifest.phases],
+    );
+    const midAxialSlice = useMemo(
+        () => Math.floor(manifest.views.axial.slices / 2) + 1,
+        [manifest.views.axial.slices],
+    );
+    const midCoronalSlice = useMemo(
+        () => Math.floor(manifest.views.coronal.slices / 2) + 1,
+        [manifest.views.coronal.slices],
+    );
+    const midSagittalSlice = useMemo(
+        () => Math.floor(manifest.views.sagittal.slices / 2) + 1,
+        [manifest.views.sagittal.slices],
+    );
+
+    const [loadedCount, setLoadedCount] = useState(0);
+    const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
+    const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(0);
+    const [loadedUrls, setLoadedUrls] = useState<Record<number, { axial: string; coronal: string; sagittal: string }>>({});
+    const completedRef = useRef(false);
+
+    useEffect(() => {
+        completedRef.current = false;
+        queueMicrotask(() => {
+            setLoadedCount(0);
+            setLoadedUrls({});
+            setSelectedPhaseIndex(0);
+            setSelectedSegmentIndex(0);
+        });
+    }, [manifest]);
+
+    useEffect(() => {
+        if (completedRef.current) return;
+        if (loadedCount >= phaseIndexes.length) {
+            completedRef.current = true;
+            onComplete();
+            return;
+        }
+
+        let cancelled = false;
+        const phaseIndex = phaseIndexes[loadedCount];
+        const urls = {
+            axial: getFourDImageUrl(phaseIndex, "axial", midAxialSlice),
+            coronal: getFourDImageUrl(phaseIndex, "coronal", midCoronalSlice),
+            sagittal: getFourDImageUrl(phaseIndex, "sagittal", midSagittalSlice),
+        };
+
+        const preloadImage = (url: string) =>
+            new Promise<void>((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve();
+                img.onerror = () => resolve();
+                img.src = url;
+            });
+
+        Promise.all([preloadImage(urls.axial), preloadImage(urls.coronal), preloadImage(urls.sagittal)]).then(() => {
+            if (cancelled) return;
+            setLoadedUrls((prev) => ({ ...prev, [phaseIndex]: urls }));
+            window.setTimeout(() => {
+                if (!cancelled) setLoadedCount((prev) => prev + 1);
+            }, SIMULATED_PHASE_LOAD_DELAY_MS);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [loadedCount, midAxialSlice, midCoronalSlice, midSagittalSlice, onComplete, phaseIndexes]);
+
+    const progress = phaseIndexes.length === 0 ? 1 : loadedCount / phaseIndexes.length;
+    const selectedPhaseUrls = loadedUrls[selectedPhaseIndex];
+    const selectedPhaseValue = manifest.phase_values?.[selectedPhaseIndex] ?? selectedPhaseIndex * 10;
+    const duplicateSegments = [
+        { id: 1, time: "12:34:56.78", quality: "Excellent", color: "text-emerald-400" },
+        { id: 2, time: "12:45:12.34", quality: "Good", color: "text-amber-300" },
+        { id: 3, time: "12:55:45.67", quality: "Fair", color: "text-orange-300" },
+    ];
+
+    return (
+        <div className={className}>
+            <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
+                <div>
+                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">4D Axial Reconstruction</div>
+                    <div className="mt-0.5 text-[11px] font-semibold text-slate-400">
+                        Preparing phase images. Controls outside this loading view are temporarily disabled.
+                    </div>
+                </div>
+                <div className="flex items-center gap-3">
+                    <div className="h-1.5 w-44 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-[#4D94FF] transition-all duration-200" style={{ width: `${progress * 100}%` }} />
+                    </div>
+                    <span className="w-12 text-right text-[11px] font-black text-slate-300">{Math.round(progress * 100)}%</span>
+                </div>
+            </div>
+
+            <div className="flex min-h-0 flex-1 gap-3 p-3">
+                <section className="flex w-[58%] min-w-0 flex-col overflow-hidden rounded-xl border border-[#22344F] bg-[#081220]">
+                    <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+                        <h3 className="text-[13px] font-black text-white">Phase Loading</h3>
+                        <span className="text-[11px] font-semibold text-slate-400">{loadedCount}/{phaseIndexes.length} phases ready</span>
+                    </div>
+                    <div className="grid min-h-0 flex-1 grid-cols-5 grid-rows-2 gap-2 overflow-auto p-3">
+                        {phaseIndexes.map((phaseIndex, idx) => {
+                            const phaseValue = manifest.phase_values?.[phaseIndex] ?? phaseIndex * 10;
+                            const urls = loadedUrls[phaseIndex];
+                            const isLoaded = !!urls;
+                            const isActiveLoading = idx === loadedCount && !isLoaded;
+                            const hasDuplicate = phaseIndex === 0;
+                            const selected = selectedPhaseIndex === phaseIndex;
+                            return (
+                                <button
+                                    key={phaseIndex}
+                                    type="button"
+                                    onClick={() => isLoaded && setSelectedPhaseIndex(phaseIndex)}
+                                    className={`group relative overflow-hidden rounded-lg border text-left transition-all ${selected ? "border-[#4D94FF] shadow-[0_0_0_2px_rgba(77,148,255,0.3)]" : "border-[#1F2E46]"}`}
+                                >
+                                    <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-black/70 px-2 py-1">
+                                        <span className="text-[10px] font-black text-white">Phase {phaseValue}%</span>
+                                        <span className={`h-2.5 w-2.5 rounded-full ${isLoaded ? "bg-emerald-400" : isActiveLoading ? "bg-[#4D94FF]" : "bg-slate-500"}`} />
+                                    </div>
+                                    <div className="h-full w-full bg-black pt-7">
+                                        {isLoaded ? (
+                                            <img src={urls.axial} alt={`phase-${phaseValue}`} className="h-full w-full object-cover opacity-90" />
+                                        ) : (
+                                            <div className="flex h-full items-center justify-center bg-[#0B1220]">
+                                                <div className={`h-6 w-6 rounded-full border-2 border-white/20 border-t-[#4D94FF] ${isActiveLoading ? "animate-spin" : ""}`} />
+                                            </div>
+                                        )}
+                                    </div>
+                                    {hasDuplicate && (
+                                        <div className="absolute bottom-2 left-2 rounded bg-amber-500/85 px-1.5 py-0.5 text-[10px] font-bold text-black">
+                                            3 segments
+                                        </div>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <div className="flex h-10 items-center gap-5 border-t border-white/10 px-3 text-[11px] text-slate-300">
+                        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />Ready</span>
+                        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" />Duplicate data</span>
+                        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-slate-500" />Pending</span>
+                    </div>
+                </section>
+
+                <section className="flex min-w-0 flex-1 flex-col rounded-xl border border-[#22344F] bg-gradient-to-b from-[#0B1729] to-[#081220]">
+                    <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+                        <div className="flex items-center gap-2">
+                            <h3 className="text-[14px] font-bold text-white">Phase {selectedPhaseValue}% Review</h3>
+                            <span className="rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">3 segments</span>
+                        </div>
+                    </div>
+                    <div className="flex min-h-0 flex-1 gap-2 p-2">
+                        <div className="w-[180px] shrink-0 space-y-2">
+                            {duplicateSegments.map((seg, idx) => (
+                                <button
+                                    key={seg.id}
+                                    type="button"
+                                    onClick={() => setSelectedSegmentIndex(idx)}
+                                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${selectedSegmentIndex === idx ? "border-[#4D94FF] bg-[#132944]" : "border-[#24374F] bg-[#0D182B] hover:bg-[#132944]"}`}
+                                >
+                                    <div className="text-[12px] font-bold text-white">Segment {seg.id}</div>
+                                    <div className="mt-1 text-[11px] text-slate-300">{seg.time}</div>
+                                    <div className={`mt-1 text-[11px] font-bold ${seg.color}`}>Quality: {seg.quality}</div>
+                                </button>
+                            ))}
+                        </div>
+                        <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-1 overflow-hidden rounded-lg border border-[#24374F] bg-black">
+                            {([
+                                { key: "axial", label: "Axial" },
+                                { key: "coronal", label: "Coronal" },
+                                { key: "sagittal", label: "Sagittal" },
+                                { key: "preview", label: "3D Preview" },
+                            ] as const).map((pane) => (
+                                <div key={pane.key} className="relative overflow-hidden border border-white/5">
+                                    <div className="absolute left-2 top-1 z-10 text-[11px] font-bold text-white/85">{pane.label}</div>
+                                    {pane.key !== "preview" && selectedPhaseUrls ? (
+                                        <img
+                                            src={selectedPhaseUrls[pane.key]}
+                                            alt={pane.label}
+                                            className="h-full w-full object-cover opacity-95"
+                                        />
+                                    ) : pane.key === "preview" ? (
+                                        <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_50%_40%,#1F2937_0%,#020617_70%)] text-[12px] text-slate-300">
+                                            3D preview loading...
+                                        </div>
+                                    ) : (
+                                        <div className="flex h-full items-center justify-center bg-[#0B1220]">
+                                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-[#4D94FF]" />
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-white/10 px-3 py-2">
+                        <p className="text-[11px] text-slate-300">Select the clearest segment before entering phase review.</p>
+                        {showReviewButton && (
+                            <button
+                                type="button"
+                                onClick={onReviewClick}
+                                className="h-8 rounded-md bg-[#4D94FF] px-4 text-[11px] font-black text-white shadow-lg shadow-blue-500/20 transition-all hover:bg-blue-600 active:scale-95"
+                            >
+                                Phase Review
+                            </button>
+                        )}
+                    </div>
+                </section>
+            </div>
+        </div>
+    );
+}
 
 const Param = ({ label, value }: { label: string; value: string }) => (
     <div className="p-2 bg-white border border-[#B0C4DE]/30 rounded-md flex flex-col items-center justify-center shadow-sm min-h-[56px]">
