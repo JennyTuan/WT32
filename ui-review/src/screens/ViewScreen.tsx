@@ -954,7 +954,7 @@ const ViewScreen = () => {
     // (Canvas-based coronal/sagittal/volume render effects removed — now Cornerstone MPR handles all 3D panels)
 
     return (
-        <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl">
+        <div className="relative flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl">
             <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-3 py-1.5 px-4 bg-[#DCE6F2] border border-[#B0C4DE] rounded-sm min-w-[210px]">
@@ -1294,12 +1294,7 @@ const ViewScreen = () => {
                             {/* 4D entry: drive the grid from pre-rendered WebP stacks so
                                 the phase slider actually changes the image. */}
                             {isFourDLungReconSeries && fourDManifest && isFourDEntry && fourDStage !== "done" ? (
-                                <FourDPhaseLoadingGrid
-                                    manifest={fourDManifest}
-                                    onComplete={handleFourDPhaseGridComplete}
-                                    showReviewButton={fourDStage === "reviewReady"}
-                                    onReviewClick={() => setFourDStage("review")}
-                                />
+                                <div className="absolute inset-0 bg-[#05070B]" />
                             ) : isFourDLungReconSeries && fourDManifest ? (
                                 <FourDMprGrid
                                     ref={fourDGridRef}
@@ -1637,6 +1632,28 @@ const ViewScreen = () => {
                     }}
                 />
             )}
+            {isFourDLungReconSeries && fourDManifest && isFourDEntry && fourDStage !== "done" && fourDStage !== "review" && (
+                <FourDPhaseLoadingGrid
+                    manifest={fourDManifest}
+                    onComplete={handleFourDPhaseGridComplete}
+                    showReviewButton={fourDStage === "reviewReady"}
+                    onReviewClick={() => setFourDStage("review")}
+                    className="absolute inset-0 z-50 flex flex-col bg-[#05070B] pointer-events-auto"
+                />
+            )}
+            {isFourDLungReconSeries && !fourDManifest && isFourDEntry && fourDStage !== "done" && fourDStage !== "review" && (
+                <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#05070B] text-white pointer-events-auto">
+                    <div className="h-10 w-10 rounded-full border-2 border-white/20 border-t-[#4D94FF] animate-spin" />
+                    <div className="text-[12px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">
+                        {fourDManifestError ? "4D Image Data Load Failed" : "Loading 4D Image Data"}
+                    </div>
+                    {fourDManifestError && (
+                        <div className="max-w-[520px] px-6 text-center text-[12px] font-semibold text-red-200">
+                            {fourDManifestError}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };
@@ -1646,11 +1663,13 @@ function FourDPhaseLoadingGrid({
     onComplete,
     showReviewButton,
     onReviewClick,
+    className = "absolute inset-0 flex flex-col bg-[#05070B]",
 }: {
     manifest: FourDManifest;
     onComplete: () => void;
     showReviewButton: boolean;
     onReviewClick: () => void;
+    className?: string;
 }) {
     const SIMULATED_PHASE_LOAD_DELAY_MS = 650;
     const phaseIndexes = useMemo(
@@ -1721,11 +1740,11 @@ function FourDPhaseLoadingGrid({
     const selectedPhaseUrls = loadedUrls[selectedPhaseIndex];
 
     return (
-        <div className="absolute inset-0 flex min-h-0 gap-2 bg-[#070D18] p-2 text-white">
-            <section className="flex min-w-0 flex-[1.2] flex-col rounded-xl border border-[#22344F] bg-gradient-to-b from-[#0B1729] to-[#081220]">
-                <div className="flex h-11 items-center justify-between border-b border-white/10 px-3">
-                    <h3 className="text-[14px] font-bold">选择要重建的相位</h3>
-                    <span className="text-[11px] text-slate-300">{loadedCount}/{phaseIndexes.length} 已加载</span>
+        <div className={className}>
+            <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
+                <div>
+                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">4D Axial Reconstruction</div>
+                   
                 </div>
 
                 <div className="grid flex-1 min-h-0 grid-cols-5 grid-rows-2 gap-2 overflow-auto p-3">
