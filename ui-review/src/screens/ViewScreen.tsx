@@ -518,6 +518,8 @@ const ViewScreen = () => {
         "flex-1 min-w-0 flex overflow-hidden bg-[#0F172A]";
     const isMprViewActive = !isTopogramSeries && imageMode === "3D";
     const isFourDMprViewActive = isMprViewActive && isFourDLungReconSeries;
+    const isFourDPlaybackBlockedByReview = isFourDLungReconSeries && isFourDEntry && fourDStage !== "done";
+    const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
     const isToolSupportedInCurrentView = (mode: "pan" | "wl" | "measure" | "annotate" | "eraser") => {
         if (!isMprViewActive) return true;
         if (isFourDMprViewActive) {
@@ -921,6 +923,11 @@ const ViewScreen = () => {
         }, 250);
         return () => window.clearInterval(timer);
     }, [isPlaying, totalSlices, isFourDLungReconSeries]);
+
+    useEffect(() => {
+        if (isPlaybackEnabled) return;
+        setIsPlaying(false);
+    }, [isPlaybackEnabled]);
     useEffect(() => {
         const onMove = (e: MouseEvent) => {
             if (toolMode !== "measure" || !measureStartRef.current) return;
@@ -1494,6 +1501,7 @@ const ViewScreen = () => {
 
                             {[
                                 {
+                                    key: "zoom-in",
                                     title: "Zoom In",
                                     icon: <ZoomIn size={20} strokeWidth={1.5} />,
                                     action: () => {
@@ -1507,6 +1515,7 @@ const ViewScreen = () => {
                                     },
                                 },
                                 {
+                                    key: "zoom-out",
                                     title: "Zoom Out",
                                     icon: <ZoomOut size={20} strokeWidth={1.5} />,
                                     action: () => {
@@ -1520,6 +1529,7 @@ const ViewScreen = () => {
                                     },
                                 },
                                 {
+                                    key: "fit",
                                     title: "Fit to Screen",
                                     icon: <Maximize size={20} strokeWidth={1.5} />,
                                     action: () => {
@@ -1533,6 +1543,7 @@ const ViewScreen = () => {
                                     },
                                 },
                                 {
+                                    key: "reset",
                                     title: "Reset",
                                     icon: <RefreshCw size={20} strokeWidth={1.5} />,
                                     action: () => {
@@ -1556,17 +1567,24 @@ const ViewScreen = () => {
                                     },
                                 },
                                 {
-                                    title: isPlaying ? "Pause" : "Play",
+                                    key: "play",
+                                    title: !isPlaybackEnabled
+                                        ? "Play (available after phase review)"
+                                        : isPlaying
+                                            ? "Pause"
+                                            : "Play",
                                     icon: isPlaying ? <Pause size={20} strokeWidth={1.5} /> : <Play size={20} strokeWidth={1.5} />,
                                     action: () => setIsPlaying((prev) => !prev),
                                     active: isPlaying,
                                 },
-                            ].map(({ title, icon, action, active }) => (
+                            ].map(({ key, title, icon, action, active }) => {
+                                const disabled = key === "play" && !isPlaybackEnabled;
+                                return (
                                 <button
-                                    key={title}
+                                    key={key}
                                     title={title}
                                     onClick={action}
-                                    disabled={false}
+                                    disabled={disabled}
                                     style={{
                                         width: "44px",
                                         height: "44px",
@@ -1575,16 +1593,18 @@ const ViewScreen = () => {
                                         alignItems: "center",
                                         justifyContent: "center",
                                         border: "none",
-                                        cursor: "pointer",
+                                        cursor: disabled ? "not-allowed" : "pointer",
                                         transition: "all 0.15s ease",
                                         background: active ? "#3B82F6" : "transparent",
-                                        color: active ? "#ffffff" : "#94A3B8",
+                                        color: active ? "#ffffff" : disabled ? "#475569" : "#94A3B8",
                                         boxShadow: active ? "0 0 15px rgba(59,130,246,0.55)" : "none",
+                                        opacity: disabled ? 0.45 : 1,
                                     }}
                                 >
                                     {icon}
                                 </button>
-                            ))}
+                                );
+                            })}
 
                             <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
 
