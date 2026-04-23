@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { CheckCircle2, ChevronRight, Layers3, LoaderCircle, Waves } from "lucide-react";
+import { CheckCircle2, ChevronRight, Layers3, LoaderCircle } from "lucide-react";
 import { getFourDImageUrl } from "../lib/fourDImageSource";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
 
@@ -169,8 +169,6 @@ export default function ImageLoadScreen() {
 
   const selectedBedLoad = bedLoads.find((bed) => bed.id === selectedBedNumber) ?? null;
   const loadedBedCount = bedLoads.filter((bed) => bed.status === "done").length;
-  const totalProgress = Math.round(bedLoads.reduce((sum, bed) => sum + bed.progress, 0) / BED_COUNT);
-
   const bedQueue = useMemo(
     () =>
       Array.from({ length: BED_COUNT }, (_, idx) => ({
@@ -243,10 +241,9 @@ export default function ImageLoadScreen() {
         </section>
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
-          <div className="mb-3 flex items-end justify-between">
+          <div className="mb-3 flex items-center justify-between">
             <div>
               <div className="text-[18px] font-bold text-slate-800">图像加载</div>
-              <div className="mt-1 text-[12px] text-slate-500">点击左侧床位，查看对应床位的影像布局和波形数据</div>
             </div>
             <div className="flex items-center gap-3">
               <div className="rounded-full bg-white px-3 py-1.5 text-[12px] font-bold text-slate-600 shadow-sm">当前床位：{selectedBedNumber}</div>
@@ -254,26 +251,9 @@ export default function ImageLoadScreen() {
             </div>
           </div>
 
-          <div className="mb-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <div className="mb-2 flex items-center justify-between text-[12px]">
-              <span className="font-bold text-slate-700">整体加载进度</span>
-              <span className="font-bold text-[#1565C0]">{totalProgress}%</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-              <div
-                className="h-full rounded-full bg-[linear-gradient(90deg,#2563EB_0%,#22C55E_100%)] transition-all"
-                style={{ width: `${totalProgress}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="grid min-h-0 flex-1 grid-rows-[1.15fr_0.85fr] gap-3">
+          <div className="grid min-h-0 flex-1 grid-rows-[1.45fr_0.55fr] gap-3">
             <div className="min-h-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="mb-3 flex items-center gap-2">
-                <Layers3 size={14} className="text-slate-500" />
-                <div className="text-[14px] font-bold text-slate-800">影像布局</div>
-              </div>
-              <div className="grid h-[calc(100%-28px)] min-h-0 grid-cols-5 grid-rows-2 gap-2">
+              <div className="grid h-full min-h-0 grid-cols-5 grid-rows-2 gap-2">
                 {PHASE_LABELS.map((_, phaseIndex) => (
                   <PhaseThumbnail
                     key={`${selectedBedNumber}-${phaseIndex}`}
@@ -286,11 +266,7 @@ export default function ImageLoadScreen() {
             </div>
 
             <div className="min-h-0">
-              <div className="mb-3 flex items-center gap-2">
-                <Waves size={14} className="text-slate-500" />
-                <div className="text-[14px] font-bold text-slate-800">波形图</div>
-              </div>
-              <div className="h-[calc(100%-28px)] min-h-0">
+              <div className="h-full min-h-0">
                 <div className="relative h-full">
                   <WaveformPanel bedNumber={selectedBedNumber} />
                   {selectedBedLoad?.status !== "done" && (
