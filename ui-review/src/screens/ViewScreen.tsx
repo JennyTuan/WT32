@@ -265,7 +265,7 @@ const ViewScreen = () => {
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
     const fourDState = location.state as FourDPostScanState | null;
     const isFourDEntry = !!fourDState?.scanResult;
-    const shouldShowSliceLoadingBridge = isFourDEntry && !!fourDState?.showSliceLoadingBeforeImageLoad;
+    const shouldShowSliceLoadingBridge = false;
 
     /** "idle" → 非4D入口/等待图像加载；"review" → 相位审核弹窗；"done" → 审核完成 */
     const [fourDStage, setFourDStage] = useState<"idle" | "phaseLoading" | "reviewReady" | "review" | "done">(
@@ -282,11 +282,9 @@ const ViewScreen = () => {
     }, [fourDState, navigate]);
 
     // Will be updated to the first session series when session loads
-    const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
+    const [selectedSeriesId, setSelectedSeriesId] = useState(isFourDEntry ? "4d-preview-recon" : REAL_LUNG_SERIES.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>(
-        shouldShowSliceLoadingBridge ? "slice" : "phase"
-    );
+    const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("slice");
     const [sliceCineTick, setSliceCineTick] = useState(0);
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<PhaseCineSpeed>(1); // multiplier; 1× = 500 ms/phase
     const [phaseCineMode] = useState<PhaseCineMode>("forward");
@@ -299,9 +297,7 @@ const ViewScreen = () => {
     // Across-phase aggregation for the MPR 4th panel (ITV visualisation)
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
     const [slabThickness, setSlabThickness] = useState(5);
-    const [imageMode, setImageMode] = useState<"2D" | "3D">(
-        isFourDEntry && !shouldShowSliceLoadingBridge ? "3D" : "2D"
-    );
+    const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry ? "3D" : "2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
     const [toolMode, setToolMode] = useState<ViewerToolMode>("wl");
     const [ww, setWw] = useState(350);
@@ -398,6 +394,32 @@ const ViewScreen = () => {
 
         // ── Static fallback (no scan session in localStorage) ────────────────────
         if (!scanSession) {
+            if (isFourDEntry) {
+                return [{
+                    id: "study-4d-preview",
+                    name: "4D CT",
+                    scanGroups: [{
+                        id: "4d-preview-group",
+                        label: "4D Reconstruction",
+                        type: "4d" as SeriesType,
+                        series: [{
+                            id: "4d-preview-recon",
+                            name: "4D Lung Reconstruction",
+                            count: REAL_LUNG_SERIES.count,
+                            kernel: "B41 Soft Tissue",
+                            thickness: "3.0 mm",
+                            kV: "120",
+                            mAs: "Auto",
+                            fov: "402.0 mm",
+                            matrix: "512",
+                            seriesType: "4d" as SeriesType,
+                            images: makeImages(REAL_LUNG_SERIES.count, "4d-preview"),
+                            defaultWw: 400,
+                            defaultWl: 40,
+                        }],
+                    }],
+                }];
+            }
             return [{
                 id: REAL_LUNG_SERIES.studyId,
                 name: REAL_LUNG_SERIES.studyName,
@@ -524,7 +546,7 @@ const ViewScreen = () => {
             name: scanSession.name || "扫描序列",
             scanGroups,
         }];
-    }, [scanSession]);
+    }, [scanSession, isFourDEntry]);
 
     const seriesList = studyTree.flatMap((study) => study.scanGroups.flatMap((g) => g.series));
     // Guard: if seriesList is somehow still empty, always fall back to the static series
@@ -541,7 +563,13 @@ const ViewScreen = () => {
         seriesType: "static" as SeriesType,
         images: Array.from({ length: REAL_LUNG_SERIES.count }, (_, i) => ({ id: `qin-img-${i + 1}`, name: `Image ${i + 1}` })),
     }];
-    const selectedSeries = safeSeriesList.find((s) => s.id === selectedSeriesId) ?? safeSeriesList[0];
+    const selectedSeries =
+        safeSeriesList.find((s) => s.id === selectedSeriesId) ??
+        (isFourDEntry
+            ? safeSeriesList.find((series) => series.seriesType === "4d") ??
+              safeSeriesList.find((series) => series.seriesType !== "topogram")
+            : undefined) ??
+        safeSeriesList[0];
     const isTopogramSeries = selectedSeries.seriesType === "topogram";
     const isFourDLungReconSeries =
         selectedSeries.seriesType === "4d" &&
@@ -556,7 +584,7 @@ const ViewScreen = () => {
     const isMprViewActive = !isTopogramSeries && imageMode === "3D";
     const isFourDMprViewActive = isMprViewActive && isFourDLungReconSeries;
     const isFourDPlaybackBlockedByReview = isFourDLungReconSeries && isFourDEntry && fourDStage !== "done";
-    const isFourDEntryLoadingFlow = isFourDEntry && fourDStage !== "done" && fourDStage !== "review";
+    const isFourDEntryLoadingFlow = false;
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
     const isToolSupportedInCurrentView = (mode: ViewerToolMode) => {
         if (!isMprViewActive) return true;
@@ -585,21 +613,18 @@ const ViewScreen = () => {
     useEffect(() => {
         setSelectedPhaseIndex(0);
         setIsPlaying(false);
-        setFourDBrowseMode(shouldShowSliceLoadingBridge ? "slice" : "phase");
+        setFourDBrowseMode("slice");
         setSliceCineTick(0);
         phaseCineDirectionRef.current = 1;
-    }, [selectedSeriesId, shouldShowSliceLoadingBridge]);
+    }, [selectedSeriesId]);
 
     // When a 4D series is active, auto-switch to 3D MPR layout; leave non-4D workflows untouched.
-    // Exception: entering from 4D rescan-select with slice-loading bridge stays in 2D 常规浏览 so the
-    // inline slice counter is visible.
     useEffect(() => {
         if (!isFourDLungReconSeries) return;
-        if (shouldShowSliceLoadingBridge) return;
         setImageMode("3D");
         setSelectedLayout("多平面重建");
         setSelectedRenderMode("MPR");
-    }, [isFourDLungReconSeries, shouldShowSliceLoadingBridge]);
+    }, [isFourDLungReconSeries]);
 
     useEffect(() => {
         if (!isTopogramSeries) return;
@@ -706,8 +731,6 @@ const ViewScreen = () => {
             null
         );
     }, [isFourDEntry, safeSeriesList]);
-    const isFourDEntrySeriesResolved = !isFourDEntry || !preferredSeriesForFourDEntry || selectedSeries.id === preferredSeriesForFourDEntry.id;
-
     // Auto-select first series when session data loads (or series list changes)
     useEffect(() => {
         const first = safeSeriesList[0];
@@ -1017,14 +1040,6 @@ const ViewScreen = () => {
 
     return (
         <div className="relative flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl">
-            {isFourDEntry && !isFourDEntrySeriesResolved && (
-                <div className="absolute inset-0 z-[70] flex items-center justify-center bg-[#05070B] text-white">
-                    <div className="flex items-center gap-3 text-[12px] font-black uppercase tracking-[0.16em] text-[#60A5FA]">
-                        <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-[#4D94FF] animate-spin" />
-                        Preparing 4D Reconstruction Workspace
-                    </div>
-                </div>
-            )}
             <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-3 py-1.5 px-4 bg-[#DCE6F2] border border-[#B0C4DE] rounded-sm min-w-[210px]">
@@ -1428,6 +1443,7 @@ const ViewScreen = () => {
                                     initialLayout={fourDBrowseMode === "slice" ? "axial-single" : "mpr"}
                                     sliceCineTick={sliceCineTick}
                                     mipMode={phaseMipMode}
+                                    progressiveSliceLoad={isFourDEntry && fourDBrowseMode === "slice"}
                                     activeTool={mapCornerstoneTool(toolMode)}
                                     windowCenter={wl}
                                     windowWidth={ww}

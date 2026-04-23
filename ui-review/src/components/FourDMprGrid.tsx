@@ -65,6 +65,7 @@ interface FourDMprGridProps {
     windowWidth?: number;
     onWindowLevelChange?: (wc: number, ww: number) => void;
     onStatusChange?: (status: "loading" | "ready" | "error") => void;
+    progressiveSliceLoad?: boolean;
     className?: string;
 }
 
@@ -127,6 +128,7 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
         windowWidth,
         onWindowLevelChange,
         onStatusChange,
+        progressiveSliceLoad = false,
         className = "absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden",
     },
     ref,
@@ -161,24 +163,64 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     const axialUrls    = useMemo(() => buildFourDMipUrls(manifest, "axial", mipMode),    [manifest, mipMode]);
     const coronalUrls  = useMemo(() => buildFourDMipUrls(manifest, "coronal", mipMode),  [manifest, mipMode]);
     const sagittalUrls = useMemo(() => buildFourDMipUrls(manifest, "sagittal", mipMode), [manifest, mipMode]);
+    const [progressiveAxialCount, setProgressiveAxialCount] = useState(() => progressiveSliceLoad ? 0 : axialUrls.length);
+    const visibleAxialUrls = useMemo(
+        () => progressiveSliceLoad ? axialUrls.slice(0, progressiveAxialCount) : axialUrls,
+        [axialUrls, progressiveAxialCount, progressiveSliceLoad],
+    );
 
     useEffect(() => {
         queueMicrotask(() => {
-            setAxialIdx((prev) => Math.min(prev, Math.max(0, axialUrls.length - 1)));
+            setAxialIdx((prev) => Math.min(prev, Math.max(0, visibleAxialUrls.length - 1)));
             setCoronalIdx((prev) => Math.min(prev, Math.max(0, coronalUrls.length - 1)));
             setSagittalIdx((prev) => Math.min(prev, Math.max(0, sagittalUrls.length - 1)));
         });
-    }, [axialUrls.length, coronalUrls.length, sagittalUrls.length]);
+    }, [visibleAxialUrls.length, coronalUrls.length, sagittalUrls.length]);
+
+    useEffect(() => {
+        if (!progressiveSliceLoad) {
+            setProgressiveAxialCount(axialUrls.length);
+            return;
+        }
+
+        let cancelled = false;
+        let nextIndex = 0;
+        setProgressiveAxialCount(0);
+        setAxialIdx(0);
+
+        const loadNext = () => {
+            if (cancelled) return;
+            if (nextIndex >= axialUrls.length) return;
+
+            const indexToLoad = nextIndex;
+            const img = new Image();
+            const done = () => {
+                if (cancelled) return;
+                nextIndex = indexToLoad + 1;
+                setProgressiveAxialCount(nextIndex);
+                window.setTimeout(loadNext, 22);
+            };
+            img.onload = done;
+            img.onerror = done;
+            img.src = axialUrls[indexToLoad];
+        };
+
+        const startTimer = window.setTimeout(loadNext, 80);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(startTimer);
+        };
+    }, [axialUrls, progressiveSliceLoad]);
 
     // Slice-cine: whenever parent bumps tick, advance spatial slices (phase remains locked).
     useEffect(() => {
         if (sliceCineTick <= 0) return;
         queueMicrotask(() => {
-            setAxialIdx((prev) => (prev + 1) % Math.max(1, axialUrls.length));
+            setAxialIdx((prev) => (prev + 1) % Math.max(1, visibleAxialUrls.length));
             setCoronalIdx((prev) => (prev + 1) % Math.max(1, coronalUrls.length));
             setSagittalIdx((prev) => (prev + 1) % Math.max(1, sagittalUrls.length));
         });
-    }, [sliceCineTick, axialUrls.length, coronalUrls.length, sagittalUrls.length]);
+    }, [sliceCineTick, visibleAxialUrls.length, coronalUrls.length, sagittalUrls.length]);
 
     // Bubble status: ready once axial plane has loaded at least one frame.
     const [axialStatus, setAxialStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -305,7 +347,7 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
             return {
                 label: "AXIAL",
                 index: axialIdx,
-                count: axialUrls.length,
+                count: Math.max(visibleAxialUrls.length, axialUrls.length),
                 viewMeta: manifest.views.axial,
             };
         }
@@ -534,7 +576,7 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
             >
                 <WebImageViewer
                     ref={axialRef}
-                    imageUrls={axialUrls}
+                    imageUrls={visibleAxialUrls}
                     currentImageIndex={axialIdx}
                     onImageIndexChange={setAxialIdx}
                     onStatusChange={setAxialStatus}
@@ -548,6 +590,11 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
                     />
                 )}
                 {showPanelLabels && <div className={PANEL_LABEL_STYLE}>AXIAL</div>}
+                {progressiveSliceLoad && progressiveAxialCount < axialUrls.length && (
+                    <div className="pointer-events-none absolute bottom-3 left-1/2 z-[5] -translate-x-1/2 rounded-md border border-[#4D94FF]/40 bg-black/70 px-3 py-1.5 text-[11px] font-bold text-[#BFDBFE] shadow-lg">
+                        正在加载图像 {Math.max(1, progressiveAxialCount)} / {axialUrls.length}
+                    </div>
+                )}
                 {renderPhaseBadge("axial")}
                 {renderCornerInfo("axial")}
             </div>

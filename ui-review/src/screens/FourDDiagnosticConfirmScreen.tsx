@@ -178,7 +178,7 @@ export default function FourDDiagnosticConfirmScreen() {
         );
         const postScanState: FourDPostScanState = {
             scanResult,
-            showSliceLoadingBeforeImageLoad: true,
+            showSliceLoadingBeforeImageLoad: false,
         };
 
         if (scanResult.rescanOccurred) {

@@ -322,7 +322,7 @@ export default function FourDPhaseReviewScreen() {
       ...state,
       scanResult,
       phaseSelections,
-      showSliceLoadingBeforeImageLoad: true,
+      showSliceLoadingBeforeImageLoad: false,
     };
     navigate(
       scanResult.rescanOccurred ? "/fourd-rescan-select" : "/image-viewer",

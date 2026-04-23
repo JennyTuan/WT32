@@ -980,7 +980,7 @@ export default function FourDRescanSelectScreen() {
         ...state,
         scanResult,
         rescanChoices: choices,
-        showSliceLoadingBeforeImageLoad: true,
+        showSliceLoadingBeforeImageLoad: false,
       } as FourDPostScanState,
     });
   };

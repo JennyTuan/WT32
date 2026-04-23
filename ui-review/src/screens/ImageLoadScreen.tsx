@@ -140,7 +140,10 @@ export default function ImageLoadScreen() {
   const location = useLocation();
   const routeState = location.state as FourDPostScanState | null;
   const fourDViewerState = useMemo<FourDPostScanState>(
-    () => (routeState?.scanResult ? routeState : { scanResult: generateMockScanResult(9, 10, 165.0) }),
+    () => ({
+      ...(routeState?.scanResult ? routeState : { scanResult: generateMockScanResult(9, 10, 165.0) }),
+      showSliceLoadingBeforeImageLoad: false,
+    }),
     [routeState],
   );
 

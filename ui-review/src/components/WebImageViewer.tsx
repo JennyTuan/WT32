@@ -224,27 +224,29 @@ const WebImageViewer = forwardRef<DicomViewerHandle, WebImageViewerProps>(
                     background: "#000",
                 }}
             >
-                <img
-                    ref={imgRef}
-                    src={currentUrl}
-                    alt=""
-                    draggable={false}
-                    onLoad={onImgLoad}
-                    onError={onImgError}
-                    style={{
-                        position: "absolute",
-                        left: "50%",
-                        top: "50%",
-                        transform: `translate(-50%, -50%) translate(${tx}px, ${ty}px) scale(${scale})`,
-                        transformOrigin: "center center",
-                        maxWidth: "100%",
-                        maxHeight: "100%",
-                        imageRendering: "auto",
-                        filter,
-                        userSelect: "none",
-                        pointerEvents: "none",
-                    }}
-                />
+                {currentUrl && (
+                    <img
+                        ref={imgRef}
+                        src={currentUrl}
+                        alt=""
+                        draggable={false}
+                        onLoad={onImgLoad}
+                        onError={onImgError}
+                        style={{
+                            position: "absolute",
+                            left: "50%",
+                            top: "50%",
+                            transform: `translate(-50%, -50%) translate(${tx}px, ${ty}px) scale(${scale})`,
+                            transformOrigin: "center center",
+                            maxWidth: "100%",
+                            maxHeight: "100%",
+                            imageRendering: "auto",
+                            filter,
+                            userSelect: "none",
+                            pointerEvents: "none",
+                        }}
+                    />
+                )}
                 {status === "loading" && (
                     <div className="absolute inset-0 flex items-center justify-center text-xs text-white/60 pointer-events-none">
                         加载中…
