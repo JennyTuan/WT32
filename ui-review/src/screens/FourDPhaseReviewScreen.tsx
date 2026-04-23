@@ -325,7 +325,7 @@ export default function FourDPhaseReviewScreen() {
       showSliceLoadingBeforeImageLoad: false,
     };
     navigate(
-      scanResult.rescanOccurred ? "/fourd-rescan-select" : "/image-viewer",
+      scanResult.rescanOccurred ? "/fourd-rescan-select" : "/image-load",
       { state: nextState }
     );
   }, [matrix, navigate, scanResult, state]);

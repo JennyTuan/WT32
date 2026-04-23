@@ -192,8 +192,8 @@ export default function FourDDiagnosticConfirmScreen() {
             // 先做重扫区域选择，再进图像浏览
             navigate("/fourd-rescan-select", { state: postScanState });
         } else {
-            // 先进入图示界面展示切片加载过程，完成后再进入 image-load
-            navigate("/image-viewer", { state: postScanState });
+            // 直接进入图像加载流程第一步
+            navigate("/image-load", { state: postScanState });
         }
     }, [bedSegmentCount, dynamicParams.scanLength, navigate]);
 
