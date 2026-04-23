@@ -98,17 +98,42 @@ function buildMockPhases(): PhaseData[] {
 function MprTile({
   label,
   phaseLabel,
+  bedLabel,
+  bedPosition,
+  bedMarkers,
   children,
 }: {
   label: string;
   phaseLabel: string;
+  bedLabel: string;
+  bedPosition: string;
+  bedMarkers: Array<{ label: string; active: boolean; duplicated: boolean }>;
   children: React.ReactNode;
 }) {
   return (
     <div className="relative h-full overflow-hidden bg-black">
       <div className="pointer-events-none absolute left-3 top-2 z-10 text-[18px] font-black tracking-[0.16em] text-white">{label}</div>
-      <div className="pointer-events-none absolute right-3 top-2 z-10 rounded-md border border-[#1E3A8A] bg-black/75 px-3 py-1 text-[20px] font-black text-[#4EA2FF]">
-        Phase {phaseLabel}
+      <div className="pointer-events-none absolute left-3 top-11 z-10 flex items-center gap-2">
+        <span className="rounded bg-[#1E64F0] px-2 py-1 text-[12px] font-black text-white">PHASE {phaseLabel}</span>
+        <span className="rounded border border-[#3C98E0] bg-[#0A1B2F]/90 px-2 py-1 text-[11px] font-bold text-[#68CAFF]">
+          床位: {bedLabel} [{bedPosition}]
+        </span>
+      </div>
+      <div className="pointer-events-none absolute right-0 top-[88px] z-10 flex max-h-[72%] flex-col gap-1 overflow-hidden rounded-l border border-[#1E3A8A]/70 bg-black/55 px-1 py-1">
+        {bedMarkers.map((bed) => (
+          <div
+            key={bed.label}
+            className={`w-8 rounded px-1 py-1 text-center text-[10px] font-bold leading-tight ${
+              bed.active
+                ? "bg-[#1E64F0]/85 text-[#A5D8FF]"
+                : bed.duplicated
+                  ? "bg-red-600/80 text-red-100"
+                  : "bg-[#0B1220]/70 text-[#4E678C]"
+            }`}
+          >
+            {bed.label}
+          </div>
+        ))}
       </div>
       <div className="flex h-full w-full items-center justify-center">{children}</div>
     </div>
@@ -160,6 +185,13 @@ export default function ImageLoadScreen() {
     [selectedPhaseIdx],
   );
   const currentPhase = phases[selectedPhaseIdx] ?? null;
+  const selectedBed = currentPhase?.beds.find((bed) => bed.id === selectedBedId) ?? currentPhase?.beds[0] ?? null;
+  const selectedBedRange = selectedBed?.range.split("-")[0]?.trim() ?? "—";
+  const bedMarkers = (currentPhase?.beds ?? []).map((bed) => ({
+    label: bed.label.replace("床位 ", "Bed "),
+    active: bed.id === selectedBed?.id,
+    duplicated: bed.segments.length > 1,
+  }));
 
   const setSegmentForBed = (phaseIdx: number, bedId: string, segId: string) => {
     setPhases((prev) =>
@@ -278,7 +310,13 @@ export default function ImageLoadScreen() {
           <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-[#1E3A8A] bg-black">
             <div className="grid min-h-0 flex-1 grid-cols-2 gap-px bg-[#1E3A8A]">
               <div className="min-h-0 bg-black">
-                <MprTile label="CORONAL" phaseLabel={currentPhase?.label ?? "0%"}>
+                <MprTile
+                  label="CORONAL"
+                  phaseLabel={currentPhase?.label ?? "0%"}
+                  bedLabel={selectedBed?.label.replace("床位 ", "") ?? "--"}
+                  bedPosition={selectedBedRange}
+                  bedMarkers={bedMarkers}
+                >
                   <div className="relative h-full w-full bg-black">
                     <FourDPreviewImage src={previewUrls.coronal} />
                     <CrossHair horizontalClass="bg-red-500/85" verticalClass="bg-yellow-300/85" />
@@ -287,7 +325,13 @@ export default function ImageLoadScreen() {
                 </MprTile>
               </div>
               <div className="min-h-0 bg-black">
-                <MprTile label="SAGITTAL" phaseLabel={currentPhase?.label ?? "0%"}>
+                <MprTile
+                  label="SAGITTAL"
+                  phaseLabel={currentPhase?.label ?? "0%"}
+                  bedLabel={selectedBed?.label.replace("床位 ", "") ?? "--"}
+                  bedPosition={selectedBedRange}
+                  bedMarkers={bedMarkers}
+                >
                   <div className="relative h-full w-full bg-black">
                     <FourDPreviewImage src={previewUrls.sagittal} />
                     <CrossHair horizontalClass="bg-red-500/85" verticalClass="bg-emerald-400/85" />
