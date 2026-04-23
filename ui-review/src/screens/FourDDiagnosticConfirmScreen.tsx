@@ -89,7 +89,7 @@ export default function FourDDiagnosticConfirmScreen() {
         filterThreshold: 0.42,
         peakThreshold: 1.15,
         gain: 1.4,
-        triggerDelay: 120,
+        valleyThreshold: 0.35,
     });
 
     const [rawWaveData, setRawWaveData] = useState<number[]>(new Array(500).fill(100));
@@ -333,26 +333,34 @@ export default function FourDDiagnosticConfirmScreen() {
     const waveformExposureWidth = 96;
     const waveformExposureX = Math.max(0, Math.min(800 - waveformExposureWidth, scanProgress * (800 - waveformExposureWidth)));
     const thresholdY = (value: number) => 120 - (value / 1100) * 120;
-    const cycleSampleCount = 126;
-    const cycleThresholdSegments = Array.from(
-        { length: Math.ceil(filteredWaveData.length / cycleSampleCount) },
-        (_, cycleIndex) => {
-            const startIndex = cycleIndex * cycleSampleCount;
-            const endIndex = Math.min(filteredWaveData.length - 1, (cycleIndex + 1) * cycleSampleCount - 1);
-            const samples = filteredWaveData.slice(startIndex, endIndex + 1);
-            const peak = Math.max(...samples);
-            const valley = Math.min(...samples);
-            const amplitude = Math.max(1, peak - valley);
+    const upperThresholdY = thresholdY(500 + breathingControls.peakThreshold * 280);
+    const lowerThresholdY = thresholdY(breathingControls.valleyThreshold * 680);
+    const filteredWavePoints = filteredWaveData.map((value, index) => ({
+        x: (index / (filteredWaveData.length - 1)) * 800,
+        y: thresholdY(value),
+        value,
+        index,
+    }));
+    const waveformExtremaMarkers = filteredWavePoints.flatMap((point, index) => {
+        const windowSize = 6;
+        if (index < windowSize || index > filteredWavePoints.length - windowSize - 1) return [];
 
-            return {
-                id: `threshold-${cycleIndex}`,
-                x1: (startIndex / (filteredWaveData.length - 1)) * 800,
-                x2: (endIndex / (filteredWaveData.length - 1)) * 800,
-                upperY: thresholdY(valley + amplitude * 0.72),
-                lowerY: thresholdY(valley + amplitude * 0.28),
-            };
-        },
-    );
+        const neighbors = [
+            ...filteredWaveData.slice(index - windowSize, index),
+            ...filteredWaveData.slice(index + 1, index + windowSize + 1),
+        ];
+        const isPeak = neighbors.every((value) => point.value > value);
+        const isValley = neighbors.every((value) => point.value < value);
+
+        if (!isPeak && !isValley) return [];
+
+        return [{
+            id: `${isPeak ? "peak" : "valley"}-${point.index}`,
+            kind: isPeak ? "peak" : "valley",
+            x: point.x,
+            y: point.y,
+        }];
+    });
 
     const renderSteps = (sequence: Sequence, isActiveSequence: boolean, isCompletedSequence: boolean) => (
         <div className="flex flex-col ml-12 mt-1.5 gap-2.5 relative pb-2.5">
@@ -643,40 +651,14 @@ export default function FourDDiagnosticConfirmScreen() {
                                         />
                                     )}
                                     <line x1="0" y1="60" x2="800" y2="60" stroke="#94A3B8" strokeWidth="1" strokeDasharray="3 3" opacity="0.4" />
-                                    {cycleThresholdSegments.map((segment, index) => (
-                                        <g key={segment.id}>
-                                            <line
-                                                x1={segment.x1}
-                                                y1={segment.upperY}
-                                                x2={segment.x2}
-                                                y2={segment.upperY}
-                                                stroke="#EF4444"
-                                                strokeWidth="1.2"
-                                                strokeDasharray="8 5"
-                                                opacity="0.78"
-                                            />
-                                            <line
-                                                x1={segment.x1}
-                                                y1={segment.lowerY}
-                                                x2={segment.x2}
-                                                y2={segment.lowerY}
-                                                stroke="#F59E0B"
-                                                strokeWidth="1.2"
-                                                strokeDasharray="8 5"
-                                                opacity="0.78"
-                                            />
-                                            {index === 0 && (
-                                                <>
-                                                    <text x={segment.x1 + 5} y={segment.upperY - 4} fill="#EF4444" fontSize="10" fontWeight="800">
-                                                        Upper Threshold
-                                                    </text>
-                                                    <text x={segment.x1 + 5} y={segment.lowerY - 4} fill="#F59E0B" fontSize="10" fontWeight="800">
-                                                        Lower Threshold
-                                                    </text>
-                                                </>
-                                            )}
-                                        </g>
-                                    ))}
+                                    <line x1="0" y1={upperThresholdY} x2="800" y2={upperThresholdY} stroke="#EF4444" strokeWidth="1.4" strokeDasharray="8 5" opacity="0.82" />
+                                    <line x1="0" y1={lowerThresholdY} x2="800" y2={lowerThresholdY} stroke="#F59E0B" strokeWidth="1.4" strokeDasharray="8 5" opacity="0.82" />
+                                    <text x="6" y={upperThresholdY - 4} fill="#EF4444" fontSize="10" fontWeight="800">
+                                        Upper Threshold
+                                    </text>
+                                    <text x="6" y={lowerThresholdY - 4} fill="#F59E0B" fontSize="10" fontWeight="800">
+                                        Lower Threshold
+                                    </text>
                                     <path
                                         d={`M ${rawWaveData.map((value, index) => `${(index / (rawWaveData.length - 1)) * 800},${120 - (value / 1100) * 120}`).join(" L ")}`}
                                         fill="none"
@@ -685,17 +667,28 @@ export default function FourDDiagnosticConfirmScreen() {
                                         className="opacity-30"
                                     />
                                     <path
-                                        d={`M 0,120 L ${filteredWaveData.map((value, index) => `${(index / (filteredWaveData.length - 1)) * 800},${120 - (value / 1100) * 120}`).join(" L ")} L 800,120 Z`}
+                                        d={`M 0,120 L ${filteredWavePoints.map((point) => `${point.x},${point.y}`).join(" L ")} L 800,120 Z`}
                                         fill="url(#fourd-wave-fill)"
                                     />
                                     <path
-                                        d={`M ${filteredWaveData.map((value, index) => `${(index / (filteredWaveData.length - 1)) * 800},${120 - (value / 1100) * 120}`).join(" L ")}`}
+                                        d={`M ${filteredWavePoints.map((point) => `${point.x},${point.y}`).join(" L ")}`}
                                         fill="none"
                                         stroke="#2563EB"
                                         strokeWidth="2.5"
                                         strokeLinecap="round"
                                         strokeLinejoin="round"
                                     />
+                                    {waveformExtremaMarkers.map((marker) => (
+                                        <circle
+                                            key={marker.id}
+                                            cx={marker.x}
+                                            cy={marker.y}
+                                            r={marker.kind === "peak" ? 4.2 : 3.8}
+                                            fill={marker.kind === "peak" ? "#2563EB" : "#DC2626"}
+                                            stroke="#FFFFFF"
+                                            strokeWidth="1.3"
+                                        />
+                                    ))}
                                 </svg>
                             </div>
 
@@ -743,9 +736,9 @@ export default function FourDDiagnosticConfirmScreen() {
                                 {renderControlSlider("增益", breathingControls.gain, 0.5, 3, 0.1, (value) => {
                                     setBreathingControls((prev) => ({ ...prev, gain: value }));
                                 })}
-                                {renderControlSlider("谷值阈", breathingControls.triggerDelay, 0, 500, 10, (value) => {
-                                    setBreathingControls((prev) => ({ ...prev, triggerDelay: value }));
-                                }, " ms")}
+                                {renderControlSlider("谷值阈", breathingControls.valleyThreshold, 0.1, 0.8, 0.01, (value) => {
+                                    setBreathingControls((prev) => ({ ...prev, valleyThreshold: value }));
+                                })}
                             </div>
                         </div>
                     </div>
