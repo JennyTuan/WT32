@@ -822,17 +822,26 @@ const buildApiUrl = (path: string) => {
     return `${API_BASE_URL}${path}`;
 };
 
+const inferHostApiBaseUrl = () => {
+    if (typeof window === "undefined") return "";
+    const { protocol, hostname } = window.location;
+    if (!hostname) return "";
+    return `${protocol}//${hostname}:8000`;
+};
+
+const HOST_API_BASE_URL = inferHostApiBaseUrl();
+
 const isSupportedPosition = (value: string): value is "HFS" | "FFS" | "HFP" | "FFP" | "HFDR" | "FFDR" | "HFDL" | "FFDL" =>
     ["HFS", "FFS", "HFP", "FFP", "HFDR", "FFDR", "HFDL", "FFDL"].includes(value);
 
 const fetchProtocolCatalogWithFallback = async () => {
     const candidates = API_BASE_URL
-        ? [buildApiUrl("/api/protocols/catalog"), "/api/protocols/catalog"]
-        : ["/api/protocols/catalog", "http://127.0.0.1:8000/api/protocols/catalog"];
+        ? [buildApiUrl("/api/protocols/catalog"), "/api/protocols/catalog", HOST_API_BASE_URL ? `${HOST_API_BASE_URL}/api/protocols/catalog` : ""]
+        : ["/api/protocols/catalog", HOST_API_BASE_URL ? `${HOST_API_BASE_URL}/api/protocols/catalog` : "", "http://127.0.0.1:8000/api/protocols/catalog"];
 
     let lastError: Error | null = null;
 
-    for (const url of candidates) {
+    for (const url of candidates.filter(Boolean)) {
         try {
             const response = await fetch(url);
             if (!response.ok) {
@@ -850,12 +859,12 @@ const fetchProtocolCatalogWithFallback = async () => {
 
 const fetchProtocolDetailWithFallback = async (protocolId: number) => {
     const candidates = API_BASE_URL
-        ? [buildApiUrl(`/api/protocols/${protocolId}`), `/api/protocols/${protocolId}`]
-        : [`/api/protocols/${protocolId}`, `http://127.0.0.1:8000/api/protocols/${protocolId}`];
+        ? [buildApiUrl(`/api/protocols/${protocolId}`), `/api/protocols/${protocolId}`, HOST_API_BASE_URL ? `${HOST_API_BASE_URL}/api/protocols/${protocolId}` : ""]
+        : [`/api/protocols/${protocolId}`, HOST_API_BASE_URL ? `${HOST_API_BASE_URL}/api/protocols/${protocolId}` : "", `http://127.0.0.1:8000/api/protocols/${protocolId}`];
 
     let lastError: Error | null = null;
 
-    for (const url of candidates) {
+    for (const url of candidates.filter(Boolean)) {
         try {
             const response = await fetch(url);
             if (!response.ok) {

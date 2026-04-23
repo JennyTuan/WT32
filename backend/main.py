@@ -19,6 +19,7 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5175",
     ],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,4 +45,3 @@ app.include_router(scan_sessions.router, prefix="/api")
 app.include_router(disk_manager.router, prefix="/api")
 app.include_router(corners.router, prefix="/api")
 app.include_router(scan_ws_router)
-
