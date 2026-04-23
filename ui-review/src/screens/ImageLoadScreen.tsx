@@ -39,7 +39,6 @@ interface PhaseData {
 
 const PHASE_LABELS = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"];
 const PREVIEW_SLICES = {
-  axial: 71,
   coronal: 256,
   sagittal: 256,
 } as const;
@@ -98,16 +97,18 @@ function buildMockPhases(): PhaseData[] {
 
 function MprTile({
   label,
+  phaseLabel,
   children,
 }: {
   label: string;
+  phaseLabel: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="relative h-full overflow-hidden bg-black">
       <div className="pointer-events-none absolute left-3 top-2 z-10 text-[18px] font-black tracking-[0.16em] text-white">{label}</div>
       <div className="pointer-events-none absolute right-3 top-2 z-10 rounded-md border border-[#1E3A8A] bg-black/75 px-3 py-1 text-[20px] font-black text-[#4EA2FF]">
-        Phase 0%
+        Phase {phaseLabel}
       </div>
       <div className="flex h-full w-full items-center justify-center">{children}</div>
     </div>
@@ -153,12 +154,12 @@ export default function ImageLoadScreen() {
   const [selectedBedId, setSelectedBedId] = useState("bed-0-03");
   const previewUrls = useMemo(
     () => ({
-      axial: getFourDImageUrl(selectedPhaseIdx, "axial", PREVIEW_SLICES.axial),
       coronal: getFourDImageUrl(selectedPhaseIdx, "coronal", PREVIEW_SLICES.coronal),
       sagittal: getFourDImageUrl(selectedPhaseIdx, "sagittal", PREVIEW_SLICES.sagittal),
     }),
     [selectedPhaseIdx],
   );
+  const currentPhase = phases[selectedPhaseIdx] ?? null;
 
   const setSegmentForBed = (phaseIdx: number, bedId: string, segId: string) => {
     setPhases((prev) =>
@@ -275,9 +276,9 @@ export default function ImageLoadScreen() {
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
           <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-[#1E3A8A] bg-black">
-            <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-px bg-[#1E3A8A]">
-              <div className="row-span-2 min-h-0 bg-black">
-                <MprTile label="CORONAL">
+            <div className="grid min-h-0 flex-1 grid-cols-2 gap-px bg-[#1E3A8A]">
+              <div className="min-h-0 bg-black">
+                <MprTile label="CORONAL" phaseLabel={currentPhase?.label ?? "0%"}>
                   <div className="relative h-full w-full bg-black">
                     <FourDPreviewImage src={previewUrls.coronal} />
                     <CrossHair horizontalClass="bg-red-500/85" verticalClass="bg-yellow-300/85" />
@@ -286,19 +287,10 @@ export default function ImageLoadScreen() {
                 </MprTile>
               </div>
               <div className="min-h-0 bg-black">
-                <MprTile label="SAGITTAL">
+                <MprTile label="SAGITTAL" phaseLabel={currentPhase?.label ?? "0%"}>
                   <div className="relative h-full w-full bg-black">
                     <FourDPreviewImage src={previewUrls.sagittal} />
                     <CrossHair horizontalClass="bg-red-500/85" verticalClass="bg-emerald-400/85" />
-                    <div className="absolute bottom-3 left-3 text-[16px] font-bold leading-tight text-[#E6ECFF]">W 400<br />WL 40</div>
-                  </div>
-                </MprTile>
-              </div>
-              <div className="min-h-0 bg-black">
-                <MprTile label="AXIAL">
-                  <div className="relative h-full w-full bg-black">
-                    <FourDPreviewImage src={previewUrls.axial} />
-                    <CrossHair horizontalClass="bg-emerald-400/85" verticalClass="bg-yellow-300/85" />
                     <div className="absolute bottom-3 left-3 text-[16px] font-bold leading-tight text-[#E6ECFF]">W 400<br />WL 40</div>
                   </div>
                 </MprTile>
