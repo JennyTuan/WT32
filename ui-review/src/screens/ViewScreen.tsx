@@ -23,7 +23,6 @@ import {
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
-import { FourDPhaseReviewModal } from "./FourDPhaseReviewModal";
 import { hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
@@ -263,13 +262,13 @@ const ViewScreen = () => {
     const location = useLocation();
 
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
-    const fourDState = location.state as FourDPostScanState | null;
+    const fourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode }) | null;
     const isFourDEntry = !!fourDState?.scanResult;
     const shouldShowSliceLoadingBridge = false;
 
     /** "idle" → 非4D入口/等待图像加载；"review" → 相位审核弹窗；"done" → 审核完成 */
     const [fourDStage, setFourDStage] = useState<"idle" | "phaseLoading" | "reviewReady" | "review" | "done">(
-        isFourDEntry ? "done" : "idle"
+        isFourDEntry ? (fourDState?.initialBrowseMode === "phase" ? "done" : "phaseLoading") : "idle"
     );
     const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">("ready");
     const handleFourDPhaseGridComplete = useCallback(() => {
@@ -280,11 +279,15 @@ const ViewScreen = () => {
     const handleAdvancedProcessing = useCallback(() => {
         navigate("/image-load", { state: fourDState ?? undefined });
     }, [fourDState, navigate]);
+    const handleFourDSliceLoadComplete = useCallback(() => {
+        if (!isFourDEntry || fourDStage !== "phaseLoading") return;
+        navigate("/image-load", { state: fourDState ?? undefined });
+    }, [fourDStage, fourDState, isFourDEntry, navigate]);
 
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(isFourDEntry ? "4d-preview-recon" : REAL_LUNG_SERIES.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("slice");
+    const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>(fourDState?.initialBrowseMode ?? "slice");
     const [sliceCineTick, setSliceCineTick] = useState(0);
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<PhaseCineSpeed>(1); // multiplier; 1× = 500 ms/phase
     const [phaseCineMode] = useState<PhaseCineMode>("forward");
@@ -571,9 +574,7 @@ const ViewScreen = () => {
             : undefined) ??
         safeSeriesList[0];
     const isTopogramSeries = selectedSeries.seriesType === "topogram";
-    const isFourDLungReconSeries =
-        selectedSeries.seriesType === "4d" &&
-        /肺/.test(selectedSeries.name);
+    const isFourDLungReconSeries = selectedSeries.seriesType === "4d";
     const totalSlices = selectedSeries.count;
     // Single flex container for both 2D and 3D; CornerstoneMPRViewport does its own 2×2 panel grid internally.
     // (`currentLayoutSpec` retained for backward-compatible dropdown but no longer drives the outer layout —
@@ -613,10 +614,10 @@ const ViewScreen = () => {
     useEffect(() => {
         setSelectedPhaseIndex(0);
         setIsPlaying(false);
-        setFourDBrowseMode("slice");
+        setFourDBrowseMode(fourDState?.initialBrowseMode ?? "slice");
         setSliceCineTick(0);
         phaseCineDirectionRef.current = 1;
-    }, [selectedSeriesId]);
+    }, [fourDState?.initialBrowseMode, selectedSeriesId]);
 
     // When a 4D series is active, auto-switch to 3D MPR layout; leave non-4D workflows untouched.
     useEffect(() => {
@@ -1410,9 +1411,7 @@ const ViewScreen = () => {
                         <div className="relative flex-1 min-w-0 overflow-hidden">
                             {/* 4D entry: drive the grid from pre-rendered WebP stacks so
                                 the phase slider actually changes the image. */}
-                            {isFourDLungReconSeries && fourDManifest && isFourDEntry && fourDStage !== "done" ? (
-                                <div className="absolute inset-0 bg-[#05070B]" />
-                            ) : isFourDLungReconSeries && fourDManifest ? (
+                            {isFourDLungReconSeries && fourDManifest ? (
                                 <FourDMprGrid
                                     ref={fourDGridRef}
                                     manifest={fourDManifest}
@@ -1443,7 +1442,8 @@ const ViewScreen = () => {
                                     initialLayout={fourDBrowseMode === "slice" ? "axial-single" : "mpr"}
                                     sliceCineTick={sliceCineTick}
                                     mipMode={phaseMipMode}
-                                    progressiveSliceLoad={isFourDEntry && fourDBrowseMode === "slice"}
+                                    progressiveSliceLoad={isFourDEntry && fourDBrowseMode === "slice" && fourDStage === "phaseLoading"}
+                                    onProgressiveSliceLoadComplete={handleFourDSliceLoadComplete}
                                     activeTool={mapCornerstoneTool(toolMode)}
                                     windowCenter={wl}
                                     windowWidth={ww}
@@ -1773,15 +1773,6 @@ const ViewScreen = () => {
                 </div>
             </footer>
 
-            {/* ── 4D 相位审核弹窗 ── */}
-            {fourDStage === "review" && fourDState?.scanResult && (
-                <FourDPhaseReviewModal
-                    scanResult={fourDState.scanResult}
-                    onComplete={() => {
-                        setFourDStage("done");
-                    }}
-                />
-            )}
             {isFourDEntryLoadingFlow && fourDManifest && (
                 <FourDPhaseLoadingGrid
                     manifest={fourDManifest}

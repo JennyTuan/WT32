@@ -11,6 +11,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import {
+    buildFourDImageUrls,
     buildFourDMipUrls,
     type FourDAggregateMode,
     type FourDManifest,
@@ -66,6 +67,7 @@ interface FourDMprGridProps {
     onWindowLevelChange?: (wc: number, ww: number) => void;
     onStatusChange?: (status: "loading" | "ready" | "error") => void;
     progressiveSliceLoad?: boolean;
+    onProgressiveSliceLoadComplete?: () => void;
     className?: string;
 }
 
@@ -129,6 +131,7 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
         onWindowLevelChange,
         onStatusChange,
         progressiveSliceLoad = false,
+        onProgressiveSliceLoadComplete,
         className = "absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden",
     },
     ref,
@@ -158,11 +161,19 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     const [coronalIdx, setCoronalIdx] = useState(() => Math.floor(manifest.views.coronal.slices / 2));
     const [sagittalIdx, setSagittalIdx] = useState(() => Math.floor(manifest.views.sagittal.slices / 2));
 
-    // The volume-rendering selector drives the displayed stack directly:
-    // MIP / MinIP / Avg are pre-rendered across phases for all three views.
-    const axialUrls    = useMemo(() => buildFourDMipUrls(manifest, "axial", mipMode),    [manifest, mipMode]);
-    const coronalUrls  = useMemo(() => buildFourDMipUrls(manifest, "coronal", mipMode),  [manifest, mipMode]);
-    const sagittalUrls = useMemo(() => buildFourDMipUrls(manifest, "sagittal", mipMode), [manifest, mipMode]);
+    const usePhaseStacks = showPhaseBadge;
+    const axialUrls = useMemo(
+        () => usePhaseStacks ? buildFourDImageUrls(manifest, phase, "axial") : buildFourDMipUrls(manifest, "axial", mipMode),
+        [manifest, mipMode, phase, usePhaseStacks],
+    );
+    const coronalUrls = useMemo(
+        () => usePhaseStacks ? buildFourDImageUrls(manifest, phase, "coronal") : buildFourDMipUrls(manifest, "coronal", mipMode),
+        [manifest, mipMode, phase, usePhaseStacks],
+    );
+    const sagittalUrls = useMemo(
+        () => usePhaseStacks ? buildFourDImageUrls(manifest, phase, "sagittal") : buildFourDMipUrls(manifest, "sagittal", mipMode),
+        [manifest, mipMode, phase, usePhaseStacks],
+    );
     const [progressiveAxialCount, setProgressiveAxialCount] = useState(() => progressiveSliceLoad ? 0 : axialUrls.length);
     const visibleAxialUrls = useMemo(
         () => progressiveSliceLoad ? axialUrls.slice(0, progressiveAxialCount) : axialUrls,
@@ -190,7 +201,10 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
 
         const loadNext = () => {
             if (cancelled) return;
-            if (nextIndex >= axialUrls.length) return;
+            if (nextIndex >= axialUrls.length) {
+                onProgressiveSliceLoadComplete?.();
+                return;
+            }
 
             const indexToLoad = nextIndex;
             const img = new Image();
@@ -198,6 +212,7 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
                 if (cancelled) return;
                 nextIndex = indexToLoad + 1;
                 setProgressiveAxialCount(nextIndex);
+                setAxialIdx(Math.max(0, nextIndex - 1));
                 window.setTimeout(loadNext, 22);
             };
             img.onload = done;
@@ -210,7 +225,7 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
             cancelled = true;
             window.clearTimeout(startTimer);
         };
-    }, [axialUrls, progressiveSliceLoad]);
+    }, [axialUrls, onProgressiveSliceLoadComplete, progressiveSliceLoad]);
 
     // Slice-cine: whenever parent bumps tick, advance spatial slices (phase remains locked).
     useEffect(() => {
@@ -590,11 +605,6 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
                     />
                 )}
                 {showPanelLabels && <div className={PANEL_LABEL_STYLE}>AXIAL</div>}
-                {progressiveSliceLoad && progressiveAxialCount < axialUrls.length && (
-                    <div className="pointer-events-none absolute bottom-3 left-1/2 z-[5] -translate-x-1/2 rounded-md border border-[#4D94FF]/40 bg-black/70 px-3 py-1.5 text-[11px] font-bold text-[#BFDBFE] shadow-lg">
-                        正在加载图像 {Math.max(1, progressiveAxialCount)} / {axialUrls.length}
-                    </div>
-                )}
                 {renderPhaseBadge("axial")}
                 {renderCornerInfo("axial")}
             </div>
