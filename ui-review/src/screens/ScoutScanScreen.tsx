@@ -121,9 +121,9 @@ type FourDScoutParams = {
     scanLength: string;
     mA: string;
     kV: string;
-    rotationTime: string;
-    fov: string;
-    gantryTilt: string;
+    scoutAngle: string;
+    ctdiVol: string;
+    dlp: string;
 };
 
 function FourDScoutParamPanel({
@@ -135,47 +135,104 @@ function FourDScoutParamPanel({
     onChange: (key: keyof FourDScoutParams, value: string) => void;
     readOnly: boolean;
 }) {
-    const fields: Array<{ key: keyof FourDScoutParams; label: string }> = [
-        { key: "bedMode", label: "进出床" },
-        { key: "position", label: "体位" },
-        { key: "scanLength", label: "扫描长度" },
-        { key: "mA", label: "mA" },
-        { key: "kV", label: "kV" },
-        { key: "rotationTime", label: "旋转时间" },
-        { key: "fov", label: "FOV" },
-        { key: "gantryTilt", label: "床倾角" },
-    ];
+    const editableCardCls = `p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${
+        readOnly ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"
+    }`;
+    const staticCardCls =
+        "p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm";
+    const labelCls = "text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter";
+    const valueCls = "text-[13px] font-black text-[#37474F]";
+    const chevronCls = `text-[#90A4AE] ${readOnly ? "" : "group-hover:text-[#4D94FF]"}`;
 
     return (
-        <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 overflow-hidden">
-            <div className="grid grid-cols-2 gap-1.5">
-                {fields.map(({ key, label }) => (
-                    <label
-                        key={key}
-                        className={`rounded-md border px-2 py-1.5 shadow-sm transition-colors ${
-                            readOnly ? "border-[#B0C4DE]/30 bg-[#F3F6FA]" : "border-[#B0C4DE]/40 bg-white"
-                        }`}
-                    >
-                        <div className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</div>
-                        <input
-                            type="text"
-                            value={params[key]}
-                            readOnly={readOnly}
-                            disabled={readOnly}
-                            onChange={(e) => onChange(key, e.target.value)}
-                            className={`mt-1 h-[24px] w-full border-0 bg-transparent p-0 text-[12px] font-black outline-none ${
-                                readOnly ? "cursor-not-allowed text-[#90A4AE]" : "text-[#37474F]"
-                            }`}
-                        />
+        <div className="flex-1 border-t border-[#EEF2F9] bg-[#F8FAFC] flex flex-col overflow-hidden">
+            <div className="flex-1 p-2 pt-2 flex flex-col gap-2 overflow-y-auto">
+                <div className="grid grid-cols-2 gap-2">
+                    <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
+                        <span className={labelCls}>进出床</span>
+                        <div className="relative w-full">
+                            <select
+                                value={params.bedMode}
+                                onChange={(e) => onChange("bedMode", e.target.value)}
+                                disabled={readOnly}
+                                className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
+                            >
+                                <option value="in">进床</option>
+                                <option value="out">出床</option>
+                            </select>
+                            <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
+                        </div>
                     </label>
-                ))}
+
+                    <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
+                        <span className={labelCls}>体位</span>
+                        <div className="relative w-full">
+                            <select
+                                value={params.position}
+                                onChange={(e) => onChange("position", e.target.value)}
+                                disabled={readOnly}
+                                className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
+                            >
+                                <option value="HFS">HFS</option>
+                                <option value="FFS">FFS</option>
+                                <option value="HFP">HFP</option>
+                                <option value="FFP">FFP</option>
+                                <option value="HFDR">HFDR</option>
+                                <option value="FFDR">FFDR</option>
+                                <option value="HFDL">HFDL</option>
+                                <option value="FFDL">FFDL</option>
+                            </select>
+                            <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
+                        </div>
+                    </label>
+
+                    <div className={staticCardCls}>
+                        <span className={labelCls}>扫描长度</span>
+                        <span className={`${valueCls} mt-[1px]`}>{params.scanLength}</span>
+                    </div>
+
+                    <div className={editableCardCls}>
+                        <span className={labelCls}>mA</span>
+                        <div className="flex items-center gap-1 mt-[1px]">
+                            <span className={valueCls}>{params.mA}</span>
+                            <ChevronDown size={9} className={chevronCls} />
+                        </div>
+                    </div>
+
+                    <div className={editableCardCls}>
+                        <span className={labelCls}>KV</span>
+                        <div className="flex items-center gap-1 mt-[1px]">
+                            <span className={valueCls}>{params.kV}</span>
+                            <ChevronDown size={9} className={chevronCls} />
+                        </div>
+                    </div>
+
+                    <div className={editableCardCls}>
+                        <span className={labelCls}>平扫角度</span>
+                        <div className="flex items-center gap-1 mt-[1px]">
+                            <span className={valueCls}>{params.scoutAngle}</span>
+                            <ChevronDown size={9} className={chevronCls} />
+                        </div>
+                    </div>
+
+                    <div className={staticCardCls}>
+                        <span className={labelCls}>CTDIvol</span>
+                        <span className={`${valueCls} mt-[1px]`}>{params.ctdiVol}</span>
+                    </div>
+
+                    <div className={staticCardCls}>
+                        <span className={labelCls}>DLP</span>
+                        <span className={`${valueCls} mt-[1px]`}>{params.dlp}</span>
+                    </div>
+                </div>
             </div>
-            <div className="mt-auto pt-0.5">
+
+            <div className="p-2 flex justify-center shrink-0">
                 <button
                     disabled={readOnly}
-                    className={`h-[28px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border shadow-sm transition-all ${
+                    className={`h-[32px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border shadow-sm transition-all ${
                         readOnly
-                            ? "cursor-not-allowed border-[#D6E0EA] bg-[#EEF2F6] text-[#A0AEC0]"
+                            ? "cursor-not-allowed border-[#CBD5E1] bg-[#F1F5F9] text-[#94A3B8]"
                             : "border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95"
                     }`}
                 >
@@ -694,15 +751,16 @@ const ScoutScanScreen = ({
         gain: 1.5,
         triggerDelay: 0.0,
     });
+    const [breathingParamsExpanded, setBreathingParamsExpanded] = useState(false);
     const [fourDScoutParams, setFourDScoutParams] = useState<FourDScoutParams>({
-        bedMode: "IN",
+        bedMode: "in",
         position: "HFS",
-        scanLength: "122.2",
-        mA: "50",
+        scanLength: "80.00",
+        mA: "30",
         kV: "120",
-        rotationTime: "0.5",
-        fov: "500",
-        gantryTilt: "0",
+        scoutAngle: "270",
+        ctdiVol: "59.40",
+        dlp: "1168.50",
     });
 
     const [breathingPhase, setBreathingPhase] = useState<"training" | "stable">("training");
@@ -1398,64 +1456,114 @@ const ScoutScanScreen = ({
                 {/* Right Viewport Area */}
                 <section className={`flex-1 ${isBreathingAcquisitionStep ? 'bg-transparent border-0 shadow-none' : `${viewportBgClassName} rounded-lg border border-[#B0C4DE] shadow-sm`} flex flex-col overflow-hidden relative`}>
                     {isBreathingAcquisitionStep ? (
-                        <div className="flex-1 flex flex-col gap-2 bg-transparent">
-                            <div className="shrink-0 rounded-md border border-[#B0C4DE]/40 bg-white p-4 shadow-sm">
-                                <div className="mb-3 flex items-center justify-between">
-                                    <div className="text-[14px] font-black text-[#37474F]">采集参数</div>
-                                    <div className="text-[10px] font-mono text-[#90A4AE]">Acquisition Controls</div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                                    <SliderField label="最小间距" min={0.5} max={5} step={0.1} value={breathingAcquisitionParams.minSpacing} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, minSpacing: v }))} />
-                                    <SliderField label="滤波范围" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.filterThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, filterThreshold: v }))} />
-                                    <SliderField label="峰值阈值" min={0.5} max={2.5} step={0.05} value={breathingAcquisitionParams.peakThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, peakThreshold: v }))} />
-                                    <SliderField label="谷值阈值" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.valleyThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, valleyThreshold: v }))} />
-                                    <SliderField label="增益" min={0.5} max={3} step={0.1} value={breathingAcquisitionParams.gain} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, gain: v }))} />
-                                    
-                                </div>
-                            </div>
-                            <div className="min-h-0 flex-1 bg-white rounded-md border border-[#B0C4DE]/40 shadow-inner p-3 relative overflow-hidden">
-                                <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded border border-[#C8E6C9] bg-[#E8F5E9] px-2 py-1">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-[#4CAF50] animate-pulse"></div>
-                                    <span className="text-[10px] font-bold text-[#2E7D32]">实时波形</span>
-                                </div>
-                                <div className="absolute right-3 top-3 bg-white border border-[#EEF2F9] rounded px-2 py-1 shadow-sm flex flex-col items-center">
-                                    <span className="text-[8px] font-black text-[#90A4AE] uppercase tracking-tighter">实时数据</span>
-                                    <div className="flex items-center gap-1">
-                                        <span className="text-[9px] font-bold text-[#546E7A]">采样值:</span>
-                                        <span className="text-[11px] font-black text-[#4D94FF] tabular-nums">{(filteredWaveData[filteredWaveData.length - 1] ?? 0).toFixed(1)}</span>
+                        <div className="flex-1 flex flex-col bg-transparent relative gap-2">
+                            {/* Full-bleed waveform as the hero */}
+                            <div className="min-h-0 flex-1 bg-gradient-to-b from-white to-[#F6FAFE] rounded-lg border border-[#B0C4DE]/50 shadow-sm relative overflow-hidden">
+                                {/* Top-left: status cluster */}
+                                <div className="absolute left-4 top-4 flex items-center gap-2 z-10">
+                                    <div className="flex items-center gap-1.5 rounded-full border border-[#C8E6C9] bg-[#E8F5E9] px-2.5 py-1 shadow-sm">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-[#4CAF50] animate-pulse"></div>
+                                        <span className="text-[11px] font-bold text-[#2E7D32]">实时波形</span>
+                                    </div>
+                                    <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-sm ${breathingPhase === 'stable' ? 'border-[#C8E6C9] bg-[#E8F5E9]' : 'border-[#FFE0B2] bg-[#FFF8E1]'}`}>
+                                        <div className={`w-1.5 h-1.5 rounded-full ${breathingPhase === 'stable' ? 'bg-[#4CAF50]' : 'bg-[#FFA726] animate-pulse'}`}></div>
+                                        <span className={`text-[11px] font-bold ${breathingPhase === 'stable' ? 'text-[#2E7D32]' : 'text-[#E65100]'}`}>
+                                            {breathingPhase === 'stable' ? '呼吸稳定 · 可继续' : `呼吸模拟中 · ${breathingReadyCountdown}s`}
+                                        </span>
                                     </div>
                                 </div>
-                                <div className="absolute inset-x-8 top-7 bottom-7 flex flex-col justify-between pointer-events-none opacity-20">
+
+                                {/* Top-right: sample value + 参数 toggle */}
+                                <div className="absolute right-4 top-4 flex items-center gap-2 z-10">
+                                    <div className="bg-white/90 backdrop-blur border border-[#E3EAF3] rounded-lg px-3 py-1.5 shadow-sm">
+                                        <div className="text-[8px] font-black text-[#90A4AE] uppercase tracking-wider leading-none">实时采样</div>
+                                        <div className="flex items-baseline gap-1 mt-0.5">
+                                            <span className="text-[20px] font-black text-[#2F80FF] tabular-nums leading-none">{(filteredWaveData[filteredWaveData.length - 1] ?? 0).toFixed(1)}</span>
+                                            <span className="text-[10px] font-bold text-[#90A4AE]">a.u.</span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setBreathingParamsExpanded(v => !v)}
+                                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[11px] font-bold shadow-sm transition-colors ${breathingParamsExpanded ? 'border-[#4D94FF] bg-[#E3F2FD] text-[#1565C0]' : 'border-[#B0C4DE] bg-white text-[#546E7A] hover:border-[#4D94FF] hover:text-[#1565C0]'}`}
+                                    >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                        采集参数
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${breathingParamsExpanded ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"/></svg>
+                                    </button>
+                                </div>
+
+                                {/* Gridlines */}
+                                <div className="absolute inset-x-10 top-20 bottom-10 flex flex-col justify-between pointer-events-none opacity-25">
                                     {[1100, 1000, 800, 600, 400, 200, 0].map(val => (
                                         <div key={val} className="flex items-center gap-2">
-                                            <span className="text-[10px] w-6 text-right font-mono text-[#90A4AE]">{val}</span>
+                                            <span className="text-[10px] w-8 text-right font-mono text-[#90A4AE]">{val}</span>
                                             <div className="flex-1 h-[1px] bg-[#B0C4DE]"></div>
                                         </div>
                                     ))}
                                 </div>
-                                <div className="absolute inset-x-0 inset-y-5 flex flex-col justify-end px-14">
-                                    <svg viewBox="0 0 800 160" className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                                {/* Vertical gridlines */}
+                                <div className="absolute inset-x-14 top-20 bottom-10 bg-[linear-gradient(to_right,rgba(77,148,255,0.08)_1px,transparent_1px)] bg-[size:80px_100%] pointer-events-none" />
+
+                                {/* Waveform SVG, expanded to fill viewport */}
+                                <div className="absolute inset-x-0 top-18 bottom-8 flex flex-col justify-end px-16" style={{ top: '4.5rem' }}>
+                                    <svg viewBox="0 0 800 320" className="w-full h-full overflow-visible" preserveAspectRatio="none">
                                         <defs>
                                             <linearGradient id="acq-wave-fill" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor="#7EAAFF" stopOpacity="0.22" />
+                                                <stop offset="0%" stopColor="#7EAAFF" stopOpacity="0.28" />
                                                 <stop offset="100%" stopColor="#7EAAFF" stopOpacity="0.02" />
                                             </linearGradient>
                                         </defs>
-                                        <line x1="0" y1="80" x2="800" y2="80" stroke="#7FA1C5" strokeWidth="1.2" strokeDasharray="4 4" opacity="0.55" />
-                                        <path d={`M ${rawWaveData.map((v,i)=>`${(i/(rawWaveData.length-1))*800},${160-(v/1100)*160}`).join(' L ')}`} fill="none" stroke="#8FA3B8" strokeWidth="1.4" className="opacity-55" />
-                                        <path d={`M 0,160 L ${filteredWaveData.map((v,i)=>`${(i/(filteredWaveData.length-1))*800},${160-(v/1100)*160}`).join(' L ')} L 800,160 Z`} fill="url(#acq-wave-fill)" />
-                                        <path d={`M ${filteredWaveData.map((v,i)=>`${(i/(filteredWaveData.length-1))*800},${160-(v/1100)*160}`).join(' L ')}`} fill="none" stroke="#2F80FF" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 4px rgba(77,148,255,0.28))" }} />
+                                        <line x1="0" y1="160" x2="800" y2="160" stroke="#7FA1C5" strokeWidth="1.2" strokeDasharray="4 4" opacity="0.5" />
+                                        <path d={`M ${rawWaveData.map((v,i)=>`${(i/(rawWaveData.length-1))*800},${320-(v/1100)*320}`).join(' L ')}`} fill="none" stroke="#8FA3B8" strokeWidth="1.4" className="opacity-50" />
+                                        <path d={`M 0,320 L ${filteredWaveData.map((v,i)=>`${(i/(filteredWaveData.length-1))*800},${320-(v/1100)*320}`).join(' L ')} L 800,320 Z`} fill="url(#acq-wave-fill)" />
+                                        <path d={`M ${filteredWaveData.map((v,i)=>`${(i/(filteredWaveData.length-1))*800},${320-(v/1100)*320}`).join(' L ')}`} fill="none" stroke="#2F80FF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 5px rgba(77,148,255,0.32))" }} />
                                         {filteredWaveData.map((v, i) => {
                                             if (i < 10 || i > filteredWaveData.length - 10) return null;
                                             const mx = v > filteredWaveData[i-1] && v > filteredWaveData[i+1] && v > filteredWaveData[i-2] && v > filteredWaveData[i+2] && v > filteredWaveData[i-3] && v > filteredWaveData[i+3];
                                             const mn = v < filteredWaveData[i-1] && v < filteredWaveData[i+1] && v < filteredWaveData[i-2] && v < filteredWaveData[i+2] && v < filteredWaveData[i-3] && v < filteredWaveData[i+3];
-                                            if (mx && v >= 650) return <circle key={`pk-${i}`} cx={(i/(filteredWaveData.length-1))*800} cy={160-(v/1100)*160} r="4.5" fill="#FF1744" stroke="#FFF" strokeWidth="1.5" />;
-                                            if (mn && v <= 380) return <circle key={`vl-${i}`} cx={(i/(filteredWaveData.length-1))*800} cy={160-(v/1100)*160} r="4" fill="#FFD600" stroke="#FFF" strokeWidth="1.2" />;
+                                            if (mx && v >= 650) return <circle key={`pk-${i}`} cx={(i/(filteredWaveData.length-1))*800} cy={320-(v/1100)*320} r="5" fill="#FF1744" stroke="#FFF" strokeWidth="1.5" />;
+                                            if (mn && v <= 380) return <circle key={`vl-${i}`} cx={(i/(filteredWaveData.length-1))*800} cy={320-(v/1100)*320} r="4.5" fill="#FFD600" stroke="#FFF" strokeWidth="1.2" />;
                                             return null;
                                         })}
                                     </svg>
                                 </div>
+
+                                {/* Bottom legend */}
+                                <div className="absolute left-4 bottom-3 flex items-center gap-3 text-[10px] text-[#78909C] pointer-events-none">
+                                    <div className="flex items-center gap-1"><span className="w-3 h-[2px] bg-[#2F80FF] rounded"></span><span>滤波信号</span></div>
+                                    <div className="flex items-center gap-1"><span className="w-3 h-[1px] bg-[#8FA3B8] opacity-60"></span><span>原始信号</span></div>
+                                    <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#FF1744]"></span><span>峰值</span></div>
+                                    <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#FFD600]"></span><span>谷值</span></div>
+                                </div>
+
                             </div>
+
+                            {/* Collapsible params sheet — in-flow so it compresses the waveform instead of overlaying */}
+                            {breathingParamsExpanded && (
+                                <div className="shrink-0 rounded-lg border border-[#B0C4DE]/60 bg-white shadow-sm">
+                                    <div className="px-4 pt-3 pb-4">
+                                        <div className="mb-2 flex items-center justify-between">
+                                            <div className="flex items-baseline gap-2">
+                                                <span className="text-[13px] font-black text-[#37474F]">采集参数</span>
+                                                <span className="text-[10px] font-mono text-[#90A4AE]">Acquisition Controls</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setBreathingParamsExpanded(false)}
+                                                className="text-[11px] font-bold text-[#90A4AE] hover:text-[#546E7A] px-2 py-1"
+                                            >收起 ▾</button>
+                                        </div>
+                                        <div className="grid grid-cols-3 gap-x-5 gap-y-2">
+                                            <SliderField label="最小间距" min={0.5} max={5} step={0.1} value={breathingAcquisitionParams.minSpacing} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, minSpacing: v }))} />
+                                            <SliderField label="滤波范围" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.filterThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, filterThreshold: v }))} />
+                                            <SliderField label="峰值阈值" min={0.5} max={2.5} step={0.05} value={breathingAcquisitionParams.peakThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, peakThreshold: v }))} />
+                                            <SliderField label="谷值阈值" min={0.1} max={1} step={0.01} value={breathingAcquisitionParams.valleyThreshold} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, valleyThreshold: v }))} />
+                                            <SliderField label="增益" min={0.5} max={3} step={0.1} value={breathingAcquisitionParams.gain} onChange={(v) => setBreathingAcquisitionParams(p => ({ ...p, gain: v }))} />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     ) : isBreathingTraining ? (
                         <div className="flex-1 flex flex-col gap-2 bg-transparent">

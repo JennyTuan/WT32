@@ -284,7 +284,9 @@ const ViewScreen = () => {
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(REAL_LUNG_SERIES.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("phase");
+    const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>(
+        shouldShowSliceLoadingBridge ? "slice" : "phase"
+    );
     const [sliceCineTick, setSliceCineTick] = useState(0);
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<PhaseCineSpeed>(1); // multiplier; 1× = 500 ms/phase
     const [phaseCineMode] = useState<PhaseCineMode>("forward");
@@ -297,7 +299,9 @@ const ViewScreen = () => {
     // Across-phase aggregation for the MPR 4th panel (ITV visualisation)
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
     const [slabThickness, setSlabThickness] = useState(5);
-    const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry ? "3D" : "2D");
+    const [imageMode, setImageMode] = useState<"2D" | "3D">(
+        isFourDEntry && !shouldShowSliceLoadingBridge ? "3D" : "2D"
+    );
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
     const [toolMode, setToolMode] = useState<ViewerToolMode>("wl");
     const [ww, setWw] = useState(350);
@@ -581,18 +585,21 @@ const ViewScreen = () => {
     useEffect(() => {
         setSelectedPhaseIndex(0);
         setIsPlaying(false);
-        setFourDBrowseMode("phase");
+        setFourDBrowseMode(shouldShowSliceLoadingBridge ? "slice" : "phase");
         setSliceCineTick(0);
         phaseCineDirectionRef.current = 1;
-    }, [selectedSeriesId]);
+    }, [selectedSeriesId, shouldShowSliceLoadingBridge]);
 
     // When a 4D series is active, auto-switch to 3D MPR layout; leave non-4D workflows untouched.
+    // Exception: entering from 4D rescan-select with slice-loading bridge stays in 2D 常规浏览 so the
+    // inline slice counter is visible.
     useEffect(() => {
         if (!isFourDLungReconSeries) return;
+        if (shouldShowSliceLoadingBridge) return;
         setImageMode("3D");
         setSelectedLayout("多平面重建");
         setSelectedRenderMode("MPR");
-    }, [isFourDLungReconSeries]);
+    }, [isFourDLungReconSeries, shouldShowSliceLoadingBridge]);
 
     useEffect(() => {
         if (!isTopogramSeries) return;
