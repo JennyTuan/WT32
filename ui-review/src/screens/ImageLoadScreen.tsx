@@ -112,23 +112,23 @@ function MprTile({
 }) {
   return (
     <div className="relative h-full overflow-hidden bg-black">
-      <div className="pointer-events-none absolute left-3 top-2 z-10 text-[18px] font-black tracking-[0.16em] text-white">{label}</div>
-      <div className="pointer-events-none absolute left-3 top-11 z-10 flex items-center gap-2">
-        <span className="rounded bg-[#1E64F0] px-2 py-1 text-[12px] font-black text-white">PHASE {phaseLabel}</span>
-        <span className="rounded border border-[#3C98E0] bg-[#0A1B2F]/90 px-2 py-1 text-[11px] font-bold text-[#68CAFF]">
+      <div className="pointer-events-none absolute left-3 top-2 z-10 text-[33px] font-black tracking-[0.18em] text-white">{label}</div>
+      <div className="pointer-events-none absolute left-3 top-14 z-10 flex items-center gap-2">
+        <span className="rounded bg-[#1E64F0] px-2.5 py-1 text-[11px] font-black text-white">PHASE {phaseLabel}</span>
+        <span className="rounded border border-[#0EA5E9] bg-[#0A1B2F]/90 px-2 py-1 text-[11px] font-bold text-[#7DD3FC]">
           床位: {bedLabel} [{bedPosition}]
         </span>
       </div>
-      <div className="pointer-events-none absolute right-0 top-[88px] z-10 flex max-h-[72%] flex-col gap-1 overflow-hidden rounded-l border border-[#1E3A8A]/70 bg-black/55 px-1 py-1">
+      <div className="pointer-events-none absolute right-1 top-[90px] z-10 flex max-h-[38%] flex-col gap-1 overflow-hidden">
         {bedMarkers.map((bed) => (
           <div
             key={bed.label}
-            className={`w-8 rounded px-1 py-1 text-center text-[10px] font-bold leading-tight ${
+            className={`w-9 rounded border px-1 py-1 text-center text-[10px] font-black leading-tight ${
               bed.active
-                ? "bg-[#1E64F0]/85 text-[#A5D8FF]"
+                ? "border-[#1D4ED8] bg-[#1D4ED8]/90 text-[#BFDBFE]"
                 : bed.duplicated
-                  ? "bg-red-600/80 text-red-100"
-                  : "bg-[#0B1220]/70 text-[#4E678C]"
+                  ? "border-[#991B1B] bg-[#DC2626]/90 text-red-100"
+                  : "border-[#1F2937] bg-[#0B1220]/80 text-[#4E678C]"
             }`}
           >
             {bed.label}
@@ -207,9 +207,9 @@ export default function ImageLoadScreen() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-[#EDF1F7] text-slate-700 select-none">
+    <div className="flex h-full flex-col bg-[#E5E7EB] text-slate-700 select-none">
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <section className="flex w-[260px] shrink-0 flex-col border-r border-slate-200 bg-white px-3 py-4">
+        <section className="flex w-[268px] shrink-0 flex-col border-r border-slate-200 bg-[#F3F4F6] px-3 py-4">
           <div className="mb-3 flex items-center gap-2">
             <h2 className="text-[13px] font-bold text-slate-700">相位数据选择</h2>
             <Info size={12} className="text-slate-400" />
@@ -224,7 +224,7 @@ export default function ImageLoadScreen() {
                 return (
                   <div
                     key={p.label}
-                    className={`overflow-hidden rounded-md border bg-white transition-shadow ${phaseActive ? "border-[#4D94FF]/50 shadow-sm" : "border-slate-200"}`}
+                    className={`overflow-hidden rounded-md border bg-white transition-shadow ${phaseActive ? "border-[#60A5FA] shadow-sm" : "border-slate-200"}`}
                   >
                     <button
                       type="button"
@@ -307,7 +307,7 @@ export default function ImageLoadScreen() {
         </section>
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
-          <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-[#1E3A8A] bg-black">
+          <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-[#1E3A8A] bg-black shadow-[inset_0_0_0_2px_rgba(30,58,138,0.5)]">
             <div className="grid min-h-0 flex-1 grid-cols-2 gap-px bg-[#1E3A8A]">
               <div className="min-h-0 bg-black">
                 <MprTile
@@ -319,6 +319,11 @@ export default function ImageLoadScreen() {
                 >
                   <div className="relative h-full w-full bg-black">
                     <FourDPreviewImage src={previewUrls.coronal} />
+                    <div className="absolute left-1 top-[122px] z-10 flex flex-col gap-0.5">
+                      {Array.from({ length: 8 }).map((_, idx) => (
+                        <div key={idx} className="h-10 w-4 border border-red-500 bg-red-500/15" />
+                      ))}
+                    </div>
                     <CrossHair horizontalClass="bg-red-500/85" verticalClass="bg-yellow-300/85" />
                     <div className="absolute bottom-3 left-3 text-[16px] font-bold leading-tight text-[#E6ECFF]">W 400<br />WL 40</div>
                   </div>
