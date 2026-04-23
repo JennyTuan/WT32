@@ -36,7 +36,7 @@ interface BedTableProps {
   onChange: (bedIdx: number, choice: "first" | "rescan") => void;
 }
 
-function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
+export function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
   const [start, end] = rescanRange;
   const beds = Array.from({ length: end - start + 1 }, (_, index) => start + index);
 
@@ -89,6 +89,74 @@ function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
                         {posStart} - {posEnd} mm（重扫 · {SECOND_ACQUISITION_EXPOSURE}）
                       </span>
                     </label>
+                  </td>
+                </tr>
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RescanBedTable({ rescanRange, choices, onChange }: BedTableProps) {
+  const [start, end] = rescanRange;
+  const beds = Array.from({ length: end - start + 1 }, (_, index) => start + index);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200">
+      <table className="w-full text-[12px]">
+        <thead>
+          <tr className="bg-[#F1F5F9]">
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">床位/采集</th>
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">起止位置</th>
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">时间</th>
+            <th className="px-4 py-2.5 text-center font-bold text-slate-600">选择</th>
+          </tr>
+        </thead>
+        <tbody>
+          {beds.map((bedIdx) => {
+            const posStart = (bedIdx * BED_TRAVEL_MM).toFixed(1);
+            const posEnd = ((bedIdx + 1) * BED_TRAVEL_MM).toFixed(1);
+            const choice = choices[bedIdx];
+
+            return (
+              <Fragment key={bedIdx}>
+                <tr className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1} · 采集 1</td>
+                  <td className={`px-4 py-3 font-mono text-[11px] font-semibold ${choice === "first" ? "text-amber-600" : "text-slate-500"}`}>
+                    {posStart} - {posEnd} mm
+                  </td>
+                  <td className={`px-4 py-3 font-mono text-[11px] font-semibold ${choice === "first" ? "text-amber-600" : "text-slate-500"}`}>
+                    {FIRST_ACQUISITION_EXPOSURE}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="radio"
+                      name={`bed-${bedIdx}`}
+                      checked={choice === "first"}
+                      onChange={() => onChange(bedIdx, "first")}
+                      className="h-4 w-4 cursor-pointer accent-amber-500"
+                    />
+                  </td>
+                </tr>
+                <tr className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1} · 采集 2</td>
+                  <td className={`px-4 py-3 font-mono text-[11px] font-semibold ${choice === "rescan" ? "text-[#4D94FF]" : "text-slate-500"}`}>
+                    {posStart} - {posEnd} mm
+                  </td>
+                  <td className={`px-4 py-3 font-mono text-[11px] font-semibold ${choice === "rescan" ? "text-[#4D94FF]" : "text-slate-500"}`}>
+                    {SECOND_ACQUISITION_EXPOSURE}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="radio"
+                      name={`bed-${bedIdx}`}
+                      checked={choice === "rescan"}
+                      onChange={() => onChange(bedIdx, "rescan")}
+                      className="h-4 w-4 cursor-pointer accent-[#4D94FF]"
+                    />
                   </td>
                 </tr>
               </Fragment>
@@ -1086,7 +1154,7 @@ export default function FourDRescanSelectScreen() {
             <div className="text-[11px] text-slate-400">共 {rescanCount} 个床位</div>
           </div>
 
-          <BedTable rescanRange={rescanRange} choices={choices} onChange={handleBedChange} />
+          <RescanBedTable rescanRange={rescanRange} choices={choices} onChange={handleBedChange} />
         </div>
 
         <RespiratoryWaveMonitor
@@ -1118,7 +1186,7 @@ export default function FourDRescanSelectScreen() {
           onClick={handleConfirm}
           className="flex h-[52px] items-center gap-2 rounded-md bg-[#4D94FF] px-10 text-[13px] font-bold uppercase text-white shadow-lg transition-all hover:bg-blue-600 active:scale-95"
         >
-          进入图像重建 <ChevronRight size={20} />
+          图像浏览 <ChevronRight size={20} />
         </button>
       </footer>
     </div>

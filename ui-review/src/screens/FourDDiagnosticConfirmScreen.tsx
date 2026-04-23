@@ -48,7 +48,7 @@ const FOURD_PARAMS = {
     dlp: "1334.97",
 };
 
-type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "completed";
+type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "paused" | "completed";
 
 interface Sequence {
     id: string;
@@ -71,12 +71,14 @@ export default function FourDDiagnosticConfirmScreen() {
     const [laserActive, setLaserActive] = useState(false);
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
+    const [showBreathingConfirm, setShowBreathingConfirm] = useState(false);
     const [showPatientConfirm, setShowPatientConfirm] = useState(false);
     const [guideVisible, setGuideVisible] = useState(false);
 
     const [scanStage, setScanStage] = useState<ScanStage>("idle");
     const [holdProgress, setHoldProgress] = useState(0);
     const [scanStarted, setScanStarted] = useState(false);
+    const [scanPaused, setScanPaused] = useState(false);
     const [scanCompleted, setScanCompleted] = useState(false);
     const [scanProgress, setScanProgress] = useState(0);
     const [bedProgress, setBedProgress] = useState(0);
@@ -95,12 +97,15 @@ export default function FourDDiagnosticConfirmScreen() {
     const [rawWaveData, setRawWaveData] = useState<number[]>(new Array(500).fill(100));
     const [filteredWaveData, setFilteredWaveData] = useState<number[]>(new Array(500).fill(100));
     const [metrics, setMetrics] = useState({ bpm: "14.2", peakErr: "1.6", freqErr: "1.8" });
+    const [breathingDemoElapsedSec, setBreathingDemoElapsedSec] = useState(0);
 
     const holdRafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
     const scanRafRef = useRef<number | null>(null);
+    const scanProgressRef = useRef(0);
     const waveRafRef = useRef<number | null>(null);
     const waveTimeRef = useRef(0);
+    const breathingDemoStartRef = useRef(Date.now());
 
     const buildGroups = useCallback((): ProtocolGroup[] => {
         if (workflowPlans.length === 0) {
@@ -163,8 +168,10 @@ export default function FourDDiagnosticConfirmScreen() {
 
     const handleScanComplete = useCallback(() => {
         setScanStarted(false);
+        setScanPaused(false);
         setScanCompleted(true);
         setScanStage("completed");
+        scanProgressRef.current = 1;
         setScanProgress(1);
         setBedProgress(bedSegmentCount);
     }, [bedSegmentCount]);
@@ -197,7 +204,56 @@ export default function FourDDiagnosticConfirmScreen() {
         });
     }, []);
 
+    const breathingStability = useMemo(() => {
+        const demoWarmupRemaining = Math.max(0, 10 - breathingDemoElapsedSec);
+        if (demoWarmupRemaining > 0) {
+            return {
+                stable: false,
+                label: "呼吸不平稳",
+                detail: `约 ${demoWarmupRemaining}s 后稳定`,
+            };
+        }
+
+        const recent = filteredWaveData.slice(-360);
+        const extremaWindow = 6;
+        const peaks: { index: number; value: number }[] = [];
+
+        for (let index = extremaWindow; index < recent.length - extremaWindow; index += 1) {
+            const value = recent[index];
+            const neighbors = [
+                ...recent.slice(index - extremaWindow, index),
+                ...recent.slice(index + 1, index + extremaWindow + 1),
+            ];
+            const isPeak = neighbors.every((neighbor) => value > neighbor);
+            if (isPeak && value > 620) peaks.push({ index, value });
+        }
+
+        const recentPeaks = peaks.slice(-4);
+        if (recentPeaks.length < 3) {
+            return { stable: false, label: "呼吸采集中", detail: "等待稳定波峰" };
+        }
+
+        const intervals = recentPeaks.slice(1).map((peak, index) => peak.index - recentPeaks[index].index);
+        const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+        const cv = (values: number[]) => {
+            const avg = mean(values);
+            if (avg <= 0) return 1;
+            const variance = mean(values.map((value) => (value - avg) ** 2));
+            return Math.sqrt(variance) / avg;
+        };
+        const intervalCv = cv(intervals);
+        const amplitudeCv = cv(recentPeaks.map((peak) => peak.value));
+        const stable = intervalCv < 0.18 && amplitudeCv < 0.08;
+
+        return {
+            stable,
+            label: stable ? "呼吸平稳" : "呼吸不平稳",
+            detail: stable ? "允许执行扫描" : "请等待呼吸稳定",
+        };
+    }, [breathingDemoElapsedSec, filteredWaveData]);
+
     const triggerScanSequence = useCallback(() => {
+        if (!breathingStability.stable) return;
         clearHoldRaf();
         setHoldProgress(1);
         setScanStage("enabled");
@@ -209,14 +265,16 @@ export default function FourDDiagnosticConfirmScreen() {
 
         window.setTimeout(() => {
             setScanStarted(true);
+            setScanPaused(false);
             setScanCompleted(false);
+            scanProgressRef.current = 0;
             setScanProgress(0);
             setBedProgress(0);
         }, 1200);
-    }, []);
+    }, [breathingStability.stable]);
 
     const startHold = () => {
-        if (!guideVisible || scanStage === "exposing" || scanStage === "completed") return;
+        if (!guideVisible || !breathingStability.stable || scanStage === "exposing" || scanStage === "completed") return;
 
         clearHoldRaf();
         holdStartRef.current = performance.now();
@@ -246,14 +304,26 @@ export default function FourDDiagnosticConfirmScreen() {
         setScanStage("idle");
     };
 
-    useEffect(() => {
-        if (!scanStarted) return;
+    const toggleScanPause = () => {
+        if (!scanStarted || scanCompleted) return;
+        setScanPaused((paused) => {
+            const nextPaused = !paused;
+            setScanStage(nextPaused ? "paused" : "exposing");
+            return nextPaused;
+        });
+    };
 
-        let startTs: number | null = null;
+    useEffect(() => {
+        if (!scanStarted || scanPaused) return;
+
+        let lastTs: number | null = null;
 
         const tick = (timestamp: number) => {
-            if (startTs === null) startTs = timestamp;
-            const progress = Math.min((timestamp - startTs) / SCAN_DURATION_MS, 1);
+            if (lastTs === null) lastTs = timestamp;
+            const elapsed = timestamp - lastTs;
+            lastTs = timestamp;
+            const progress = Math.min(scanProgressRef.current + elapsed / SCAN_DURATION_MS, 1);
+            scanProgressRef.current = progress;
             setScanProgress(progress);
             setBedProgress(Math.min(bedSegmentCount, Math.max(0, Math.ceil(progress * bedSegmentCount))));
 
@@ -267,7 +337,7 @@ export default function FourDDiagnosticConfirmScreen() {
 
         scanRafRef.current = requestAnimationFrame(tick);
         return clearScanRaf;
-    }, [bedSegmentCount, handleScanComplete, scanStarted]);
+    }, [bedSegmentCount, handleScanComplete, scanPaused, scanStarted]);
 
     useEffect(() => {
         const tick = () => {
@@ -280,6 +350,7 @@ export default function FourDDiagnosticConfirmScreen() {
 
             setRawWaveData((prev) => [...prev.slice(1), rawValue]);
             setFilteredWaveData((prev) => [...prev.slice(1), filteredValue]);
+            setBreathingDemoElapsedSec(Math.floor((Date.now() - breathingDemoStartRef.current) / 1000));
 
             if (Math.random() > 0.98) {
                 setMetrics({
@@ -307,6 +378,7 @@ export default function FourDDiagnosticConfirmScreen() {
         scanStage === "arming" ? `长按触发 ${Math.max(0, (1 - holdProgress) * 3).toFixed(1)}s`
         : scanStage === "enabled" ? "系统已使能"
         : scanStage === "exposing" ? "正在采集..."
+        : scanStage === "paused" ? "扫描已暂停"
         : scanStage === "completed" ? "采集完成"
         : "等待执行";
 
@@ -314,6 +386,7 @@ export default function FourDDiagnosticConfirmScreen() {
         scanStage === "arming" ? "持续按住绿色按钮"
         : scanStage === "enabled" ? "系统已使能"
         : scanStage === "exposing" ? "正在4D采集"
+        : scanStage === "paused" ? "扫描已暂停"
         : "按住绿色按钮";
 
     const sidebarParams = [
@@ -361,6 +434,8 @@ export default function FourDDiagnosticConfirmScreen() {
             y: point.y,
         }];
     });
+    const canExecuteScan = scanCompleted || scanStarted || breathingStability.stable;
+    const primaryActionLabel = scanCompleted ? "完成扫描" : scanStarted ? (scanPaused ? "继续扫描" : "暂停扫描") : "执行扫描";
 
     const renderSteps = (sequence: Sequence, isActiveSequence: boolean, isCompletedSequence: boolean) => (
         <div className="flex flex-col ml-12 mt-1.5 gap-2.5 relative pb-2.5">
@@ -610,6 +685,16 @@ export default function FourDDiagnosticConfirmScreen() {
                             </div>
 
                             <div className="absolute right-2 top-1.5 flex gap-1.5 z-10">
+                                <div className={`px-2 py-0.5 rounded border shadow-sm flex items-center gap-1.5 min-w-[86px] ${
+                                    breathingStability.stable
+                                        ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                        : "bg-amber-50 border-amber-200 text-amber-700"
+                                }`}>
+                                    <span className={`h-2 w-2 rounded-full ${
+                                        breathingStability.stable ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]" : "bg-amber-500 animate-pulse"
+                                    }`} />
+                                    <span className="text-[9px] font-black leading-none">{breathingStability.label}</span>
+                                </div>
                                 {[
                                     { label: "BPM", value: metrics.bpm },
                                     { label: "PEAK ERR", value: `${metrics.peakErr}%` },
@@ -697,7 +782,7 @@ export default function FourDDiagnosticConfirmScreen() {
                                 <div className="flex flex-1 gap-1 items-end h-3">
                                     {Array.from({ length: bedSegmentCount }, (_, index) => {
                                         const isCompletedSegment = scanCompleted || index < bedProgress;
-                                        const isActiveSegment = scanStarted && !scanCompleted && index === bedProgress;
+                                        const isActiveSegment = scanStarted && !scanPaused && !scanCompleted && index === bedProgress;
                                         return (
                                             <div key={index} className="flex-1 flex flex-col gap-0.5">
                                                 <div className={`h-1.5 w-full rounded-sm transition-all duration-500 ${
@@ -766,21 +851,29 @@ export default function FourDDiagnosticConfirmScreen() {
 
                 <div className="flex-1 flex justify-end">
                     <button
-                        disabled={scanStarted}
+                        disabled={!canExecuteScan}
                         onClick={() => {
                             if (scanCompleted) {
                                 handlePostScanNavigate();
                                 return;
                             }
-                            setShowPatientConfirm(true);
+                            if (scanStarted) {
+                                toggleScanPause();
+                                return;
+                            }
+                            if (!breathingStability.stable) return;
+                            setShowBreathingConfirm(true);
                         }}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md shadow-lg transition-all uppercase text-[13px] active:scale-95 ${
-                            scanStarted
+                            !canExecuteScan
                                 ? "bg-gray-300 text-white cursor-not-allowed shadow-none active:scale-100"
+                                : scanStarted && !scanPaused
+                                    ? "bg-[#F57C00] text-white hover:bg-orange-600"
                                 : "bg-[#4D94FF] text-white hover:bg-blue-600"
                         }`}
+                        title={scanCompleted ? undefined : breathingStability.detail}
                     >
-                        {scanCompleted ? "下一步" : "执行扫描"} <ChevronRight size={20} />
+                        {primaryActionLabel} <ChevronRight size={20} />
                     </button>
                 </div>
             </footer>
@@ -811,8 +904,11 @@ export default function FourDDiagnosticConfirmScreen() {
                                 onMouseLeave={stopHold}
                                 onTouchStart={startHold}
                                 onTouchEnd={stopHold}
+                                disabled={!breathingStability.stable || scanStage === "exposing" || scanStage === "completed"}
                                 className={`group flex h-[132px] w-[132px] items-center justify-center rounded-full border-[10px] shadow-[0_22px_40px_rgba(15,23,42,0.28)] transition-all duration-200 ${
-                                    scanStage === "arming" || scanStage === "enabled" || scanStage === "exposing"
+                                    !breathingStability.stable
+                                        ? "border-slate-400 bg-[radial-gradient(circle_at_35%_30%,#CBD5E1_0%,#94A3B8_45%,#64748B_100%)] cursor-not-allowed opacity-70"
+                                        : scanStage === "arming" || scanStage === "enabled" || scanStage === "exposing"
                                         ? "border-[#14532D] bg-[radial-gradient(circle_at_35%_30%,#7EF29C_0%,#22C55E_45%,#15803D_100%)] scale-[0.97]"
                                         : "border-[#1F6E44] bg-[radial-gradient(circle_at_35%_30%,#90F8AE_0%,#22C55E_40%,#166534_100%)] hover:scale-[1.02]"
                                 }`}
@@ -845,10 +941,61 @@ export default function FourDDiagnosticConfirmScreen() {
                 </div>
             </div>
 
+            {showBreathingConfirm && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+                    <div className="w-[390px] overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-2xl">
+                        <div className="flex items-center gap-3 border-b border-emerald-100 bg-emerald-50 px-5 py-4">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/15">
+                                <CheckCircle size={22} className="text-emerald-600" />
+                            </div>
+                            <div>
+                                <div className="text-[15px] font-black text-[#37474F]">确认患者呼吸平稳</div>
+                                <div className="mt-0.5 text-[12px] font-medium text-emerald-700">请技师确认当前呼吸信号满足4D扫描条件</div>
+                            </div>
+                        </div>
+                        <div className="px-5 py-4">
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                                <div className="flex items-center justify-between text-[12px] font-bold text-slate-600">
+                                    <span>呼吸状态</span>
+                                    <span className="flex items-center gap-1.5 text-emerald-600">
+                                        <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]" />
+                                        {breathingStability.label}
+                                    </span>
+                                </div>
+                                <div className="mt-2 text-[12px] leading-relaxed text-slate-500">
+                                    确认患者呼吸节律稳定，波形峰谷清晰，且受照阈值范围设置正确后再继续。
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex gap-2 px-5 pb-4">
+                            <button
+                                onClick={() => setShowBreathingConfirm(false)}
+                                className="h-[40px] flex-1 rounded-lg border-2 border-[#B0C4DE] bg-white text-[13px] font-bold text-[#546E7A] transition-all hover:bg-gray-50 active:scale-95"
+                            >
+                                返回检查
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowBreathingConfirm(false);
+                                    setShowPatientConfirm(true);
+                                }}
+                                className="h-[40px] flex-1 rounded-lg bg-emerald-600 text-[13px] font-bold text-white shadow-md transition-all hover:bg-emerald-700 active:scale-95"
+                            >
+                                已确认
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <PatientConfirmationModal
                 isOpen={showPatientConfirm}
                 onClose={() => setShowPatientConfirm(false)}
                 onConfirm={() => {
+                    if (!breathingStability.stable) {
+                        setShowPatientConfirm(false);
+                        return;
+                    }
                     setShowPatientConfirm(false);
                     setGuideVisible(true);
                 }}
