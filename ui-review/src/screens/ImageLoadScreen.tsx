@@ -100,14 +100,12 @@ function MprTile({
   phaseLabel,
   bedLabel,
   bedPosition,
-  bedMarkers,
   children,
 }: {
   label: string;
   phaseLabel: string;
   bedLabel: string;
   bedPosition: string;
-  bedMarkers: Array<{ label: string; active: boolean; duplicated: boolean }>;
   children: React.ReactNode;
 }) {
   return (
@@ -118,22 +116,6 @@ function MprTile({
         <span className="rounded border border-[#0EA5E9] bg-[#0A1B2F]/90 px-2 py-1 text-[11px] font-bold text-[#7DD3FC]">
           床位: {bedLabel} [{bedPosition}]
         </span>
-      </div>
-      <div className="pointer-events-none absolute right-1 top-[90px] z-10 flex max-h-[38%] flex-col gap-1 overflow-hidden">
-        {bedMarkers.map((bed) => (
-          <div
-            key={bed.label}
-            className={`w-9 rounded border px-1 py-1 text-center text-[10px] font-black leading-tight ${
-              bed.active
-                ? "border-[#1D4ED8] bg-[#1D4ED8]/90 text-[#BFDBFE]"
-                : bed.duplicated
-                  ? "border-[#991B1B] bg-[#DC2626]/90 text-red-100"
-                  : "border-[#1F2937] bg-[#0B1220]/80 text-[#4E678C]"
-            }`}
-          >
-            {bed.label}
-          </div>
-        ))}
       </div>
       <div className="flex h-full w-full items-center justify-center">{children}</div>
     </div>
@@ -187,12 +169,6 @@ export default function ImageLoadScreen() {
   const currentPhase = phases[selectedPhaseIdx] ?? null;
   const selectedBed = currentPhase?.beds.find((bed) => bed.id === selectedBedId) ?? currentPhase?.beds[0] ?? null;
   const selectedBedRange = selectedBed?.range.split("-")[0]?.trim() ?? "—";
-  const bedMarkers = (currentPhase?.beds ?? []).map((bed) => ({
-    label: bed.label.replace("床位 ", "Bed "),
-    active: bed.id === selectedBed?.id,
-    duplicated: bed.segments.length > 1,
-  }));
-
   const setSegmentForBed = (phaseIdx: number, bedId: string, segId: string) => {
     setPhases((prev) =>
       prev.map((phase, i) =>
@@ -315,13 +291,12 @@ export default function ImageLoadScreen() {
                   phaseLabel={currentPhase?.label ?? "0%"}
                   bedLabel={selectedBed?.label.replace("床位 ", "") ?? "--"}
                   bedPosition={selectedBedRange}
-                  bedMarkers={bedMarkers}
                 >
                   <div className="relative h-full w-full bg-black">
                     <FourDPreviewImage src={previewUrls.coronal} />
-                    <div className="absolute left-1 top-[122px] z-10 flex flex-col gap-0.5">
+                    <div className="absolute bottom-[20%] left-1 top-[20%] z-10 flex flex-col justify-between">
                       {Array.from({ length: 8 }).map((_, idx) => (
-                        <div key={idx} className="h-10 w-4 border border-red-500 bg-red-500/15" />
+                        <div key={idx} className="h-[11%] min-h-6 w-4 border border-red-500 bg-red-500/15" />
                       ))}
                     </div>
                     <CrossHair horizontalClass="bg-red-500/85" verticalClass="bg-yellow-300/85" />
@@ -335,7 +310,6 @@ export default function ImageLoadScreen() {
                   phaseLabel={currentPhase?.label ?? "0%"}
                   bedLabel={selectedBed?.label.replace("床位 ", "") ?? "--"}
                   bedPosition={selectedBedRange}
-                  bedMarkers={bedMarkers}
                 >
                   <div className="relative h-full w-full bg-black">
                     <FourDPreviewImage src={previewUrls.sagittal} />
