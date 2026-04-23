@@ -15,6 +15,12 @@ interface BedLoadState {
   status: LoadStatus;
 }
 
+interface FullscreenImageState {
+  phaseIndex: number;
+  bedNumber: number;
+  imageUrl: string;
+}
+
 function buildWavePath(bedNumber: number, width: number, height: number) {
   const points = Array.from({ length: 80 }, (_, idx) => {
     const x = (idx / 79) * width;
@@ -32,15 +38,15 @@ function PhaseThumbnail({
   phaseIndex,
   bedNumber,
   loaded,
+  onDoubleClick,
 }: {
   phaseIndex: number;
   bedNumber: number;
   loaded: boolean;
+  onDoubleClick: (payload: FullscreenImageState) => void;
 }) {
-  const rowIndex = Math.floor(phaseIndex / 5);
-  const view = rowIndex === 0 ? "coronal" : "sagittal";
-  const sliceBase = rowIndex === 0 ? 120 : 140;
-  const slice = Math.min(320, sliceBase + bedNumber * 12 + (phaseIndex % 5) * 8);
+  const view = "axial";
+  const slice = Math.min(140, 44 + bedNumber * 6 + phaseIndex * 4);
   const imageUrl = getFourDImageUrl(phaseIndex, view, slice);
 
   return (
@@ -49,7 +55,11 @@ function PhaseThumbnail({
         <span className="text-slate-100">Phase {PHASE_LABELS[phaseIndex]}</span>
         <span className="text-slate-400">{view.toUpperCase()}</span>
       </div>
-      <div className="relative aspect-[4/3] bg-black">
+      <button
+        type="button"
+        onDoubleClick={() => onDoubleClick({ phaseIndex, bedNumber, imageUrl })}
+        className="relative block aspect-[4/3] w-full bg-black text-left"
+      >
         <img src={imageUrl} alt="" draggable={false} className="h-full w-full object-contain" />
         {!loaded && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-950/72">
@@ -62,7 +72,7 @@ function PhaseThumbnail({
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 py-1 text-[10px] text-slate-200">
           床位 {bedNumber}
         </div>
-      </div>
+      </button>
     </div>
   );
 }
@@ -116,6 +126,7 @@ export default function ImageLoadScreen() {
   );
 
   const [selectedBedNumber, setSelectedBedNumber] = useState(1);
+  const [fullscreenImage, setFullscreenImage] = useState<FullscreenImageState | null>(null);
   const [bedLoads, setBedLoads] = useState<BedLoadState[]>(
     Array.from({ length: BED_COUNT }, (_, idx) => ({
       id: idx + 1,
@@ -180,7 +191,7 @@ export default function ImageLoadScreen() {
   );
 
   return (
-    <div className="flex h-full select-none flex-col bg-[#E5E7EB] text-slate-700">
+    <div className="relative flex h-full select-none flex-col bg-[#E5E7EB] text-slate-700">
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <section className="flex w-[240px] shrink-0 flex-col border-r border-slate-200 bg-[#F7F8FA] px-3 py-4">
           <div className="mb-3 flex items-center gap-2">
@@ -242,9 +253,7 @@ export default function ImageLoadScreen() {
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
           <div className="mb-3 flex items-center justify-between">
-            <div>
-              <div className="text-[18px] font-bold text-slate-800">图像加载</div>
-            </div>
+            <div className="text-[18px] font-bold text-slate-800">图像加载</div>
             <div className="flex items-center gap-3">
               <div className="rounded-full bg-white px-3 py-1.5 text-[12px] font-bold text-slate-600 shadow-sm">当前床位：{selectedBedNumber}</div>
               <div className="rounded-full bg-white px-3 py-1.5 text-[12px] font-bold text-slate-600 shadow-sm">已加载 {loadedBedCount}/{BED_COUNT}</div>
@@ -253,13 +262,18 @@ export default function ImageLoadScreen() {
 
           <div className="grid min-h-0 flex-1 grid-rows-[1.45fr_0.55fr] gap-3">
             <div className="min-h-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="grid h-full min-h-0 grid-cols-5 grid-rows-2 gap-2">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-[14px] font-bold text-slate-800">Axial 相位影像</div>
+                <div className="text-[11px] text-slate-500">双击任一缩略图可全屏查看，再双击退出</div>
+              </div>
+              <div className="grid h-[calc(100%-28px)] min-h-0 grid-cols-5 grid-rows-2 gap-2">
                 {PHASE_LABELS.map((_, phaseIndex) => (
                   <PhaseThumbnail
                     key={`${selectedBedNumber}-${phaseIndex}`}
                     phaseIndex={phaseIndex}
                     bedNumber={selectedBedNumber}
                     loaded={selectedBedLoad?.status === "done"}
+                    onDoubleClick={setFullscreenImage}
                   />
                 ))}
               </div>
@@ -306,6 +320,35 @@ export default function ImageLoadScreen() {
           <ChevronRight size={14} />
         </button>
       </footer>
+
+      {fullscreenImage && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/92">
+          <div className="flex h-full w-full flex-col px-8 py-6">
+            <div className="mb-4 flex items-center justify-between text-white">
+              <div>
+                <div className="text-[18px] font-bold">Axial · Phase {PHASE_LABELS[fullscreenImage.phaseIndex]}</div>
+                <div className="mt-1 text-[12px] text-slate-300">床位 {fullscreenImage.bedNumber}，双击影像返回主界面</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFullscreenImage(null)}
+                className="rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-white/15"
+              >
+                退出全屏
+              </button>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl border border-white/10 bg-black">
+              <img
+                src={fullscreenImage.imageUrl}
+                alt=""
+                draggable={false}
+                className="max-h-full max-w-full object-contain"
+                onDoubleClick={() => setFullscreenImage(null)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
