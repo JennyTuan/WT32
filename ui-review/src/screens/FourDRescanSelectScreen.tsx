@@ -319,6 +319,22 @@ function RespiratoryWaveMonitor({
   const filteredPath = signal.filtered
     .map((sample) => `${xFromT(sample.t)},${yFromValue(sample.value)}`)
     .join(" ");
+  const cycleThresholdSegments = stats.cycles.map((cycle, index) => {
+    const cyclePoints = sortedPoints.filter((point) => point.t >= cycle.startT && point.t <= cycle.endT);
+    const peak = cyclePoints.find((point) => point.kind === "peak") ?? sortedPoints[cycle.peakIdx];
+    const valley = cyclePoints.find((point) => point.kind === "valley");
+    const peakValue = peak?.value ?? 78;
+    const valleyValue = valley?.value ?? Math.max(0, peakValue - cycle.amplitude);
+    const amplitude = Math.max(1, peakValue - valleyValue);
+
+    return {
+      id: `cycle-threshold-${index}`,
+      x1: xFromT(cycle.startT),
+      x2: xFromT(cycle.endT),
+      upperY: yFromValue(valleyValue + amplitude * 0.72),
+      lowerY: yFromValue(valleyValue + amplitude * 0.28),
+    };
+  });
 
   const bedSegments = Array.from({ length: bedCount }, (_, index) => {
     const segmentStart = (index + 1) / totalCycles;
@@ -625,6 +641,41 @@ function RespiratoryWaveMonitor({
               stroke="#D7E4FA"
               strokeDasharray="4 4"
             />
+          ))}
+
+          {cycleThresholdSegments.map((segment, index) => (
+            <g key={segment.id}>
+              <line
+                x1={segment.x1}
+                y1={segment.upperY}
+                x2={segment.x2}
+                y2={segment.upperY}
+                stroke="#EF4444"
+                strokeWidth="1.4"
+                strokeDasharray="8 5"
+                opacity="0.82"
+              />
+              <line
+                x1={segment.x1}
+                y1={segment.lowerY}
+                x2={segment.x2}
+                y2={segment.lowerY}
+                stroke="#F59E0B"
+                strokeWidth="1.4"
+                strokeDasharray="8 5"
+                opacity="0.82"
+              />
+              {index === 0 && (
+                <>
+                  <text x={segment.x1 + 6} y={segment.upperY - 6} fill="#EF4444" fontSize="11" fontWeight="800">
+                    Upper Threshold
+                  </text>
+                  <text x={segment.x1 + 6} y={segment.lowerY - 6} fill="#F59E0B" fontSize="11" fontWeight="800">
+                    Lower Threshold
+                  </text>
+                </>
+              )}
+            </g>
           ))}
 
           <line

@@ -332,6 +332,27 @@ export default function FourDDiagnosticConfirmScreen() {
     const currentBedDisplay = scanCompleted ? bedSegmentCount : scanStarted ? Math.max(1, bedProgress) : 0;
     const waveformExposureWidth = 96;
     const waveformExposureX = Math.max(0, Math.min(800 - waveformExposureWidth, scanProgress * (800 - waveformExposureWidth)));
+    const thresholdY = (value: number) => 120 - (value / 1100) * 120;
+    const cycleSampleCount = 126;
+    const cycleThresholdSegments = Array.from(
+        { length: Math.ceil(filteredWaveData.length / cycleSampleCount) },
+        (_, cycleIndex) => {
+            const startIndex = cycleIndex * cycleSampleCount;
+            const endIndex = Math.min(filteredWaveData.length - 1, (cycleIndex + 1) * cycleSampleCount - 1);
+            const samples = filteredWaveData.slice(startIndex, endIndex + 1);
+            const peak = Math.max(...samples);
+            const valley = Math.min(...samples);
+            const amplitude = Math.max(1, peak - valley);
+
+            return {
+                id: `threshold-${cycleIndex}`,
+                x1: (startIndex / (filteredWaveData.length - 1)) * 800,
+                x2: (endIndex / (filteredWaveData.length - 1)) * 800,
+                upperY: thresholdY(valley + amplitude * 0.72),
+                lowerY: thresholdY(valley + amplitude * 0.28),
+            };
+        },
+    );
 
     const renderSteps = (sequence: Sequence, isActiveSequence: boolean, isCompletedSequence: boolean) => (
         <div className="flex flex-col ml-12 mt-1.5 gap-2.5 relative pb-2.5">
@@ -622,6 +643,40 @@ export default function FourDDiagnosticConfirmScreen() {
                                         />
                                     )}
                                     <line x1="0" y1="60" x2="800" y2="60" stroke="#94A3B8" strokeWidth="1" strokeDasharray="3 3" opacity="0.4" />
+                                    {cycleThresholdSegments.map((segment, index) => (
+                                        <g key={segment.id}>
+                                            <line
+                                                x1={segment.x1}
+                                                y1={segment.upperY}
+                                                x2={segment.x2}
+                                                y2={segment.upperY}
+                                                stroke="#EF4444"
+                                                strokeWidth="1.2"
+                                                strokeDasharray="8 5"
+                                                opacity="0.78"
+                                            />
+                                            <line
+                                                x1={segment.x1}
+                                                y1={segment.lowerY}
+                                                x2={segment.x2}
+                                                y2={segment.lowerY}
+                                                stroke="#F59E0B"
+                                                strokeWidth="1.2"
+                                                strokeDasharray="8 5"
+                                                opacity="0.78"
+                                            />
+                                            {index === 0 && (
+                                                <>
+                                                    <text x={segment.x1 + 5} y={segment.upperY - 4} fill="#EF4444" fontSize="10" fontWeight="800">
+                                                        Upper Threshold
+                                                    </text>
+                                                    <text x={segment.x1 + 5} y={segment.lowerY - 4} fill="#F59E0B" fontSize="10" fontWeight="800">
+                                                        Lower Threshold
+                                                    </text>
+                                                </>
+                                            )}
+                                        </g>
+                                    ))}
                                     <path
                                         d={`M ${rawWaveData.map((value, index) => `${(index / (rawWaveData.length - 1)) * 800},${120 - (value / 1100) * 120}`).join(" L ")}`}
                                         fill="none"
