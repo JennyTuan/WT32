@@ -1345,19 +1345,6 @@ const ScoutScanScreen = ({
                         </div>
                     ) : isBreathingAcquisitionStep ? (
                         <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 overflow-hidden">
-                            {/* Status badge */}
-                            <div className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border ${
-                                breathingPhase === 'stable' ? 'bg-[#E8F5E9] border-[#A5D6A7]' : 'bg-[#FFF8E1] border-[#FFE082]'
-                            }`}>
-                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                    breathingPhase === 'stable' ? 'bg-[#43A047]' : 'bg-[#F57C00] animate-pulse'
-                                }`} />
-                                <span className={`text-[9px] font-black ${
-                                    breathingPhase === 'stable' ? 'text-[#2E7D32]' : 'text-[#F57C00]'
-                                }`}>
-                                    {breathingPhase === 'stable' ? '呼吸稳定 · 可继续' : `呼吸模拟中… ${breathingReadyCountdown}s`}
-                                </span>
-                            </div>
                             {/* Read-only 呼吸参数 */}
                             <div className="text-[10px] font-black text-[#90A4AE] uppercase tracking-wider px-0.5">呼吸参数</div>
                             <div className="grid grid-cols-2 gap-1.5 overflow-y-auto">
