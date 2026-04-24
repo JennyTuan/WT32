@@ -48,6 +48,12 @@ interface CornerstoneMPRViewportProps {
   phaseOptions?: Array<{ index: number; value: number }>;
   selectedPhaseIndex?: number;
   onPhaseChange?: (phase: number) => void;
+  /**
+   * Optional list of URL-sets (e.g. one per 4D phase) to warm the cornerstone
+   * volume cache in the background after mount, so phase-cine playback hits
+   * cached volumes instead of cold-loading DICOM on every tick.
+   */
+  preloadImageUrlsList?: string[][];
 }
 
 interface TextAnnotation {
@@ -63,6 +69,20 @@ function registerVolumeLoader() {
   if (volumeLoaderRegistered) return;
   volumeLoader.registerVolumeLoader('streaming-wado-image-volume', cornerstoneStreamingImageVolumeLoader as any);
   volumeLoaderRegistered = true;
+}
+
+// Wraps StreamingImageVolume.load() in a promise that resolves when the
+// volume has finished loading every frame. Callers can then safely call
+// setVolumesForViewports without rendering an empty viewport mid-load.
+function awaitVolumeLoaded(vol: any): Promise<void> {
+  if (vol?.loadStatus?.loaded) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    try {
+      vol.load(() => resolve());
+    } catch {
+      resolve();
+    }
+  });
 }
 
 const PANEL_LABEL_CLASS =
@@ -140,6 +160,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       phaseOptions,
       selectedPhaseIndex,
       onPhaseChange,
+      preloadImageUrlsList,
     },
     ref
   ) {
@@ -170,6 +191,17 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([]);
     const [phasePickerPanel, setPhasePickerPanel] = useState<PanelId | null>(null);
     const phasePickerRef = useRef<HTMLDivElement | null>(null);
+    // Engine lifecycle is independent of imageUrls so that phase-cine swaps
+    // don't tear down + rebuild the whole cornerstone scene on every tick.
+    const [engineReady, setEngineReady] = useState(false);
+    const loadedVolumeIdsRef = useRef<Set<string>>(new Set());
+    const hasFirstRenderRef = useRef(false);
+    // Latest imageUrls reference, read by the long-lived prewarm walker so it
+    // can skip the active phase without being restarted on every cine tick.
+    const currentImageUrlsRef = useRef(imageUrls);
+    useEffect(() => {
+      currentImageUrlsRef.current = imageUrls;
+    }, [imageUrls]);
 
     useEffect(() => {
       onStatusChange?.(status);
@@ -238,8 +270,12 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       },
     }));
 
+    // ── Engine lifecycle ─────────────────────────────────────────────────────
+    // Create the cornerstone rendering engine, viewports and tool group exactly
+    // once per mount (also re-runs when layoutMode flips, since that changes
+    // the viewport set). Volume loading is handled by a separate effect so
+    // phase-cine swaps don't rebuild the whole scene.
     useEffect(() => {
-      if (!imageUrls.length) return;
       const refs = [axialRef.current, coronalRef.current, sagittalRef.current];
       if (layoutMode === 'four-up') refs.push(slabRef.current);
       if (!refs.every(Boolean)) return;
@@ -247,11 +283,10 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       let disposed = false;
       let ro: ResizeObserver | null = null;
 
-      const setup = async () => {
+      (async () => {
         try {
           setStatus('loading');
           setErrorMsg('');
-
           await initCornerstone();
           registerVolumeLoader();
           if (disposed) return;
@@ -289,55 +324,15 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           const toolGroup = getOrCreateToolGroup(toolGroupId.current);
           activeViewportIds.forEach((id) => toolGroup.addViewport(id, engineId.current));
 
-          const volId = volumeIdRef.current;
-          const imageIds =
-            imageUrls.length === 1 && isMhaVolumeUrl(imageUrls[0])
-              ? await buildMhaImageIds(imageUrls[0])
-              : imageUrls.length > 1 && imageUrls.every(isMhaVolumeUrl)
-                ? await buildStitchedMhaImageIds(imageUrls)
-                : imageUrls.map(buildWadoImageId);
-
-          if (!cache.getVolume(volId)) {
-            const vol = await volumeLoader.createAndCacheVolume(volId, { imageIds });
-            if (disposed) return;
-            vol.load();
-          } else {
-            (cache.getVolume(volId) as any)?.load();
-          }
-
-          if (disposed) return;
-
-          await setVolumesForViewports(engine, [{ volumeId: volId }], activeViewportIds);
-          if (disposed) return;
-
-          const lower = windowCenter - windowWidth / 2;
-          const upper = windowCenter + windowWidth / 2;
-          lastVoiRef.current = { lower, upper };
-          activeViewportIds.forEach((id) => {
-            (engine.getViewport(id) as Types.IVolumeViewport | undefined)?.setProperties({ voiRange: { lower, upper } });
-          });
-
           ro = new ResizeObserver(() => {
             engine.resize(true, false);
             engine.renderViewports(activeViewportIds);
           });
           refs.forEach((el) => ro?.observe(el!));
 
-          engine.resize(true, false);
-          engine.renderViewports(activeViewportIds);
-
-          rafRef.current = requestAnimationFrame(() => {
-            rafRef.current = requestAnimationFrame(() => {
-              if (disposed || !engineRef.current) return;
-              engineRef.current.resize(true, false);
-              activeViewportIds.forEach((id) => {
-                const vp = engineRef.current?.getViewport(id) as Types.IVolumeViewport | undefined;
-                vp?.resetCamera();
-              });
-              engineRef.current.renderViewports(activeViewportIds);
-              if (!disposed) setStatus('ready');
-            });
-          });
+          if (disposed) return;
+          hasFirstRenderRef.current = false;
+          setEngineReady(true);
         } catch (err) {
           console.error('CornerstoneMPRViewport setup failed:', err);
           if (!disposed) {
@@ -345,22 +340,220 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
             setErrorMsg(err instanceof Error ? err.message : String(err));
           }
         }
-      };
-
-      void setup();
+      })();
 
       return () => {
         disposed = true;
+        setEngineReady(false);
         if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
         ro?.disconnect();
         destroyToolGroup(toolGroupId.current);
-        try { cache.removeVolumeLoadObject(volumeIdRef.current); } catch { /* ok */ }
+        // Drop all volumes that were created for this engine instance so the
+        // cornerstone cache doesn't grow unbounded across mount cycles.
+        loadedVolumeIdsRef.current.forEach((id) => {
+          try { cache.removeVolumeLoadObject(id); } catch { /* ok */ }
+        });
+        loadedVolumeIdsRef.current.clear();
         engineRef.current?.destroy();
         engineRef.current = null;
         lastVoiRef.current = null;
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [imageUrls, layoutMode]);
+    }, [layoutMode]);
+
+    // ── Volume swap ──────────────────────────────────────────────────────────
+    // When imageUrls change (e.g. 4D phase-cine advances phase N → N+1),
+    // derive a stable volume ID from the URL set so revisits hit the
+    // cornerstone volume cache, then swap with setVolumesForViewports.
+    // Camera state is preserved across swaps so playback looks smooth
+    // rather than re-fitting on every frame.
+    //
+    // CRITICAL: setVolumesForViewports is only called once the new volume's
+    // pixel data is fully loaded. Otherwise the viewport renders empty for
+    // the duration of the load and the cine "blanks" between phases.
+    useEffect(() => {
+      if (!engineReady || !imageUrls.length) return;
+      const engine = engineRef.current;
+      if (!engine) return;
+
+      let cancelled = false;
+      const isFirstSwap = !hasFirstRenderRef.current;
+      // Only show the loading spinner on the very first cold load. Cine swaps
+      // either land instantly (cached) or are silently dropped (still loading)
+      // — never flash a "loading" state mid-playback.
+      if (isFirstSwap) {
+        setStatus('loading');
+        setErrorMsg('');
+      }
+
+      (async () => {
+        try {
+          // Stable id derived from the URL set so phase 0..9 each get their
+          // own cached volume and the second pass through the cine loop is
+          // effectively instant.
+          const volId = `streaming-wado-image-volume:${engineId.current}:${imageUrls.length}:${imageUrls[0]}`;
+
+          let vol = cache.getVolume(volId);
+          if (!vol) {
+            const imageIds =
+              imageUrls.length === 1 && isMhaVolumeUrl(imageUrls[0])
+                ? await buildMhaImageIds(imageUrls[0])
+                : imageUrls.length > 1 && imageUrls.every(isMhaVolumeUrl)
+                  ? await buildStitchedMhaImageIds(imageUrls)
+                  : imageUrls.map(buildWadoImageId);
+            if (cancelled) return;
+            vol = await volumeLoader.createAndCacheVolume(volId, { imageIds });
+            if (cancelled) return;
+            loadedVolumeIdsRef.current.add(volId);
+          }
+
+          // For cine ticks: if the new phase isn't fully loaded yet, drop the
+          // frame rather than swap to an empty volume. The previous phase
+          // stays on screen until prewarm catches up.
+          const alreadyLoaded = (vol as any)?.loadStatus?.loaded === true;
+          if (!isFirstSwap && !alreadyLoaded) {
+            // Kick the loader (idempotent) so prewarm-in-progress finishes,
+            // but don't swap or block.
+            void awaitVolumeLoaded(vol);
+            return;
+          }
+
+          // First-paint cold load OR cine swap with a cache-hot volume:
+          // make sure pixel data is fully there before the swap.
+          if (!alreadyLoaded) {
+            await awaitVolumeLoaded(vol);
+            if (cancelled) return;
+          }
+
+          volumeIdRef.current = volId;
+
+          // Snapshot cameras so we can restore pan/zoom/slice after the swap.
+          const cameras = hasFirstRenderRef.current
+            ? activeViewportIds
+                .map((id) => {
+                  const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
+                  const cam = vp?.getCamera();
+                  return cam ? { id, camera: cam } : null;
+                })
+                .filter((x): x is { id: string; camera: Types.ICamera } => x !== null)
+            : [];
+
+          await setVolumesForViewports(engine, [{ volumeId: volId }], activeViewportIds);
+          if (cancelled) return;
+
+          if (hasFirstRenderRef.current) {
+            cameras.forEach(({ id, camera }) => {
+              const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
+              try { vp?.setCamera(camera); } catch { /* volume geometry may differ */ }
+            });
+          } else {
+            activeViewportIds.forEach((id) => {
+              const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
+              vp?.resetCamera();
+            });
+          }
+
+          const lower = lastVoiRef.current?.lower ?? windowCenter - windowWidth / 2;
+          const upper = lastVoiRef.current?.upper ?? windowCenter + windowWidth / 2;
+          lastVoiRef.current = { lower, upper };
+          activeViewportIds.forEach((id) => {
+            (engine.getViewport(id) as Types.IVolumeViewport | undefined)?.setProperties({ voiRange: { lower, upper } });
+          });
+
+          engine.renderViewports(activeViewportIds);
+
+          if (!hasFirstRenderRef.current) {
+            // First paint: defer a resize+render tick so layout settles.
+            rafRef.current = requestAnimationFrame(() => {
+              rafRef.current = requestAnimationFrame(() => {
+                if (cancelled || !engineRef.current) return;
+                engineRef.current.resize(true, false);
+                engineRef.current.renderViewports(activeViewportIds);
+                hasFirstRenderRef.current = true;
+                if (!cancelled) setStatus('ready');
+              });
+            });
+          } else if (!cancelled) {
+            setStatus('ready');
+          }
+        } catch (err) {
+          console.error('CornerstoneMPRViewport volume load failed:', err);
+          if (!cancelled) {
+            setStatus('error');
+            setErrorMsg(err instanceof Error ? err.message : String(err));
+          }
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+      // windowCenter/windowWidth intentionally excluded: the dedicated
+      // window-level effect below keeps them in sync without thrashing
+      // the volume loader.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [imageUrls, engineReady, activeViewportIds]);
+
+    // ── Background phase pre-warm ────────────────────────────────────────────
+    // Walk the URL-sets one at a time and create + fully load each volume in
+    // the background. STRICTLY sequential: we await each volume's full load
+    // before starting the next, so we never have more than one phase
+    // streaming at a time. Otherwise 10 phases × ~99 slices = ~990 parallel
+    // requests that choke the network and freeze playback.
+    //
+    // The active phase (current imageUrls) is read from a ref so this walk
+    // is NOT restarted on every cine tick — restarting would mean we
+    // re-queue from phase 0 every 500ms and never finish warming anything.
+    useEffect(() => {
+      if (!engineReady || !preloadImageUrlsList?.length) return;
+      let cancelled = false;
+      let kickoffTimer: number | null = null;
+
+      const warmAll = async () => {
+        // Warm the active phase first so cine has something cache-hot
+        // immediately, then walk the rest in array order.
+        const ordered = [...preloadImageUrlsList].sort((a, b) => {
+          const aActive = a === currentImageUrlsRef.current ? -1 : 0;
+          const bActive = b === currentImageUrlsRef.current ? -1 : 0;
+          return aActive - bActive;
+        });
+
+        for (const urls of ordered) {
+          if (cancelled) return;
+          if (!urls?.length) continue;
+          try {
+            const volId = `streaming-wado-image-volume:${engineId.current}:${urls.length}:${urls[0]}`;
+            let vol = cache.getVolume(volId);
+            if (!vol) {
+              const imageIds =
+                urls.length === 1 && isMhaVolumeUrl(urls[0])
+                  ? await buildMhaImageIds(urls[0])
+                  : urls.length > 1 && urls.every(isMhaVolumeUrl)
+                    ? await buildStitchedMhaImageIds(urls)
+                    : urls.map(buildWadoImageId);
+              if (cancelled) return;
+              vol = await volumeLoader.createAndCacheVolume(volId, { imageIds });
+              if (cancelled) return;
+              loadedVolumeIdsRef.current.add(volId);
+            }
+            // Wait until this phase is fully in cache before starting the
+            // next one — this is the key serialisation point.
+            await awaitVolumeLoaded(vol);
+          } catch (err) {
+            // Best-effort — don't break playback if one phase fails to warm.
+            console.warn('Phase volume pre-warm failed:', err);
+          }
+        }
+      };
+
+      // Let the active volume start streaming first, then kick off warms.
+      kickoffTimer = window.setTimeout(() => { void warmAll(); }, 250);
+
+      return () => {
+        cancelled = true;
+        if (kickoffTimer !== null) window.clearTimeout(kickoffTimer);
+      };
+    }, [engineReady, preloadImageUrlsList]);
 
     useEffect(() => {
       const engine = engineRef.current;

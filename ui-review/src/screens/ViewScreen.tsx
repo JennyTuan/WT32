@@ -32,6 +32,7 @@ import {
     type FourDManifest,
 } from "../lib/fourDImageSource";
 import {
+    FOUR_D_DICOM_PHASE_COUNT,
     getFourDDicomSeriesUrls,
     type FourDDicomMpId,
 } from "../lib/fourDDicomSource";
@@ -598,6 +599,21 @@ const ViewScreen = () => {
                 : []
         ),
         [isFourDLungReconSeries, selectedFourDMpId, selectedPhaseIndex]
+    );
+    // Full list of DICOM URL-sets (one per phase) so the MPR viewport can
+    // warm every phase's cornerstone volume in the background — makes the
+    // first phase-cine loop cache-hot instead of cold-fetching 99 slices
+    // on every tick.
+    const fourDAllPhaseDicomUrls = useMemo(
+        () => (
+            isFourDLungReconSeries
+                ? Array.from(
+                    { length: FOUR_D_DICOM_PHASE_COUNT },
+                    (_, phase) => getFourDDicomSeriesUrls(phase, selectedFourDMpId),
+                )
+                : undefined
+        ),
+        [isFourDLungReconSeries, selectedFourDMpId],
     );
     const fourDPhaseOptions = useMemo(
         () => FOUR_D_PHASE_LABELS.map((label, index) => ({
@@ -1436,6 +1452,7 @@ const ViewScreen = () => {
                                 <CornerstoneMPRViewport
                                     ref={mprRef}
                                     imageUrls={fourDDicomImageUrls}
+                                    preloadImageUrlsList={fourDAllPhaseDicomUrls}
                                     onStatusChange={setViewerLoadStatus}
                                     windowCenter={wl}
                                     windowWidth={ww}
