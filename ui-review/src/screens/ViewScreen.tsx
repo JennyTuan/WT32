@@ -33,6 +33,10 @@ import {
     type FourDManifest,
 } from "../lib/fourDImageSource";
 import {
+    getFourDDicomSeriesUrls,
+    type FourDDicomMpId,
+} from "../lib/fourDDicomSource";
+import {
     fetchSelectedScanSession,
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
@@ -100,6 +104,7 @@ type FourDBrowseMode = "phase" | "slice";
 type PhaseCineSpeed = 0.5 | 1 | 2;
 type PhaseCineMode = "forward" | "bounce";
 const PHASE_CINE_SPEED_OPTIONS: readonly PhaseCineSpeed[] = [0.5, 1, 2] as const;
+const FOUR_D_LUNG_DEFAULT_WINDOW = { ww: 1600, wl: -600 } as const;
 
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
 
@@ -287,7 +292,8 @@ const ViewScreen = () => {
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(isFourDEntry ? "4d-preview-recon" : REAL_LUNG_SERIES.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>(fourDState?.initialBrowseMode ?? "slice");
+    const [selectedFourDMpId, setSelectedFourDMpId] = useState<FourDDicomMpId>("MP1");
+    const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("phase");
     const [sliceCineTick, setSliceCineTick] = useState(0);
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<PhaseCineSpeed>(1); // multiplier; 1× = 500 ms/phase
     const [phaseCineMode] = useState<PhaseCineMode>("forward");
@@ -585,6 +591,14 @@ const ViewScreen = () => {
     const isMprViewActive = !isTopogramSeries && imageMode === "3D";
     const isFourDMprViewActive = isMprViewActive && isFourDLungReconSeries;
     const isFourDPlaybackBlockedByReview = isFourDLungReconSeries && isFourDEntry && fourDStage !== "done";
+    const fourDDicomImageUrls = useMemo(
+        () => (
+            isFourDLungReconSeries
+                ? getFourDDicomSeriesUrls(selectedPhaseIndex, selectedFourDMpId)
+                : []
+        ),
+        [isFourDLungReconSeries, selectedFourDMpId, selectedPhaseIndex]
+    );
     const isFourDEntryLoadingFlow = false;
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
     const isToolSupportedInCurrentView = (mode: ViewerToolMode) => {
@@ -613,8 +627,9 @@ const ViewScreen = () => {
 
     useEffect(() => {
         setSelectedPhaseIndex(0);
+        setSelectedFourDMpId("MP1");
         setIsPlaying(false);
-        setFourDBrowseMode(fourDState?.initialBrowseMode ?? "slice");
+        setFourDBrowseMode("phase");
         setSliceCineTick(0);
         phaseCineDirectionRef.current = 1;
     }, [fourDState?.initialBrowseMode, selectedSeriesId]);
@@ -631,6 +646,17 @@ const ViewScreen = () => {
         if (!isTopogramSeries) return;
         setImageMode("2D");
     }, [isTopogramSeries]);
+
+    useEffect(() => {
+        if (!isFourDLungReconSeries) return;
+        setSelectedLayout("多平面重建");
+        setSelectedRenderMode("MPR");
+        setWw(FOUR_D_LUNG_DEFAULT_WINDOW.ww);
+        setWl(FOUR_D_LUNG_DEFAULT_WINDOW.wl);
+        setDisplayWw(FOUR_D_LUNG_DEFAULT_WINDOW.ww);
+        setDisplayWl(FOUR_D_LUNG_DEFAULT_WINDOW.wl);
+        defaultWindowRef.current = FOUR_D_LUNG_DEFAULT_WINDOW;
+    }, [isFourDLungReconSeries]);
 
     useEffect(() => {
         if (isToolSupportedInCurrentView(toolMode)) return;
@@ -711,16 +737,6 @@ const ViewScreen = () => {
         }, intervalMs);
         return () => window.clearInterval(timer);
     }, [isFourDLungReconSeries, isPlaying, phaseCineSpeed, phaseCineMode, fourDBrowseMode]);
-
-    // Conventional slice browsing: lock current phase, cycle spatial slices in all MPR planes.
-    useEffect(() => {
-        if (!isFourDLungReconSeries || !isPlaying || fourDBrowseMode !== "slice") return;
-        const intervalMs = 220 / phaseCineSpeed;
-        const timer = window.setInterval(() => {
-            setSliceCineTick((prev) => prev + 1);
-        }, intervalMs);
-        return () => window.clearInterval(timer);
-    }, [isFourDLungReconSeries, isPlaying, phaseCineSpeed, fourDBrowseMode]);
 
     const preferredSeriesForFourDEntry = useMemo(() => {
         if (!isFourDEntry) return null;
@@ -1320,7 +1336,7 @@ const ViewScreen = () => {
                                                         {([
                                                             { k: "phase" as const, l: "4D Cine" },
                                                             { k: "slice" as const, l: "常规浏览" },
-                                                        ]).map(({ k, l }) => (
+                                                        ].slice(0, 1).map(({ k, l }) => (
                                                             <div
                                                                 key={k}
                                                                 onClick={() => {
@@ -1337,7 +1353,7 @@ const ViewScreen = () => {
                                                             >
                                                                 {l}
                                                             </div>
-                                                        ))}
+                                                        )))}
                                                     </div>
                                                 )}
                                             </div>
@@ -1369,6 +1385,27 @@ const ViewScreen = () => {
                                                         ))}
                                                     </div>
                                                 )}
+                                            </div>
+                                            
+                                            
+                                            <div className="flex items-start gap-2">
+                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">Phase</span>
+                                                <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                                                    <div className="grid grid-cols-[minmax(0,1fr)_48px] items-center gap-2">
+                                                        <input
+                                                            type="range"
+                                                            min={0}
+                                                            max={FOUR_D_PHASE_LABELS.length - 1}
+                                                            step={1}
+                                                            value={selectedPhaseIndex}
+                                                            onChange={(event) => setSelectedPhaseIndex(Number(event.target.value))}
+                                                            className="h-[18px] w-full accent-[#4D94FF]"
+                                                        />
+                                                        <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">
+                                                            {FOUR_D_PHASE_LABELS[selectedPhaseIndex]}
+                                                        </span>
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div className="flex items-start gap-2">
                                                 <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">厚度</span>
@@ -1409,16 +1446,31 @@ const ViewScreen = () => {
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
                     {!isFourDEntryLoadingFlow && !isTopogramSeries && imageMode === "3D" && (
                         <div className="relative flex-1 min-w-0 overflow-hidden">
-                            {/* 4D entry: drive the grid from pre-rendered WebP stacks so
-                                the phase slider actually changes the image. */}
-                            {isFourDLungReconSeries && fourDManifest ? (
+                            {isFourDLungReconSeries ? (
+                                <CornerstoneMPRViewport
+                                    ref={mprRef}
+                                    imageUrls={fourDDicomImageUrls}
+                                    onStatusChange={setViewerLoadStatus}
+                                    windowCenter={wl}
+                                    windowWidth={ww}
+                                    activeTool={mapCornerstoneTool(toolMode)}
+                                    renderMode={(phaseMipMode === "Avg" ? "MPR" : phaseMipMode) as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
+                                    onWindowLevelChange={(wc, wwidth) => {
+                                        setDisplayWl(Math.round(wc));
+                                        setDisplayWw(Math.round(wwidth));
+                                        setWl(Math.round(wc));
+                                        setWw(Math.round(wwidth));
+                                    }}
+                                    className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden"
+                                />
+                            ) : isFourDLungReconSeries && fourDManifest ? (
                                 <FourDMprGrid
                                     ref={fourDGridRef}
                                     manifest={fourDManifest}
                                     phase={selectedPhaseIndex}
                                     onPhaseChange={setSelectedPhaseIndex}
-                                    showPhaseBadge={fourDBrowseMode === "phase"}
-                                    showCornerInfo={fourDBrowseMode === "slice"}
+                                    showPhaseBadge={true}
+                                    showCornerInfo={false}
                                     cornerInfo={{
                                         patientName: meta.patientName,
                                         patientId: meta.patientId,
@@ -1439,10 +1491,10 @@ const ViewScreen = () => {
                                         ww: displayWw,
                                         wl: displayWl,
                                     }}
-                                    initialLayout={fourDBrowseMode === "slice" ? "axial-single" : "mpr"}
+                                    initialLayout="mpr"
                                     sliceCineTick={sliceCineTick}
                                     mipMode={phaseMipMode}
-                                    progressiveSliceLoad={isFourDEntry && fourDBrowseMode === "slice" && fourDStage === "phaseLoading"}
+                                    progressiveSliceLoad={false}
                                     onProgressiveSliceLoadComplete={handleFourDSliceLoadComplete}
                                     activeTool={mapCornerstoneTool(toolMode)}
                                     windowCenter={wl}

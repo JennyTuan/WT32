@@ -18,6 +18,7 @@ import {
   ZoomTool,
 } from '@cornerstonejs/tools';
 import dicomImageLoader from '@cornerstonejs/dicom-image-loader';
+import { initMhaImageLoader } from './mhaImageLoader';
 
 let initPromise: Promise<void> | null = null;
 let toolsRegistered = false;
@@ -56,6 +57,7 @@ export async function initCornerstone() {
 
       await initCornerstoneTools();
       dicomImageLoader.init();
+      initMhaImageLoader();
       metaData.addProvider(dicomImageLoader.wadouri.metaData.metaDataProvider, 10000);
       registerTools();
     })();

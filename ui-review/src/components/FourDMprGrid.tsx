@@ -1,9 +1,9 @@
 /**
- * FourDMprGrid — 2×2 MPR display backed by pre-rendered 4D WebP stacks.
+ * FourDMprGrid — 3-view MPR display backed by pre-rendered 4D WebP stacks.
  *
- * Replaces CornerstoneMPRViewport for the 4D image viewer demo. Each quadrant
+ * Replaces CornerstoneMPRViewport for the 4D image viewer demo. Each panel
  * is an independent WebImageViewer showing axial / coronal / sagittal of the
- * currently selected phase, plus the cross-phase MIP (ITV) in the 4th cell.
+ * currently selected phase.
  *
  * Slice indices per plane are managed locally (one mid-slice per plane on
  * mount); the phase index is controlled externally via the bottom phase bar.
@@ -190,14 +190,18 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
 
     useEffect(() => {
         if (!progressiveSliceLoad) {
-            setProgressiveAxialCount(axialUrls.length);
+            queueMicrotask(() => {
+                setProgressiveAxialCount(axialUrls.length);
+            });
             return;
         }
 
         let cancelled = false;
         let nextIndex = 0;
-        setProgressiveAxialCount(0);
-        setAxialIdx(0);
+        queueMicrotask(() => {
+            setProgressiveAxialCount(0);
+            setAxialIdx(0);
+        });
 
         const loadNext = () => {
             if (cancelled) return;
@@ -520,9 +524,11 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
     );
 
     const panelLayoutClass = (panel: MprPanel) => {
-        if (maximizedPanel === panel) return "col-span-2 row-span-2";
+        if (maximizedPanel === panel) return "col-span-2 row-span-2 col-start-1 row-start-1";
         if (maximizedPanel !== null) return "hidden";
-        return panel === "coronal" ? "row-span-2" : "";
+        if (panel === "axial") return "col-start-1 row-start-1";
+        if (panel === "sagittal") return "col-start-1 row-start-2";
+        return "col-start-2 row-start-1 row-span-2";
     };
 
     const showCrosshair = maximizedPanel === null;
@@ -530,30 +536,31 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
 
     return (
         <div className={className}>
-            {/* CORONAL */}
+            {/* AXIAL */}
             <div
-                ref={coronalPanelRef}
-                className={`${panelBase} ${panelLayoutClass("coronal")}`}
-                onDoubleClick={() => toggleMaximize("coronal")}
-                {...bindCrosshairDrag("coronal")}
+                ref={axialPanelRef}
+                className={`${panelBase} ${panelLayoutClass("axial")}`}
+                onDoubleClick={() => toggleMaximize("axial")}
+                {...bindCrosshairDrag("axial")}
             >
                 <WebImageViewer
-                    ref={coronalRef}
-                    imageUrls={coronalUrls}
-                    currentImageIndex={coronalIdx}
-                    onImageIndexChange={setCoronalIdx}
+                    ref={axialRef}
+                    imageUrls={visibleAxialUrls}
+                    currentImageIndex={axialIdx}
+                    onImageIndexChange={setAxialIdx}
+                    onStatusChange={setAxialStatus}
                     {...viewerCommon}
                 />
                 {showCrosshair && (
                     <CrosshairOverlay
-                        {...coronalCrosshair}
-                        horizontalColor={AXIAL_COLOR}
+                        {...axialCrosshair}
+                        horizontalColor={CORONAL_COLOR}
                         verticalColor={SAGITTAL_COLOR}
                     />
                 )}
-                {showPanelLabels && <div className={PANEL_LABEL_STYLE}>CORONAL</div>}
-                {renderPhaseBadge("coronal")}
-                {renderCornerInfo("coronal")}
+                {showPanelLabels && <div className={PANEL_LABEL_STYLE}>AXIAL</div>}
+                {renderPhaseBadge("axial")}
+                {renderCornerInfo("axial")}
             </div>
 
             {/* SAGITTAL */}
@@ -582,31 +589,30 @@ const FourDMprGrid = forwardRef<FourDMprGridHandle, FourDMprGridProps>(function 
                 {renderCornerInfo("sagittal")}
             </div>
 
-            {/* AXIAL */}
+            {/* CORONAL */}
             <div
-                ref={axialPanelRef}
-                className={`${panelBase} ${panelLayoutClass("axial")}`}
-                onDoubleClick={() => toggleMaximize("axial")}
-                {...bindCrosshairDrag("axial")}
+                ref={coronalPanelRef}
+                className={`${panelBase} ${panelLayoutClass("coronal")}`}
+                onDoubleClick={() => toggleMaximize("coronal")}
+                {...bindCrosshairDrag("coronal")}
             >
                 <WebImageViewer
-                    ref={axialRef}
-                    imageUrls={visibleAxialUrls}
-                    currentImageIndex={axialIdx}
-                    onImageIndexChange={setAxialIdx}
-                    onStatusChange={setAxialStatus}
+                    ref={coronalRef}
+                    imageUrls={coronalUrls}
+                    currentImageIndex={coronalIdx}
+                    onImageIndexChange={setCoronalIdx}
                     {...viewerCommon}
                 />
                 {showCrosshair && (
                     <CrosshairOverlay
-                        {...axialCrosshair}
-                        horizontalColor={CORONAL_COLOR}
+                        {...coronalCrosshair}
+                        horizontalColor={AXIAL_COLOR}
                         verticalColor={SAGITTAL_COLOR}
                     />
                 )}
-                {showPanelLabels && <div className={PANEL_LABEL_STYLE}>AXIAL</div>}
-                {renderPhaseBadge("axial")}
-                {renderCornerInfo("axial")}
+                {showPanelLabels && <div className={PANEL_LABEL_STYLE}>CORONAL</div>}
+                {renderPhaseBadge("coronal")}
+                {renderCornerInfo("coronal")}
             </div>
         </div>
     );

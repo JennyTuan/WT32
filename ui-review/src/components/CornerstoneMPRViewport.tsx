@@ -17,6 +17,7 @@ import {
   initCornerstone,
   TOOL_NAMES,
 } from '../lib/cornerstone/initCornerstone';
+import { buildMhaImageIds, buildStitchedMhaImageIds, isMhaVolumeUrl } from '../lib/cornerstone/mhaImageLoader';
 
 export type CornerstoneMPRHandle = {
   zoomIn: () => void;
@@ -222,7 +223,12 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
           // Volume
           const volId = volumeIdRef.current;
-          const imageIds = imageUrls.map(buildWadoImageId);
+          const imageIds =
+            imageUrls.length === 1 && isMhaVolumeUrl(imageUrls[0])
+              ? await buildMhaImageIds(imageUrls[0])
+              : imageUrls.length > 1 && imageUrls.every(isMhaVolumeUrl)
+              ? await buildStitchedMhaImageIds(imageUrls)
+              : imageUrls.map(buildWadoImageId);
 
           if (!cache.getVolume(volId)) {
             const vol = await volumeLoader.createAndCacheVolume(volId, { imageIds });
