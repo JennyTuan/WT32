@@ -26,7 +26,6 @@ import * as dicomParser from "dicom-parser";
 import { hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
-import FourDMprGrid, { type FourDMprGridHandle } from "../components/FourDMprGrid";
 import {
     getFourDImageUrl,
     loadFourDManifest,
@@ -282,19 +281,22 @@ const ViewScreen = () => {
         setFourDStage(hasPhaseConflicts(fourDState.scanResult) ? "reviewReady" : "done");
     }, [fourDState, isFourDEntry]);
     const handleAdvancedProcessing = useCallback(() => {
-        navigate("/image-load", { state: fourDState ?? undefined });
+        navigate("/phase-filter", {
+            state: fourDState
+                ? {
+                    ...fourDState,
+                    initialBrowseMode: "phase",
+                    skipImageLoad: true,
+                }
+                : undefined,
+        });
     }, [fourDState, navigate]);
-    const handleFourDSliceLoadComplete = useCallback(() => {
-        if (!isFourDEntry || fourDStage !== "phaseLoading") return;
-        navigate("/image-load", { state: fourDState ?? undefined });
-    }, [fourDStage, fourDState, isFourDEntry, navigate]);
 
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(isFourDEntry ? "4d-preview-recon" : REAL_LUNG_SERIES.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
     const [selectedFourDMpId, setSelectedFourDMpId] = useState<FourDDicomMpId>("MP1");
     const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("phase");
-    const [sliceCineTick, setSliceCineTick] = useState(0);
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<PhaseCineSpeed>(1); // multiplier; 1× = 500 ms/phase
     const [phaseCineMode] = useState<PhaseCineMode>("forward");
     const cyclePhaseCineSpeed = useCallback(() => {
@@ -321,8 +323,6 @@ const ViewScreen = () => {
     const dicomViewerRef = useRef<DicomViewerHandle>(null);
     // Ref for the 3D MPR Cornerstone viewport
     const mprRef = useRef<CornerstoneMPRHandle>(null);
-    // Ref for the 4D pre-rendered MPR grid (used when isFourDLungReconSeries)
-    const fourDGridRef = useRef<FourDMprGridHandle>(null);
 
     // ─── 4D manifest (pre-rendered WebP dataset) ───────────────────────────
     const [fourDManifest, setFourDManifest] = useState<FourDManifest | null>(null);
@@ -599,14 +599,22 @@ const ViewScreen = () => {
         ),
         [isFourDLungReconSeries, selectedFourDMpId, selectedPhaseIndex]
     );
+    const fourDPhaseOptions = useMemo(
+        () => FOUR_D_PHASE_LABELS.map((label, index) => ({
+            index,
+            value: Number.parseInt(label, 10),
+        })),
+        []
+    );
+    const fourDPhaseBadgeLabel = `Phase ${FOUR_D_PHASE_LABELS[selectedPhaseIndex] ?? `${selectedPhaseIndex * 10}%`}`;
     const isFourDEntryLoadingFlow = false;
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
     const isToolSupportedInCurrentView = (mode: ViewerToolMode) => {
         if (!isMprViewActive) return true;
         if (isFourDMprViewActive) {
-            return mode === "pan" || mode === "wl";
+            return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate";
         }
-        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "eraser";
+        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser";
     };
 
 
@@ -630,7 +638,6 @@ const ViewScreen = () => {
         setSelectedFourDMpId("MP1");
         setIsPlaying(false);
         setFourDBrowseMode("phase");
-        setSliceCineTick(0);
         phaseCineDirectionRef.current = 1;
     }, [fourDState?.initialBrowseMode, selectedSeriesId]);
 
@@ -1386,27 +1393,6 @@ const ViewScreen = () => {
                                                     </div>
                                                 )}
                                             </div>
-                                            
-                                            
-                                            <div className="flex items-start gap-2">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">Phase</span>
-                                                <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
-                                                    <div className="grid grid-cols-[minmax(0,1fr)_48px] items-center gap-2">
-                                                        <input
-                                                            type="range"
-                                                            min={0}
-                                                            max={FOUR_D_PHASE_LABELS.length - 1}
-                                                            step={1}
-                                                            value={selectedPhaseIndex}
-                                                            onChange={(event) => setSelectedPhaseIndex(Number(event.target.value))}
-                                                            className="h-[18px] w-full accent-[#4D94FF]"
-                                                        />
-                                                        <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">
-                                                            {FOUR_D_PHASE_LABELS[selectedPhaseIndex]}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
                                             <div className="flex items-start gap-2">
                                                 <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">厚度</span>
                                                 <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
@@ -1455,6 +1441,13 @@ const ViewScreen = () => {
                                     windowWidth={ww}
                                     activeTool={mapCornerstoneTool(toolMode)}
                                     renderMode={(phaseMipMode === "Avg" ? "MPR" : phaseMipMode) as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
+                                    layoutMode="three-up"
+                                    slabThickness={slabThickness}
+                                    showPhaseBadge={true}
+                                    phaseBadgeLabel={fourDPhaseBadgeLabel}
+                                    phaseOptions={fourDPhaseOptions}
+                                    selectedPhaseIndex={selectedPhaseIndex}
+                                    onPhaseChange={setSelectedPhaseIndex}
                                     onWindowLevelChange={(wc, wwidth) => {
                                         setDisplayWl(Math.round(wc));
                                         setDisplayWw(Math.round(wwidth));
@@ -1463,56 +1456,6 @@ const ViewScreen = () => {
                                     }}
                                     className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden"
                                 />
-                            ) : isFourDLungReconSeries && fourDManifest ? (
-                                <FourDMprGrid
-                                    ref={fourDGridRef}
-                                    manifest={fourDManifest}
-                                    phase={selectedPhaseIndex}
-                                    onPhaseChange={setSelectedPhaseIndex}
-                                    showPhaseBadge={true}
-                                    showCornerInfo={false}
-                                    cornerInfo={{
-                                        patientName: meta.patientName,
-                                        patientId: meta.patientId,
-                                        patientSex: meta.patientSex,
-                                        patientAge: meta.patientAge,
-                                        modality: meta.modality,
-                                        studyDate: meta.studyDate,
-                                        studyTime: meta.studyTime,
-                                        seriesDescription: selectedSeries.name,
-                                        kvp: meta.kvp,
-                                        mas: meta.mas,
-                                        pixelSpacing: meta.pixelSpacing,
-                                        thickness: `${slabThickness} mm`,
-                                        institution: meta.institution,
-                                        manufacturer: meta.manufacturer,
-                                        rows: meta.rows,
-                                        cols: meta.cols,
-                                        ww: displayWw,
-                                        wl: displayWl,
-                                    }}
-                                    initialLayout="mpr"
-                                    sliceCineTick={sliceCineTick}
-                                    mipMode={phaseMipMode}
-                                    progressiveSliceLoad={false}
-                                    onProgressiveSliceLoadComplete={handleFourDSliceLoadComplete}
-                                    activeTool={mapCornerstoneTool(toolMode)}
-                                    windowCenter={wl}
-                                    windowWidth={ww}
-                                    onWindowLevelChange={(wc, wwidth) => {
-                                        setWl(Math.round(wc));
-                                        setWw(Math.round(wwidth));
-                                        setDisplayWl(Math.round(wc));
-                                        setDisplayWw(Math.round(wwidth));
-                                    }}
-                                    onStatusChange={setViewerLoadStatus}
-                                />
-                            ) : isFourDLungReconSeries && !fourDManifest ? (
-                                <div className="absolute inset-0 flex items-center justify-center text-xs text-white/70 bg-black">
-                                    {fourDManifestError
-                                        ? `4D 数据加载失败: ${fourDManifestError}`
-                                        : "正在加载 4D 影像数据…"}
-                                </div>
                             ) : (
                                 <CornerstoneMPRViewport
                                     ref={mprRef}
@@ -1684,8 +1627,6 @@ const ViewScreen = () => {
                                     action: () => {
                                         if (imageMode === "2D") {
                                             dicomViewerRef.current?.zoomIn();
-                                        } else if (isFourDLungReconSeries) {
-                                            fourDGridRef.current?.zoomIn();
                                         } else {
                                             mprRef.current?.zoomIn();
                                         }
@@ -1698,8 +1639,6 @@ const ViewScreen = () => {
                                     action: () => {
                                         if (imageMode === "2D") {
                                             dicomViewerRef.current?.zoomOut();
-                                        } else if (isFourDLungReconSeries) {
-                                            fourDGridRef.current?.zoomOut();
                                         } else {
                                             mprRef.current?.zoomOut();
                                         }
@@ -1712,8 +1651,6 @@ const ViewScreen = () => {
                                     action: () => {
                                         if (imageMode === "2D") {
                                             dicomViewerRef.current?.fit();
-                                        } else if (isFourDLungReconSeries) {
-                                            fourDGridRef.current?.fit();
                                         } else {
                                             mprRef.current?.resetAll();
                                         }
@@ -1726,12 +1663,6 @@ const ViewScreen = () => {
                                     action: () => {
                                         if (imageMode === "2D") {
                                             dicomViewerRef.current?.reset();
-                                            setDisplayWw(defaultWindowRef.current.ww);
-                                            setDisplayWl(defaultWindowRef.current.wl);
-                                        } else if (isFourDLungReconSeries) {
-                                            fourDGridRef.current?.reset();
-                                            setWw(defaultWindowRef.current.ww);
-                                            setWl(defaultWindowRef.current.wl);
                                             setDisplayWw(defaultWindowRef.current.ww);
                                             setDisplayWl(defaultWindowRef.current.wl);
                                         } else {
