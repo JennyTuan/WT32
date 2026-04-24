@@ -36,16 +36,17 @@ function PhaseThumbnail({
   const imageUrl = getFourDImageUrl(phaseIndex, "axial", slice);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-950 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
-      <div className="border-b border-slate-700/80 bg-slate-900/95 px-2 py-1.5 text-[10px] font-bold text-slate-100">
-        Phase {PHASE_LABELS[phaseIndex]}
+    <div className="group flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-950 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition hover:border-blue-400/70 hover:shadow-md">
+      <div className="flex items-center justify-between border-b border-slate-700/80 bg-slate-900/95 px-2.5 py-1.5 text-[10px] font-bold text-slate-100">
+        <span>Phase {PHASE_LABELS[phaseIndex]}</span>
+        {loaded && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />}
       </div>
       <button
         type="button"
         onDoubleClick={() => onDoubleClick({ phaseIndex, bedNumber, imageUrl })}
-        className="relative block aspect-[4/3] w-full bg-black text-left"
+        className="relative block min-h-0 w-full flex-1 bg-black text-left"
       >
-        <img src={imageUrl} alt="" draggable={false} className="h-full w-full object-contain" />
+        <img src={imageUrl} alt="" draggable={false} className="absolute inset-0 h-full w-full object-contain" />
         {!loaded && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-950/72">
             <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-[10px] font-bold text-slate-100">
