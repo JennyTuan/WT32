@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ChevronRight, LoaderCircle } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronRight,
+  Database,
+  LoaderCircle,
+} from "lucide-react";
 import * as dicomParser from "dicom-parser";
 import {
   FOUR_D_DICOM_MP_IDS,
@@ -197,17 +204,43 @@ function PhaseThumbnail({
     ((phase.completedBeds + partialBedProgress) / Math.max(totalBeds, 1)) * 100,
   );
   const canOpenFullscreen = !!phase.previewUrl;
+  const statusConfig = {
+    waiting: {
+      label: phase.completedBeds > 0 ? "排队中" : "待加载",
+      dot: "bg-slate-400",
+      text: "text-slate-300",
+      emphasis: "",
+      progress: "bg-[#4D94FF]",
+    },
+    loading: {
+      label: `床位 ${phase.activeBedNumber ?? "-"} 加载中`,
+      dot: "bg-[#4D94FF]",
+      text: "text-[#BFDBFE]",
+      emphasis: "ring-1 ring-inset ring-[#4D94FF]/80 z-[1]",
+      progress: "bg-[#4D94FF]",
+    },
+    done: {
+      label: "已完成",
+      dot: "bg-emerald-400",
+      text: "text-emerald-300",
+      emphasis: "",
+      progress: "bg-emerald-400",
+    },
+    error: {
+      label: "加载失败",
+      dot: "bg-rose-400",
+      text: "text-rose-300",
+      emphasis: "ring-1 ring-inset ring-rose-500/80 z-[1]",
+      progress: "bg-rose-500",
+    },
+  }[phase.status];
 
   return (
-    <div className="group flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-950 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition hover:border-blue-400/70 hover:shadow-md">
-      <div className="flex items-center justify-between border-b border-slate-700/80 bg-slate-900/95 px-2.5 py-1.5 text-[10px] font-bold text-slate-100">
-        <span>Phase {phaseLabel}</span>
-        <span className="text-[9px] text-slate-300">{phase.completedBeds}/{totalBeds} beds</span>
-      </div>
-
+    <div className={`group relative h-full min-h-0 overflow-hidden bg-black transition ${statusConfig.emphasis}`}>
       <button
         type="button"
         disabled={!canOpenFullscreen}
+        title={canOpenFullscreen ? "双击放大预览" : undefined}
         onDoubleClick={() => {
           if (!phase.previewUrl) return;
           onDoubleClick({
@@ -217,54 +250,55 @@ function PhaseThumbnail({
             imageUrl: phase.previewUrl,
           });
         }}
-        className="relative block min-h-0 w-full flex-1 bg-black text-left disabled:cursor-default"
+        className="relative block h-full min-h-0 w-full bg-black text-left disabled:cursor-default"
       >
         {phase.previewUrl ? (
           <img src={phase.previewUrl} alt="" draggable={false} className="absolute inset-0 h-full w-full object-contain" />
         ) : (
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(37,99,235,0.22),rgba(2,6,23,0.96)_72%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,23,42,0.94),rgba(2,6,23,1))]">
+            <Database className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-slate-700" size={28} strokeWidth={1.5} />
+          </div>
         )}
 
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/80 to-transparent px-2 py-2 text-white">
-          <div className="mb-1 h-1.5 overflow-hidden rounded-full bg-white/15">
+        <div className="absolute left-2 top-2 flex items-center gap-1.5 bg-black/55 px-2 py-1 text-[10px] font-black text-white backdrop-blur-sm">
+          <span className={`h-2 w-2 rounded-full ${statusConfig.dot} ${phase.status === "loading" ? "animate-pulse" : ""}`} />
+          <span>Phase {phaseLabel}</span>
+        </div>
+        <div className="absolute right-2 top-2 bg-black/55 px-2 py-1 font-mono text-[10px] font-black text-slate-100 backdrop-blur-sm">
+          {progressPercent}%
+        </div>
+
+        {canOpenFullscreen && (
+          <div className="absolute left-2 top-8 hidden bg-black/55 px-2 py-1 text-[9px] font-bold text-slate-200 group-hover:block">
+            双击放大
+          </div>
+        )}
+
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/82 to-transparent px-2.5 pb-1.5 pt-6 text-white">
+          <div className="mb-1 h-1 overflow-hidden bg-white/15">
             <div
-              className={`h-full rounded-full transition-all ${
-                phase.status === "error"
-                  ? "bg-rose-500"
-                  : phase.status === "done"
-                    ? "bg-emerald-400"
-                    : "bg-[#4D94FF]"
-              }`}
+              className={`h-full transition-all ${statusConfig.progress}`}
               style={{ width: `${progressPercent}%` }}
             />
           </div>
 
-          {phase.status === "loading" && (
-            <div className="flex items-center justify-between text-[10px] font-bold">
-              <span>床位 {phase.activeBedNumber} 加载中</span>
-              <span>{phase.activeFileCount}/{FOUR_D_DICOM_SLICES_PER_PHASE}</span>
-            </div>
-          )}
-
-          {phase.status === "done" && (
-            <div className="text-[10px] font-bold text-emerald-300">已完成全部床位拼接</div>
-          )}
-
-          {phase.status === "waiting" && phase.completedBeds > 0 && (
-            <div className="text-[10px] font-bold text-slate-200">等待下一个床位段并入</div>
-          )}
-
-          {phase.status === "waiting" && phase.completedBeds === 0 && (
-            <div className="text-[10px] font-bold text-slate-400">等待队列中</div>
-          )}
-
+          <div className="flex items-center justify-between gap-2">
+            <span className={`truncate text-[10px] font-bold ${statusConfig.text}`}>{statusConfig.label}</span>
+            {phase.status === "loading" ? (
+              <span className="font-mono text-[10px] font-bold text-slate-200">
+                {phase.activeFileCount}/{FOUR_D_DICOM_SLICES_PER_PHASE}
+              </span>
+            ) : (
+              <span className="font-mono text-[10px] font-bold text-slate-300">{phase.completedBeds}/{totalBeds}</span>
+            )}
+          </div>
           {phase.status === "error" && (
-            <div className="text-[10px] font-bold text-rose-300">{phase.errorMessage ?? "加载失败"}</div>
+            <div className="mt-1 truncate text-[9px] font-bold text-rose-300">{phase.errorMessage ?? "加载失败"}</div>
           )}
         </div>
 
         {phase.status === "loading" && (
-          <div className="absolute right-2 top-8 flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-1 text-[9px] font-bold text-slate-100">
+          <div className="absolute right-2 top-8 flex items-center gap-1 border border-white/10 bg-black/55 px-2 py-1 text-[9px] font-bold text-slate-100">
             <LoaderCircle size={10} className="animate-spin" />
             实时
           </div>
@@ -376,7 +410,7 @@ export default function ImageLoadScreen() {
           } catch (error) {
             if (controller.signal.aborted) return;
             const message = error instanceof Error ? error.message : String(error);
-            setGlobalError(`Failed at bed ${bedNumber}, phase ${PHASE_LABELS[phaseIndex]}: ${message}`);
+            setGlobalError(`床位 ${bedNumber} · 相位 ${PHASE_LABELS[phaseIndex]} 加载失败：${message}`);
             setPhaseLoads((prev) =>
               prev.map((phase) =>
                 phase.phaseIndex !== phaseIndex
@@ -408,19 +442,49 @@ export default function ImageLoadScreen() {
   const completedTaskCount = phaseLoads.reduce((sum, phase) => sum + phase.completedBeds, 0);
   const totalTaskCount = totalBeds * PHASE_LABELS.length;
   const allLoaded = completedTaskCount === totalTaskCount && !globalError;
+  const overallProgress = Math.round((completedTaskCount / Math.max(totalTaskCount, 1)) * 100);
+  const donePhaseCount = phaseLoads.filter((phase) => phase.status === "done").length;
 
   return (
     <div className="relative flex h-full select-none flex-col bg-[#E5E7EB] text-slate-700">
-      <div className="flex min-h-0 flex-1 overflow-hidden p-3">
+      <header className="shrink-0 border-b border-slate-300 bg-[#F8FAFC] px-5 py-3">
+        <div className="flex items-center justify-between gap-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <Activity size={17} className="text-[#1E64F0]" />
+              <h1 className="text-[15px] font-black text-slate-800">4D 图像加载</h1>
+            </div>
+            <div className="mt-1 text-[11px] font-medium text-slate-500">
+              正在按床位合并 10 个呼吸相位，生成相位筛选预览。
+            </div>
+          </div>
+          <div className="grid w-[280px] grid-cols-2 gap-2">
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+              <div className="text-[10px] font-black uppercase text-slate-400">Overall</div>
+              <div className="mt-0.5 text-[18px] font-black tabular-nums text-slate-800">{overallProgress}%</div>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+              <div className="text-[10px] font-black uppercase text-slate-400">Phase</div>
+              <div className="mt-0.5 text-[18px] font-black tabular-nums text-slate-800">{donePhaseCount}/{PHASE_LABELS.length}</div>
+            </div>
+          </div>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+          <div className="h-full rounded-full bg-[#1E64F0] transition-all duration-300" style={{ width: `${overallProgress}%` }} />
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {globalError && (
-            <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] font-medium text-rose-700">
+            <div className="absolute left-4 right-4 top-[92px] z-10 flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] font-medium text-rose-700 shadow-lg">
+              <AlertTriangle size={15} />
               {globalError}
             </div>
           )}
 
-          <div className="min-h-0 flex-1 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="grid h-full min-h-0 grid-cols-5 grid-rows-2 gap-2">
+          <div className="min-h-0 flex-1 overflow-hidden bg-[#071426]">
+            <div className="grid h-full min-h-0 grid-cols-5 grid-rows-2 gap-px">
               {phaseLoads.map((phase) => (
                 <PhaseThumbnail
                   key={phase.phaseIndex}
@@ -446,15 +510,23 @@ export default function ImageLoadScreen() {
             <span className="font-medium">相位筛选</span>
           </div>
         </div>
-        <button
-          onClick={() => navigate("/phase-filter", { state: phaseFilterState })}
-          disabled={!allLoaded}
-          className={`flex items-center gap-1.5 rounded-md px-6 py-2 text-[12px] font-bold text-white shadow-sm ${
-            !allLoaded ? "cursor-not-allowed bg-slate-300" : "bg-[#4D94FF] hover:bg-blue-600"
-          }`}
-        >
-          下一步：相位筛选 <ChevronRight size={14} />
-        </button>
+        <div className="flex items-center gap-3">
+          {allLoaded && (
+            <div className="flex items-center gap-1.5 text-[12px] font-bold text-emerald-600">
+              <CheckCircle2 size={15} />
+              全部相位加载完成
+            </div>
+          )}
+          <button
+            onClick={() => navigate("/phase-filter", { state: phaseFilterState })}
+            disabled={!allLoaded}
+            className={`flex items-center gap-1.5 rounded-md px-6 py-2 text-[12px] font-bold text-white shadow-sm ${
+              !allLoaded ? "cursor-not-allowed bg-slate-300" : "bg-[#4D94FF] hover:bg-blue-600"
+            }`}
+          >
+            下一步：相位筛选 <ChevronRight size={14} />
+          </button>
+        </div>
       </footer>
 
       {fullscreenImage && (
