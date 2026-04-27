@@ -7,12 +7,11 @@ import {
   type Types,
   volumeLoader,
 } from '@cornerstonejs/core';
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type RefObject } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type RefObject } from 'react';
 
 import {
   buildWadoImageId,
   CornerstoneToolsEnums,
-  applyCanvasImagePostProcessing,
   destroyToolGroup,
   getOrCreateToolGroup,
   initCornerstone,
@@ -34,6 +33,15 @@ type VolumePreset = 'CT-Lung' | 'CT-Soft-Tissue';
 type InterpolationMode = 'NEAREST' | 'LINEAR' | 'FAST_LINEAR';
 type VoiLutMode = 'LINEAR' | 'LINEAR_EXACT' | 'SIGMOID';
 type PanelId = 'axial' | 'coronal' | 'sagittal';
+type NumericTypedArray =
+  | Int8Array
+  | Uint8Array
+  | Int16Array
+  | Uint16Array
+  | Int32Array
+  | Uint32Array
+  | Float32Array
+  | Float64Array;
 
 interface CornerstoneMPRViewportProps {
   imageUrls: string[];
@@ -165,6 +173,85 @@ function getVoiLutFunction(mode: VoiLutMode) {
   return Enums.VOILUTFunctionType.LINEAR;
 }
 
+function clampIndex(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function blurVolumeScalarData(source: NumericTypedArray, dimensions: Types.Point3, radius: number) {
+  if (radius <= 0) return Float32Array.from(source);
+
+  const [width, height, depth] = dimensions;
+  const sliceSize = width * height;
+  const tempX = new Float32Array(source.length);
+  const tempY = new Float32Array(source.length);
+  const output = new Float32Array(source.length);
+  const diameter = radius * 2 + 1;
+
+  for (let z = 0; z < depth; z += 1) {
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let sum = 0;
+        for (let dx = -radius; dx <= radius; dx += 1) {
+          sum += source[z * sliceSize + y * width + clampIndex(x + dx, 0, width - 1)];
+        }
+        tempX[z * sliceSize + y * width + x] = sum / diameter;
+      }
+    }
+  }
+
+  for (let z = 0; z < depth; z += 1) {
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let sum = 0;
+        for (let dy = -radius; dy <= radius; dy += 1) {
+          sum += tempX[z * sliceSize + clampIndex(y + dy, 0, height - 1) * width + x];
+        }
+        tempY[z * sliceSize + y * width + x] = sum / diameter;
+      }
+    }
+  }
+
+  for (let z = 0; z < depth; z += 1) {
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let sum = 0;
+        for (let dz = -radius; dz <= radius; dz += 1) {
+          sum += tempY[clampIndex(z + dz, 0, depth - 1) * sliceSize + y * width + x];
+        }
+        output[z * sliceSize + y * width + x] = sum / diameter;
+      }
+    }
+  }
+
+  return output;
+}
+
+function createFilteredVolumeScalarData(source: NumericTypedArray, dimensions: Types.Point3, smoothing: number, sharpening: number) {
+  const denoiseRadius = smoothing > 0 ? Math.max(1, Math.round(smoothing * 2)) : 0;
+  const denoised = denoiseRadius > 0 ? blurVolumeScalarData(source, dimensions, denoiseRadius) : Float32Array.from(source);
+
+  if (sharpening <= 0) {
+    return denoised;
+  }
+
+  const maskRadius = Math.max(1, Math.round(1 + sharpening * 1.5));
+  const blurred = blurVolumeScalarData(denoised, dimensions, maskRadius);
+  const output = new Float32Array(denoised.length);
+  const amount = sharpening * 1.6;
+
+  for (let i = 0; i < output.length; i += 1) {
+    output[i] = denoised[i] + (denoised[i] - blurred[i]) * amount;
+  }
+
+  return output;
+}
+
+function getVolumeScalarData(volume: Types.IImageVolume | Types.IStreamingImageVolume) {
+  const withGetter = volume as typeof volume & { getScalarData?: () => NumericTypedArray };
+  const scalarData = withGetter.getScalarData?.() ?? volume.voxelManager?.getScalarData?.();
+  return scalarData as NumericTypedArray | undefined;
+}
+
 const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRViewportProps>(
   function CornerstoneMPRViewport(
     {
@@ -231,6 +318,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     // don't tear down + rebuild the whole cornerstone scene on every tick.
     const [engineReady, setEngineReady] = useState(false);
     const loadedVolumeIdsRef = useRef<Set<string>>(new Set());
+    const filteredVolumeIdsRef = useRef<Set<string>>(new Set());
     const hasFirstRenderRef = useRef(false);
     // Latest imageUrls reference, read by the long-lived prewarm walker so it
     // can skip the active phase without being restarted on every cine tick.
@@ -238,6 +326,49 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     useEffect(() => {
       currentImageUrlsRef.current = imageUrls;
     }, [imageUrls]);
+
+    const getDisplayVolumeId = useCallback((sourceVolumeId: string, sourceVolume: Types.IImageVolume | Types.IStreamingImageVolume) => {
+      if (smoothing <= 0 && sharpening <= 0) return sourceVolumeId;
+
+      const smoothKey = Math.round(smoothing * 100);
+      const sharpKey = Math.round(sharpening * 100);
+      const filteredVolumeId = `${sourceVolumeId}:filtered:s${smoothKey}:h${sharpKey}`;
+      if (cache.getVolume(filteredVolumeId)) return filteredVolumeId;
+
+      const scalarData = getVolumeScalarData(sourceVolume);
+      if (!scalarData) return sourceVolumeId;
+
+      const filteredScalarData = createFilteredVolumeScalarData(scalarData, sourceVolume.dimensions, smoothing, sharpening);
+      const filteredVolume = volumeLoader.createLocalVolume(filteredVolumeId, {
+        metadata: sourceVolume.metadata,
+        dimensions: sourceVolume.dimensions,
+        spacing: sourceVolume.spacing,
+        origin: sourceVolume.origin,
+        direction: sourceVolume.direction,
+        scalarData: filteredScalarData,
+        referencedImageIds: sourceVolume.imageIds,
+        referencedVolumeId: sourceVolumeId,
+        targetBuffer: { type: 'Float32Array' },
+      });
+      filteredVolume.voxelManager?.setCompleteScalarDataArray?.(filteredScalarData);
+      filteredVolume.modified();
+      loadedVolumeIdsRef.current.add(filteredVolumeId);
+      filteredVolumeIdsRef.current.add(filteredVolumeId);
+
+      return filteredVolumeId;
+    }, [sharpening, smoothing]);
+
+    useEffect(() => {
+      filteredVolumeIdsRef.current.forEach((id) => {
+        try {
+          cache.removeVolumeLoadObject(id);
+        } catch {
+          // ok
+        }
+        loadedVolumeIdsRef.current.delete(id);
+      });
+      filteredVolumeIdsRef.current.clear();
+    }, [sharpening, smoothing]);
 
     useEffect(() => {
       onStatusChange?.(status);
@@ -412,6 +543,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           try { cache.removeVolumeLoadObject(id); } catch { /* ok */ }
         });
         loadedVolumeIdsRef.current.clear();
+        filteredVolumeIdsRef.current.clear();
         engineRef.current?.destroy();
         engineRef.current = null;
         lastVoiRef.current = null;
@@ -483,7 +615,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
             if (cancelled) return;
           }
 
-          volumeIdRef.current = volId;
+          const displayVolumeId = getDisplayVolumeId(volId, vol);
+          volumeIdRef.current = displayVolumeId;
 
           // Snapshot cameras so we can restore pan/zoom/slice after the swap.
           const cameras = hasFirstRenderRef.current
@@ -496,7 +629,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
                 .filter((x): x is { id: string; camera: Types.ICamera } => x !== null)
             : [];
 
-          await setVolumesForViewports(engine, [{ volumeId: volId }], activeViewportIds);
+          await setVolumesForViewports(engine, [{ volumeId: displayVolumeId }], activeViewportIds);
           if (cancelled) return;
 
           if (hasFirstRenderRef.current) {
@@ -550,7 +683,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       // window-level effect below keeps them in sync without thrashing
       // the volume loader.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [imageUrls, engineReady, activeViewportIds]);
+    }, [imageUrls, engineReady, activeViewportIds, getDisplayVolumeId]);
 
     // ── Background phase pre-warm ────────────────────────────────────────────
     // Walk the URL-sets one at a time and create + fully load each volume in
@@ -755,8 +888,6 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         invert,
         interpolationType: getInterpolationType(interpolationMode),
         VOILUTFunction: getVoiLutFunction(voiLutMode),
-        smoothing,
-        sharpening,
       };
       const panelViewportIds = [vpAxial, vpCoronal, vpSagittal];
       panelViewportIds.forEach((id) => {
@@ -787,52 +918,6 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       }
       fourthVp.render();
     }, [interpolationMode, invert, layoutMode, renderMode, sharpening, slabThickness, smoothing, status, voiLutMode, volumePanelMode, volumePreset, volumeSampleDistanceMultiplier, vpAxial, vpCoronal, vpSagittal, vpSlab]);
-
-    useEffect(() => {
-      if (status !== 'ready') return;
-      const panelRefs = layoutMode === 'three-up'
-        ? [axialRef, coronalRef, sagittalRef]
-        : [axialRef, coronalRef, sagittalRef, slabRef];
-      const frameIds = new Map<HTMLElement, number>();
-
-      const runPostProcessing = (element: HTMLElement) => {
-        const existingFrame = frameIds.get(element);
-        if (existingFrame !== undefined) {
-          window.cancelAnimationFrame(existingFrame);
-        }
-
-        const frameId = window.requestAnimationFrame(() => {
-          frameIds.delete(element);
-          try {
-            applyCanvasImagePostProcessing(element, smoothing, sharpening);
-          } catch (error) {
-            console.warn('MPR canvas post-processing skipped.', error);
-          }
-        });
-        frameIds.set(element, frameId);
-      };
-
-      const cleanups = panelRefs
-        .map((refEl) => refEl.current)
-        .filter((element): element is HTMLDivElement => !!element)
-        .map((element) => {
-          const handler = () => runPostProcessing(element);
-          element.addEventListener(Enums.Events.IMAGE_RENDERED, handler);
-          runPostProcessing(element);
-          return () => element.removeEventListener(Enums.Events.IMAGE_RENDERED, handler);
-        });
-
-      activeViewportIds.forEach((id) => {
-        const vp = engineRef.current?.getViewport(id);
-        vp?.render();
-      });
-
-      return () => {
-        cleanups.forEach((cleanup) => cleanup());
-        frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId));
-        frameIds.clear();
-      };
-    }, [activeViewportIds, layoutMode, sharpening, smoothing, status]);
 
     useEffect(() => {
       const engine = engineRef.current;
