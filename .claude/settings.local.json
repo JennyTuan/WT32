@@ -46,7 +46,11 @@
       "Bash(npx kill-port:*)",
       "Bash(findstr :5175)",
       "Bash(echo \"---EXIT---$?\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(npm list *)",
+      "Bash(node build_prd.js)",
+      "Bash(node -e \"const s=require\\('fs'\\).readFileSync\\('build_prd.js','utf8'\\); console.log\\(s.substring\\(s.indexOf\\('4D 胸部'\\)-30, s.indexOf\\('4D 胸部'\\)+30\\)\\);\")",
+      "Bash(python \"C:/Users/24606/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/b81a614f-51be-4b1f-8c7b-88a3f8885dd0/21eeda3a-b06d-409a-be02-319636f4d6d8/skills/docx/scripts/office/validate.py\" 4D_CT_扫描_PRD.docx)"
     ]
   }
 }
