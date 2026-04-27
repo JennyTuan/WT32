@@ -21,13 +21,14 @@ import {
     ZoomIn,
     ZoomOut,
     RotateCcw,
+    Shield,
 } from "lucide-react";
-import { fetchSelectedScanSession, updateSelectedScanSessionHelicalParam } from "../lib/scanSession";
-import type { ApiScanSessionDetail } from "../lib/scanSession";
+import { fetchScanSessionDomConfig, fetchSelectedScanSession, updateSelectedScanSessionHelicalParam } from "../lib/scanSession";
+import type { ApiScanSessionDetail, ApiScanSessionDomConfig } from "../lib/scanSession";
 
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
-import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
+import ScanConfirmScreen, { PatientConfirmationModal, type DomDisplayData } from "./ScanConfirmScreen";
 import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,11 @@ const FOUR_D_SCOUT_SERIES = {
     fallbackWindowWidth: 500,
     fallbackWindowLevel: 50,
 };
+const DOM_ORGAN_LABEL: Record<string, string> = {
+    breast: "乳腺", eye_lens: "晶状体", thyroid: "甲状腺", gonad: "性腺", auto: "自动推荐",
+};
+const DOM_STRENGTH_LABEL: Record<string, string> = { low: "低", medium: "中", high: "高" };
+const DOM_DOSE_CHANGE: Record<string, number> = { low: -8, medium: -15, high: -25 };
 
 function WindowLevelIcon({ size = 14 }: { size?: number }) {
     return (
@@ -716,6 +722,7 @@ const GatingHelicalConfirmScreen = () => {
     const [scanStarted, setScanStarted] = useState(false);
     const [scanCompleted, setScanCompleted] = useState(false);
     const [sessionData, setSessionData] = useState<ApiScanSessionDetail | null>(null);
+    const [domConfig, setDomConfig] = useState<ApiScanSessionDomConfig | null>(null);
 
     // Physical Button states
     const [showPhysicalButton, setShowPhysicalButton] = useState(false);
@@ -842,6 +849,36 @@ const GatingHelicalConfirmScreen = () => {
     useEffect(() => {
         fetchSelectedScanSession().then(setSessionData);
     }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        const loadDomConfig = async () => {
+            if (!sessionData?.id) return;
+            try {
+                const config = await fetchScanSessionDomConfig(sessionData.id);
+                if (!cancelled) setDomConfig(config);
+            } catch (error) {
+                console.error("Failed to load DOM config for gating confirm screen.", error);
+                if (!cancelled) setDomConfig(null);
+            }
+        };
+        void loadDomConfig();
+        return () => {
+            cancelled = true;
+        };
+    }, [sessionData?.id]);
+
+    const domData: DomDisplayData | undefined = useMemo(() => {
+        if (!domConfig || domConfig.mode === "off") return undefined;
+        const dose = domConfig.strength ? DOM_DOSE_CHANGE[domConfig.strength] ?? 0 : 0;
+        return {
+            mode: "已启用",
+            organ: DOM_ORGAN_LABEL[domConfig.protected_organs ?? "auto"] ?? "自动推荐",
+            direction: "自动",
+            strength: DOM_STRENGTH_LABEL[domConfig.strength ?? "medium"] ?? "中",
+            doseChange: `${dose > 0 ? "+" : ""}${dose}%`,
+        };
+    }, [domConfig]);
 
     // Clean up timers on unmount
     useEffect(() => {
@@ -1057,6 +1094,16 @@ const GatingHelicalConfirmScreen = () => {
                                     <span className="mt-px text-[12px] font-black text-[#37474F]">{value}</span>
                                 </div>
                             ))}
+                        </div>
+                        <div className={`mt-2 h-[28px] rounded-md border px-2 flex items-center gap-2 ${
+                            domData
+                                ? "border-[#BFDBFE] bg-gradient-to-r from-[#EFF6FF] to-[#ECFDF5]"
+                                : "border-[#CBD5E1] bg-[#F8FAFC]"
+                        }`}>
+                            <Shield size={13} className={domData ? "text-[#2563EB]" : "text-[#94A3B8]"} />
+                            <span className={`text-[10px] font-black ${domData ? "text-[#1D4ED8]" : "text-[#94A3B8]"}`}>
+                                {domData ? `DOM ${domData.organ} · ${domData.strength}` : "DOM 关闭"}
+                            </span>
                         </div>
                         <button className="w-full h-[28px] mt-2 rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
                             <Info size={14} /> 参数详情
@@ -1289,6 +1336,7 @@ const GatingHelicalConfirmScreen = () => {
                     dlp: (sessionData?.series.find(s => s.series_type === "helical")?.helical_param?.dlp?.toFixed(2)) || "1168.50",
                     protocol: "断层扫描"
                 }}
+                domData={domData}
             />
         </div>
     );

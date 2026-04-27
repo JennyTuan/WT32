@@ -430,8 +430,10 @@ const ScanConfirmScreen = ({
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
     const [showPatientConfirm, setShowPatientConfirm] = useState(false);
+    const [showDomRiskConfirm, setShowDomRiskConfirm] = useState(false);
     const [laserActive, setLaserActive] = useState(false);
     const [scoutDoseDisplayParams, setScoutDoseDisplayParams] = useState<ScoutDoseDisplayParams>(DEFAULT_SCOUT_DOSE_PARAMS);
+    const [domConfig, setDomConfig] = useState<ApiScanSessionDomConfig | null>(null);
     const isFourDScoutWorkflow = forceFourDScoutWorkflow || scanSession?.acquisition_type === "four_d";
 
     const buildGroupsFromWorkflowPlans = useCallback((): ProtocolGroup[] => {
@@ -569,6 +571,31 @@ const ScanConfirmScreen = ({
         dlp: scoutDoseDisplayParams.doseDlp,
         protocol: currentProtocolLabel,
     };
+    const showDomCard = parameterPanelMode === "tomographicScan" || parameterPanelMode === "helicalScan";
+    const domDosePercent = domConfig?.strength ? DOM_DOSE_CHANGE[domConfig.strength] ?? 0 : 0;
+    const domDisplayData: DomDisplayData | undefined = useMemo(() => {
+        if (!domConfig || domConfig.mode === "off") return undefined;
+        return {
+            mode: "已启用",
+            organ: DOM_ORGAN_LABEL[domConfig.protected_organs ?? "auto"] ?? (domConfig.protected_organs ?? "自动推荐"),
+            direction: DOM_DIRECTION_LABEL[domConfig.direction ?? "auto"] ?? (domConfig.direction ?? "自动"),
+            strength: DOM_STRENGTH_LABEL[domConfig.strength ?? "medium"] ?? (domConfig.strength ?? "中"),
+            doseChange: `${domDosePercent > 0 ? "+" : ""}${domDosePercent}%`,
+        };
+    }, [domConfig, domDosePercent]);
+    const domRiskMessages = useMemo(() => {
+        if (!domConfig || domConfig.mode === "off") return [];
+        const risks: string[] = [];
+        const normalizedBodyPart = (scanSession?.body_part ?? "").toLowerCase();
+        const conflictKeywords = ORGAN_BODY_CONFLICT[domConfig.protected_organs ?? ""];
+        if (conflictKeywords?.some((keyword) => normalizedBodyPart.includes(keyword.toLowerCase()))) {
+            risks.push("当前 DOM 保护器官可能与本次诊断目标一致，可能影响目标区域图像质量。");
+        }
+        if (!domConfig.auto_ma_linked) {
+            risks.push("当前 DOM 未与 Auto mA 联动，剂量调制可能偏离预期。");
+        }
+        return risks;
+    }, [domConfig, scanSession?.body_part]);
     const handleOpenDetails = () => {
         const detailTarget = parameterPanelMode === "helicalScan"
             ? "helical"
@@ -605,6 +632,28 @@ const ScanConfirmScreen = ({
             setBedMode(direction === "IN" ? "in" : "out");
         }
     }, [parameterPanelMode, resolvedTomographicScanDisplayParams.scanningDirection, resolvedHelicalScanDisplayParams.scanningDirection]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const loadDomConfig = async () => {
+            const scanSessionId = scanSession?.id ?? loadSelectedScanSessionId();
+            if (!scanSessionId) {
+                if (!cancelled) setDomConfig(null);
+                return;
+            }
+            try {
+                const config = await fetchScanSessionDomConfig(scanSessionId);
+                if (!cancelled) setDomConfig(config);
+            } catch (error) {
+                console.error("Failed to load scan session DOM config.", error);
+                if (!cancelled) setDomConfig(null);
+            }
+        };
+        void loadDomConfig();
+        return () => {
+            cancelled = true;
+        };
+    }, [scanSession?.id]);
 
     useEffect(() => {
         setExpandedSeqId(resolvedActiveSequenceId);
@@ -647,6 +696,17 @@ const ScanConfirmScreen = ({
         );
         setCheckedSeqIds([]);
         setShowDeleteConfirm(false);
+    };
+    const handleRequestExecuteScan = () => {
+        if (onExecuteScan) {
+            onExecuteScan();
+            return;
+        }
+        if (domRiskMessages.length > 0) {
+            setShowDomRiskConfirm(true);
+            return;
+        }
+        setShowPatientConfirm(true);
     };
 
     return (
@@ -1168,6 +1228,32 @@ const ScanConfirmScreen = ({
                                 </div>
                             )}
                         </div>
+                        {showDomCard && (
+                            <div className="px-2">
+                                {domDisplayData ? (
+                                    <div className="h-[60px] rounded-md border border-[#BFDBFE] bg-gradient-to-r from-[#EFF6FF] to-[#ECFDF5] px-2.5 py-2 flex items-center justify-between">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <Shield size={15} className="text-[#2563EB] shrink-0" />
+                                            <div className="min-w-0">
+                                                <div className="text-[10px] font-black text-[#1D4ED8]">DOM 已启用</div>
+                                                <div className="text-[11px] font-bold text-[#334155] truncate">
+                                                    {domDisplayData.organ} · {domDisplayData.direction} · {domDisplayData.strength}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-[9px] font-black text-[#64748B] uppercase">Dose</div>
+                                            <div className="text-[13px] font-black text-[#0F766E]">{domDisplayData.doseChange}</div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="h-[60px] rounded-md border border-[#CBD5E1] bg-[#F8FAFC] px-2.5 py-2 flex items-center gap-2">
+                                        <Shield size={14} className="text-[#94A3B8]" />
+                                        <div className="text-[11px] font-bold text-[#94A3B8]">DOM 关闭</div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         {/* Details Button */}
                         <div className="p-2 flex justify-center shrink-0">
@@ -1207,13 +1293,7 @@ const ScanConfirmScreen = ({
                 </div>
                 <div className="flex-1 flex justify-end">
                     <button
-                        onClick={() => {
-                            if (onExecuteScan) {
-                                onExecuteScan();
-                                return;
-                            }
-                            setShowPatientConfirm(true);
-                        }}
+                        onClick={handleRequestExecuteScan}
                         disabled={readOnlyMode && !onExecuteScan}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md transition-all uppercase text-[13px] ${readOnlyMode && !onExecuteScan ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
                     >
@@ -1321,6 +1401,25 @@ const ScanConfirmScreen = ({
                     checkType: selectedPatient.checkType ?? "CT Routine",
                 } : undefined}
                 scanData={currentScanData}
+                domData={domDisplayData}
+            />
+            <DomRiskConfirmModal
+                isOpen={showDomRiskConfirm}
+                risks={domRiskMessages}
+                onBack={() => setShowDomRiskConfirm(false)}
+                onContinue={async () => {
+                    const sessionId = scanSession?.id ?? loadSelectedScanSessionId();
+                    if (sessionId) {
+                        try {
+                            const updated = await updateScanSessionDomConfig(sessionId, { user_confirmed: true });
+                            setDomConfig(updated);
+                        } catch (error) {
+                            console.error("Failed to confirm DOM risk acknowledgement.", error);
+                        }
+                    }
+                    setShowDomRiskConfirm(false);
+                    setShowPatientConfirm(true);
+                }}
             />
         </div>
     );
@@ -1344,12 +1443,28 @@ interface ScanData {
     protocol: string;
 }
 
+export interface DomDisplayData {
+    mode: string;
+    organ: string;
+    direction: string;
+    strength: string;
+    doseChange: string;
+}
+
 interface PatientConfirmationModalProps {
     isOpen: boolean;
     onClose: () => void;
     onConfirm: () => void;
     patientData?: PatientData;
     scanData?: ScanData;
+    domData?: DomDisplayData;
+}
+
+interface DomRiskConfirmModalProps {
+    isOpen: boolean;
+    risks: string[];
+    onContinue: () => void;
+    onBack: () => void;
 }
 
 // 辅助组件：信息项
@@ -1377,7 +1492,8 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
         patientId: "P20260226001",
         checkType: "CT Routine"
     },
-    scanData = { ctdi: "12.45", dlp: "658.2", protocol: "定位像" }
+    scanData = { ctdi: "12.45", dlp: "658.2", protocol: "定位像" },
+    domData,
 }) => {
     if (!isOpen) return null;
 
@@ -1452,6 +1568,25 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                                     {scanData.protocol}
                                 </div>
                             </div>
+
+                            {domData && (
+                                <div className="bg-gradient-to-r from-[#ECFDF5] to-[#EFF6FF] rounded-[28px] p-5 border border-[#BBF7D0] flex items-center justify-between min-h-[100px]">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-xl bg-[#DCFCE7] text-[#15803D] flex items-center justify-center">
+                                            <Shield size={20} />
+                                        </div>
+                                        <div>
+                                            <div className="text-[10px] font-bold text-[#16A34A] uppercase">DOM Protection</div>
+                                            <div className="text-[15px] font-black text-[#166534]">{domData.organ} · {domData.strength}</div>
+                                            <div className="text-[12px] font-bold text-[#0F766E]">方向：{domData.direction}</div>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-[10px] font-bold text-[#16A34A] uppercase">Dose Δ</div>
+                                        <div className="text-[24px] font-black text-[#0F766E] leading-none">{domData.doseChange}</div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1478,6 +1613,44 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                             开始扫描
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const DomRiskConfirmModal = ({ isOpen, risks, onContinue, onBack }: DomRiskConfirmModalProps) => {
+    if (!isOpen) return null;
+
+    return (
+        <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-[#0F172A]/50 backdrop-blur-sm">
+            <div className="w-[540px] rounded-2xl bg-white border border-[#FED7AA] shadow-2xl overflow-hidden">
+                <div className="px-6 py-4 bg-[#FFF7ED] border-b border-[#FED7AA] flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[#FFEDD5] flex items-center justify-center text-[#EA580C]">
+                        <ShieldAlert size={20} />
+                    </div>
+                    <div>
+                        <div className="text-[16px] font-black text-[#9A3412]">DOM 风险二次确认</div>
+                        <div className="text-[12px] text-[#C2410C]">请确认已知晓以下风险后再继续扫描。</div>
+                    </div>
+                </div>
+                <div className="px-6 py-5">
+                    <div className="rounded-xl border border-[#FDBA74] bg-[#FFF7ED] p-4">
+                        <div className="text-[12px] font-black text-[#C2410C] mb-2">风险提示</div>
+                        <ul className="list-disc pl-5 space-y-1 text-[13px] text-[#9A3412]">
+                            {risks.map((risk) => (
+                                <li key={risk}>{risk}</li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+                <div className="px-6 pb-5 flex justify-end gap-3">
+                    <button onClick={onBack} className="h-[40px] px-5 rounded-lg border border-[#CBD5E1] text-[#475569] font-bold hover:bg-slate-50">
+                        返回调整
+                    </button>
+                    <button onClick={onContinue} className="h-[40px] px-5 rounded-lg bg-[#F97316] text-white font-bold hover:bg-[#EA580C]">
+                        继续扫描
+                    </button>
                 </div>
             </div>
         </div>
