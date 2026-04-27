@@ -14,6 +14,11 @@ interface DicomViewerProps {
     windowWidth?: number;
     onWindowLevelChange?: (windowCenter: number, windowWidth: number) => void;
     windowSyncKey?: number;
+    invert?: boolean;
+    interpolationMode?: "LINEAR" | "NEAREST" | "FAST_LINEAR";
+    voiLutMode?: "LINEAR" | "LINEAR_EXACT" | "SIGMOID";
+    smoothing?: number;
+    sharpening?: number;
 }
 
 const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function DicomViewer(
@@ -28,6 +33,11 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
         windowWidth = 400,
         onWindowLevelChange,
         windowSyncKey,
+        invert,
+        interpolationMode,
+        voiLutMode,
+        smoothing,
+        sharpening,
     },
     ref
 ) {
@@ -54,6 +64,11 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
             windowWidth={windowWidth}
             onWindowLevelChange={onWindowLevelChange}
             windowSyncKey={windowSyncKey}
+            invert={invert}
+            interpolationMode={interpolationMode}
+            voiLutMode={voiLutMode}
+            smoothing={smoothing}
+            sharpening={sharpening}
             className="w-full h-full relative overflow-hidden select-none"
         />
     );

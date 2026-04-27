@@ -5,6 +5,7 @@ import { annotation } from '@cornerstonejs/tools';
 import {
   buildWadoImageId,
   CornerstoneToolsEnums,
+  applyCanvasImagePostProcessing,
   destroyToolGroup,
   getOrCreateToolGroup,
   initCornerstone,
@@ -12,6 +13,17 @@ import {
 } from '../lib/cornerstone/initCornerstone';
 
 type ActiveTool = 'pan' | 'zoom' | 'zoomin' | 'window' | 'ruler' | 'eraser' | 'zoomout' | 'fit' | 'flip' | 'reset' | 'annotate';
+type InterpolationMode = 'NEAREST' | 'LINEAR' | 'FAST_LINEAR';
+type VoiLutMode = 'LINEAR' | 'LINEAR_EXACT' | 'SIGMOID';
+type AppliedDisplayProperties = {
+  lower: number;
+  upper: number;
+  invert: boolean;
+  interpolationMode: InterpolationMode;
+  voiLutMode: VoiLutMode;
+  smoothing: number;
+  sharpening: number;
+};
 
 export type CornerstoneViewportHandle = {
   zoomIn: () => void;
@@ -33,10 +45,27 @@ interface CornerstoneStackViewportProps {
   onWindowLevelChange?: (windowCenter: number, windowWidth: number) => void;
   className?: string;
   windowSyncKey?: number;
+  invert?: boolean;
+  interpolationMode?: InterpolationMode;
+  voiLutMode?: VoiLutMode;
+  smoothing?: number;
+  sharpening?: number;
 }
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getInterpolationType(mode: InterpolationMode) {
+  if (mode === 'NEAREST') return Enums.InterpolationType.NEAREST;
+  if (mode === 'FAST_LINEAR') return Enums.InterpolationType.FAST_LINEAR;
+  return Enums.InterpolationType.LINEAR;
+}
+
+function getVoiLutFunction(mode: VoiLutMode) {
+  if (mode === 'SIGMOID') return Enums.VOILUTFunctionType.SAMPLED_SIGMOID;
+  if (mode === 'LINEAR_EXACT') return Enums.VOILUTFunctionType.LINEAR_EXACT;
+  return Enums.VOILUTFunctionType.LINEAR;
 }
 
 function isSupportedActiveTool(value: string | undefined): value is ActiveTool {
@@ -69,6 +98,11 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       onWindowLevelChange,
       className,
       windowSyncKey,
+      invert = false,
+      interpolationMode = 'LINEAR',
+      voiLutMode = 'LINEAR',
+      smoothing = 0,
+      sharpening = 0,
     },
     ref
   ) {
@@ -82,6 +116,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
     // Track last WL values sent to Cornerstone to avoid feedback loops
     const lastSentVoiRef = useRef<{ lower: number; upper: number } | null>(null);
     const lastEmittedVoiRef = useRef<{ lower: number; upper: number } | null>(null);
+    const lastAppliedDisplayRef = useRef<AppliedDisplayProperties | null>(null);
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [errorMsg, setErrorMsg] = useState('');
 
@@ -115,6 +150,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         viewport.resetProperties();
         viewport.resetCamera();
         lastSentVoiRef.current = null;
+        lastAppliedDisplayRef.current = null;
         viewport.render();
       },
       clearAnnotations: () => {
@@ -192,6 +228,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         renderingEngineRef.current?.destroy();
         renderingEngineRef.current = null;
         lastSentVoiRef.current = null;
+        lastAppliedDisplayRef.current = null;
       };
       // currentImageIndex intentionally excluded — handled by the effect below
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -224,18 +261,43 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
 
       const newLower = windowCenter - windowWidth / 2;
       const newUpper = windowCenter + windowWidth / 2;
+      const nextDisplay: AppliedDisplayProperties = {
+        lower: newLower,
+        upper: newUpper,
+        invert,
+        interpolationMode,
+        voiLutMode,
+        smoothing,
+        sharpening,
+      };
 
-      // Skip if these exact values are already applied (prevents feedback loop with onWindowLevelChange)
-      const last = lastSentVoiRef.current;
-      if (last && Math.abs(last.lower - newLower) < 0.5 && Math.abs(last.upper - newUpper) < 0.5) {
+      // Skip only if every display property is already applied. WW/WL alone is not enough:
+      // controls such as invert/interpolation can change while VOI stays the same.
+      const last = lastAppliedDisplayRef.current;
+      if (
+        last &&
+        Math.abs(last.lower - nextDisplay.lower) < 0.5 &&
+        Math.abs(last.upper - nextDisplay.upper) < 0.5 &&
+        last.invert === nextDisplay.invert &&
+        last.interpolationMode === nextDisplay.interpolationMode &&
+        last.voiLutMode === nextDisplay.voiLutMode &&
+        Math.abs(last.smoothing - nextDisplay.smoothing) < 0.001 &&
+        Math.abs(last.sharpening - nextDisplay.sharpening) < 0.001
+      ) {
         return;
       }
 
       lastSentVoiRef.current = { lower: newLower, upper: newUpper };
       lastEmittedVoiRef.current = { lower: newLower, upper: newUpper };
-      viewport.setProperties({ voiRange: { lower: newLower, upper: newUpper } });
+      lastAppliedDisplayRef.current = nextDisplay;
+      viewport.setProperties({
+        voiRange: { lower: newLower, upper: newUpper },
+        invert,
+        interpolationType: getInterpolationType(interpolationMode),
+        VOILUTFunction: getVoiLutFunction(voiLutMode),
+      });
       viewport.render();
-    }, [status, windowCenter, windowWidth, windowSyncKey]);
+    }, [interpolationMode, invert, sharpening, smoothing, status, voiLutMode, windowCenter, windowWidth, windowSyncKey]);
 
     // ─── Active tool switching ───
     useEffect(() => {
@@ -294,6 +356,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
           viewport.resetProperties();
           viewport.resetCamera();
           lastSentVoiRef.current = null;
+          lastAppliedDisplayRef.current = null;
           viewport.render();
           break;
         case 'annotate':
@@ -343,6 +406,39 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       return () => element.removeEventListener(Enums.Events.IMAGE_RENDERED, handleImageRendered);
     }, [status, onWindowLevelChange]);
 
+    // Pixel-level denoise/sharpen pass for the rendered 2D canvas.
+    // Cornerstone redraws the original image first; this pass then writes processed pixels back.
+    useEffect(() => {
+      const element = elementRef.current;
+      const viewport = viewportRef.current;
+      if (!element || !viewport || status !== 'ready') return;
+
+      let frameId: number | null = null;
+      const runPostProcessing = () => {
+        if (frameId !== null) {
+          window.cancelAnimationFrame(frameId);
+        }
+        frameId = window.requestAnimationFrame(() => {
+          frameId = null;
+          try {
+            applyCanvasImagePostProcessing(element, smoothing, sharpening);
+          } catch (error) {
+            console.warn('DICOM canvas post-processing skipped.', error);
+          }
+        });
+      };
+
+      element.addEventListener(Enums.Events.IMAGE_RENDERED, runPostProcessing);
+      viewport.render();
+
+      return () => {
+        element.removeEventListener(Enums.Events.IMAGE_RENDERED, runPostProcessing);
+        if (frameId !== null) {
+          window.cancelAnimationFrame(frameId);
+        }
+      };
+    }, [sharpening, smoothing, status]);
+
     // ─── Mouse wheel: slice scroll or zoom ───
     useEffect(() => {
       const element = elementRef.current;
@@ -381,7 +477,10 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
     }, [dicomUrl, imageUrls, onImageIndexChange, status]);
 
     return (
-      <div ref={elementRef} className={className ?? 'w-full h-full relative overflow-hidden bg-black'}>
+      <div
+        ref={elementRef}
+        className={className ?? 'w-full h-full relative overflow-hidden bg-black'}
+      >
         {status === 'loading' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#4D94FF]/40">
             <div className="w-8 h-8 border-2 border-[#4D94FF]/30 border-t-[#4D94FF] rounded-full animate-spin" />

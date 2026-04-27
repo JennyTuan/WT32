@@ -13,6 +13,7 @@ import {
     Move,
     Ruler,
     Pencil,
+    Rotate3D,
     Maximize,
     RefreshCw,
     Play,
@@ -21,6 +22,7 @@ import {
     Network,
     Siren,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import type { FourDPostScanState } from "../lib/fourDTypes";
@@ -95,6 +97,13 @@ type PhaseCineSpeed = 0.5 | 1 | 2;
 type PhaseCineMode = "forward" | "bounce";
 const PHASE_CINE_SPEED_OPTIONS: readonly PhaseCineSpeed[] = [0.5, 1, 2] as const;
 const FOUR_D_LUNG_DEFAULT_WINDOW = { ww: 1600, wl: -600 } as const;
+const WINDOW_PRESETS = [
+    { key: "lung", label: "Lung", ww: 1500, wl: -600 },
+    { key: "bone", label: "Bone", ww: 2000, wl: 300 },
+    { key: "tissue", label: "Tissue", ww: 400, wl: 40 },
+    { key: "mediastinum", label: "Mediastinum", ww: 350, wl: 50 },
+    { key: "brain", label: "Brain", ww: 80, wl: 40 },
+] as const;
 
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
 
@@ -218,7 +227,7 @@ const getSeriesDicomUrl = (sliceIndex: number, seriesType?: SeriesType) => {
     return `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
 };
 
-type ViewerToolMode = "pan" | "wl" | "measure" | "annotate" | "eraser";
+type ViewerToolMode = "pan" | "wl" | "measure" | "annotate" | "eraser" | "rotate";
 
 const mapCornerstoneTool = (toolMode: ViewerToolMode) => {
     if (toolMode === "pan") return "pan";
@@ -226,6 +235,7 @@ const mapCornerstoneTool = (toolMode: ViewerToolMode) => {
     if (toolMode === "measure") return "ruler";
     if (toolMode === "eraser") return "eraser";
     if (toolMode === "annotate") return "annotate";
+    if (toolMode === "rotate") return "rotate";
     return "window";
 };
 
@@ -365,13 +375,43 @@ const ViewScreen = () => {
     });
 
     const [selectedLayout, setSelectedLayout] = useState("三维四窗");
-    const [selectedRenderMode, setSelectedRenderMode] = useState("MPR");
+    const [selectedVolumePreset, setSelectedVolumePreset] = useState<"CT-Lung" | "CT-Soft-Tissue">("CT-Lung");
+    const [selectedRenderMode, setSelectedRenderMode] = useState<"MIP" | "MinIP">("MIP");
+    const [selectedVoiLutMode, setSelectedVoiLutMode] = useState<"LINEAR" | "LINEAR_EXACT" | "SIGMOID">("LINEAR");
+    const [selectedInterpolationMode, setSelectedInterpolationMode] = useState<"LINEAR" | "NEAREST" | "FAST_LINEAR">("LINEAR");
+    const [isImageInverted, setIsImageInverted] = useState(false);
+    const [imageSmoothing, setImageSmoothing] = useState(0);
+    const [imageSharpening, setImageSharpening] = useState(0);
+    const [volumeQuality, setVolumeQuality] = useState<"performance" | "standard" | "fine">("standard");
     const [isBrowseModeOpen, setIsBrowseModeOpen] = useState(false);
     const [isLayoutOpen, setIsLayoutOpen] = useState(false);
+    const [isVolumePresetOpen, setIsVolumePresetOpen] = useState(false);
     const [isRenderModeOpen, setIsRenderModeOpen] = useState(false);
+    const [isWindowPresetOpen, setIsWindowPresetOpen] = useState(false);
+    const [isVoiLutOpen, setIsVoiLutOpen] = useState(false);
+    const [isInterpolationOpen, setIsInterpolationOpen] = useState(false);
+    const [isVolumeQualityOpen, setIsVolumeQualityOpen] = useState(false);
     const currentLayoutSpec = useMemo(
         () => LAYOUT_SPECS[selectedLayout] ?? LAYOUT_SPECS["三维四窗"],
         [selectedLayout]
+    );
+    const volumeSampleDistanceMultiplier =
+        volumeQuality === "performance" ? 1.25 : volumeQuality === "fine" ? 0.45 : 0.75;
+    const applyWindowPreset = useCallback((preset: typeof WINDOW_PRESETS[number]) => {
+        setWw(preset.ww);
+        setWl(preset.wl);
+        setDisplayWw(preset.ww);
+        setDisplayWl(preset.wl);
+        defaultWindowRef.current = { ww: preset.ww, wl: preset.wl };
+    }, []);
+    const activeWindowPreset = useMemo(
+        () =>
+            WINDOW_PRESETS.find(
+                (preset) =>
+                    Math.round(displayWw) === preset.ww &&
+                    Math.round(displayWl) === preset.wl
+            ),
+        [displayWw, displayWl]
     );
 
     // ─── Build study tree from scan session (falls back to static DICOM data) ──
@@ -603,11 +643,11 @@ const ViewScreen = () => {
     const fourDPhaseBadgeLabel = `Phase ${FOUR_D_PHASE_LABELS[selectedPhaseIndex] ?? `${selectedPhaseIndex * 10}%`}`;
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
     const isToolSupportedInCurrentView = (mode: ViewerToolMode) => {
-        if (!isMprViewActive) return true;
+        if (!isMprViewActive) return mode !== "rotate";
         if (isFourDMprViewActive) {
             return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate";
         }
-        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser";
+        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser" || mode === "rotate";
     };
 
 
@@ -639,7 +679,7 @@ const ViewScreen = () => {
         if (!isFourDLungReconSeries) return;
         setImageMode("3D");
         setSelectedLayout("多平面重建");
-        setSelectedRenderMode("MPR");
+        setPhaseMipMode("Avg");
     }, [isFourDLungReconSeries]);
 
     useEffect(() => {
@@ -650,7 +690,7 @@ const ViewScreen = () => {
     useEffect(() => {
         if (!isFourDLungReconSeries) return;
         setSelectedLayout("多平面重建");
-        setSelectedRenderMode("MPR");
+        setPhaseMipMode("Avg");
         setWw(FOUR_D_LUNG_DEFAULT_WINDOW.ww);
         setWl(FOUR_D_LUNG_DEFAULT_WINDOW.wl);
         setDisplayWw(FOUR_D_LUNG_DEFAULT_WINDOW.ww);
@@ -1094,19 +1134,92 @@ const ViewScreen = () => {
                     <div className="flex-1 bg-[#F8FAFC] overflow-hidden flex flex-col">
                         <div className="flex-1 p-3 grid grid-cols-2 gap-2 overflow-y-auto">
                             {imageMode === "2D" || isTopogramSeries ? (
-                                <>
-                                    <Param label="WW" value={String(Math.round(displayWw))} />
-                                    <Param label="WL" value={String(Math.round(displayWl))} />
-                                    {/* Prefer live DICOM tag values; fall back to scan session / static values */}
-                                    <Param label="Kernel" value={selectedSeries.kernel !== "—" ? selectedSeries.kernel : meta.seriesDescription} />
-                                    <Param label="Thick" value={meta.thickness !== "N/A" ? meta.thickness : selectedSeries.thickness} />
-                                    <Param label="FOV" value={selectedSeries.fov} />
-                                    <Param label="Matrix" value={meta.rows > 0 ? `${meta.rows}×${meta.cols}` : selectedSeries.matrix} />
-                                </>
+                                <div className="col-span-2 flex flex-col gap-2">
+                                    <PanelSection title="显示">
+                                    <div className="rounded-md border border-[#DCE6F2] bg-white px-2.5 py-2 shadow-sm">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex items-baseline gap-1.5">
+                                                <span className="text-[9px] font-black uppercase text-[#90A4AE]">WW</span>
+                                                <span className="text-[13px] font-black tabular-nums text-[#37474F]">{Math.round(displayWw)}</span>
+                                            </div>
+                                            <div className="h-5 w-px bg-[#E2E8F0]" />
+                                            <div className="flex items-baseline gap-1.5">
+                                                <span className="text-[9px] font-black uppercase text-[#90A4AE]">WL</span>
+                                                <span className="text-[13px] font-black tabular-nums text-[#37474F]">{Math.round(displayWl)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 relative">
+                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">窗模板</span>
+                                        <div
+                                            onClick={() => {
+                                                setIsWindowPresetOpen(!isWindowPresetOpen);
+                                                setIsVoiLutOpen(false);
+                                                setIsInterpolationOpen(false);
+                                                setIsVolumePresetOpen(false);
+                                                setIsRenderModeOpen(false);
+                                                setIsVolumeQualityOpen(false);
+                                            }}
+                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isWindowPresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                        >
+                                            <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                {activeWindowPreset ? activeWindowPreset.label : "Custom"}
+                                            </span>
+                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                        </div>
+                                        {isWindowPresetOpen && (
+                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                {WINDOW_PRESETS.map((preset) => {
+                                                    const active = activeWindowPreset?.key === preset.key;
+                                                    return (
+                                                        <div
+                                                            key={preset.key}
+                                                            onClick={() => {
+                                                                applyWindowPreset(preset);
+                                                                setIsWindowPresetOpen(false);
+                                                            }}
+                                                            className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${active ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                        >
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span>{preset.label}</span>
+                                                                <span className="text-[10px] font-black tabular-nums opacity-60">
+                                                                    {preset.ww}/{preset.wl}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <DisplayControls
+                                        selectedVoiLutMode={selectedVoiLutMode}
+                                        setSelectedVoiLutMode={setSelectedVoiLutMode}
+                                        selectedInterpolationMode={selectedInterpolationMode}
+                                        setSelectedInterpolationMode={setSelectedInterpolationMode}
+                                        isImageInverted={isImageInverted}
+                                        setIsImageInverted={setIsImageInverted}
+                                        imageSmoothing={imageSmoothing}
+                                        setImageSmoothing={setImageSmoothing}
+                                        imageSharpening={imageSharpening}
+                                        setImageSharpening={setImageSharpening}
+                                        isVoiLutOpen={isVoiLutOpen}
+                                        setIsVoiLutOpen={setIsVoiLutOpen}
+                                        isInterpolationOpen={isInterpolationOpen}
+                                        setIsInterpolationOpen={setIsInterpolationOpen}
+                                        closeOtherMenus={() => {
+                                            setIsWindowPresetOpen(false);
+                                            setIsVolumePresetOpen(false);
+                                            setIsRenderModeOpen(false);
+                                            setIsVolumeQualityOpen(false);
+                                        }}
+                                    />
+                                    </PanelSection>
+                                </div>
                             ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
                                     {/* Layout Dropdown */}
-                                    <div className={`${isFourDLungReconSeries ? "hidden" : "flex"} items-center gap-2 relative`}>
+                                    <div className="hidden items-center gap-2 relative">
                                         <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">布局</span>
                                         {isFourDLungReconSeries ? (
                                             <div
@@ -1134,8 +1247,6 @@ const ViewScreen = () => {
                                                         key={opt}
                                                         onClick={() => {
                                                             setPhaseMipMode(opt);
-                                                            if (opt === "Avg") setSelectedRenderMode("MPR");
-                                                            else setSelectedRenderMode(opt);
                                                             setIsLayoutOpen(false);
                                                         }}
                                                         className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${phaseMipMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
@@ -1168,33 +1279,241 @@ const ViewScreen = () => {
                                         )}
                                     </div>
 
-                                    {/* Render Mode Dropdown */}
+                                    {/* Volume Rendering Preset Dropdown */}
                                     {!isFourDLungReconSeries && (
-                                        <div className="flex items-center gap-2 relative">
-                                            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">渲染</span>
-                                            <div
-                                                onClick={() => setIsRenderModeOpen(!isRenderModeOpen)}
-                                                className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
-                                            >
-                                                <span className="text-[12px] font-medium text-[#37474F]">
-                                                    {selectedRenderMode}
-                                                </span>
-                                                <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
-                                            </div>
-                                            {isRenderModeOpen && (
-                                                <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                                                    {["MIP", "MPR", "VR", "MinIP"].map((opt) => (
-                                                        <div
-                                                            key={opt}
-                                                            onClick={() => { setSelectedRenderMode(opt); setIsRenderModeOpen(false); }}
-                                                            className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedRenderMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
-                                                        >
-                                                            {opt}
-                                                        </div>
-                                                    ))}
+                                        <>
+                                            <PanelSection title="显示">
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <Param label="WW" value={String(Math.round(displayWw))} />
+                                                    <Param label="WL" value={String(Math.round(displayWl))} />
                                                 </div>
-                                            )}
-                                        </div>
+                                                <div className="flex items-center gap-2 relative">
+                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">窗值曲线</span>
+                                                    <div
+                                                        onClick={() => {
+                                                            setIsVoiLutOpen(!isVoiLutOpen);
+                                                            setIsInterpolationOpen(false);
+                                                            setIsVolumePresetOpen(false);
+                                                            setIsRenderModeOpen(false);
+                                                            setIsVolumeQualityOpen(false);
+                                                        }}
+                                                        className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVoiLutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                                    >
+                                                        <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                            {selectedVoiLutMode === "SIGMOID" ? "Sigmoid" : selectedVoiLutMode === "LINEAR_EXACT" ? "Linear Exact" : "Linear"}
+                                                        </span>
+                                                        <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVoiLutOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                                    </div>
+                                                    {isVoiLutOpen && (
+                                                        <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                            {([
+                                                                { value: "LINEAR" as const, label: "Linear" },
+                                                                { value: "LINEAR_EXACT" as const, label: "Linear Exact" },
+                                                                { value: "SIGMOID" as const, label: "Sigmoid" },
+                                                            ]).map((opt) => (
+                                                                <div
+                                                                    key={opt.value}
+                                                                    onClick={() => { setSelectedVoiLutMode(opt.value); setIsVoiLutOpen(false); }}
+                                                                    className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedVoiLutMode === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                                >
+                                                                    {opt.label}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center gap-2 relative">
+                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">插值</span>
+                                                    <div
+                                                        onClick={() => {
+                                                            setIsInterpolationOpen(!isInterpolationOpen);
+                                                            setIsVoiLutOpen(false);
+                                                            setIsVolumePresetOpen(false);
+                                                            setIsRenderModeOpen(false);
+                                                            setIsVolumeQualityOpen(false);
+                                                        }}
+                                                        className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isInterpolationOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                                    >
+                                                        <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                            {selectedInterpolationMode === "FAST_LINEAR" ? "Fast Linear" : selectedInterpolationMode === "NEAREST" ? "Nearest" : "Linear"}
+                                                        </span>
+                                                        <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isInterpolationOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                                    </div>
+                                                    {isInterpolationOpen && (
+                                                        <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                            {([
+                                                                { value: "LINEAR" as const, label: "Linear" },
+                                                                { value: "NEAREST" as const, label: "Nearest" },
+                                                                { value: "FAST_LINEAR" as const, label: "Fast Linear" },
+                                                            ]).map((opt) => (
+                                                                <div
+                                                                    key={opt.value}
+                                                                    onClick={() => { setSelectedInterpolationMode(opt.value); setIsInterpolationOpen(false); }}
+                                                                    className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedInterpolationMode === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                                >
+                                                                    {opt.label}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                                                    <span className="text-[11px] font-semibold text-[#546E7A]">反相</span>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isImageInverted}
+                                                        onChange={(event) => setIsImageInverted(event.target.checked)}
+                                                        className="h-4 w-4 accent-[#4D94FF]"
+                                                    />
+                                                </div>
+                                                <div className="flex items-start gap-2">
+                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">平滑</span>
+                                                    <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                                                        <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
+                                                            <input type="range" min={0} max={1} step={0.05} value={imageSmoothing} onChange={(event) => setImageSmoothing(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
+                                                            <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSmoothing.toFixed(2)}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-start gap-2">
+                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">锐化</span>
+                                                    <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                                                        <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
+                                                            <input type="range" min={0} max={1} step={0.05} value={imageSharpening} onChange={(event) => setImageSharpening(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
+                                                            <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSharpening.toFixed(2)}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </PanelSection>
+
+                                            <PanelSection title="体绘制">
+                                            <div className="flex items-center gap-2 relative">
+                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">体绘制</span>
+                                                <div
+                                                    onClick={() => {
+                                                        setIsVolumePresetOpen(!isVolumePresetOpen);
+                                                        setIsRenderModeOpen(false);
+                                                        setIsVoiLutOpen(false);
+                                                        setIsInterpolationOpen(false);
+                                                        setIsVolumeQualityOpen(false);
+                                                    }}
+                                                    className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVolumePresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                                >
+                                                    <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                        {selectedVolumePreset === "CT-Lung" ? "CT-Lung" : "Soft Tissue"}
+                                                    </span>
+                                                    <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVolumePresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                                </div>
+                                                {isVolumePresetOpen && (
+                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                        {([
+                                                            { value: "CT-Lung" as const, label: "CT-Lung" },
+                                                            { value: "CT-Soft-Tissue" as const, label: "Soft Tissue" },
+                                                        ]).map((opt) => (
+                                                            <div
+                                                                key={opt.value}
+                                                                onClick={() => { setSelectedVolumePreset(opt.value); setIsVolumePresetOpen(false); }}
+                                                                className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedVolumePreset === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                            >
+                                                                {opt.label}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="flex items-center gap-2 relative">
+                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">采样质量</span>
+                                                <div
+                                                    onClick={() => {
+                                                        setIsVolumeQualityOpen(!isVolumeQualityOpen);
+                                                        setIsVolumePresetOpen(false);
+                                                        setIsRenderModeOpen(false);
+                                                        setIsVoiLutOpen(false);
+                                                        setIsInterpolationOpen(false);
+                                                    }}
+                                                    className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVolumeQualityOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                                >
+                                                    <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                        {volumeQuality === "performance" ? "性能" : volumeQuality === "fine" ? "精细" : "标准"}
+                                                    </span>
+                                                    <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVolumeQualityOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                                </div>
+                                                {isVolumeQualityOpen && (
+                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                        {([
+                                                            { value: "performance" as const, label: "性能" },
+                                                            { value: "standard" as const, label: "标准" },
+                                                            { value: "fine" as const, label: "精细" },
+                                                        ]).map((opt) => (
+                                                            <div
+                                                                key={opt.value}
+                                                                onClick={() => { setVolumeQuality(opt.value); setIsVolumeQualityOpen(false); }}
+                                                                className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${volumeQuality === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                            >
+                                                                {opt.label}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            </PanelSection>
+
+                                            <PanelSection title="投影">
+
+                                            <div className="flex items-center gap-2 relative">
+                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">投影模式</span>
+                                                <div
+                                                    onClick={() => {
+                                                        setIsRenderModeOpen(!isRenderModeOpen);
+                                                        setIsVolumePresetOpen(false);
+                                                        setIsVoiLutOpen(false);
+                                                        setIsInterpolationOpen(false);
+                                                        setIsVolumeQualityOpen(false);
+                                                    }}
+                                                    className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                                >
+                                                    <span className="text-[12px] font-medium text-[#37474F]">
+                                                        {selectedRenderMode}
+                                                    </span>
+                                                    <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                                </div>
+                                                {isRenderModeOpen && (
+                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                        {(["MIP", "MinIP"] as const).map((opt) => (
+                                                            <div
+                                                                key={opt}
+                                                                onClick={() => { setSelectedRenderMode(opt); setIsRenderModeOpen(false); }}
+                                                                className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedRenderMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                            >
+                                                                {opt}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="flex items-start gap-2">
+                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">厚度</span>
+                                                <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                                                    <div className="grid grid-cols-[minmax(0,1fr)_48px] items-center gap-2">
+                                                        <input
+                                                            type="range"
+                                                            min={1}
+                                                            max={100}
+                                                            step={1}
+                                                            value={slabThickness}
+                                                            onChange={(event) => setSlabThickness(Number(event.target.value))}
+                                                            className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]"
+                                                        />
+                                                        <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">
+                                                            {slabThickness} mm
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            </PanelSection>
+                                        </>
                                     )}
 
                                     {isFourDLungReconSeries && (
@@ -1251,8 +1570,6 @@ const ViewScreen = () => {
                                                                 key={opt}
                                                                 onClick={() => {
                                                                     setPhaseMipMode(opt);
-                                                                    if (opt === "Avg") setSelectedRenderMode("MPR");
-                                                                    else setSelectedRenderMode(opt);
                                                                     setIsLayoutOpen(false);
                                                                 }}
                                                                 className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${phaseMipMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
@@ -1313,6 +1630,7 @@ const ViewScreen = () => {
                                     windowWidth={ww}
                                     activeTool={mapCornerstoneTool(toolMode)}
                                     renderMode={(phaseMipMode === "Avg" ? "MPR" : phaseMipMode) as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
+                                    layoutMode="three-up"
                                     slabThickness={slabThickness}
                                     showPhaseBadge={true}
                                     phaseBadgeLabel={fourDPhaseBadgeLabel}
@@ -1335,10 +1653,22 @@ const ViewScreen = () => {
                                     windowCenter={wl}
                                     windowWidth={ww}
                                     activeTool={mapCornerstoneTool(toolMode)}
-                                    renderMode={selectedRenderMode as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
+                                    renderMode={selectedRenderMode}
+                                    layoutMode="four-up"
+                                    volumePanelMode="volume3d"
+                                    volumePreset={selectedVolumePreset}
+                                    volumeSampleDistanceMultiplier={volumeSampleDistanceMultiplier}
+                                    slabThickness={slabThickness}
+                                    invert={isImageInverted}
+                                    interpolationMode={selectedInterpolationMode}
+                                    voiLutMode={selectedVoiLutMode}
+                                    smoothing={imageSmoothing}
+                                    sharpening={imageSharpening}
                                     onWindowLevelChange={(wc, wwidth) => {
                                         setDisplayWl(Math.round(wc));
                                         setDisplayWw(Math.round(wwidth));
+                                        setWl(Math.round(wc));
+                                        setWw(Math.round(wwidth));
                                     }}
                                     className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden"
                                 />
@@ -1361,6 +1691,11 @@ const ViewScreen = () => {
                                 activeTool={mapCornerstoneTool(toolMode)}
                                 windowCenter={wl}
                                 windowWidth={ww}
+                                invert={isImageInverted}
+                                interpolationMode={selectedInterpolationMode}
+                                voiLutMode={selectedVoiLutMode}
+                                smoothing={imageSmoothing}
+                                sharpening={imageSharpening}
                                 onWindowLevelChange={(wc, wwidth) => {
                                     setDisplayWl(Math.round(wc));
                                     setDisplayWw(Math.round(wwidth));
@@ -1443,14 +1778,15 @@ const ViewScreen = () => {
                 </div>
                 <aside className="w-[72px] bg-[#0F172A] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3" onPointerDown={(e) => e.stopPropagation()}>
-                            {(["pan", "wl", "measure", "annotate"] as const).map((mode, i) => {
+                            {(["pan", "wl", "measure", "annotate", "rotate"] as const).map((mode, i) => {
                                 const icons = [
                                     <Move size={20} strokeWidth={1.5} key="pan" />,
                                     <WindowLevelIcon size={20} key="window-level" />,
                                     <Ruler size={20} strokeWidth={1.5} key="ruler" />,
                                     <Pencil size={20} strokeWidth={1.5} key="pencil" />,
+                                    <Rotate3D size={20} strokeWidth={1.5} key="rotate-3d" />,
                                 ];
-                                const titles = ["移动", "窗宽/窗位", "测量", "标注"];
+                                const titles = ["移动", "窗宽/窗位", "测量", "标注", "3D旋转"];
                                 const active = toolMode === mode;
                                 const supported = isToolSupportedInCurrentView(mode);
                                 return (
@@ -1630,6 +1966,132 @@ const Param = ({ label, value }: { label: string; value: string }) => (
         <span className="text-[8px] font-black uppercase text-[#90A4AE] tracking-tighter">{label}</span>
         <span className="text-[13px] font-black text-[#37474F] mt-1">{value}</span>
     </div>
+);
+
+const PanelSection = ({ title, children }: { title: string; children: ReactNode }) => (
+    <div className="flex flex-col gap-2 border-t border-[#DCE6F2] pt-2 first:border-t-0 first:pt-0">
+        <div className="text-[10px] font-black uppercase tracking-wide text-[#78909C]">{title}</div>
+        {children}
+    </div>
+);
+
+type DisplayControlsProps = {
+    selectedVoiLutMode: "LINEAR" | "LINEAR_EXACT" | "SIGMOID";
+    setSelectedVoiLutMode: (value: "LINEAR" | "LINEAR_EXACT" | "SIGMOID") => void;
+    selectedInterpolationMode: "LINEAR" | "NEAREST" | "FAST_LINEAR";
+    setSelectedInterpolationMode: (value: "LINEAR" | "NEAREST" | "FAST_LINEAR") => void;
+    isImageInverted: boolean;
+    setIsImageInverted: (value: boolean) => void;
+    imageSmoothing: number;
+    setImageSmoothing: (value: number) => void;
+    imageSharpening: number;
+    setImageSharpening: (value: number) => void;
+    isVoiLutOpen: boolean;
+    setIsVoiLutOpen: (value: boolean) => void;
+    isInterpolationOpen: boolean;
+    setIsInterpolationOpen: (value: boolean) => void;
+    closeOtherMenus: () => void;
+};
+
+const DisplayControls = ({
+    selectedVoiLutMode,
+    setSelectedVoiLutMode,
+    selectedInterpolationMode,
+    setSelectedInterpolationMode,
+    isImageInverted,
+    setIsImageInverted,
+    imageSmoothing,
+    setImageSmoothing,
+    imageSharpening,
+    setImageSharpening,
+    isVoiLutOpen,
+    setIsVoiLutOpen,
+    isInterpolationOpen,
+    setIsInterpolationOpen,
+    closeOtherMenus,
+}: DisplayControlsProps) => (
+    <>
+        <div className="flex items-center gap-2 relative">
+            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">窗值曲线</span>
+            <div
+                onClick={() => {
+                    setIsVoiLutOpen(!isVoiLutOpen);
+                    setIsInterpolationOpen(false);
+                    closeOtherMenus();
+                }}
+                className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVoiLutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+            >
+                <span className="text-[12px] font-medium text-[#37474F] truncate">
+                    {selectedVoiLutMode === "SIGMOID" ? "Sigmoid" : selectedVoiLutMode === "LINEAR_EXACT" ? "Linear Exact" : "Linear"}
+                </span>
+                <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVoiLutOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+            </div>
+            {isVoiLutOpen && (
+                <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                    {([
+                        { value: "LINEAR" as const, label: "Linear" },
+                        { value: "LINEAR_EXACT" as const, label: "Linear Exact" },
+                        { value: "SIGMOID" as const, label: "Sigmoid" },
+                    ]).map((opt) => (
+                        <div key={opt.value} onClick={() => { setSelectedVoiLutMode(opt.value); setIsVoiLutOpen(false); }} className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedVoiLutMode === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}>
+                            {opt.label}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+        <div className="flex items-center gap-2 relative">
+            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">插值</span>
+            <div
+                onClick={() => {
+                    setIsInterpolationOpen(!isInterpolationOpen);
+                    setIsVoiLutOpen(false);
+                    closeOtherMenus();
+                }}
+                className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isInterpolationOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+            >
+                <span className="text-[12px] font-medium text-[#37474F] truncate">
+                    {selectedInterpolationMode === "FAST_LINEAR" ? "Fast Linear" : selectedInterpolationMode === "NEAREST" ? "Nearest" : "Linear"}
+                </span>
+                <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isInterpolationOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+            </div>
+            {isInterpolationOpen && (
+                <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                    {([
+                        { value: "LINEAR" as const, label: "Linear" },
+                        { value: "NEAREST" as const, label: "Nearest" },
+                        { value: "FAST_LINEAR" as const, label: "Fast Linear" },
+                    ]).map((opt) => (
+                        <div key={opt.value} onClick={() => { setSelectedInterpolationMode(opt.value); setIsInterpolationOpen(false); }} className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedInterpolationMode === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}>
+                            {opt.label}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+        <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+            <span className="text-[11px] font-semibold text-[#546E7A]">反相</span>
+            <input type="checkbox" checked={isImageInverted} onChange={(event) => setIsImageInverted(event.target.checked)} className="h-4 w-4 accent-[#4D94FF]" />
+        </div>
+        <div className="flex items-start gap-2">
+            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">平滑</span>
+            <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
+                    <input type="range" min={0} max={1} step={0.05} value={imageSmoothing} onChange={(event) => setImageSmoothing(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
+                    <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSmoothing.toFixed(2)}</span>
+                </div>
+            </div>
+        </div>
+        <div className="flex items-start gap-2">
+            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">锐化</span>
+            <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
+                    <input type="range" min={0} max={1} step={0.05} value={imageSharpening} onChange={(event) => setImageSharpening(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
+                    <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSharpening.toFixed(2)}</span>
+                </div>
+            </div>
+        </div>
+    </>
 );
 
 export default ViewScreen;
