@@ -154,7 +154,7 @@ export function ProtocolSidebar({
                                 : "text-[#546E7A] border-transparent hover:bg-gray-50"
                         }`}
                     >
-                        剂量 / 通知阈值
+                        剂量 / DOM / 阈值
                         <ChevronRight size={14} className={selection.type === "dose" ? "text-[#1E88E5]" : "text-[#90A4AE] group-hover:text-[#4D94FF]"} />
                     </button>
                     <button className="flex items-center justify-between px-4 py-3 rounded-md text-[13px] font-bold text-[#546E7A] hover:bg-gray-50 transition-colors group">

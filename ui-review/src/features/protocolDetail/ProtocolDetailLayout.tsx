@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { 
     ApiProtocolDetail, 
     ApiSeriesDetail, 
@@ -74,6 +75,16 @@ export function ProtocolDetailLayout({
     onSave,
     onCancel
 }: ProtocolDetailLayoutProps) {
+    // DOM scroll request state
+    const [scrollToDom, setScrollToDom] = useState(false);
+
+    const handleSelectDose = () => {
+        onSelect({ type: "dose" });
+        setScrollToDom(true);
+        // Reset after scroll animation finishes
+        setTimeout(() => setScrollToDom(false), 800);
+    };
+
     return (
         <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl text-[#37474F] font-sans select-none">
             <header className="flex items-center px-5 h-[52px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
@@ -120,6 +131,7 @@ export function ProtocolDetailLayout({
                             onModeChange={onModeChange}
                             onDelete={onDeleteSeries}
                             onDraftChange={onSeriesDraftChange}
+                            onSelectDose={handleSelectDose}
                         />
                     )}
                     {selection.type === "recon" && activeSeries && activeRecon && (
@@ -131,7 +143,7 @@ export function ProtocolDetailLayout({
                         />
                     )}
                     {selection.type === "dose" && (
-                        <DoseParamsPanel protocol={protocol} />
+                        <DoseParamsPanel protocol={protocol} scrollToDom={scrollToDom} />
                     )}
                 </section>
             </main>
