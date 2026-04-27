@@ -45,7 +45,8 @@
       "Bash(copy \"C:\\\\Users\\\\24606\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\b81a614f-51be-4b1f-8c7b-88a3f8885dd0\\\\21eeda3a-b06d-409a-be02-319636f4d6d8\\\\skills\\\\docx\\\\4D_CT_扫描流程与后处理_技术文档.docx\" \"C:\\\\CT-Prototype-backup\\\\CT-Prototype\\\\4D_CT_扫描流程与后处理_技术文档.docx\")",
       "Bash(npx kill-port:*)",
       "Bash(findstr :5175)",
-      "Bash(echo \"---EXIT---$?\")"
+      "Bash(echo \"---EXIT---$?\")",
+      "Bash(python -c ' *)"
     ]
   }
 }
