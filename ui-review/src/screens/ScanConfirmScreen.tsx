@@ -22,12 +22,34 @@ import {
     X,
     Flame,
     Network,
-    Siren
+    Siren,
+    Shield,
+    ShieldAlert,
+    ShieldCheck
 } from "lucide-react";
 import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb, type RawProtocolCase } from "../lib/protocolDb";
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
-import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
+import { fetchSelectedScanSession, fetchScanSessionDomConfig, updateScanSessionDomConfig, loadSelectedScanSessionId, type ApiScanSessionDetail, type ApiScanSessionDomConfig } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+
+// ── DOM display label maps ──
+const DOM_ORGAN_LABEL: Record<string, string> = {
+    breast: "乳腺", eye_lens: "晶状体", thyroid: "甲状腺",
+    gonad: "性腺", auto: "自动推荐", off: "关闭", custom: "自定义",
+};
+const DOM_DIRECTION_LABEL: Record<string, string> = {
+    anterior: "前方", posterior: "后方", left: "左侧", right: "右侧", auto: "自动",
+};
+const DOM_STRENGTH_LABEL: Record<string, string> = { low: "低", medium: "中", high: "高" };
+const DOM_DOSE_CHANGE: Record<string, number> = { low: -8, medium: -15, high: -25 };
+
+// body_part keywords that conflict with the protected organ (risk detection)
+const ORGAN_BODY_CONFLICT: Record<string, string[]> = {
+    breast: ["胸", "chest", "thorax", "lung"],
+    eye_lens: ["头", "脑", "head", "brain", "cranial"],
+    thyroid: ["颈", "neck", "cervical"],
+    gonad: ["盆", "pelvis", "pelvic", "abdomen", "腹"],
+};
 
 interface Sequence {
     id: string;
