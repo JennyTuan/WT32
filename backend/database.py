@@ -836,11 +836,57 @@ def _migrate_protocol_columns() -> None:
         conn.commit()
 
 
+def _migrate_dom_config_tables() -> None:
+    """Create DOM config tables if they don't exist (idempotent)."""
+    from sqlalchemy import text
+
+    statements = [
+        """
+        CREATE TABLE IF NOT EXISTS protocol_dom_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            protocol_id INTEGER NOT NULL UNIQUE REFERENCES protocols(id) ON DELETE CASCADE,
+            mode VARCHAR(20) NOT NULL DEFAULT 'off',
+            protected_organs TEXT,
+            direction VARCHAR(20),
+            strength VARCHAR(10),
+            auto_ma_linked BOOLEAN NOT NULL DEFAULT 1,
+            image_quality_priority VARCHAR(20),
+            min_ma_floor FLOAT,
+            reason TEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS scan_session_dom_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_session_id INTEGER NOT NULL UNIQUE REFERENCES scan_sessions(id) ON DELETE CASCADE,
+            template_dom_config_id INTEGER REFERENCES protocol_dom_configs(id) ON DELETE SET NULL,
+            mode VARCHAR(20) NOT NULL DEFAULT 'off',
+            protected_organs TEXT,
+            direction VARCHAR(20),
+            strength VARCHAR(10),
+            auto_ma_linked BOOLEAN NOT NULL DEFAULT 1,
+            image_quality_priority VARCHAR(20),
+            min_ma_floor FLOAT,
+            reason TEXT,
+            user_confirmed BOOLEAN NOT NULL DEFAULT 0
+        )
+        """,
+    ]
+    with engine.connect() as conn:
+        for sql in statements:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                pass
+
+
 def init_db() -> None:
     from . import models
 
     Base.metadata.create_all(bind=engine)
     _migrate_protocol_columns()
+    _migrate_dom_config_tables()
 
     db = SessionLocal()
     try:

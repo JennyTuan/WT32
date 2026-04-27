@@ -12,7 +12,7 @@ const helicalFields: HelicalField[] = [
     { label: "扫描长度 (MM)", type: "input", value: "165", required: true },
     { label: "扫描方向", type: "select", options: ["OUT", "IN"], required: true },
     { label: "定位像 FOV", type: "input", value: "500", required: true },
-    { label: "DOM (动态扫描)", type: "input", value: "0", required: true },
+    { label: "DOM 器官剂量保护", type: "select", options: ["关闭", "自动推荐", "乳腺保护", "晶状体保护", "甲状腺保护", "性腺保护", "自定义"], required: true },
     { label: "PITCH (螺距)", type: "input", value: "0.984", required: true },
     { label: "床倾角 (ANGLE)", type: "input", value: "0", required: true },
 ];

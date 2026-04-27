@@ -19,6 +19,100 @@ type ApiPatient = {
     patient_id: string;
 };
 
+// DOM (Dynamic Organ Dose Modulation) 模式枚举。
+// 兼容历史值 "0"/"1"，新数据请使用规范值。
+export type DomMode =
+    | "off"
+    | "auto"
+    | "breast"
+    | "eye_lens"
+    | "thyroid"
+    | "gonad"
+    | "custom";
+
+export const DOM_MODE_OPTIONS: { value: DomMode; label: string }[] = [
+    { value: "off", label: "关闭" },
+    { value: "auto", label: "自动推荐" },
+    { value: "breast", label: "乳腺保护" },
+    { value: "eye_lens", label: "晶状体保护" },
+    { value: "thyroid", label: "甲状腺保护" },
+    { value: "gonad", label: "性腺保护" },
+    { value: "custom", label: "自定义" },
+];
+
+export type DomDirection = "anterior" | "posterior" | "left" | "right" | "auto";
+export type DomStrength = "low" | "medium" | "high";
+export type DomImageQualityPriority = "balanced" | "dose_saving" | "image_quality";
+
+export type ApiProtocolDomConfig = {
+    id: number;
+    protocol_id: number;
+    mode: DomMode;
+    protected_organs?: string | null;
+    direction?: DomDirection | null;
+    strength?: DomStrength | null;
+    auto_ma_linked: boolean;
+    image_quality_priority?: DomImageQualityPriority | null;
+    min_ma_floor?: number | null;
+    reason?: string | null;
+};
+
+export type ApiScanSessionDomConfig = ApiProtocolDomConfig & {
+    scan_session_id: number;
+    template_dom_config_id?: number | null;
+    user_confirmed: boolean;
+};
+
+export type DomConfigUpdate = Partial<{
+    mode: DomMode;
+    protected_organs: string | null;
+    direction: DomDirection | null;
+    strength: DomStrength | null;
+    auto_ma_linked: boolean;
+    image_quality_priority: DomImageQualityPriority | null;
+    min_ma_floor: number | null;
+    reason: string | null;
+    user_confirmed: boolean;
+}>;
+
+export const fetchProtocolDomConfig = async (protocolId: number): Promise<ApiProtocolDomConfig> => {
+    const res = await fetch(buildApiUrl(`/api/dom-configs/protocols/${protocolId}`));
+    if (!res.ok) throw new Error(`fetchProtocolDomConfig failed: ${res.status}`);
+    return res.json();
+};
+
+export const updateProtocolDomConfig = async (
+    protocolId: number,
+    patch: DomConfigUpdate,
+): Promise<ApiProtocolDomConfig> => {
+    const res = await fetch(buildApiUrl(`/api/dom-configs/protocols/${protocolId}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error(`updateProtocolDomConfig failed: ${res.status}`);
+    return res.json();
+};
+
+export const fetchScanSessionDomConfig = async (sessionId: number): Promise<ApiScanSessionDomConfig> => {
+    const res = await fetch(buildApiUrl(`/api/dom-configs/scan-sessions/${sessionId}`));
+    if (!res.ok) throw new Error(`fetchScanSessionDomConfig failed: ${res.status}`);
+    return res.json();
+};
+
+export const updateScanSessionDomConfig = async (
+    sessionId: number,
+    patch: DomConfigUpdate,
+): Promise<ApiScanSessionDomConfig> => {
+    const res = await fetch(buildApiUrl(`/api/dom-configs/scan-sessions/${sessionId}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error(`updateScanSessionDomConfig failed: ${res.status}`);
+    return res.json();
+};
+
 export type ApiScanSessionTopogramParam = {
     id: number;
     kv: number;
@@ -28,7 +122,7 @@ export type ApiScanSessionTopogramParam = {
     fov: number;
     collimator?: string | null;
     scan_direction?: string | null;
-    dom?: string | null;
+    dom?: DomMode | string | null;
     ctdi_vol?: number | null;
     dlp?: number | null;
 };
@@ -44,7 +138,7 @@ export type ApiScanSessionHelicalParam = {
     fov: number;
     collimator?: string | null;
     scan_direction?: string | null;
-    dom?: string | null;
+    dom?: DomMode | string | null;
     ctdi_vol?: number | null;
     dlp?: number | null;
     auto_ma?: boolean;
@@ -63,7 +157,7 @@ export type ApiScanSessionAxialParam = {
     fov: number;
     collimator?: string | null;
     scan_direction?: string | null;
-    dom?: string | null;
+    dom?: DomMode | string | null;
     ctdi_vol?: number | null;
     dlp?: number | null;
     auto_ma?: boolean;

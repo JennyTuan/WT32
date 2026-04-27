@@ -53,6 +53,12 @@ class Protocol(Base):
         cascade="all, delete-orphan",
         order_by="Series.series_order",
     )
+    dom_config = relationship(
+        "ProtocolDomConfig",
+        back_populates="protocol",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
     scan_sessions = relationship("ScanSession", back_populates="protocol")
 
 
@@ -265,6 +271,12 @@ class ScanSession(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    dom_config = relationship(
+        "ScanSessionDomConfig",
+        back_populates="scan_session",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
     series = relationship(
         "ScanSessionSeries",
         back_populates="scan_session",
@@ -456,6 +468,42 @@ class ScanSessionBreathingTrainingParam(Base):
     tolerance_range = Column(Float, nullable=False)
 
     fourd_config = relationship("ScanSessionFourDConfig", back_populates="breathing_training_param")
+
+
+class ProtocolDomConfig(Base):
+    __tablename__ = "protocol_dom_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    protocol_id = Column(Integer, ForeignKey("protocols.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    mode = Column(String(20), nullable=False, default="off")
+    protected_organs = Column(Text, nullable=True)
+    direction = Column(String(20), nullable=True)
+    strength = Column(String(10), nullable=True)
+    auto_ma_linked = Column(Boolean, nullable=False, default=True)
+    image_quality_priority = Column(String(20), nullable=True)
+    min_ma_floor = Column(Float, nullable=True)
+    reason = Column(Text, nullable=True)
+
+    protocol = relationship("Protocol", back_populates="dom_config")
+
+
+class ScanSessionDomConfig(Base):
+    __tablename__ = "scan_session_dom_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scan_session_id = Column(Integer, ForeignKey("scan_sessions.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    template_dom_config_id = Column(Integer, ForeignKey("protocol_dom_configs.id", ondelete="SET NULL"), nullable=True)
+    mode = Column(String(20), nullable=False, default="off")
+    protected_organs = Column(Text, nullable=True)
+    direction = Column(String(20), nullable=True)
+    strength = Column(String(10), nullable=True)
+    auto_ma_linked = Column(Boolean, nullable=False, default=True)
+    image_quality_priority = Column(String(20), nullable=True)
+    min_ma_floor = Column(Float, nullable=True)
+    reason = Column(Text, nullable=True)
+    user_confirmed = Column(Boolean, nullable=False, default=False)
+
+    scan_session = relationship("ScanSession", back_populates="dom_config")
 
 
 class CornerConfig(Base):

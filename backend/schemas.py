@@ -10,6 +10,19 @@ class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# DOM (Dynamic Organ Dose Modulation) 模式枚举。
+# 兼容历史值 "0"/"1"，建议新数据使用规范值。
+DomMode = Literal[
+    "off",
+    "auto",
+    "breast",
+    "eye_lens",
+    "thyroid",
+    "gonad",
+    "custom",
+]
+
+
 class PatientBase(BaseModel):
     name: str
     patient_id: str
@@ -694,6 +707,51 @@ class ScanSessionSummary(ORMModel):
     scan_mode: Literal["plain", "contrast", "4d"]
     created_at: datetime
     started_at: Optional[datetime] = None
+
+# ===== DOM (Dynamic Organ Dose Modulation) 配置 schemas =====
+
+DomDirection = Literal["anterior", "posterior", "left", "right", "auto"]
+DomStrength = Literal["low", "medium", "high"]
+DomImageQualityPriority = Literal["balanced", "dose_saving", "image_quality"]
+
+
+class DomConfigBase(BaseModel):
+    mode: DomMode = "off"
+    protected_organs: Optional[str] = None  # JSON list 字符串
+    direction: Optional[DomDirection] = None
+    strength: Optional[DomStrength] = None
+    auto_ma_linked: bool = True
+    image_quality_priority: Optional[DomImageQualityPriority] = None
+    min_ma_floor: Optional[float] = None
+    reason: Optional[str] = None
+
+
+class ProtocolDomConfigUpdate(BaseModel):
+    mode: Optional[DomMode] = None
+    protected_organs: Optional[str] = None
+    direction: Optional[DomDirection] = None
+    strength: Optional[DomStrength] = None
+    auto_ma_linked: Optional[bool] = None
+    image_quality_priority: Optional[DomImageQualityPriority] = None
+    min_ma_floor: Optional[float] = None
+    reason: Optional[str] = None
+
+
+class ProtocolDomConfig(DomConfigBase, ORMModel):
+    id: int
+    protocol_id: int
+
+
+class ScanSessionDomConfigUpdate(ProtocolDomConfigUpdate):
+    user_confirmed: Optional[bool] = None
+
+
+class ScanSessionDomConfig(DomConfigBase, ORMModel):
+    id: int
+    scan_session_id: int
+    template_dom_config_id: Optional[int] = None
+    user_confirmed: bool = False
+
 
 class CornerConfigBase(BaseModel):
     template_name: str

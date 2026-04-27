@@ -8,6 +8,23 @@ import type {
 } from "../types";
 import { AGE_LABEL, ALL_POSITIONS, SERIES_TYPE_LABEL, EDITABLE_SERIES_TYPE_OPTIONS } from "../constants";
 import { FieldInput, FieldSelect, FieldSpinner, Divider } from "./SharedUI";
+import { DOM_MODE_OPTIONS, type DomMode } from "../../../lib/scanSession";
+
+const DOM_LABEL_TO_VALUE: Record<string, DomMode> = Object.fromEntries(
+    DOM_MODE_OPTIONS.map((o) => [o.label, o.value]),
+) as Record<string, DomMode>;
+const DOM_VALUE_TO_LABEL: Record<string, string> = Object.fromEntries(
+    DOM_MODE_OPTIONS.map((o) => [o.value, o.label]),
+);
+const DOM_OPTION_LABELS: string[] = DOM_MODE_OPTIONS.map((o) => o.label);
+
+const toDomLabel = (raw: string | null | undefined): string => {
+    if (!raw) return DOM_VALUE_TO_LABEL.off;
+    if (raw in DOM_VALUE_TO_LABEL) return DOM_VALUE_TO_LABEL[raw];
+    if (raw === "0") return DOM_VALUE_TO_LABEL.off;
+    if (raw === "1") return DOM_VALUE_TO_LABEL.auto;
+    return DOM_VALUE_TO_LABEL.off;
+};
 
 export function BasicInfoPanel({ protocol, draft, selectedPos, bodyPartOptions, ageGroupOptions, onPosChange, onDraftChange }: {
     protocol: ApiProtocolDetail | null;
@@ -108,7 +125,12 @@ export function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, o
                     <FieldInput label="扫描长度 (MM)" value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
                     <FieldSelect label="扫描方向" value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
                     <FieldInput label="FOV" value={draft.fov} required onChange={(value) => onDraftChange({ fov: value })} />
-                    <FieldInput label="DOM" value={draft.dom} placeholder="0 或 1" onChange={(value) => onDraftChange({ dom: value })} />
+                    <FieldSelect
+                        label="DOM 器官剂量保护"
+                        value={toDomLabel(draft.dom)}
+                        options={DOM_OPTION_LABELS}
+                        onChange={(label) => onDraftChange({ dom: DOM_LABEL_TO_VALUE[label] ?? "off" })}
+                    />
                     <FieldInput label="床角度 (ANGLE)" value={draft.tubeAngle} required onChange={(value) => onDraftChange({ tubeAngle: value })} />
                 </div>
             </div>
@@ -149,7 +171,12 @@ export function HelicalParamsPanel({ series, draft, canEditMode, onModeChange, o
                     <FieldInput label="扫描长度 (MM)" value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
                     <FieldSelect label="扫描方向" value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
                     <FieldInput label="FOV" value={draft.fov} required onChange={(value) => onDraftChange({ fov: value })} />
-                    <FieldInput label="DOM" value={draft.dom} placeholder="0 或 1" onChange={(value) => onDraftChange({ dom: value })} />
+                    <FieldSelect
+                        label="DOM 器官剂量保护"
+                        value={toDomLabel(draft.dom)}
+                        options={DOM_OPTION_LABELS}
+                        onChange={(label) => onDraftChange({ dom: DOM_LABEL_TO_VALUE[label] ?? "off" })}
+                    />
                     {series.series_type === "helical" && (
                         <FieldInput label="PITCH" value={draft.pitch} required onChange={(value) => onDraftChange({ pitch: value })} />
                     )}

@@ -97,6 +97,19 @@ def _clone_session_from_protocol(patient: models.Patient, protocol: models.Proto
             saline_rate=protocol.contrast_config.saline_rate,
         )
 
+    if protocol.dom_config:
+        scan_session.dom_config = models.ScanSessionDomConfig(
+            template_dom_config_id=protocol.dom_config.id,
+            mode=protocol.dom_config.mode,
+            protected_organs=protocol.dom_config.protected_organs,
+            direction=protocol.dom_config.direction,
+            strength=protocol.dom_config.strength,
+            auto_ma_linked=protocol.dom_config.auto_ma_linked,
+            image_quality_priority=protocol.dom_config.image_quality_priority,
+            min_ma_floor=protocol.dom_config.min_ma_floor,
+            reason=protocol.dom_config.reason,
+        )
+
     for series in protocol.series:
         session_series = models.ScanSessionSeries(
             template_series_id=series.id,
@@ -116,6 +129,9 @@ def _clone_session_from_protocol(patient: models.Patient, protocol: models.Proto
                 scan_length=series.topogram_param.scan_length,
                 tube_angle=series.topogram_param.tube_angle,
                 fov=series.topogram_param.fov,
+                collimator=series.topogram_param.collimator,
+                scan_direction=series.topogram_param.scan_direction,
+                dom=series.topogram_param.dom,
                 ctdi_vol=series.topogram_param.ctdi_vol,
                 dlp=series.topogram_param.dlp,
             )
@@ -130,6 +146,9 @@ def _clone_session_from_protocol(patient: models.Patient, protocol: models.Proto
                 rotation_time=series.helical_param.rotation_time,
                 scan_length=series.helical_param.scan_length,
                 fov=series.helical_param.fov,
+                collimator=series.helical_param.collimator,
+                scan_direction=series.helical_param.scan_direction,
+                dom=series.helical_param.dom,
                 ctdi_vol=series.helical_param.ctdi_vol,
                 dlp=series.helical_param.dlp,
                 auto_ma=series.helical_param.auto_ma,
@@ -147,6 +166,9 @@ def _clone_session_from_protocol(patient: models.Patient, protocol: models.Proto
                 rotation_time=series.axial_param.rotation_time,
                 scan_length=series.axial_param.scan_length,
                 fov=series.axial_param.fov,
+                collimator=series.axial_param.collimator,
+                scan_direction=series.axial_param.scan_direction,
+                dom=series.axial_param.dom,
                 ctdi_vol=series.axial_param.ctdi_vol,
                 dlp=series.axial_param.dlp,
                 auto_ma=series.axial_param.auto_ma,
@@ -254,6 +276,9 @@ def _clone_session_series(source: models.ScanSessionSeries) -> models.ScanSessio
             scan_length=source.topogram_param.scan_length,
             tube_angle=source.topogram_param.tube_angle,
             fov=source.topogram_param.fov,
+            collimator=source.topogram_param.collimator,
+            scan_direction=source.topogram_param.scan_direction,
+            dom=source.topogram_param.dom,
             ctdi_vol=source.topogram_param.ctdi_vol,
             dlp=source.topogram_param.dlp,
         )
@@ -268,6 +293,9 @@ def _clone_session_series(source: models.ScanSessionSeries) -> models.ScanSessio
             rotation_time=source.helical_param.rotation_time,
             scan_length=source.helical_param.scan_length,
             fov=source.helical_param.fov,
+            collimator=source.helical_param.collimator,
+            scan_direction=source.helical_param.scan_direction,
+            dom=source.helical_param.dom,
             ctdi_vol=source.helical_param.ctdi_vol,
             dlp=source.helical_param.dlp,
             auto_ma=source.helical_param.auto_ma,
@@ -285,6 +313,9 @@ def _clone_session_series(source: models.ScanSessionSeries) -> models.ScanSessio
             rotation_time=source.axial_param.rotation_time,
             scan_length=source.axial_param.scan_length,
             fov=source.axial_param.fov,
+            collimator=source.axial_param.collimator,
+            scan_direction=source.axial_param.scan_direction,
+            dom=source.axial_param.dom,
             ctdi_vol=source.axial_param.ctdi_vol,
             dlp=source.axial_param.dlp,
             auto_ma=source.axial_param.auto_ma,
