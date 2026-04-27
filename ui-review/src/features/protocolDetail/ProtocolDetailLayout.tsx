@@ -163,7 +163,7 @@ export function ProtocolDetailLayout({
                 {!isReadOnly && (
                     <button
                         onClick={onSave}
-                        disabled={isSaving || selection.type === "dose"}
+                        disabled={isSaving}
                         className="h-[36px] px-6 bg-[#4D94FF] rounded-md text-[13px] font-bold text-white hover:bg-[#1E88E5] transition-colors disabled:bg-[#B0C4DE] disabled:cursor-not-allowed"
                     >
                         {isSaving ? "保存中..." : "保存"}

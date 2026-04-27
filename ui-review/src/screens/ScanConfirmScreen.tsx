@@ -42,6 +42,12 @@ const DOM_DIRECTION_LABEL: Record<string, string> = {
 };
 const DOM_STRENGTH_LABEL: Record<string, string> = { low: "低", medium: "中", high: "高" };
 const DOM_DOSE_CHANGE: Record<string, number> = { low: -8, medium: -15, high: -25 };
+const LEGACY_DOM_ON_VALUES = new Set(["1", "auto", "breast", "eye_lens", "thyroid", "gonad", "custom"]);
+
+const isDomEnabledRaw = (raw: string | null | undefined): boolean => {
+    if (!raw) return false;
+    return LEGACY_DOM_ON_VALUES.has(raw.toLowerCase());
+};
 
 // body_part keywords that conflict with the protected organ (risk detection)
 const ORGAN_BODY_CONFLICT: Record<string, string[]> = {
@@ -572,30 +578,55 @@ const ScanConfirmScreen = ({
         protocol: currentProtocolLabel,
     };
     const showDomCard = parameterPanelMode === "tomographicScan" || parameterPanelMode === "helicalScan";
-    const domDosePercent = domConfig?.strength ? DOM_DOSE_CHANGE[domConfig.strength] ?? 0 : 0;
+    const fallbackDomRaw = useMemo(() => {
+        if (!scanSession || !showDomCard) return null;
+        const preferredSeriesType = parameterPanelMode === "helicalScan" ? "helical" : "axial";
+        const preferredSeries = scanSession.series.find((series) => series.series_type === preferredSeriesType);
+        const targetSeries = preferredSeries ?? scanSession.series.find((series) => series.series_type === "helical" || series.series_type === "axial");
+        if (!targetSeries) return null;
+        return targetSeries.helical_param?.dom ?? targetSeries.axial_param?.dom ?? null;
+    }, [parameterPanelMode, scanSession, showDomCard]);
+    const fallbackDomConfig = useMemo<ApiScanSessionDomConfig | null>(() => {
+        if (!isDomEnabledRaw(fallbackDomRaw)) return null;
+        return {
+            id: -1,
+            protocol_id: scanSession?.protocol_id ?? -1,
+            scan_session_id: scanSession?.id ?? -1,
+            mode: "auto",
+            protected_organs: "auto",
+            direction: "auto",
+            strength: "medium",
+            auto_ma_linked: true,
+            image_quality_priority: "balanced",
+            user_confirmed: true,
+            template_dom_config_id: null,
+        };
+    }, [fallbackDomRaw, scanSession?.id, scanSession?.protocol_id]);
+    const effectiveDomConfig = domConfig ?? fallbackDomConfig;
+    const domDosePercent = effectiveDomConfig?.strength ? DOM_DOSE_CHANGE[effectiveDomConfig.strength] ?? 0 : 0;
     const domDisplayData: DomDisplayData | undefined = useMemo(() => {
-        if (!domConfig || domConfig.mode === "off") return undefined;
+        if (!effectiveDomConfig || effectiveDomConfig.mode === "off") return undefined;
         return {
             mode: "已启用",
-            organ: DOM_ORGAN_LABEL[domConfig.protected_organs ?? "auto"] ?? (domConfig.protected_organs ?? "自动推荐"),
-            direction: DOM_DIRECTION_LABEL[domConfig.direction ?? "auto"] ?? (domConfig.direction ?? "自动"),
-            strength: DOM_STRENGTH_LABEL[domConfig.strength ?? "medium"] ?? (domConfig.strength ?? "中"),
+            organ: DOM_ORGAN_LABEL[effectiveDomConfig.protected_organs ?? "auto"] ?? (effectiveDomConfig.protected_organs ?? "自动推荐"),
+            direction: DOM_DIRECTION_LABEL[effectiveDomConfig.direction ?? "auto"] ?? (effectiveDomConfig.direction ?? "自动"),
+            strength: DOM_STRENGTH_LABEL[effectiveDomConfig.strength ?? "medium"] ?? (effectiveDomConfig.strength ?? "中"),
             doseChange: `${domDosePercent > 0 ? "+" : ""}${domDosePercent}%`,
         };
-    }, [domConfig, domDosePercent]);
+    }, [effectiveDomConfig, domDosePercent]);
     const domRiskMessages = useMemo(() => {
-        if (!domConfig || domConfig.mode === "off") return [];
+        if (!effectiveDomConfig || effectiveDomConfig.mode === "off") return [];
         const risks: string[] = [];
         const normalizedBodyPart = (scanSession?.body_part ?? "").toLowerCase();
-        const conflictKeywords = ORGAN_BODY_CONFLICT[domConfig.protected_organs ?? ""];
+        const conflictKeywords = ORGAN_BODY_CONFLICT[effectiveDomConfig.protected_organs ?? ""];
         if (conflictKeywords?.some((keyword) => normalizedBodyPart.includes(keyword.toLowerCase()))) {
             risks.push("当前 DOM 保护器官可能与本次诊断目标一致，可能影响目标区域图像质量。");
         }
-        if (!domConfig.auto_ma_linked) {
+        if (!effectiveDomConfig.auto_ma_linked) {
             risks.push("当前 DOM 未与 Auto mA 联动，剂量调制可能偏离预期。");
         }
         return risks;
-    }, [domConfig, scanSession?.body_part]);
+    }, [effectiveDomConfig, scanSession?.body_part]);
     const handleOpenDetails = () => {
         const detailTarget = parameterPanelMode === "helicalScan"
             ? "helical"
