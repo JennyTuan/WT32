@@ -23,11 +23,10 @@ import {
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
-import { hasPhaseConflicts, type FourDPostScanState } from "../lib/fourDTypes";
+import type { FourDPostScanState } from "../lib/fourDTypes";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
 import {
-    getFourDImageUrl,
     loadFourDManifest,
     type FourDManifest,
 } from "../lib/fourDImageSource";
@@ -86,15 +85,6 @@ type TextAnnotation = {
     mode?: "2d" | "3d";
 };
 type Annotation = TextAnnotation;
-type VolumeData = {
-    rows: number;
-    cols: number;
-    depth: number;
-    hu: Float32Array;
-    pixelSpacingX: number;
-    pixelSpacingY: number;
-    sliceSpacing: number;
-};
 type PanelId = "axial" | "coronal" | "sagittal" | "volume";
 type LayoutSpec = {
     containerClassName: string;
@@ -269,18 +259,10 @@ const ViewScreen = () => {
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
     const fourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode }) | null;
     const isFourDEntry = !!fourDState?.scanResult;
-    const shouldShowSliceLoadingBridge = false;
 
-    /** "idle" → 非4D入口/等待图像加载；"review" → 相位审核弹窗；"done" → 审核完成 */
-    const [fourDStage, setFourDStage] = useState<"idle" | "phaseLoading" | "reviewReady" | "review" | "done">(
-        isFourDEntry ? (fourDState?.initialBrowseMode === "phase" ? "done" : "phaseLoading") : "idle"
-    );
+    /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
+    const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";
     const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">("ready");
-    const handleFourDPhaseGridComplete = useCallback(() => {
-        if (!isFourDEntry || !fourDState?.scanResult) return;
-        setViewerLoadStatus("ready");
-        setFourDStage(hasPhaseConflicts(fourDState.scanResult) ? "reviewReady" : "done");
-    }, [fourDState, isFourDEntry]);
     const handleAdvancedProcessing = useCallback(() => {
         navigate("/phase-filter", {
             state: fourDState
@@ -299,7 +281,7 @@ const ViewScreen = () => {
     const [selectedFourDMpId, setSelectedFourDMpId] = useState<FourDDicomMpId>("MP1");
     const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("phase");
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<PhaseCineSpeed>(1); // multiplier; 1× = 500 ms/phase
-    const [phaseCineMode] = useState<PhaseCineMode>("forward");
+    const phaseCineMode: PhaseCineMode = "forward";
     const cyclePhaseCineSpeed = useCallback(() => {
         const currentIndex = PHASE_CINE_SPEED_OPTIONS.indexOf(phaseCineSpeed);
         const nextIndex = (currentIndex + 1) % PHASE_CINE_SPEED_OPTIONS.length;
@@ -328,8 +310,6 @@ const ViewScreen = () => {
     // ─── 4D manifest (pre-rendered WebP dataset) ───────────────────────────
     const [fourDManifest, setFourDManifest] = useState<FourDManifest | null>(null);
     const [fourDManifestError, setFourDManifestError] = useState<string | null>(null);
-    const [sliceLoadingCount, setSliceLoadingCount] = useState(0);
-    const [isSliceLoadingInline, setIsSliceLoadingInline] = useState(shouldShowSliceLoadingBridge);
 
     // ─── Live clock ───────────────────────────────────────────────────────────
     const buildClock = () => {
@@ -350,8 +330,6 @@ const ViewScreen = () => {
     const viewportRef = useRef<HTMLElement | null>(null);
     const dragRef = useRef<{ dragging: boolean; x: number; y: number }>({ dragging: false, x: 0, y: 0 });
     const measureStartRef = useRef<{ x: number; y: number } | null>(null);
-    // For 2D canvas-based measures (3D mode canvas removed — now Cornerstone MPR)
-    const volumeDataRef = useRef<VolumeData | null>(null);
     const defaultWindowRef = useRef({ ww: 350, wl: 45 });
     const [annotations, setAnnotations] = useState<Annotation[]>([]);
     const [draftMeasure, setDraftMeasure] = useState<{
@@ -623,7 +601,6 @@ const ViewScreen = () => {
         []
     );
     const fourDPhaseBadgeLabel = `Phase ${FOUR_D_PHASE_LABELS[selectedPhaseIndex] ?? `${selectedPhaseIndex * 10}%`}`;
-    const isFourDEntryLoadingFlow = false;
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
     const isToolSupportedInCurrentView = (mode: ViewerToolMode) => {
         if (!isMprViewActive) return true;
@@ -689,7 +666,7 @@ const ViewScreen = () => {
     // Load 4D manifest + preload each phase's first frame (mid axial) so
     // phase switches are instant after the initial warm.
     useEffect(() => {
-        if (!isFourDLungReconSeries && !isFourDEntryLoadingFlow) return;
+        if (!isFourDLungReconSeries) return;
         if (fourDManifest || fourDManifestError) return;
         let cancelled = false;
         loadFourDManifest()
@@ -708,32 +685,7 @@ const ViewScreen = () => {
         return () => {
             cancelled = true;
         };
-    }, [isFourDLungReconSeries, isFourDEntryLoadingFlow, fourDManifest, fourDManifestError]);
-
-    useEffect(() => {
-        setIsSliceLoadingInline(shouldShowSliceLoadingBridge);
-    }, [shouldShowSliceLoadingBridge]);
-
-    useEffect(() => {
-        if (!shouldShowSliceLoadingBridge || !fourDManifest) return;
-        const totalSlices = fourDManifest.views.axial.slices;
-        setSliceLoadingCount(1);
-        setSliceIndex(0);
-        let current = 1;
-        const timer = window.setInterval(() => {
-            if (current >= totalSlices) {
-                window.clearInterval(timer);
-                setSliceLoadingCount(totalSlices);
-                setSliceIndex(clampSliceIndex(totalSlices - 1));
-                setIsSliceLoadingInline(false);
-                return;
-            }
-            current += 1;
-            setSliceLoadingCount(current);
-            setSliceIndex(clampSliceIndex(current - 1));
-        }, 28);
-        return () => window.clearInterval(timer);
-    }, [clampSliceIndex, fourDManifest, shouldShowSliceLoadingBridge]);
+    }, [isFourDLungReconSeries, fourDManifest, fourDManifestError]);
 
     // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
     // (clinical convention: cine cycles phases at a locked anatomical slice).
@@ -847,102 +799,6 @@ const ViewScreen = () => {
             })
             .catch(() => { /* fall back to static data */ });
     }, []);
-
-    useEffect(() => {
-        const loadVolume = async () => {
-            try {
-                const slices: Array<{
-                    instanceNumber: number;
-                    positionZ: number;
-                    hu: Float32Array;
-                    rows: number;
-                    cols: number;
-                    pixelSpacingX: number;
-                    pixelSpacingY: number;
-                    sliceThickness: number;
-                }> = [];
-
-                for (let i = 1; i <= REAL_LUNG_SERIES.count; i += 1) {
-                    const fileName = `1-${String(i).padStart(3, "0")}.dcm`;
-                    const response = await fetch(`${REAL_LUNG_SERIES.basePath}/${fileName}`);
-                    if (!response.ok) {
-                        throw new Error(`Failed to fetch ${fileName}`);
-                    }
-                    const arrayBuffer = await response.arrayBuffer();
-                    const byteArray = new Uint8Array(arrayBuffer);
-                    const dataSet = dicomParser.parseDicom(byteArray);
-
-                    const rows = dataSet.uint16("x00280010") ?? 0;
-                    const cols = dataSet.uint16("x00280011") ?? 0;
-                    const bitsAllocated = dataSet.uint16("x00280100") ?? 16;
-                    const pixelRepresentation = dataSet.uint16("x00280103") ?? 0;
-                    const intercept = Number(dataSet.string("x00281052") ?? "0");
-                    const slope = Number(dataSet.string("x00281053") ?? "1");
-                    const positionZ = Number((dataSet.string("x00200032") ?? "0\\0\\0").split("\\")[2] ?? 0);
-                    const pixelSpacing = (dataSet.string("x00280030") ?? "1\\1").split("\\").map(Number);
-                    const sliceThickness = Number(dataSet.string("x00180050") ?? "1");
-                    const pixelDataElement = dataSet.elements.x7fe00010;
-                    if (!pixelDataElement || rows === 0 || cols === 0) continue;
-
-                    const pixelData = byteArray.slice(pixelDataElement.dataOffset, pixelDataElement.dataOffset + pixelDataElement.length);
-                    const pixelBuffer = pixelData.buffer.slice(pixelData.byteOffset, pixelData.byteOffset + pixelData.byteLength);
-
-                    let values: Int16Array | Uint16Array;
-                    if (bitsAllocated === 16) {
-                        values = pixelRepresentation === 1 ? new Int16Array(pixelBuffer) : new Uint16Array(pixelBuffer);
-                    } else {
-                        values = new Uint16Array(pixelBuffer);
-                    }
-
-                    const hu = new Float32Array(values.length);
-                    for (let j = 0; j < values.length; j += 1) {
-                        hu[j] = values[j] * slope + intercept;
-                    }
-
-                    slices.push({
-                        instanceNumber: Number(dataSet.string("x00200013") ?? i),
-                        positionZ,
-                        hu,
-                        rows,
-                        cols,
-                        pixelSpacingX: pixelSpacing[1] || 1,
-                        pixelSpacingY: pixelSpacing[0] || 1,
-                        sliceThickness: Number.isFinite(sliceThickness) && sliceThickness > 0 ? sliceThickness : 1,
-                    });
-                }
-
-                slices.sort((a, b) => b.positionZ - a.positionZ || a.instanceNumber - b.instanceNumber);
-                if (slices.length === 0) return;
-
-                const rows = slices[0].rows;
-                const cols = slices[0].cols;
-                const depth = slices.length;
-                const hu = new Float32Array(rows * cols * depth);
-                slices.forEach((slice, index) => {
-                    hu.set(slice.hu, index * rows * cols);
-                });
-
-                const sliceSpacing = depth > 1
-                    ? Math.abs(slices[0].positionZ - slices[1].positionZ) || slices[0].sliceThickness
-                    : slices[0].sliceThickness;
-
-                volumeDataRef.current = {
-                    rows,
-                    cols,
-                    depth,
-                    hu,
-                    pixelSpacingX: slices[0].pixelSpacingX,
-                    pixelSpacingY: slices[0].pixelSpacingY,
-                    sliceSpacing,
-                };
-                setSliceIndex((prev) => clampSliceIndex(prev));
-            } catch (error) {
-                console.error(error);
-            }
-        };
-
-        loadVolume();
-    }, [clampSliceIndex]);
 
     useEffect(() => {
         const loadSlice = async () => {
@@ -1358,8 +1214,7 @@ const ViewScreen = () => {
                                                     <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                         {([
                                                             { k: "phase" as const, l: "4D Cine" },
-                                                            { k: "slice" as const, l: "常规浏览" },
-                                                        ].slice(0, 1).map(({ k, l }) => (
+                                                        ].map(({ k, l }) => (
                                                             <div
                                                                 key={k}
                                                                 onClick={() => {
@@ -1446,7 +1301,7 @@ const ViewScreen = () => {
                 <div className="flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE]">
                 <div className={viewportContainerClassName}>
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
-                    {!isFourDEntryLoadingFlow && !isTopogramSeries && imageMode === "3D" && (
+                    {!isTopogramSeries && imageMode === "3D" && (
                         <div className="relative flex-1 min-w-0 overflow-hidden">
                             {isFourDLungReconSeries ? (
                                 <CornerstoneMPRViewport
@@ -1458,7 +1313,6 @@ const ViewScreen = () => {
                                     windowWidth={ww}
                                     activeTool={mapCornerstoneTool(toolMode)}
                                     renderMode={(phaseMipMode === "Avg" ? "MPR" : phaseMipMode) as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
-                                    layoutMode="three-up"
                                     slabThickness={slabThickness}
                                     showPhaseBadge={true}
                                     phaseBadgeLabel={fourDPhaseBadgeLabel}
@@ -1492,7 +1346,7 @@ const ViewScreen = () => {
                         </div>
                     )}
                     {/* ── 2D mode: single Cornerstone stack viewport ── */}
-                    {!isFourDEntryLoadingFlow && (imageMode === "2D" || isTopogramSeries) && (
+                    {(imageMode === "2D" || isTopogramSeries) && (
                         <section
                             ref={viewportRef}
                             className={`flex-1 min-w-0 bg-black overflow-hidden relative ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : "cursor-default"}`}
@@ -1568,7 +1422,7 @@ const ViewScreen = () => {
                             <div className="absolute top-2 right-2 text-[10px] text-[#CFD8DC] font-mono text-right leading-[1.35] pointer-events-none">
                                 <div className="font-bold">{meta.seriesDescription}</div>
                                 <div>
-                                    Image {isSliceLoadingInline ? Math.max(1, sliceLoadingCount) : sliceIndex + 1}/{selectedSeries.count}
+                                    Image {sliceIndex + 1}/{selectedSeries.count}
                                 </div>
                                 <div>KV {meta.kvp} | mAs {meta.mas}</div>
                             </div>
@@ -1579,16 +1433,11 @@ const ViewScreen = () => {
                             </div>
                             <div className="absolute bottom-2 right-2 text-[10px] text-[#CFD8DC] font-mono text-right leading-[1.35] pointer-events-none">
                                 <div>
-                                    Slice {isSliceLoadingInline ? Math.max(1, sliceLoadingCount) : sliceIndex + 1}/{selectedSeries.count} | Thick {meta.thickness}
+                                    Slice {sliceIndex + 1}/{selectedSeries.count} | Thick {meta.thickness}
                                 </div>
                                 <div>Location {meta.sliceLocation}</div>
                                 <div>{meta.institution} | {meta.manufacturer}</div>
                             </div>
-                            {isSliceLoadingInline && (
-                                <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-[#4D94FF]/50 bg-[#081220]/85 px-3 py-1 text-[11px] font-bold text-[#BFDBFE] shadow-md">
-                                    正在重建图像 {Math.max(1, sliceLoadingCount)} / {selectedSeries.count}
-                                </div>
-                            )}
                         </section>
                     )}
                 </div>
@@ -1772,480 +1621,9 @@ const ViewScreen = () => {
                     </button>
                 </div>
             </footer>
-
-            {isFourDEntryLoadingFlow && fourDManifest && (
-                <FourDPhaseLoadingGrid
-                    manifest={fourDManifest}
-                    onComplete={handleFourDPhaseGridComplete}
-                    showReviewButton={fourDStage === "reviewReady"}
-                    onReviewClick={() => setFourDStage("review")}
-                    className="absolute inset-0 z-50 flex flex-col bg-[#05070B] pointer-events-auto"
-                />
-            )}
-            {isFourDEntryLoadingFlow && !fourDManifest && (
-                <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-[#05070B] text-white pointer-events-auto">
-                    <div className="h-10 w-10 rounded-full border-2 border-white/20 border-t-[#4D94FF] animate-spin" />
-                    <div className="text-[12px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">
-                        {fourDManifestError ? "4D Image Data Load Failed" : "Loading 4D Image Data"}
-                    </div>
-                    {fourDManifestError && (
-                        <div className="max-w-[520px] px-6 text-center text-[12px] font-semibold text-red-200">
-                            {fourDManifestError}
-                        </div>
-                    )}
-                </div>
-            )}
         </div>
     );
 };
-
-/*
-function FourDPhaseLoadingGridBroken({
-    manifest,
-    onComplete,
-    showReviewButton,
-    onReviewClick,
-    className = "absolute inset-0 flex flex-col bg-[#05070B]",
-}: {
-    manifest: FourDManifest;
-    onComplete: () => void;
-    showReviewButton: boolean;
-    onReviewClick: () => void;
-    className?: string;
-}) {
-    const SIMULATED_PHASE_LOAD_DELAY_MS = 650;
-    const phaseIndexes = useMemo(
-        () => Array.from({ length: Math.min(10, manifest.phases) }, (_, index) => index),
-        [manifest.phases]
-    );
-    const midAxialSlice = useMemo(() => Math.floor(manifest.views.axial.slices / 2) + 1, [manifest.views.axial.slices]);
-    const midCoronalSlice = useMemo(() => Math.floor(manifest.views.coronal.slices / 2) + 1, [manifest.views.coronal.slices]);
-    const midSagittalSlice = useMemo(() => Math.floor(manifest.views.sagittal.slices / 2) + 1, [manifest.views.sagittal.slices]);
-
-    const [loadedCount, setLoadedCount] = useState(0);
-    const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    const [selectedBedCandidateIndex, setSelectedBedCandidateIndex] = useState(0);
-    const [loadedUrls, setLoadedUrls] = useState<Record<number, { axial: string; coronal: string; sagittal: string }>>({});
-    const completedRef = useRef(false);
-
-    useEffect(() => {
-        completedRef.current = false;
-        queueMicrotask(() => {
-            setLoadedCount(0);
-            setLoadedUrls({});
-            setSelectedPhaseIndex(0);
-            setSelectedBedCandidateIndex(0);
-        });
-    }, [manifest]);
-
-    useEffect(() => {
-        if (completedRef.current) return;
-        if (loadedCount >= phaseIndexes.length) {
-            completedRef.current = true;
-            onComplete();
-            return;
-        }
-
-        let cancelled = false;
-        const phaseIndex = phaseIndexes[loadedCount];
-        const urls = {
-            axial: getFourDImageUrl(phaseIndex, "axial", midAxialSlice),
-            coronal: getFourDImageUrl(phaseIndex, "coronal", midCoronalSlice),
-            sagittal: getFourDImageUrl(phaseIndex, "sagittal", midSagittalSlice),
-        };
-
-        const preloadImage = (url: string) =>
-            new Promise<void>((resolve) => {
-                const img = new Image();
-                img.onload = () => resolve();
-                img.onerror = () => resolve();
-                img.src = url;
-            });
-
-        Promise.all([preloadImage(urls.axial), preloadImage(urls.coronal), preloadImage(urls.sagittal)]).then(() => {
-            if (cancelled) return;
-            setLoadedUrls((prev) => ({ ...prev, [phaseIndex]: urls }));
-            window.setTimeout(() => {
-                if (!cancelled) setLoadedCount((prev) => prev + 1);
-            }, SIMULATED_PHASE_LOAD_DELAY_MS);
-        });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [loadedCount, midAxialSlice, midCoronalSlice, midSagittalSlice, onComplete, phaseIndexes]);
-
-    const progress = phaseIndexes.length === 0 ? 1 : loadedCount / phaseIndexes.length;
-    const duplicateSegments = [
-        { id: 1, time: "12:34:56.78", quality: "优秀", color: "text-emerald-400" },
-        { id: 2, time: "12:45:12.34", quality: "良好", color: "text-amber-300" },
-        { id: 3, time: "12:55:45.67", quality: "一般", color: "text-orange-300" },
-    ];
-    const selectedPhaseUrls = loadedUrls[selectedPhaseIndex];
-
-    return (
-        <div className={className}>
-            <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
-                <div>
-                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">4D Axial Reconstruction</div>
-                   
-                </div>
-
-                <div className="grid flex-1 min-h-0 grid-cols-5 grid-rows-2 gap-2 overflow-auto p-3">
-                    {phaseIndexes.map((phaseIndex, idx) => {
-                        const phaseValue = manifest.phase_values?.[phaseIndex] ?? phaseIndex * 10;
-                        const urls = loadedUrls[phaseIndex];
-                        const isLoaded = !!urls;
-                        const isActiveLoading = idx === loadedCount && !isLoaded;
-                        const hasDuplicate = phaseIndex === 0;
-                        const selected = selectedPhaseIndex === phaseIndex;
-                        return (
-                            <button
-                                key={phaseIndex}
-                                type="button"
-                                onClick={() => isLoaded && setSelectedPhaseIndex(phaseIndex)}
-                                className={`group relative overflow-hidden rounded-lg border text-left transition-all ${selected ? "border-[#4D94FF] shadow-[0_0_0_2px_rgba(77,148,255,0.3)]" : "border-[#1F2E46]"}`}
-                            >
-                                <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-black/70 px-2 py-1">
-                                    <span className="text-[10px] font-black">Phase {phaseValue}%</span>
-                                    <span className={`h-2.5 w-2.5 rounded-full ${isLoaded ? "bg-emerald-400" : isActiveLoading ? "bg-[#4D94FF]" : "bg-slate-500"}`} />
-                                </div>
-                                <div className="h-full w-full bg-black pt-7">
-                                    {isLoaded ? (
-                                        <img src={urls.axial} alt={`phase-${phaseValue}`} className="h-full w-full object-cover opacity-90" />
-                                    ) : (
-                                        <div className="flex h-full items-center justify-center bg-[#0B1220]">
-                                            <div className={`h-6 w-6 rounded-full border-2 border-white/20 border-t-[#4D94FF] ${isActiveLoading ? "animate-spin" : ""}`} />
-                                        </div>
-                                    )}
-                                </div>
-                                {hasDuplicate && (
-                                    <div className="absolute bottom-2 left-2 rounded bg-amber-500/85 px-1.5 py-0.5 text-[10px] font-bold text-black">重复数据: 3 段</div>
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
-
-                <div className="flex h-12 items-center gap-6 border-t border-white/10 px-4 text-[11px] text-slate-300">
-                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />数据充足</span>
-                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" />存在重复数据</span>
-                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-rose-400" />数据缺失</span>
-                </div>
-            </section>
-
-            <section className="flex min-w-0 flex-1 flex-col rounded-xl border border-[#22344F] bg-gradient-to-b from-[#0B1729] to-[#081220]">
-                <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                        <h3 className="text-[14px] font-bold">相位 0% - 存在重复数据，请选择数据段</h3>
-                        <span className="rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">3 段可用</span>
-                    </div>
-                    <div className="h-1.5 w-36 overflow-hidden rounded-full bg-white/10">
-                        <div className="h-full rounded-full bg-[#4D94FF]" style={{ width: `${progress * 100}%` }} />
-                    </div>
-                </div>
-
-                <div className="flex min-h-0 flex-1 gap-2 p-2">
-                    <div className="w-[180px] shrink-0 space-y-2">
-                        {duplicateSegments.map((seg, idx) => (
-                            <button
-                                key={seg.id}
-                                type="button"
-                                onClick={() => setSelectedSegmentIndex(idx)}
-                                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${selectedSegmentIndex === idx ? "border-[#4D94FF] bg-[#132944]" : "border-[#24374F] bg-[#0D182B] hover:bg-[#132944]"}`}
-                            >
-                                <div className="text-[12px] font-bold">数据段 {seg.id}</div>
-                                <div className="mt-1 text-[11px] text-slate-300">{seg.time}</div>
-                                <div className={`mt-1 text-[11px] font-bold ${seg.color}`}>质量评分: {seg.quality}</div>
-                            </button>
-                        ))}
-                    </div>
-
-                    <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-1 overflow-hidden rounded-lg border border-[#24374F] bg-black">
-                        {([
-                            { key: "axial", label: "Axial" },
-                            { key: "coronal", label: "Coronal" },
-                            { key: "sagittal", label: "Sagittal" },
-                            { key: "preview", label: "3D Preview" },
-                        ] as const).map((pane) => (
-                            <div key={pane.key} className="relative overflow-hidden border border-white/5">
-                                <div className="absolute left-2 top-1 z-10 text-[11px] font-bold text-white/85">{pane.label}</div>
-                                {pane.key !== "preview" && selectedPhaseUrls ? (
-                                    <img
-                                        src={selectedPhaseUrls[pane.key]}
-                                        alt={pane.label}
-                                        className="h-full w-full object-cover opacity-95"
-                                    />
-                                ) : pane.key === "preview" ? (
-                                    <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_50%_40%,#1F2937_0%,#020617_70%)] text-[12px] text-slate-300">
-                                        3D 预览加载中…
-                                    </div>
-                                ) : (
-                                    <div className="flex h-full items-center justify-center bg-[#0B1220]">
-                                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-[#4D94FF]" />
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="flex items-center justify-between border-t border-white/10 px-3 py-2">
-                    <p className="text-[11px] text-slate-300">建议：选择图像清晰、运动伪影少的数据段以获得最佳重建效果。</p>
-                    {showReviewButton && (
-                        <button
-                            type="button"
-                            onClick={onReviewClick}
-                            className="h-8 rounded-md bg-[#4D94FF] px-4 text-[11px] font-black text-white shadow-lg shadow-blue-500/20 transition-all hover:bg-blue-600 active:scale-95"
-                        >
-                            相位审核
-                        </button>
-                    )}
-                </div>
-            </section>
-        </div>
-    );
-}
-
-
-*/
-
-function FourDPhaseLoadingGrid({
-    manifest,
-    onComplete,
-    showReviewButton,
-    onReviewClick,
-    className = "absolute inset-0 flex flex-col bg-[#05070B]",
-}: {
-    manifest: FourDManifest;
-    onComplete: () => void;
-    showReviewButton: boolean;
-    onReviewClick: () => void;
-    className?: string;
-}) {
-    const SIMULATED_PHASE_LOAD_DELAY_MS = 650;
-    const phaseIndexes = useMemo(
-        () => Array.from({ length: Math.min(10, manifest.phases) }, (_, index) => index),
-        [manifest.phases],
-    );
-    const midAxialSlice = useMemo(
-        () => Math.floor(manifest.views.axial.slices / 2) + 1,
-        [manifest.views.axial.slices],
-    );
-    const midCoronalSlice = useMemo(
-        () => Math.floor(manifest.views.coronal.slices / 2) + 1,
-        [manifest.views.coronal.slices],
-    );
-    const midSagittalSlice = useMemo(
-        () => Math.floor(manifest.views.sagittal.slices / 2) + 1,
-        [manifest.views.sagittal.slices],
-    );
-
-    const [loadedCount, setLoadedCount] = useState(0);
-    const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    const [selectedBedCandidateIndex, setSelectedBedCandidateIndex] = useState(0);
-    const [loadedUrls, setLoadedUrls] = useState<Record<number, { axial: string; coronal: string; sagittal: string }>>({});
-    const completedRef = useRef(false);
-
-    useEffect(() => {
-        completedRef.current = false;
-        queueMicrotask(() => {
-            setLoadedCount(0);
-            setLoadedUrls({});
-            setSelectedPhaseIndex(0);
-            setSelectedBedCandidateIndex(0);
-        });
-    }, [manifest]);
-
-    useEffect(() => {
-        if (completedRef.current) return;
-        if (loadedCount >= phaseIndexes.length) {
-            completedRef.current = true;
-            onComplete();
-            return;
-        }
-
-        let cancelled = false;
-        const phaseIndex = phaseIndexes[loadedCount];
-        const urls = {
-            axial: getFourDImageUrl(phaseIndex, "axial", midAxialSlice),
-            coronal: getFourDImageUrl(phaseIndex, "coronal", midCoronalSlice),
-            sagittal: getFourDImageUrl(phaseIndex, "sagittal", midSagittalSlice),
-        };
-
-        const preloadImage = (url: string) =>
-            new Promise<void>((resolve) => {
-                const img = new Image();
-                img.onload = () => resolve();
-                img.onerror = () => resolve();
-                img.src = url;
-            });
-
-        Promise.all([preloadImage(urls.axial), preloadImage(urls.coronal), preloadImage(urls.sagittal)]).then(() => {
-            if (cancelled) return;
-            setLoadedUrls((prev) => ({ ...prev, [phaseIndex]: urls }));
-            window.setTimeout(() => {
-                if (!cancelled) setLoadedCount((prev) => prev + 1);
-            }, SIMULATED_PHASE_LOAD_DELAY_MS);
-        });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [loadedCount, midAxialSlice, midCoronalSlice, midSagittalSlice, onComplete, phaseIndexes]);
-
-    const progress = phaseIndexes.length === 0 ? 1 : loadedCount / phaseIndexes.length;
-    const selectedPhaseUrls = loadedUrls[selectedPhaseIndex];
-    const selectedPhaseValue = manifest.phase_values?.[selectedPhaseIndex] ?? selectedPhaseIndex * 10;
-    const bedPhaseCandidates = [
-        { id: 1, bed: "床位 03", label: "候选 1", time: "12:34:56.78", quality: "推荐", color: "text-emerald-400" },
-        { id: 2, bed: "床位 03", label: "候选 2", time: "12:45:12.34", quality: "可用", color: "text-amber-300" },
-        { id: 3, bed: "床位 03", label: "候选 3", time: "12:55:45.67", quality: "运动偏大", color: "text-orange-300" },
-    ];
-    const conflictedBedLabel = bedPhaseCandidates[0]?.bed ?? "床位";
-
-    return (
-        <div className={className}>
-            <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
-                <div>
-                    <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#60A5FA]">4D Axial Reconstruction</div>
-                    <div className="mt-0.5 text-[11px] font-semibold text-slate-400">
-                        Preparing phase images. Controls outside this loading view are temporarily disabled.
-                    </div>
-                </div>
-                <div className="flex items-center gap-3">
-                    <div className="h-1.5 w-44 overflow-hidden rounded-full bg-white/10">
-                        <div className="h-full rounded-full bg-[#4D94FF] transition-all duration-200" style={{ width: `${progress * 100}%` }} />
-                    </div>
-                    <span className="w-12 text-right text-[11px] font-black text-slate-300">{Math.round(progress * 100)}%</span>
-                </div>
-            </div>
-
-            <div className="flex min-h-0 flex-1 gap-3 p-3">
-                <section className="flex w-[58%] min-w-0 flex-col overflow-hidden rounded-xl border border-[#22344F] bg-[#081220]">
-                    <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-                        <h3 className="text-[13px] font-black text-white">Phase Loading</h3>
-                        <span className="text-[11px] font-semibold text-slate-400">{loadedCount}/{phaseIndexes.length} phases ready</span>
-                    </div>
-                    <div className="grid min-h-0 flex-1 grid-cols-5 grid-rows-2 gap-2 overflow-auto p-3">
-                        {phaseIndexes.map((phaseIndex, idx) => {
-                            const phaseValue = manifest.phase_values?.[phaseIndex] ?? phaseIndex * 10;
-                            const urls = loadedUrls[phaseIndex];
-                            const isLoaded = !!urls;
-                            const isActiveLoading = idx === loadedCount && !isLoaded;
-                            const hasDuplicate = phaseIndex === 0;
-                            const selected = selectedPhaseIndex === phaseIndex;
-                            return (
-                                <button
-                                    key={phaseIndex}
-                                    type="button"
-                                    onClick={() => isLoaded && setSelectedPhaseIndex(phaseIndex)}
-                                    className={`group relative overflow-hidden rounded-lg border text-left transition-all ${selected ? "border-[#4D94FF] shadow-[0_0_0_2px_rgba(77,148,255,0.3)]" : "border-[#1F2E46]"}`}
-                                >
-                                    <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-black/70 px-2 py-1">
-                                        <span className="text-[10px] font-black text-white">Phase {phaseValue}%</span>
-                                        <span className={`h-2.5 w-2.5 rounded-full ${isLoaded ? "bg-emerald-400" : isActiveLoading ? "bg-[#4D94FF]" : "bg-slate-500"}`} />
-                                    </div>
-                                    <div className="h-full w-full bg-black pt-7">
-                                        {isLoaded ? (
-                                            <img src={urls.axial} alt={`phase-${phaseValue}`} className="h-full w-full object-cover opacity-90" />
-                                        ) : (
-                                            <div className="flex h-full items-center justify-center bg-[#0B1220]">
-                                                <div className={`h-6 w-6 rounded-full border-2 border-white/20 border-t-[#4D94FF] ${isActiveLoading ? "animate-spin" : ""}`} />
-                                            </div>
-                                        )}
-                                    </div>
-                                    {hasDuplicate && (
-                                        <div className="absolute bottom-2 left-2 rounded bg-amber-500/85 px-1.5 py-0.5 text-[10px] font-bold text-black">
-                                            {conflictedBedLabel} 多个0%候选
-                                        </div>
-                                    )}
-                                </button>
-                            );
-                        })}
-                    </div>
-                    <div className="flex h-10 items-center gap-5 border-t border-white/10 px-3 text-[11px] text-slate-300">
-                        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />Ready</span>
-                        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" />床位相位重复</span>
-                        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-slate-500" />Pending</span>
-                    </div>
-                </section>
-
-                <section className="flex min-w-0 flex-1 flex-col rounded-xl border border-[#22344F] bg-gradient-to-b from-[#0B1729] to-[#081220]">
-                    <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-                        <div className="flex items-center gap-2">
-                            <h3 className="text-[14px] font-bold text-white">{selectedPhaseValue}% 相位床位数据选择</h3>
-                            <span className="rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">
-                                {conflictedBedLabel}: {bedPhaseCandidates.length} 个0%候选
-                            </span>
-                        </div>
-                    </div>
-                    <div className="border-b border-white/10 px-3 py-2 text-[11px] leading-relaxed text-slate-300">
-                        0% 相位由所有床位的 0% 数据合成。检测到 {conflictedBedLabel} 出现多个 0% 相位数据，请选择该床位用于重建的候选数据。
-                    </div>
-                    <div className="flex min-h-0 flex-1 gap-2 p-2">
-                        <div className="w-[180px] shrink-0 space-y-2">
-                            {bedPhaseCandidates.map((candidate, idx) => (
-                                <button
-                                    key={candidate.id}
-                                    type="button"
-                                    onClick={() => setSelectedBedCandidateIndex(idx)}
-                                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${selectedBedCandidateIndex === idx ? "border-[#4D94FF] bg-[#132944]" : "border-[#24374F] bg-[#0D182B] hover:bg-[#132944]"}`}
-                                >
-                                    <div className="text-[12px] font-bold text-white">{candidate.bed}</div>
-                                    <div className="mt-1 text-[11px] font-semibold text-slate-300">{candidate.label} · 0%相位</div>
-                                    <div className="mt-1 text-[11px] text-slate-400">{candidate.time}</div>
-                                    <div className={`mt-1 text-[11px] font-bold ${candidate.color}`}>质量: {candidate.quality}</div>
-                                </button>
-                            ))}
-                        </div>
-                        <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-1 overflow-hidden rounded-lg border border-[#24374F] bg-black">
-                            {([
-                                { key: "axial", label: "Axial" },
-                                { key: "coronal", label: "Coronal" },
-                                { key: "sagittal", label: "Sagittal" },
-                                { key: "preview", label: "3D Preview" },
-                            ] as const).map((pane) => (
-                                <div key={pane.key} className="relative overflow-hidden border border-white/5">
-                                    <div className="absolute left-2 top-1 z-10 text-[11px] font-bold text-white/85">{pane.label}</div>
-                                    {pane.key !== "preview" && selectedPhaseUrls ? (
-                                        <img
-                                            src={selectedPhaseUrls[pane.key]}
-                                            alt={pane.label}
-                                            className="h-full w-full object-cover opacity-95"
-                                        />
-                                    ) : pane.key === "preview" ? (
-                                        <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_50%_40%,#1F2937_0%,#020617_70%)] text-[12px] text-slate-300">
-                                            3D preview loading...
-                                        </div>
-                                    ) : (
-                                        <div className="flex h-full items-center justify-center bg-[#0B1220]">
-                                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-[#4D94FF]" />
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="flex items-center justify-between border-t border-white/10 px-3 py-2">
-                        <p className="text-[11px] text-slate-300">
-                            确认后，所选候选将作为 {conflictedBedLabel} 的 0% 数据参与整体 0% 相位重建。
-                        </p>
-                        {showReviewButton && (
-                            <button
-                                type="button"
-                                onClick={onReviewClick}
-                                className="h-8 rounded-md bg-[#4D94FF] px-4 text-[11px] font-black text-white shadow-lg shadow-blue-500/20 transition-all hover:bg-blue-600 active:scale-95"
-                            >
-                                确认相位选择
-                            </button>
-                        )}
-                    </div>
-                </section>
-            </div>
-        </div>
-    );
-}
 
 const Param = ({ label, value }: { label: string; value: string }) => (
     <div className="p-2 bg-white border border-[#B0C4DE]/30 rounded-md flex flex-col items-center justify-center shadow-sm min-h-[56px]">

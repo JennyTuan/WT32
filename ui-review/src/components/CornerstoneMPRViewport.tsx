@@ -27,7 +27,6 @@ export type CornerstoneMPRHandle = {
 };
 
 type RenderMode = 'MPR' | 'MIP' | 'VR' | 'MinIP';
-type LayoutMode = 'four-up' | 'three-up';
 type PanelId = 'axial' | 'coronal' | 'sagittal';
 
 interface CornerstoneMPRViewportProps {
@@ -41,7 +40,6 @@ interface CornerstoneMPRViewportProps {
   className?: string;
   currentSliceIndex?: number;
   windowSyncKey?: number;
-  layoutMode?: LayoutMode;
   slabThickness?: number;
   phaseBadgeLabel?: string;
   showPhaseBadge?: boolean;
@@ -118,16 +116,6 @@ function CrosshairOverlay({
   );
 }
 
-function getBlendMode(renderMode: RenderMode) {
-  if (renderMode === 'MIP') return Enums.BlendModes.MAXIMUM_INTENSITY_BLEND;
-  if (renderMode === 'MinIP') return Enums.BlendModes.MINIMUM_INTENSITY_BLEND;
-  return Enums.BlendModes.COMPOSITE;
-}
-
-function isProjectionMode(renderMode: RenderMode) {
-  return renderMode === 'MIP' || renderMode === 'MinIP';
-}
-
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -153,7 +141,6 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       className,
       currentSliceIndex,
       windowSyncKey,
-      layoutMode = 'four-up',
       slabThickness = SLAB_THICKNESS_MM,
       phaseBadgeLabel,
       showPhaseBadge = false,
@@ -182,9 +169,10 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     const vpCoronal = `${engineId.current}-coronal`;
     const vpSagittal = `${engineId.current}-sagittal`;
     const vpSlab = `${engineId.current}-slab`;
-    const activeViewportIds = useMemo(() => (layoutMode === 'three-up'
-      ? [vpAxial, vpCoronal, vpSagittal]
-      : [vpAxial, vpCoronal, vpSagittal, vpSlab]), [layoutMode, vpAxial, vpCoronal, vpSagittal, vpSlab]);
+    const activeViewportIds = useMemo(
+      () => [vpAxial, vpCoronal, vpSagittal, vpSlab],
+      [vpAxial, vpCoronal, vpSagittal, vpSlab]
+    );
 
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [errorMsg, setErrorMsg] = useState('');
@@ -272,12 +260,10 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
     // ── Engine lifecycle ─────────────────────────────────────────────────────
     // Create the cornerstone rendering engine, viewports and tool group exactly
-    // once per mount (also re-runs when layoutMode flips, since that changes
-    // the viewport set). Volume loading is handled by a separate effect so
+    // once per mount. Volume loading is handled by a separate effect so
     // phase-cine swaps don't rebuild the whole scene.
     useEffect(() => {
-      const refs = [axialRef.current, coronalRef.current, sagittalRef.current];
-      if (layoutMode === 'four-up') refs.push(slabRef.current);
+      const refs = [axialRef.current, coronalRef.current, sagittalRef.current, slabRef.current];
       if (!refs.every(Boolean)) return;
 
       let disposed = false;
@@ -312,14 +298,12 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
             element: sagittalRef.current!,
             defaultOptions: { orientation: Enums.OrientationAxis.SAGITTAL, background: [0, 0, 0] as [number, number, number] },
           });
-          if (layoutMode === 'four-up') {
-            engine.enableElement({
-              viewportId: vpSlab,
-              type: Enums.ViewportType.ORTHOGRAPHIC,
-              element: slabRef.current!,
-              defaultOptions: { orientation: Enums.OrientationAxis.CORONAL, background: [0, 0, 0] as [number, number, number] },
-            });
-          }
+          engine.enableElement({
+            viewportId: vpSlab,
+            type: Enums.ViewportType.VOLUME_3D,
+            element: slabRef.current!,
+            defaultOptions: { background: [0, 0, 0] as [number, number, number] },
+          });
 
           const toolGroup = getOrCreateToolGroup(toolGroupId.current);
           activeViewportIds.forEach((id) => toolGroup.addViewport(id, engineId.current));
@@ -359,7 +343,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         lastVoiRef.current = null;
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [layoutMode]);
+    }, []);
 
     // ── Volume swap ──────────────────────────────────────────────────────────
     // When imageUrls change (e.g. 4D phase-cine advances phase N → N+1),
@@ -637,25 +621,19 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       const engine = engineRef.current;
       if (!engine) return;
 
-      const blendMode = getBlendMode(renderMode);
       const panelViewportIds = [vpAxial, vpCoronal, vpSagittal];
-      if (layoutMode === 'three-up') {
-        panelViewportIds.forEach((id) => {
-          const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
-          if (!vp) return;
-          vp.setBlendMode(blendMode);
-          vp.setSlabThickness(isProjectionMode(renderMode) ? slabThickness : 1);
-          vp.render();
-        });
-        return;
-      }
+      panelViewportIds.forEach((id) => {
+        const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
+        if (!vp) return;
+        vp.setBlendMode(Enums.BlendModes.COMPOSITE);
+        vp.setSlabThickness(1);
+        vp.render();
+      });
 
-      const slabVp = engine.getViewport(vpSlab) as Types.IVolumeViewport | undefined;
-      if (!slabVp) return;
-      slabVp.setBlendMode(blendMode);
-      slabVp.setSlabThickness(isProjectionMode(renderMode) ? slabThickness : 1);
-      slabVp.render();
-    }, [layoutMode, renderMode, slabThickness, status, vpAxial, vpCoronal, vpSagittal, vpSlab]);
+      const volume3dVp = engine.getViewport(vpSlab) as Types.IVolumeViewport | undefined;
+      volume3dVp?.resetCamera();
+      volume3dVp?.render();
+    }, [renderMode, slabThickness, status, vpAxial, vpCoronal, vpSagittal, vpSlab]);
 
     useEffect(() => {
       const engine = engineRef.current;
@@ -675,7 +653,6 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     const visibleAnnotations = useMemo(() => textAnnotations, [textAnnotations]);
     const panelBase = 'relative overflow-hidden bg-black';
     const showCrosshairs = renderMode === 'MPR';
-    const slabLabel = renderMode === 'MIP' ? 'MIP' : renderMode === 'MinIP' ? 'MinIP' : 'Coronal';
 
     const renderTextAnnotations = (panel: PanelId) =>
       visibleAnnotations
@@ -795,7 +772,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       >
         <div
           ref={axialRef}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-1' : ''}`}
+          className={panelBase}
           style={{ minHeight: 0 }}
         >
           {showCrosshairs && <CrosshairOverlay horizontalColor={CORONAL_COLOR} verticalColor={SAGITTAL_COLOR} />}
@@ -806,7 +783,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         </div>
         <div
           ref={coronalRef}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-2 row-start-1 row-span-2' : ''}`}
+          className={panelBase}
           style={{ minHeight: 0 }}
         >
           {showCrosshairs && <CrosshairOverlay horizontalColor={AXIAL_COLOR} verticalColor={SAGITTAL_COLOR} />}
@@ -817,7 +794,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         </div>
         <div
           ref={sagittalRef}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-2' : ''}`}
+          className={panelBase}
           style={{ minHeight: 0 }}
         >
           {showCrosshairs && <CrosshairOverlay horizontalColor={AXIAL_COLOR} verticalColor={CORONAL_COLOR} />}
@@ -828,10 +805,10 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         </div>
         <div
           ref={slabRef}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'hidden' : ''}`}
+          className={panelBase}
           style={{ minHeight: 0 }}
         >
-          <div className={PANEL_LABEL_CLASS} style={{ color: '#86EFAC' }}>{slabLabel}</div>
+          <div className={PANEL_LABEL_CLASS} style={{ color: '#86EFAC' }}>3D</div>
         </div>
 
         {status === 'loading' && (
