@@ -375,7 +375,7 @@ const ViewScreen = () => {
     });
 
     const [selectedLayout, setSelectedLayout] = useState("三维四窗");
-    const [selectedVolumePreset, setSelectedVolumePreset] = useState<"CT-Lung" | "CT-Soft-Tissue">("CT-Lung");
+    const [selectedVolumePreset, setSelectedVolumePreset] = useState<"CT-Lung" | "CT-Soft-Tissue">("CT-Soft-Tissue");
     const [selectedRenderMode, setSelectedRenderMode] = useState<"MIP" | "MinIP">("MIP");
     const [selectedVoiLutMode, setSelectedVoiLutMode] = useState<"LINEAR" | "LINEAR_EXACT" | "SIGMOID">("LINEAR");
     const [selectedInterpolationMode, setSelectedInterpolationMode] = useState<"LINEAR" | "NEAREST" | "FAST_LINEAR">("LINEAR");
