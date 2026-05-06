@@ -105,6 +105,32 @@ const WINDOW_PRESETS = [
     { key: "brain", label: "Brain", ww: 80, wl: 40 },
 ] as const;
 
+const VOLUME_PRESETS = [
+    "CT-AAA",
+    "CT-AAA2",
+    "CT-Bone",
+    "CT-Bones",
+    "CT-Cardiac",
+    "CT-Cardiac2",
+    "CT-Cardiac3",
+    "CT-Chest-Contrast-Enhanced",
+    "CT-Chest-Vessels",
+    "CT-Coronary-Arteries",
+    "CT-Coronary-Arteries-2",
+    "CT-Coronary-Arteries-3",
+    "CT-Cropped-Volume-Bone",
+    "CT-Fat",
+    "CT-Liver-Vasculature",
+    "CT-Lung",
+    "CT-MIP",
+    "CT-Muscle",
+    "CT-Pulmonary-Arteries",
+    "CT-Soft-Tissue",
+    "CT-Air",
+] as const;
+
+type VolumePreset = typeof VOLUME_PRESETS[number];
+
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
 
 const formatDicomDate = (value?: string) => {
@@ -375,7 +401,7 @@ const ViewScreen = () => {
     });
 
     const [selectedLayout, setSelectedLayout] = useState("三维四窗");
-    const [selectedVolumePreset, setSelectedVolumePreset] = useState<"CT-Lung" | "CT-Soft-Tissue">("CT-Soft-Tissue");
+    const [selectedVolumePreset, setSelectedVolumePreset] = useState<VolumePreset>("CT-Lung");
     const [selectedRenderMode, setSelectedRenderMode] = useState<"MIP" | "MinIP">("MIP");
     const [selectedVoiLutMode, setSelectedVoiLutMode] = useState<"LINEAR" | "LINEAR_EXACT" | "SIGMOID">("LINEAR");
     const [selectedInterpolationMode, setSelectedInterpolationMode] = useState<"LINEAR" | "NEAREST" | "FAST_LINEAR">("LINEAR");
@@ -1400,22 +1426,19 @@ const ViewScreen = () => {
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVolumePresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
                                                 >
                                                     <span className="text-[12px] font-medium text-[#37474F] truncate">
-                                                        {selectedVolumePreset === "CT-Lung" ? "CT-Lung" : "Soft Tissue"}
+                                                        {selectedVolumePreset}
                                                     </span>
                                                     <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVolumePresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                 </div>
                                                 {isVolumePresetOpen && (
-                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                                                        {([
-                                                            { value: "CT-Lung" as const, label: "CT-Lung" },
-                                                            { value: "CT-Soft-Tissue" as const, label: "Soft Tissue" },
-                                                        ]).map((opt) => (
+                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 max-h-[260px] overflow-y-auto bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1">
+                                                        {VOLUME_PRESETS.map((preset) => (
                                                             <div
-                                                                key={opt.value}
-                                                                onClick={() => { setSelectedVolumePreset(opt.value); setIsVolumePresetOpen(false); }}
-                                                                className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedVolumePreset === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                                key={preset}
+                                                                onClick={() => { setSelectedVolumePreset(preset); setIsVolumePresetOpen(false); }}
+                                                                className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedVolumePreset === preset ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
                                                             >
-                                                                {opt.label}
+                                                                {preset}
                                                             </div>
                                                         ))}
                                                     </div>
