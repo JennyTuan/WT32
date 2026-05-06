@@ -33,7 +33,7 @@ export default function CornerInfoPage() {
             setConfig(parsed);
             initialConfigRef.current = parsed;
             setIsDirty(false);
-        } catch (err) {
+        } catch {
             console.error("Failed to load corner config", err);
             showToast("加载配置失败", "error");
         } finally {
@@ -54,7 +54,7 @@ export default function CornerInfoPage() {
             initialConfigRef.current = config;
             setIsDirty(false);
             showToast("配置已成功保存", "success");
-        } catch (err) {
+        } catch {
             showToast("保存失败，请稍后重试", "error");
         } finally {
             setSaving(false);
@@ -84,7 +84,7 @@ export default function CornerInfoPage() {
             initialConfigRef.current = parsed;
             setIsDirty(false);
             showToast("已恢复全部默认配置", "success");
-        } catch (err) {
+        } catch {
             showToast("恢复默认失败", "error");
         } finally {
             setLoading(false);

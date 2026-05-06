@@ -1,12 +1,4 @@
-const API_BASE_URL = (
-    (import.meta.env.VITE_API_BASE_URL as string | undefined)
-    ?? (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")
-).replace(/\/$/, "");
-
-const buildApiUrl = (path: string) => {
-    if (!API_BASE_URL) return path;
-    return `${API_BASE_URL}${path}`;
-};
+import { buildApiUrl } from "./apiClient";
 
 export type CornerItem = {
     key: string;

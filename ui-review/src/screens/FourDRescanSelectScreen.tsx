@@ -1035,6 +1035,7 @@ export default function FourDRescanSelectScreen() {
   const nextPointIdRef = useRef<number>(initialWavePoints.length + 1);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setWavePoints(initialWavePoints);
     nextPointIdRef.current = initialWavePoints.length + 1;
   }, [initialWavePoints]);

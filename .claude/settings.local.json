@@ -56,7 +56,15 @@
       "Bash(rm \"C:/CT-Prototype-backup/CT-Prototype/ui-review/src/screens/ComponentLibraryScreen.tsx\" \"C:/CT-Prototype-backup/CT-Prototype/ui-review/src/components/FourDMprGrid.tsx\" \"C:/CT-Prototype-backup/CT-Prototype/ui-review/src/components/WebImageViewer.tsx\" \"C:/CT-Prototype-backup/CT-Prototype/ui-review/src/components/ProtocolEditorModal.tsx\")",
       "Bash(rmdir \"C:/CT-Prototype-backup/CT-Prototype/ui-review/src/components/serviceMode\")",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(npm run *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(echo \"EXIT_CODE:$?\")",
+      "PowerShell(Get-CimInstance *)",
+      "PowerShell(head *)",
+      "PowerShell(npm run *)",
+      "Bash(node -e \"const p = require\\('./node_modules/eslint-plugin-react-hooks/cjs/eslint-plugin-react-hooks.development.js'\\); console.log\\(Object.keys\\(p\\)\\)\")",
+      "Bash(node *)"
     ]
   }
 }

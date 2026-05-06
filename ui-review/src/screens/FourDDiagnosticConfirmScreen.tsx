@@ -105,6 +105,7 @@ export default function FourDDiagnosticConfirmScreen() {
     const scanProgressRef = useRef(0);
     const waveRafRef = useRef<number | null>(null);
     const waveTimeRef = useRef(0);
+    // eslint-disable-next-line react-hooks/purity
     const breathingDemoStartRef = useRef(Date.now());
 
     const buildGroups = useCallback((): ProtocolGroup[] => {

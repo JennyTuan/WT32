@@ -10,17 +10,7 @@ import type {
   ScanFile,
 } from "./types";
 
-const metaEnv = (import.meta as ImportMeta & {
-  env?: {
-    DEV?: boolean;
-    VITE_API_BASE_URL?: string;
-  };
-}).env;
-
-const API_BASE_URL = (
-  metaEnv?.VITE_API_BASE_URL ??
-  (metaEnv?.DEV ? "http://127.0.0.1:8000" : "")
-).replace(/\/$/, "");
+import { API_BASE_URL } from "../../../lib/apiClient";
 
 const api = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`${API_BASE_URL}/api/disk-manager${path}`, {

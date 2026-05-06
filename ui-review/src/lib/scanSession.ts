@@ -1,18 +1,12 @@
 import { loadSelectedPatient, type SelectedPatientSession } from "./patientSession";
 
-const API_BASE_URL = (
-    (import.meta.env.VITE_API_BASE_URL as string | undefined)
-    ?? (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")
-).replace(/\/$/, "");
+import { buildApiUrl } from "./apiClient";
+
 const STORAGE_KEY = "selectedScanSessionId";
 const DETAIL_CACHE_KEY = "selectedScanSessionDetail";
 const PATIENT_CACHE_KEY = "selectedBackendPatient";
 const AD_HOC_SESSION_IDS_KEY = "adHocScanSessionIds";
 
-const buildApiUrl = (path: string) => {
-    if (!API_BASE_URL) return path;
-    return `${API_BASE_URL}${path}`;
-};
 
 type ApiPatient = {
     id: number;

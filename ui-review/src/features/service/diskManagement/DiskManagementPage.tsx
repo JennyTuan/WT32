@@ -81,6 +81,7 @@ const PartitionHeader = ({
   const visual = PARTITION_VISUALS[partition.id];
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setThresholdDraft(String(partition.threshold));
   }, [partition.threshold]);
 

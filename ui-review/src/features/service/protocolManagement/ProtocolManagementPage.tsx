@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import ServiceModeShell from "../shared/ServiceModeShell";
+import { buildApiUrl } from "../../../lib/apiClient";
 
 // ── API types ──────────────────────────────────────────────────────────────
 
@@ -47,8 +48,6 @@ type ApiProtocolSummary = {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const API_BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "").replace(/\/$/, "");
-const buildApiUrl = (path: string) => `${API_BASE_URL}${path}`;
 
 const ACQUISITION_TYPE_LABELS: Record<AcquisitionType, string> = { regular: "常规", gating: "门控", four_d: "4D" };
 

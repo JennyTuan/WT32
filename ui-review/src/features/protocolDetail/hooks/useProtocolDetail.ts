@@ -425,7 +425,7 @@ export function useProtocolDetail() {
             if (!response.ok) throw new Error("保存协议至目录失败");
             setSaveMessage("协议已更新");
             setTimeout(() => navigate(-1), 1000);
-        } catch (error) { setSaveMessage("保存失败，请重试"); } finally { setIsSaving(false); }
+        } catch { setSaveMessage("保存失败，请重试"); } finally { setIsSaving(false); }
     };
 
     const handleSave = async () => {
@@ -446,7 +446,7 @@ export function useProtocolDetail() {
                             ? "contrast"
                             : "plain";
 
-                let savedSession = await createAdHocScanSessionForSelectedPatient({
+                const savedSession = await createAdHocScanSessionForSelectedPatient({
                     source_protocol_id: sourceProtocolId,
                     session_name: basicDraft.name.trim() || protocol.name,
                     name: basicDraft.name.trim() || protocol.name,
@@ -531,7 +531,7 @@ export function useProtocolDetail() {
             }
             await syncProtocolFromSession();
             navigate(-1);
-        } catch (error) { setSaveMessage("保存失败，请稍后重试"); } finally { setIsSaving(false); }
+        } catch { setSaveMessage("保存失败，请稍后重试"); } finally { setIsSaving(false); }
     };
 
     return {

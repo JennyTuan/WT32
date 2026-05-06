@@ -1,9 +1,10 @@
-import type { 
-    ApiProtocolDetail, 
-    ApiSeriesDetail, 
-    Selection, 
-    BasicDraft, 
-    SeriesDraft, 
+import type {
+    ApiProtocolDetail,
+    ApiSeriesDetail,
+    ApiReconSeries,
+    Selection,
+    BasicDraft,
+    SeriesDraft,
     ReconDraft,
 } from "./types";
 import { ProtocolSidebar } from "./components/ProtocolSidebar";
@@ -27,7 +28,7 @@ interface ProtocolDetailLayoutProps {
     seriesDraft: SeriesDraft;
     reconDraft: ReconDraft;
     activeSeries: ApiSeriesDetail | null;
-    activeRecon: any | null; // ApiReconSeries
+    activeRecon: ApiReconSeries | null;
     ageLabel: string;
     bodyPartOptions: string[];
     ageGroupOptions: BasicDraft["ageGroup"][];

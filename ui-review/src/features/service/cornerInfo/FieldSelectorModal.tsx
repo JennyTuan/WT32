@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { X, Search, Check, User, Activity, Image as ImageIcon, Cpu } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { CornerItem } from "../../../lib/cornerConfig";
 
 interface FieldSelectorModalProps {
@@ -11,7 +12,7 @@ interface FieldSelectorModalProps {
 interface FieldGroup {
     id: string;
     label: string;
-    icon: any;
+    icon: LucideIcon;
     fields: { key: string; label: string }[];
 }
 

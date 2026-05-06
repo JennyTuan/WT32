@@ -5,12 +5,7 @@ import type {
     ApiProtocolDetail 
 } from "./types";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "";
-
-export const buildApiUrl = (path: string) => {
-    if (!API_BASE_URL) return path;
-    return `${API_BASE_URL}${path}`;
-};
+export { buildApiUrl } from "../../lib/apiClient";
 
 export const fetchProtocolCatalogWithFallback = async () => {
     const candidates = API_BASE_URL

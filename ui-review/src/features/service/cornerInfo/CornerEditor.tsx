@@ -18,7 +18,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AlignJustify, Plus, Trash2, Save, RotateCcw } from "lucide-react";
-import type { CornerItem } from "../../../lib/cornerConfig";
+import type { CornerItem, CornerConfigData } from "../../../lib/cornerConfig";
 
 const EXAMPLE_VALUES: Record<string, string> = {
     patient_name: "张三",
@@ -123,8 +123,8 @@ function SortableFieldItem({ id, item, onToggle, onRemove, showExample }: {
 }
 
 interface CornerEditorProps {
-    config: any;
-    onUpdate: (config: any) => void;
+    config: CornerConfigData;
+    onUpdate: (config: CornerConfigData) => void;
     onStartAdding: (quadrant: string) => void;
     onSave: () => void;
     onResetCorner: (quadrant: string) => void;

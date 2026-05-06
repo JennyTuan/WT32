@@ -248,15 +248,11 @@ const getAcquisitionTypeLabel = (type: ApiProtocolDetail["acquisition_type"] | A
     }
 };
 
-const getScanFlowStartRoute = (
-    _acquisitionType: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]
-): "/scout-scan" | null => {
+const getScanFlowStartRoute = (): "/scout-scan" | null => {
     return "/scout-scan";
 };
 
-const getScanFlowUnavailableMessage = (
-    _acquisitionType: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]
-) => {
+const getScanFlowUnavailableMessage = () => {
     return "";
 };
 
@@ -559,6 +555,7 @@ const mapScanSessionToRawCase = (
     ),
 });
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const protocolCaseData: RawProtocolCase[] = [
     {
         protocol: {
@@ -812,15 +809,7 @@ type ProtocolSetupScreenProps = {
     onOpenProtocolDetail?: () => void;
 };
 
-const API_BASE_URL = (
-    (import.meta.env.VITE_API_BASE_URL as string | undefined)
-    ?? (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")
-).replace(/\/$/, "");
-
-const buildApiUrl = (path: string) => {
-    if (!API_BASE_URL) return path;
-    return `${API_BASE_URL}${path}`;
-};
+import { buildApiUrl, API_BASE_URL } from "../lib/apiClient";
 
 const inferHostApiBaseUrl = () => {
     if (typeof window === "undefined") return "";
@@ -1754,9 +1743,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             return;
         }
         if (activeScanSession && activePlan?.sourceSessionId) {
-            const startRoute = getScanFlowStartRoute(activeScanSession.acquisition_type);
+            const startRoute = getScanFlowStartRoute();
             if (!startRoute) {
-                setSessionActionError(getScanFlowUnavailableMessage(activeScanSession.acquisition_type));
+                setSessionActionError(getScanFlowUnavailableMessage());
                 return;
             }
             saveSelectedScanSessionId(activeScanSession.id);
@@ -1816,9 +1805,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             return;
         }
         if (activeScanSession && activePlan?.sourceSessionId) {
-            const startRoute = getScanFlowStartRoute(activeScanSession.acquisition_type);
+            const startRoute = getScanFlowStartRoute();
             if (!startRoute) {
-                setSessionActionError(getScanFlowUnavailableMessage(activeScanSession.acquisition_type));
+                setSessionActionError(getScanFlowUnavailableMessage());
                 return;
             }
             saveSelectedScanSessionId(activeScanSession.id);
@@ -1838,9 +1827,9 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         if (!activeProtocolId) return;
         if (!activeProtocolSummary) return;
 
-        const startRoute = getScanFlowStartRoute(activeProtocolSummary.acquisition_type);
+        const startRoute = getScanFlowStartRoute();
         if (!startRoute) {
-            setSessionActionError(getScanFlowUnavailableMessage(activeProtocolSummary.acquisition_type));
+            setSessionActionError(getScanFlowUnavailableMessage());
             return;
         }
         await openScanSession(activeProtocolId, startRoute);

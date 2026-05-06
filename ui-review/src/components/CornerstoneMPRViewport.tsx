@@ -88,6 +88,7 @@ interface TextAnnotation {
 let volumeLoaderRegistered = false;
 function registerVolumeLoader() {
   if (volumeLoaderRegistered) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   volumeLoader.registerVolumeLoader('streaming-wado-image-volume', cornerstoneStreamingImageVolumeLoader as any);
   volumeLoaderRegistered = true;
 }
@@ -95,6 +96,7 @@ function registerVolumeLoader() {
 // Wraps StreamingImageVolume.load() in a promise that resolves when the
 // volume has finished loading every frame. Callers can then safely call
 // setVolumesForViewports without rendering an empty viewport mid-load.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function awaitVolumeLoaded(vol: any): Promise<void> {
   if (vol?.loadStatus?.loaded) return Promise.resolve();
   return new Promise<void>((resolve) => {
@@ -600,6 +602,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           // For cine ticks: if the new phase isn't fully loaded yet, drop the
           // frame rather than swap to an empty volume. The previous phase
           // stays on screen until prewarm catches up.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const alreadyLoaded = (vol as any)?.loadStatus?.loaded === true;
           if (!isFirstSwap && !alreadyLoaded) {
             // Kick the loader (idempotent) so prewarm-in-progress finishes,
@@ -926,6 +929,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       if (!vp) return;
       try {
         if (vp.getSliceIndex() !== currentSliceIndex) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (vp as any).setSliceIndex(currentSliceIndex);
           vp.render();
         }

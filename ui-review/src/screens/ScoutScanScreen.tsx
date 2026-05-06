@@ -625,56 +625,6 @@ function BreathingScoutViewport() {
                     </div>
                 </>
             )}
-
-            {false && loadState === "ready" && (
-                <div className="absolute bottom-3 right-3 w-[220px] rounded-md border border-white/10 bg-black/45 px-3 py-2 text-[#DCE5ED] backdrop-blur-sm">
-                    <div className="mb-2 flex items-center justify-between text-[10px] font-bold tracking-[0.08em]">
-                        <span>窗宽 / 窗位</span>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setWindowWidth(metaRef.current?.ww ?? BREATHING_SCOUT_SERIES.fallbackWindowWidth);
-                                setWindowLevel(metaRef.current?.wl ?? BREATHING_SCOUT_SERIES.fallbackWindowLevel);
-                            }}
-                            className="rounded border border-white/15 px-2 py-0.5 text-[9px] text-white/80 hover:bg-white/10"
-                        >
-                            重置
-                        </button>
-                    </div>
-                    <div className="space-y-2">
-                        <label className="block">
-                            <div className="mb-1 flex items-center justify-between text-[10px]">
-                                <span>WW</span>
-                                <span>{Math.round(windowWidth)}</span>
-                            </div>
-                            <input
-                                type="range"
-                                min="200"
-                                max="1800"
-                                step="10"
-                                value={windowWidth}
-                                onChange={(event) => setWindowWidth(Number(event.target.value))}
-                                className="w-full accent-[#7EAAFF]"
-                            />
-                        </label>
-                        <label className="block">
-                            <div className="mb-1 flex items-center justify-between text-[10px]">
-                                <span>WL</span>
-                                <span>{Math.round(windowLevel)}</span>
-                            </div>
-                            <input
-                                type="range"
-                                min="-250"
-                                max="250"
-                                step="5"
-                                value={windowLevel}
-                                onChange={(event) => setWindowLevel(Number(event.target.value))}
-                                className="w-full accent-[#66BB6A]"
-                            />
-                        </label>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
@@ -767,6 +717,7 @@ const ScoutScanScreen = ({
     const [breathingReadyCountdown, setBreathingReadyCountdown] = useState(10);
     // Rolling peak tracker for stability detection
     const peakHistoryRef = useRef<{ value: number; time: number }[]>([]);
+    // eslint-disable-next-line react-hooks/purity
     const trainingStartRef = useRef<number>(Date.now());
     const demoStableTimerRef = useRef<number | null>(null);
     const demoCountdownTimerRef = useRef<number | null>(null);

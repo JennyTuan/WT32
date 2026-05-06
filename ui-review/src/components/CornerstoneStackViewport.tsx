@@ -110,8 +110,11 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
     const renderingEngineRef = useRef<RenderingEngine | null>(null);
     const viewportRef = useRef<StackViewport | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    // eslint-disable-next-line react-hooks/purity
     const viewportIdRef = useRef(`cs-viewport-${Math.random().toString(36).slice(2, 10)}`);
+    // eslint-disable-next-line react-hooks/purity
     const renderingEngineIdRef = useRef(`cs-engine-${Math.random().toString(36).slice(2, 10)}`);
+    // eslint-disable-next-line react-hooks/purity
     const toolGroupIdRef = useRef(`cs-tools-${Math.random().toString(36).slice(2, 10)}`);
     // Track last WL values sent to Cornerstone to avoid feedback loops
     const lastSentVoiRef = useRef<{ lower: number; upper: number } | null>(null);
@@ -231,7 +234,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         lastAppliedDisplayRef.current = null;
       };
       // currentImageIndex intentionally excluded — handled by the effect below
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+       
     }, [dicomUrl, imageUrls]);
 
     // ─── Slice navigation (lightweight, no teardown) ───

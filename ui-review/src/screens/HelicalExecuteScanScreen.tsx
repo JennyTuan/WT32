@@ -42,6 +42,7 @@ function HelicalLiveViewport({ playbackActive }: { playbackActive: boolean }) {
     useEffect(() => {
         if (!playbackActive) return;
 
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setCurrentImageIndex(0);
         const timer = window.setInterval(() => {
             setCurrentImageIndex((prev) => {

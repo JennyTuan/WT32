@@ -1,11 +1,11 @@
-import type { CornerConfigData } from "../../../lib/cornerConfig";
+import type { CornerConfigData, CornerItem } from "../../../lib/cornerConfig";
 
 interface CornerPreviewProps {
     config: CornerConfigData;
 }
 
 export default function CornerPreview({ config }: CornerPreviewProps) {
-    const renderQuadrant = (items: any[], alignment: "left" | "right") => (
+    const renderQuadrant = (items: CornerItem[], alignment: "left" | "right") => (
         <div className={`flex flex-col gap-1.5 p-6 pointer-events-none ${alignment === "right" ? "items-end text-right" : "items-start text-left"}`}>
             {items.filter(i => i.visible).map((item, idx) => (
                 <div 

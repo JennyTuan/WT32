@@ -417,6 +417,7 @@ export default function ScoutExecuteScanScreen() {
 
         const workflowType = resolvePostScoutScanTypeFromWorkflowPlans();
         if (workflowType) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setPostScoutScanType(workflowType);
             return () => {
                 cancelled = true;

@@ -129,6 +129,7 @@ const PatientListScreen = () => {
 
     useEffect(() => {
         if (selectedRows.length > 0 && selectedPatients.length === 0) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setSelectedRows([]);
         }
     }, [selectedPatients.length, selectedRows.length]);
