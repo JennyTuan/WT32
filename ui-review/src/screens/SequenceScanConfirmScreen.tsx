@@ -4,6 +4,7 @@ import { Hand, Move, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { fetchSelectedScanSession, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
 import type { ApiScanSessionAxialParam } from "../lib/scanSession";
 import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
+import AutoMaPanel from "../components/AutoMaPanel";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
 const SCOUT_SERIES = {
@@ -532,7 +533,8 @@ export function TomographicScoutViewport({
 
 const SequenceScanConfirmScreen = () => {
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
-    const [axialParamId, setAxialParamId] = useState<number | null>(null);
+    const [axialParam, setAxialParam] = useState<ApiScanSessionAxialParam | null>(null);
+    const axialParamId = axialParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -541,13 +543,13 @@ const SequenceScanConfirmScreen = () => {
         const loadSessionDefaults = async () => {
             try {
                 const scanSession = await fetchSelectedScanSession();
-                const axialParam = scanSession?.series.find((series) => series.series_type === "axial")?.axial_param as ApiScanSessionAxialParam | null | undefined;
-                if (!axialParam || cancelled) return;
+                const loaded = scanSession?.series.find((series) => series.series_type === "axial")?.axial_param as ApiScanSessionAxialParam | null | undefined;
+                if (!loaded || cancelled) return;
 
-                setAxialParamId(axialParam.id);
+                setAxialParam(loaded);
                 setMeasurements({
-                    scanLength: String(axialParam.scan_length),
-                    scoutFov: String(axialParam.fov),
+                    scanLength: String(loaded.scan_length),
+                    scoutFov: String(loaded.fov),
                 });
             } catch (error) {
                 console.error("Failed to load axial scan session defaults.", error);
@@ -559,6 +561,14 @@ const SequenceScanConfirmScreen = () => {
             cancelled = true;
         };
     }, []);
+
+    const handleAutoMaChange = (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number }) => {
+        if (!axialParam) return;
+        setAxialParam((prev) => (prev ? { ...prev, ...patch } : prev));
+        void updateSelectedScanSessionAxialParam(axialParam.id, patch).catch((error) => {
+            console.error("Failed to persist Auto mA settings.", error);
+        });
+    };
 
     useEffect(() => {
         if (!axialParamId) return;
@@ -586,13 +596,33 @@ const SequenceScanConfirmScreen = () => {
         };
     }, [axialParamId, measurements.scanLength, measurements.scoutFov]);
 
+    const scanLengthNum = Number(measurements.scanLength);
+    const scanLengthForCurve = Number.isFinite(scanLengthNum) ? scanLengthNum : (axialParam?.scan_length ?? 0);
+
     return (
         <ScanConfirmScreen
             activeSequenceId="s2"
             activeSequenceStepIndex={0}
             parameterPanelMode="tomographicScan"
             tomographicParamOverrides={measurements}
-            rightViewportContent={<TomographicScoutViewport onMeasurementChange={setMeasurements} initialMeasurements={measurements} />}
+            rightViewportContent={
+                <>
+                    <TomographicScoutViewport onMeasurementChange={setMeasurements} initialMeasurements={measurements} />
+                    {axialParam && (
+                        <AutoMaPanel
+                            autoMa={axialParam.auto_ma ?? false}
+                            maMin={axialParam.ma_min ?? Math.max(40, Math.round((axialParam.ma ?? 200) * 0.5))}
+                            maMax={axialParam.ma_max ?? Math.round((axialParam.ma ?? 200) * 1.2)}
+                            fallbackMa={axialParam.ma}
+                            scanLength={scanLengthForCurve}
+                            sliceInterval={axialParam.slice_interval}
+                            rotationTime={axialParam.rotation_time}
+                            stepCount={axialParam.step_count}
+                            onChange={handleAutoMaChange}
+                        />
+                    )}
+                </>
+            }
             nextRoute="/image-viewer"
         />
     );
