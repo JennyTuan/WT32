@@ -65,7 +65,8 @@
       "PowerShell(npm run *)",
       "Bash(node -e \"const p = require\\('./node_modules/eslint-plugin-react-hooks/cjs/eslint-plugin-react-hooks.development.js'\\); console.log\\(Object.keys\\(p\\)\\)\")",
       "Bash(node *)",
-      "Bash(npx skills@latest *)"
+      "Bash(npx skills@latest *)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\CT-Prototype-backup\\\\CT-Prototype\" -Force | Format-Table Name, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"DIR\"}else{\"FILE\"}}} -AutoSize)"
     ]
   }
 }
