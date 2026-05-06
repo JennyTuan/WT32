@@ -452,7 +452,7 @@ export default function ScoutExecuteScanScreen() {
     const scoutResultSeries = isFourDScoutWorkflow ? FOUR_D_SCOUT_SERIES : SCOUT_SERIES;
 
     useEffect(() => {
-        if (!isFourDScoutWorkflow || stage !== "completed") return;
+        if (stage !== "completed") return;
 
         autoNextTimerRef.current = window.setTimeout(() => {
             navigate(postScoutAction.route);
@@ -464,7 +464,7 @@ export default function ScoutExecuteScanScreen() {
                 autoNextTimerRef.current = null;
             }
         };
-    }, [isFourDScoutWorkflow, navigate, postScoutAction.route, stage]);
+    }, [navigate, postScoutAction.route, stage]);
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {

@@ -650,7 +650,10 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           const lower = lastVoiRef.current?.lower ?? windowCenter - windowWidth / 2;
           const upper = lastVoiRef.current?.upper ?? windowCenter + windowWidth / 2;
           lastVoiRef.current = { lower, upper };
-          activeViewportIds.forEach((id) => {
+          const voiViewportIds = (layoutMode === 'four-up' && volumePanelMode === 'volume3d')
+            ? [vpAxial, vpCoronal, vpSagittal]
+            : activeViewportIds;
+          voiViewportIds.forEach((id) => {
             (engine.getViewport(id) as Types.IVolumeViewport | undefined)?.setProperties({ voiRange: { lower, upper } });
           });
 
@@ -757,12 +760,15 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       const upper = windowCenter + windowWidth / 2;
       lastVoiRef.current = { lower, upper };
       lastEmittedVoiRef.current = { lower, upper };
-      activeViewportIds.forEach((id) => {
+      const voiViewportIds = (layoutMode === 'four-up' && volumePanelMode === 'volume3d')
+        ? [vpAxial, vpCoronal, vpSagittal]
+        : activeViewportIds;
+      voiViewportIds.forEach((id) => {
         const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
         vp?.setProperties({ voiRange: { lower, upper } });
         vp?.render();
       });
-    }, [activeViewportIds, status, windowCenter, windowWidth, windowSyncKey]);
+    }, [activeViewportIds, layoutMode, status, volumePanelMode, vpAxial, vpCoronal, vpSagittal, windowCenter, windowWidth, windowSyncKey]);
 
     useEffect(() => {
       const mprViewportElements = [
@@ -909,7 +915,6 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
       if (volumePanelMode === 'volume3d') {
         fourthVp.setProperties({
-          ...commonProperties,
           preset: volumePreset,
           sampleDistanceMultiplier: volumeSampleDistanceMultiplier,
         } as Types.VolumeViewportProperties);

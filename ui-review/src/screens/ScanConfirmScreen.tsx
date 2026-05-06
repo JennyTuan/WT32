@@ -82,6 +82,8 @@ type TomographicScanDisplayParams = {
     cycleCount: string;
     scanningDirection: string;
     scoutFov: string;
+    doseCtdiVol: string;
+    doseDlp: string;
 };
 
 type HelicalScanDisplayParams = {
@@ -95,6 +97,8 @@ type HelicalScanDisplayParams = {
     pitch: string;
     scanningDirection: string;
     scoutFov: string;
+    doseCtdiVol: string;
+    doseDlp: string;
 };
 
 type ScoutDoseDisplayParams = {
@@ -128,6 +132,8 @@ const DEFAULT_TOMOGRAPHIC_SCAN_PARAMS: TomographicScanDisplayParams = {
     cycleCount: "--",
     scanningDirection: "--",
     scoutFov: "--",
+    doseCtdiVol: "--",
+    doseDlp: "--",
 };
 
 const DEFAULT_HELICAL_SCAN_PARAMS: HelicalScanDisplayParams = {
@@ -141,6 +147,8 @@ const DEFAULT_HELICAL_SCAN_PARAMS: HelicalScanDisplayParams = {
     pitch: "--",
     scanningDirection: "--",
     scoutFov: "--",
+    doseCtdiVol: "--",
+    doseDlp: "--",
 };
 
 const DEFAULT_SCOUT_DOSE_PARAMS: ScoutDoseDisplayParams = {
@@ -236,6 +244,10 @@ const mapScanSessionToProtocolCases = (scanSession: ApiScanSessionDetail | null)
             if (topogram?.fov !== undefined) scanParams.scoutFOV = topogram.fov;
             if (helical?.fov !== undefined) scanParams.scoutFOV = helical.fov;
             if (axial?.fov !== undefined) scanParams.scoutFOV = axial.fov;
+            if (helical?.ctdi_vol != null) scanParams.ctdiVol = helical.ctdi_vol;
+            if (helical?.dlp != null) scanParams.dlp = helical.dlp;
+            if (axial?.ctdi_vol != null) scanParams.ctdiVol = axial.ctdi_vol;
+            if (axial?.dlp != null) scanParams.dlp = axial.dlp;
 
             return {
                 id: String(series.id),
@@ -338,6 +350,8 @@ const getTomographicScanDisplayParams = (protocolCases: RawProtocolCase[] | unde
         cycleCount: toDisplayValue(scanSequence.scanParams.cycleCount),
         scanningDirection: toDisplayValue(scanSequence.scanParams.scanningDirection),
         scoutFov: toDisplayValue(scanSequence.scanParams.scoutFOV),
+        doseCtdiVol: toDisplayValue(scanSequence.scanParams.ctdiVol, 2),
+        doseDlp: toDisplayValue(scanSequence.scanParams.dlp, 2),
     };
 };
 
@@ -365,6 +379,8 @@ const getHelicalScanDisplayParams = (protocolCases: RawProtocolCase[] | undefine
         pitch: toDisplayValue(scanSequence.scanParams.pitch, 3),
         scanningDirection: toDisplayValue(scanSequence.scanParams.scanningDirection),
         scoutFov: toDisplayValue(scanSequence.scanParams.scoutFOV),
+        doseCtdiVol: toDisplayValue(scanSequence.scanParams.ctdiVol, 2),
+        doseDlp: toDisplayValue(scanSequence.scanParams.dlp, 2),
     };
 };
 
@@ -934,11 +950,6 @@ const ScanConfirmScreen = ({
                                     </div>
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">准直器</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedTomographicScanDisplayParams.collimation}</span>
-                                    </div>
-
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">扫描增量</span>
                                         <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedTomographicScanDisplayParams.scanIncrement}</span>
                                     </div>
@@ -960,6 +971,18 @@ const ScanConfirmScreen = ({
                                         <div className="flex items-center gap-1 mt-[1px]">
                                             <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.angle}</span>
                                             <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                        </div>
+                                    </div>
+
+                                    <div className="col-span-2 mt-1 rounded-md border border-[#FDE68A]/80 bg-[#FFFBEB] px-3 py-2 flex items-center justify-around">
+                                        <div className="flex flex-col items-center">
+                                            <span className="text-[9px] font-black text-[#B45309] uppercase tracking-tighter">CTDIvol (mGy)</span>
+                                            <span className="text-[15px] font-black text-[#B45309] mt-[2px]">{resolvedTomographicScanDisplayParams.doseCtdiVol}</span>
+                                        </div>
+                                        <div className="w-px h-6 bg-[#FDE68A]" />
+                                        <div className="flex flex-col items-center">
+                                            <span className="text-[9px] font-black text-[#B45309] uppercase tracking-tighter">DLP (mGy·cm)</span>
+                                            <span className="text-[15px] font-black text-[#B45309] mt-[2px]">{resolvedTomographicScanDisplayParams.doseDlp}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1031,11 +1054,6 @@ const ScanConfirmScreen = ({
                                     </div>
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">准直器</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedHelicalScanDisplayParams.collimation}</span>
-                                    </div>
-
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">Pitch</span>
                                         <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedHelicalScanDisplayParams.pitch}</span>
                                     </div>
@@ -1053,6 +1071,18 @@ const ScanConfirmScreen = ({
                                         <div className="flex items-center gap-1 mt-[1px]">
                                             <span className="text-[13px] font-black text-[#37474F]">{resolvedHelicalScanDisplayParams.angle}</span>
                                             <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                        </div>
+                                    </div>
+
+                                    <div className="col-span-2 mt-1 rounded-md border border-[#FDE68A]/80 bg-[#FFFBEB] px-3 py-2 flex items-center justify-around">
+                                        <div className="flex flex-col items-center">
+                                            <span className="text-[9px] font-black text-[#B45309] uppercase tracking-tighter">CTDIvol (mGy)</span>
+                                            <span className="text-[15px] font-black text-[#B45309] mt-[2px]">{resolvedHelicalScanDisplayParams.doseCtdiVol}</span>
+                                        </div>
+                                        <div className="w-px h-6 bg-[#FDE68A]" />
+                                        <div className="flex flex-col items-center">
+                                            <span className="text-[9px] font-black text-[#B45309] uppercase tracking-tighter">DLP (mGy·cm)</span>
+                                            <span className="text-[15px] font-black text-[#B45309] mt-[2px]">{resolvedHelicalScanDisplayParams.doseDlp}</span>
                                         </div>
                                     </div>
                                 </div>

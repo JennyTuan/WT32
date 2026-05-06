@@ -12,6 +12,7 @@ const HOLD_DURATION_MS = 3000;
 const EXPOSURE_DURATION_MS = 1500;
 const RENDER_DURATION_MS = 1600;
 const LIVE_FRAME_INTERVAL_MS = 85;
+const AUTO_NAVIGATE_DELAY_MS = 700;
 const HELICAL_RESULT_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
     count: 118,
@@ -83,6 +84,7 @@ export default function HelicalExecuteScanScreen() {
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
     const exposureTimerRef = useRef<number | null>(null);
+    const autoNavigateTimerRef = useRef<number | null>(null);
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -117,10 +119,28 @@ export default function HelicalExecuteScanScreen() {
     }, []);
 
     useEffect(() => {
+        if (stage !== "completed") return;
+
+        autoNavigateTimerRef.current = window.setTimeout(() => {
+            navigate("/image-viewer");
+        }, AUTO_NAVIGATE_DELAY_MS);
+
+        return () => {
+            if (autoNavigateTimerRef.current !== null) {
+                window.clearTimeout(autoNavigateTimerRef.current);
+                autoNavigateTimerRef.current = null;
+            }
+        };
+    }, [navigate, stage]);
+
+    useEffect(() => {
         return () => {
             clearHoldRaf();
             if (exposureTimerRef.current !== null) {
                 window.clearTimeout(exposureTimerRef.current);
+            }
+            if (autoNavigateTimerRef.current !== null) {
+                window.clearTimeout(autoNavigateTimerRef.current);
             }
         };
     }, []);
