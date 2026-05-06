@@ -599,16 +599,20 @@ const SequenceScanConfirmScreen = () => {
     const scanLengthNum = Number(measurements.scanLength);
     const scanLengthForCurve = Number.isFinite(scanLengthNum) ? scanLengthNum : (axialParam?.scan_length ?? 0);
 
+    const showAutoMaPanel = axialParam?.auto_ma ?? false;
+
     return (
         <ScanConfirmScreen
             activeSequenceId="s2"
             activeSequenceStepIndex={0}
             parameterPanelMode="tomographicScan"
             tomographicParamOverrides={measurements}
+            autoMaEnabled={showAutoMaPanel}
+            onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
             rightViewportContent={
                 <>
                     <TomographicScoutViewport onMeasurementChange={setMeasurements} initialMeasurements={measurements} />
-                    {axialParam && (
+                    {axialParam && showAutoMaPanel && (
                         <AutoMaPanel
                             autoMa={axialParam.auto_ma ?? false}
                             maMin={axialParam.ma_min ?? Math.max(40, Math.round((axialParam.ma ?? 200) * 0.5))}

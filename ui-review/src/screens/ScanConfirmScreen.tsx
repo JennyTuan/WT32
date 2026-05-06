@@ -51,6 +51,8 @@ type ScanConfirmScreenProps = {
     tomographicParamOverrides?: Partial<TomographicScanDisplayParams>;
     helicalParamOverrides?: Partial<HelicalScanDisplayParams>;
     rightViewportContent?: React.ReactNode;
+    autoMaEnabled?: boolean;
+    onAutoMaEnabledChange?: (value: boolean) => void;
     readOnlyMode?: boolean;
     onExecuteScan?: () => void;
     executeButtonLabel?: string;
@@ -393,6 +395,8 @@ const ScanConfirmScreen = ({
     tomographicParamOverrides,
     helicalParamOverrides,
     rightViewportContent,
+    autoMaEnabled,
+    onAutoMaEnabledChange,
     readOnlyMode = false,
     onExecuteScan,
     executeButtonLabel = "执行扫描",
@@ -552,6 +556,7 @@ const ScanConfirmScreen = ({
         ...helicalScanDisplayParams,
         ...helicalParamOverrides,
     };
+    const isTomographicMaLocked = Boolean(autoMaEnabled && onAutoMaEnabledChange);
     const currentProtocolLabel =
         parameterPanelMode === "helicalScan"
             ? "螺旋扫描"
@@ -884,6 +889,28 @@ const ScanConfirmScreen = ({
                         <div className="flex-1 p-2 pt-2 flex flex-col gap-2 overflow-y-auto">
                             {parameterPanelMode === "tomographicScan" ? (
                                 <div className="grid grid-cols-2 gap-2">
+                                     {onAutoMaEnabledChange && (
+                                        <div
+                                            className={`col-span-2 p-1.5 px-2.5 bg-white border rounded-md shadow-sm flex items-center justify-between transition-colors ${
+                                                autoMaEnabled ? "border-[#4D94FF]/60" : "border-[#B0C4DE]/40"
+                                            }`}
+                                        >
+                                            <span className="text-[10px] font-black text-[#37474F] uppercase tracking-tighter">智能剂量调节</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => onAutoMaEnabledChange(!autoMaEnabled)}
+                                                className={`relative inline-flex h-[18px] w-[32px] items-center rounded-full transition-colors ${
+                                                    autoMaEnabled ? "bg-[#2563EB]" : "bg-[#CBD5E1]"
+                                                }`}
+                                            >
+                                                <span
+                                                    className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
+                                                        autoMaEnabled ? "translate-x-[16px]" : "translate-x-[2px]"
+                                                    }`}
+                                                />
+                                            </button>
+                                        </div>
+                                    )}
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">进出床</span>
                                         <div className="relative w-full">
@@ -925,11 +952,31 @@ const ScanConfirmScreen = ({
                                         <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedTomographicScanDisplayParams.scanLength}</span>
                                     </div>
 
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
+                                     <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">旋转时间</span>
+                                        <div className="flex items-center gap-1 mt-[1px]">
+                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.rotationTime}</span>
+                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                        </div>
+                                    </div>
+
+                                    <div
+                                        aria-disabled={isTomographicMaLocked}
+                                        title={isTomographicMaLocked ? "智能剂量调节开启时，mA 由系统自动控制" : undefined}
+                                        className={`p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm group transition-colors ${
+                                            isTomographicMaLocked
+                                                ? "border-[#CBD5E1]/60 opacity-60 cursor-not-allowed"
+                                                : readOnlyMode
+                                                    ? "border-[#B0C4DE]/40 cursor-default"
+                                                    : "border-[#B0C4DE]/40 hover:border-[#4D94FF] cursor-pointer"
+                                        }`}
+                                    >
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">mA</span>
                                         <div className="flex items-center gap-1 mt-[1px]">
                                             <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.mA}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                            {!isTomographicMaLocked && (
+                                                <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                            )}
                                         </div>
                                     </div>
 
@@ -941,18 +988,7 @@ const ScanConfirmScreen = ({
                                         </div>
                                     </div>
 
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">旋转时间</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.rotationTime}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
 
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">扫描增量</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedTomographicScanDisplayParams.scanIncrement}</span>
-                                    </div>
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">循环次数</span>
@@ -973,6 +1009,8 @@ const ScanConfirmScreen = ({
                                             <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
                                         </div>
                                     </div>
+
+
 
                                     <div className="col-span-2 mt-1 rounded-md border border-[#FDE68A]/80 bg-[#FFFBEB] px-3 py-2 flex items-center justify-around">
                                         <div className="flex flex-col items-center">

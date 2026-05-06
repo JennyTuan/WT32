@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Info, Zap } from "lucide-react";
+import { Activity, Zap } from "lucide-react";
 
 export type AutoMaPanelProps = {
     autoMa: boolean;
@@ -125,32 +125,16 @@ export default function AutoMaPanel({
                 <div className="flex items-center gap-2">
                     <Activity size={13} className="text-[#60A5FA]" />
                     <span className="text-[11px] font-black uppercase tracking-widest text-[#E2E8F0]">
-                        智能剂量调节 · Auto mA（本次会话）
+                        智能剂量调节
                     </span>
-                    <span className="text-[10px] text-[#64748B]">床位位置 → mA · 阶梯式</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-[#94A3B8]">{autoMa ? "已启用" : "未启用"}</span>
-                    <button
-                        type="button"
-                        onClick={() => onChange({ auto_ma: !autoMa })}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            autoMa ? "bg-[#2563EB]" : "bg-[#334155]"
-                        }`}
-                    >
-                        <span
-                            className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
-                                autoMa ? "translate-x-5" : "translate-x-0.5"
-                            }`}
-                        />
-                    </button>
+
                 </div>
             </div>
 
-            <div className="flex gap-3 px-4 py-3">
+            <div className="flex px-4 py-3 divide-x divide-white/10">
                 {/* 曲线 */}
-                <div className="flex-1 min-w-0">
-                    <div className="relative h-[120px] rounded-md border border-white/10 bg-[#05080d] overflow-hidden">
+                <div className="flex-1 min-w-0 pr-4">
+                    <div className="relative h-[120px] overflow-hidden">
                         <svg viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
                             {/* 网格 */}
                             {[0.25, 0.5, 0.75].map((r) => (
@@ -191,50 +175,47 @@ export default function AutoMaPanel({
                             </div>
                         )}
                     </div>
-                    <div className="mt-1.5 flex items-center gap-1.5 text-[9px] text-[#64748B]">
-                        <Info size={9} />
-                        <span>
-                            基于本次定位像衰减估算，仅供参考；扫描范围或床位间隔变化后自动重算。曲线不支持逐点编辑，调节 min / max 即可压缩。
-                        </span>
-                    </div>
+
                 </div>
 
-                {/* 控制 + 预计剂量 */}
-                <div className="w-[180px] shrink-0 flex flex-col gap-2">
-                    <div className="rounded-md border border-white/10 bg-[#05080d]/60 p-2">
-                        <label className="block text-[9px] font-black uppercase tracking-tighter text-[#94A3B8]">
-                            mA 上限（max）
-                        </label>
-                        <div className="mt-1 flex items-center gap-1.5">
-                            <input
-                                type="number"
-                                value={Math.round(draftMax)}
-                                onChange={(e) => handleMaxChange(e.target.value)}
-                                disabled={!autoMa}
-                                className="h-6 w-full rounded bg-[#0F172A] border border-white/10 px-1.5 text-[12px] font-bold text-[#E2E8F0] outline-none focus:border-[#60A5FA] disabled:opacity-40"
-                            />
-                            <span className="text-[10px] text-[#64748B]">mA</span>
+                {/* 控制：mA 上下限滑块 */}
+                <div className="w-[200px] shrink-0 flex flex-col justify-center gap-3 px-4">
+                    <div>
+                        <div className="flex items-center justify-between text-[9px] font-black uppercase tracking-tighter text-[#94A3B8]">
+                            <span>mA 上限（max）</span>
+                            <span className="font-mono text-[12px] font-bold text-[#E2E8F0]">{Math.round(draftMax)} <span className="text-[9px] text-[#64748B] font-normal">mA</span></span>
                         </div>
+                        <input
+                            type="range"
+                            min={HARD_MIN}
+                            max={HARD_MAX}
+                            step={1}
+                            value={Math.round(draftMax)}
+                            onChange={(e) => handleMaxChange(e.target.value)}
+                            disabled={!autoMa}
+                            className="auto-ma-slider mt-1.5 w-full disabled:opacity-40"
+                        />
                     </div>
-                    <div className="rounded-md border border-white/10 bg-[#05080d]/60 p-2">
-                        <label className="block text-[9px] font-black uppercase tracking-tighter text-[#94A3B8]">
-                            mA 下限（min）
-                        </label>
-                        <div className="mt-1 flex items-center gap-1.5">
-                            <input
-                                type="number"
-                                value={Math.round(draftMin)}
-                                onChange={(e) => handleMinChange(e.target.value)}
-                                disabled={!autoMa}
-                                className="h-6 w-full rounded bg-[#0F172A] border border-white/10 px-1.5 text-[12px] font-bold text-[#E2E8F0] outline-none focus:border-[#60A5FA] disabled:opacity-40"
-                            />
-                            <span className="text-[10px] text-[#64748B]">mA</span>
+                    <div>
+                        <div className="flex items-center justify-between text-[9px] font-black uppercase tracking-tighter text-[#94A3B8]">
+                            <span>mA 下限（min）</span>
+                            <span className="font-mono text-[12px] font-bold text-[#E2E8F0]">{Math.round(draftMin)} <span className="text-[9px] text-[#64748B] font-normal">mA</span></span>
                         </div>
+                        <input
+                            type="range"
+                            min={HARD_MIN}
+                            max={HARD_MAX}
+                            step={1}
+                            value={Math.round(draftMin)}
+                            onChange={(e) => handleMinChange(e.target.value)}
+                            disabled={!autoMa}
+                            className="auto-ma-slider mt-1.5 w-full disabled:opacity-40"
+                        />
                     </div>
                 </div>
 
                 {/* 预计剂量 */}
-                <div className="w-[160px] shrink-0 rounded-md border border-[#854D0E]/40 bg-[#451A03]/30 p-2.5 flex flex-col justify-center">
+                <div className="w-[170px] shrink-0 pl-4 flex flex-col justify-center">
                     <div className="flex items-center gap-1 text-[9px] font-black uppercase tracking-tighter text-[#FCD34D]">
                         <Zap size={10} /> 预计剂量（参考）
                     </div>
