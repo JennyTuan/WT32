@@ -48,9 +48,6 @@ const FOURD_PARAMS = {
     dlp: "1334.97",
 };
 
-const AUTO_MA_HARD_MIN = 20;
-const AUTO_MA_HARD_MAX = 800;
-
 type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "paused" | "completed";
 
 interface Sequence {
@@ -88,12 +85,6 @@ export default function FourDDiagnosticConfirmScreen() {
     const [dynamicParams, setDynamicParams] = useState({
         scanLength: Number(FOURD_PARAMS.scanLength),
         fov: Number(FOURD_PARAMS.fov),
-    });
-    const [autoMaEnabled, setAutoMaEnabled] = useState(false);
-    const [autoMaPanelExpanded, setAutoMaPanelExpanded] = useState(false);
-    const [autoMaRange, setAutoMaRange] = useState({
-        min: 80,
-        max: Number(FOURD_PARAMS.mA),
     });
     const [breathingControls, setBreathingControls] = useState({
         minSpacing: 1.8,
@@ -399,40 +390,11 @@ export default function FourDDiagnosticConfirmScreen() {
         : scanStage === "paused" ? "扫描已暂停"
         : "按住绿色按钮";
 
-    const currentAutoMaPreview = Math.round((autoMaRange.min + autoMaRange.max) / 2);
-    const autoMaLocked = autoMaEnabled && (scanStarted || scanStage === "arming" || scanStage === "enabled" || scanCompleted);
-    const autoMaCurvePoints = Array.from({ length: 18 }, (_, index) => {
-        const t = index / 17;
-        const bell = Math.sin(t * Math.PI);
-        const wobble = 0.08 * Math.sin(t * Math.PI * 4 + 0.7);
-        const norm = Math.max(0, Math.min(1, bell + wobble));
-        const ma = autoMaRange.min + norm * Math.max(1, autoMaRange.max - autoMaRange.min);
-        return {
-            x: t * 120,
-            y: 36 - ((ma - AUTO_MA_HARD_MIN) / (AUTO_MA_HARD_MAX - AUTO_MA_HARD_MIN)) * 36,
-        };
-    });
-    const autoMaCurvePath = `M ${autoMaCurvePoints.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" L ")}`;
-
-    const handleAutoMaMinChange = (value: number) => {
-        setAutoMaRange((prev) => ({
-            ...prev,
-            min: Math.max(AUTO_MA_HARD_MIN, Math.min(prev.max - 5, value)),
-        }));
-    };
-
-    const handleAutoMaMaxChange = (value: number) => {
-        setAutoMaRange((prev) => ({
-            ...prev,
-            max: Math.min(AUTO_MA_HARD_MAX, Math.max(prev.min + 5, value)),
-        }));
-    };
-
     const sidebarParams = [
         { label: "进出床", value: FOURD_PARAMS.bedMode, accent: false },
         { label: "体位", value: FOURD_PARAMS.position, accent: false },
         { label: "扫描长度", value: dynamicParams.scanLength.toFixed(1), accent: false },
-        { label: "mA", value: autoMaEnabled ? `Auto ${currentAutoMaPreview}` : FOURD_PARAMS.mA, accent: true },
+        { label: "mA", value: FOURD_PARAMS.mA, accent: true },
         { label: "KV", value: FOURD_PARAMS.kV, accent: true },
         { label: "旋转时间", value: FOURD_PARAMS.rotationTime, accent: true },
         { label: "焦点", value: FOURD_PARAMS.focus, accent: true },
@@ -667,25 +629,20 @@ export default function FourDDiagnosticConfirmScreen() {
                         </div>
                         <div className="flex-1 px-2 pb-2 flex flex-col gap-2 overflow-y-auto overscroll-contain">
                             <div className="grid grid-cols-2 gap-2">
-                                {sidebarParams.map(({ label, value, accent, unit, dose }) => {
-                                    const isMaParam = label === "mA";
-                                    const isMaLocked = isMaParam && autoMaEnabled;
-                                    return (
+                                {sidebarParams.map(({ label, value, accent, unit, dose }) => (
                                     <div
                                         key={label}
                                         className={`min-h-[38px] p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm ${
                                             dose ? "border-[#F59E0B]/30 bg-[#FFF7ED]" : "border-[#B0C4DE]/40"
                                         } ${
-                                            accent && !isMaLocked ? "group hover:border-[#4D94FF] cursor-pointer" : ""
-                                        } ${
-                                            isMaLocked ? "opacity-70 cursor-not-allowed" : ""
+                                            accent ? "group hover:border-[#4D94FF] cursor-pointer" : ""
                                         }`}
                                     >
                                         <span className={`text-[9px] font-black uppercase tracking-tighter ${dose ? "text-[#B45309]/70" : "text-[#90A4AE]"}`}>{label}</span>
                                         {accent ? (
                                             <div className="flex items-center gap-1 mt-[1px]">
                                                 <span className="text-[13px] font-black text-[#37474F]">{value}</span>
-                                                {!isMaLocked && <ChevronDown size={9} className="text-[#90A4AE] group-hover:text-[#4D94FF]" />}
+                                                <ChevronDown size={9} className="text-[#90A4AE] group-hover:text-[#4D94FF]" />
                                             </div>
                                         ) : (
                                             <div className="mt-[1px] flex items-baseline gap-1">
@@ -694,93 +651,7 @@ export default function FourDDiagnosticConfirmScreen() {
                                             </div>
                                         )}
                                     </div>
-                                );
-                                })}
-                            </div>
-
-                            <div className="order-first rounded-md border border-[#B0C4DE]/40 bg-white shadow-sm overflow-hidden">
-                                <div className="flex h-[34px] items-center justify-between px-2.5">
-                                    <div className="flex items-center gap-2">
-                                        <Zap size={12} className={autoMaEnabled ? "text-[#2563EB]" : "text-[#94A3B8]"} />
-                                        <span className="text-[10px] font-black text-[#37474F] uppercase tracking-tighter">智能剂量调节</span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5">
-                                        {autoMaEnabled && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setAutoMaPanelExpanded((prev) => !prev)}
-                                                className="flex h-6 w-6 items-center justify-center rounded border border-[#DCE6F2] text-[#546E7A] hover:bg-[#F8FAFC]"
-                                                title={autoMaPanelExpanded ? "收起电流调节面板" : "展开电流调节面板"}
-                                            >
-                                                {autoMaPanelExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                                            </button>
-                                        )}
-                                        <button
-                                            type="button"
-                                            disabled={scanStarted || scanStage === "arming" || scanStage === "enabled" || scanCompleted}
-                                            onClick={() => {
-                                                setAutoMaEnabled((prev) => !prev);
-                                                setAutoMaPanelExpanded(false);
-                                            }}
-                                            className={`relative inline-flex h-[18px] w-[32px] items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                                                autoMaEnabled ? "bg-[#2563EB]" : "bg-[#CBD5E1]"
-                                            }`}
-                                        >
-                                            <span
-                                                className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
-                                                    autoMaEnabled ? "translate-x-[16px]" : "translate-x-[2px]"
-                                                }`}
-                                            />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {autoMaEnabled && autoMaPanelExpanded && (
-                                    <div className="border-t border-[#DCE6F2] px-2.5 py-2">
-                                        <div className="mb-2 h-[40px]">
-                                            <svg viewBox="0 0 120 36" className="h-full w-full" preserveAspectRatio="none">
-                                                {[0.25, 0.5, 0.75].map((ratio) => (
-                                                    <line key={ratio} x1="0" x2="120" y1={36 * ratio} y2={36 * ratio} stroke="#E2E8F0" strokeWidth="0.5" />
-                                                ))}
-                                                <path d={autoMaCurvePath} fill="none" stroke="#2563EB" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                                            </svg>
-                                        </div>
-
-                                        <label className="block">
-                                            <div className="flex items-center justify-between text-[9px] font-black text-[#64748B]">
-                                                <span>mA 上限</span>
-                                                <span className="font-mono text-[#37474F]">{autoMaRange.max} mA</span>
-                                            </div>
-                                            <input
-                                                type="range"
-                                                min={AUTO_MA_HARD_MIN}
-                                                max={AUTO_MA_HARD_MAX}
-                                                step={1}
-                                                value={autoMaRange.max}
-                                                disabled={autoMaLocked}
-                                                onChange={(event) => handleAutoMaMaxChange(Number(event.target.value))}
-                                                className="h-4 w-full accent-[#2563EB] disabled:opacity-40"
-                                            />
-                                        </label>
-
-                                        <label className="mt-1.5 block">
-                                            <div className="flex items-center justify-between text-[9px] font-black text-[#64748B]">
-                                                <span>mA 下限</span>
-                                                <span className="font-mono text-[#37474F]">{autoMaRange.min} mA</span>
-                                            </div>
-                                            <input
-                                                type="range"
-                                                min={AUTO_MA_HARD_MIN}
-                                                max={AUTO_MA_HARD_MAX}
-                                                step={1}
-                                                value={autoMaRange.min}
-                                                disabled={autoMaLocked}
-                                                onChange={(event) => handleAutoMaMinChange(Number(event.target.value))}
-                                                className="h-4 w-full accent-[#2563EB] disabled:opacity-40"
-                                            />
-                                        </label>
-                                    </div>
-                                )}
+                                ))}
                             </div>
                         </div>
 
