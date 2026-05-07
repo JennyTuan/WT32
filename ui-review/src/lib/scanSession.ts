@@ -95,6 +95,19 @@ export type ApiScanSessionFourDConfig = {
     } | null;
 };
 
+export type ApiScanSessionGatingConfig = {
+    id: number;
+    breathing_mode: "free_breathing" | "breath_hold_inspiration" | "breath_hold_expiration";
+    phase_start_pct: number;
+    phase_end_pct: number;
+    trigger_delay_ms: number;
+    max_triggers_per_cycle: number;
+    stability_cv_threshold: number;
+    baseline_drift_mm_threshold: number;
+    breath_hold_timeout_s?: number | null;
+    breath_hold_amplitude_tolerance_mm?: number | null;
+};
+
 export type ApiScanSessionSeries = {
     id: number;
     scan_session_id: number;
@@ -110,6 +123,7 @@ export type ApiScanSessionSeries = {
     axial_param?: ApiScanSessionAxialParam | null;
     recon_series: ApiScanSessionReconSeries[];
     fourd_config?: ApiScanSessionFourDConfig | null;
+    gating_config?: ApiScanSessionGatingConfig | null;
 };
 
 export type ApiScanSessionDetail = {

@@ -66,7 +66,13 @@
       "Bash(node -e \"const p = require\\('./node_modules/eslint-plugin-react-hooks/cjs/eslint-plugin-react-hooks.development.js'\\); console.log\\(Object.keys\\(p\\)\\)\")",
       "Bash(node *)",
       "Bash(npx skills@latest *)",
-      "PowerShell(Get-ChildItem -Path \"C:\\\\CT-Prototype-backup\\\\CT-Prototype\" -Force | Format-Table Name, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"DIR\"}else{\"FILE\"}}} -AutoSize)"
+      "PowerShell(Get-ChildItem -Path \"C:\\\\CT-Prototype-backup\\\\CT-Prototype\" -Force | Format-Table Name, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"DIR\"}else{\"FILE\"}}} -AutoSize)",
+      "Bash(python -c \"import sqlite3; c=sqlite3.connect\\('app.db'\\); cur=c.cursor\\(\\); cur.execute\\(\\\\\"SELECT name FROM sqlite_master WHERE type='table'\\\\\"\\); print\\([r[0] for r in cur.fetchall\\(\\)]\\)\")",
+      "PowerShell(cd \"C:/CT-Prototype-backup/CT-Prototype/backend\"; $env:PYTHONIOENCODING=\"utf-8\"; python -c \"import sqlite3; c=sqlite3.connect\\('app.db'\\); cur=c.cursor\\(\\); cur.execute\\('PRAGMA table_info\\(protocols\\)'\\); [print\\(r\\) for r in cur.fetchall\\(\\)]\")",
+      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"C:/CT-Prototype-backup/CT-Prototype/backend/database.py\"\\); $first3 = $bytes[0..2] -join \",\"; \"First bytes: $first3\"; \"BOM utf-8: 239,187,191\")",
+      "PowerShell(Get-Content \"C:/CT-Prototype-backup/CT-Prototype/backend/database.py\" -Encoding utf8 | Select-Object -Index \\(27..32\\))",
+      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"C:/CT-Prototype-backup/CT-Prototype/backend/database.py\"\\); $start=0; $count=0; for \\($i=0; $i -lt $bytes.Length; $i++\\) { if \\($bytes[$i] -eq 10\\) { $count++; if \\($count -eq 27\\) { $start=$i+1 } elseif \\($count -eq 33\\) { $end=$i; break } } }; [System.Text.Encoding]::UTF8.GetString\\($bytes, $start, $end-$start\\))",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

@@ -2,19 +2,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Zap } from "lucide-react";
 
 export type AutoMaPanelProps = {
+    mode?: "axial" | "helical";
     autoMa: boolean;
     maMin: number;
     maMax: number;
     fallbackMa: number;
     scanLength: number;
-    sliceInterval: number;
     rotationTime: number;
+    // axial 专用：床位间隔与步数
+    sliceInterval?: number;
     stepCount?: number | null;
+    // helical 专用：螺距
+    pitch?: number;
     onChange: (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number }) => void;
 };
 
 const HARD_MIN = 20;
 const HARD_MAX = 800;
+const HELICAL_SAMPLE_COUNT = 80;
 
 const computeStepCount = (scanLength: number, sliceInterval: number, fallback?: number | null) => {
     if (fallback && fallback > 0) return fallback;
@@ -23,18 +28,18 @@ const computeStepCount = (scanLength: number, sliceInterval: number, fallback?: 
 };
 
 // 模拟"定位像衰减/体型估计 → 床位 mA"。原型用对称偏中带轻微上下波动的伪曲线，
-// 底层语义是"床位位置 → mA"，UI 显示成阶梯。真实算法依赖定位像数据和厂商 AEC 实现。
+// 底层语义是"床位位置 → mA"。真实算法依赖定位像数据和厂商 AEC 实现。
 const generatePositionMaCurve = (
-    stepCount: number,
+    sampleCount: number,
     maMin: number,
     maMax: number,
 ): number[] => {
-    if (stepCount <= 0) return [];
-    if (stepCount === 1) return [Math.round((maMin + maMax) / 2)];
+    if (sampleCount <= 0) return [];
+    if (sampleCount === 1) return [Math.round((maMin + maMax) / 2)];
     const out: number[] = [];
     const span = Math.max(1, maMax - maMin);
-    for (let i = 0; i < stepCount; i += 1) {
-        const t = i / (stepCount - 1);
+    for (let i = 0; i < sampleCount; i += 1) {
+        const t = i / (sampleCount - 1);
         const bell = Math.sin(t * Math.PI);
         const wobble = 0.08 * Math.sin(t * Math.PI * 4 + 0.7);
         const norm = Math.max(0, Math.min(1, bell + wobble));
@@ -45,14 +50,16 @@ const generatePositionMaCurve = (
 };
 
 export default function AutoMaPanel({
+    mode = "axial",
     autoMa,
     maMin,
     maMax,
     fallbackMa,
     scanLength,
-    sliceInterval,
     rotationTime,
+    sliceInterval,
     stepCount,
+    pitch,
     onChange,
 }: AutoMaPanelProps) {
     const [draftMin, setDraftMin] = useState(maMin);
@@ -67,14 +74,17 @@ export default function AutoMaPanel({
         debounceRef.current = window.setTimeout(() => onChange(patch), 200);
     };
 
-    const effectiveSteps = computeStepCount(scanLength, sliceInterval, stepCount);
-    const positions = useMemo(
-        () => Array.from({ length: effectiveSteps }, (_, i) => i * sliceInterval),
-        [effectiveSteps, sliceInterval],
-    );
+    const isHelical = mode === "helical";
+    const effectiveSliceInterval = sliceInterval ?? 0;
+    const effectiveSteps = isHelical
+        ? HELICAL_SAMPLE_COUNT
+        : computeStepCount(scanLength, effectiveSliceInterval, stepCount);
     const curve = useMemo(
-        () => (autoMa ? generatePositionMaCurve(effectiveSteps, draftMin, draftMax) : positions.map(() => fallbackMa)),
-        [autoMa, effectiveSteps, draftMin, draftMax, fallbackMa, positions],
+        () =>
+            autoMa
+                ? generatePositionMaCurve(effectiveSteps, draftMin, draftMax)
+                : Array.from({ length: effectiveSteps }, () => fallbackMa),
+        [autoMa, effectiveSteps, draftMin, draftMax, fallbackMa],
     );
 
     const meanMa = curve.length ? curve.reduce((a, b) => a + b, 0) / curve.length : fallbackMa;
@@ -88,6 +98,18 @@ export default function AutoMaPanel({
 
     const stepPath = useMemo(() => {
         if (!curve.length) return "";
+        if (isHelical) {
+            // 螺旋：连续平滑曲线，按采样点中心连线
+            const dx = VIEW_W / Math.max(1, curve.length - 1);
+            return curve
+                .map((ma, i) => {
+                    const x = i * dx;
+                    const y = VIEW_H - (ma / yMaxView) * VIEW_H;
+                    return `${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+                })
+                .join(" ");
+        }
+        // 断层：阶梯
         const dx = VIEW_W / curve.length;
         let d = "";
         curve.forEach((ma, i) => {
@@ -98,7 +120,7 @@ export default function AutoMaPanel({
             d += ` L ${x1.toFixed(2)} ${y.toFixed(2)}`;
         });
         return d;
-    }, [curve, yMaxView]);
+    }, [curve, yMaxView, isHelical]);
 
     const yLineMin = VIEW_H - (draftMin / yMaxView) * VIEW_H;
     const yLineMax = VIEW_H - (draftMax / yMaxView) * VIEW_H;
@@ -162,10 +184,16 @@ export default function AutoMaPanel({
                         <div className="absolute bottom-3 right-2 text-[9px] font-mono text-[#F87171]">
                             min {Math.round(draftMin)}
                         </div>
-                        {effectiveSteps > 0 && (
+                        {isHelical ? (
                             <div className="absolute bottom-1 left-2 text-[9px] font-mono text-[#94A3B8]">
-                                {effectiveSteps} 床位 · 间隔 {sliceInterval.toFixed(1)} mm
+                                扫描长度 {scanLength.toFixed(1)} mm{pitch ? ` · pitch ${pitch.toFixed(2)}` : ""}
                             </div>
+                        ) : (
+                            effectiveSteps > 0 && (
+                                <div className="absolute bottom-1 left-2 text-[9px] font-mono text-[#94A3B8]">
+                                    {effectiveSteps} 床位 · 间隔 {effectiveSliceInterval.toFixed(1)} mm
+                                </div>
+                            )
                         )}
                         {!autoMa && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/40">

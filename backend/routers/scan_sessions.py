@@ -21,6 +21,7 @@ def _scan_session_query(db: Session):
         selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.helical_param),
         selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.axial_param),
         selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.recon_series),
+        selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.gating_config),
         selectinload(models.ScanSession.series)
         .selectinload(models.ScanSessionSeries.fourd_config)
         .selectinload(models.ScanSessionFourDConfig.breathing_training_param),
@@ -43,6 +44,7 @@ def _get_protocol_or_404(protocol_id: int, db: Session) -> models.Protocol:
             selectinload(models.Protocol.series).selectinload(models.Series.helical_param),
             selectinload(models.Protocol.series).selectinload(models.Series.axial_param),
             selectinload(models.Protocol.series).selectinload(models.Series.recon_series),
+            selectinload(models.Protocol.series).selectinload(models.Series.gating_config),
             selectinload(models.Protocol.series)
             .selectinload(models.Series.fourd_config)
             .selectinload(models.FourDConfig.breathing_training_param),
@@ -187,6 +189,20 @@ def _clone_session_from_protocol(patient: models.Patient, protocol: models.Proto
                 )
             session_series.fourd_config = fourd_config
 
+        if series.gating_config:
+            session_series.gating_config = models.ScanSessionGatingConfig(
+                template_config_id=series.gating_config.id,
+                breathing_mode=series.gating_config.breathing_mode,
+                phase_start_pct=series.gating_config.phase_start_pct,
+                phase_end_pct=series.gating_config.phase_end_pct,
+                trigger_delay_ms=series.gating_config.trigger_delay_ms,
+                max_triggers_per_cycle=series.gating_config.max_triggers_per_cycle,
+                stability_cv_threshold=series.gating_config.stability_cv_threshold,
+                baseline_drift_mm_threshold=series.gating_config.baseline_drift_mm_threshold,
+                breath_hold_timeout_s=series.gating_config.breath_hold_timeout_s,
+                breath_hold_amplitude_tolerance_mm=series.gating_config.breath_hold_amplitude_tolerance_mm,
+            )
+
         scan_session.series.append(session_series)
 
     return scan_session
@@ -324,6 +340,20 @@ def _clone_session_series(source: models.ScanSessionSeries) -> models.ScanSessio
                 tolerance_range=source.fourd_config.breathing_training_param.tolerance_range,
             )
         cloned.fourd_config = cloned_fourd
+
+    if source.gating_config:
+        cloned.gating_config = models.ScanSessionGatingConfig(
+            template_config_id=source.gating_config.template_config_id,
+            breathing_mode=source.gating_config.breathing_mode,
+            phase_start_pct=source.gating_config.phase_start_pct,
+            phase_end_pct=source.gating_config.phase_end_pct,
+            trigger_delay_ms=source.gating_config.trigger_delay_ms,
+            max_triggers_per_cycle=source.gating_config.max_triggers_per_cycle,
+            stability_cv_threshold=source.gating_config.stability_cv_threshold,
+            baseline_drift_mm_threshold=source.gating_config.baseline_drift_mm_threshold,
+            breath_hold_timeout_s=source.gating_config.breath_hold_timeout_s,
+            breath_hold_amplitude_tolerance_mm=source.gating_config.breath_hold_amplitude_tolerance_mm,
+        )
 
     return cloned
 

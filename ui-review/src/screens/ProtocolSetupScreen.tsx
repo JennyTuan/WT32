@@ -142,6 +142,18 @@ type ApiFourDConfig = {
     trigger_threshold?: number | null;
 };
 
+type ApiGatingConfig = {
+    breathing_mode: "free_breathing" | "breath_hold_inspiration" | "breath_hold_expiration";
+    phase_start_pct: number;
+    phase_end_pct: number;
+    trigger_delay_ms: number;
+    max_triggers_per_cycle: number;
+    stability_cv_threshold: number;
+    baseline_drift_mm_threshold: number;
+    breath_hold_timeout_s?: number | null;
+    breath_hold_amplitude_tolerance_mm?: number | null;
+};
+
 type LegacyBusinessSequenceRow = {
     params?: string;
 };
@@ -163,6 +175,7 @@ type ApiSeriesDetail = {
     axial_param?: ApiAxialParam | null;
     recon_series: ApiReconSeries[];
     fourd_config?: ApiFourDConfig | null;
+    gating_config?: ApiGatingConfig | null;
 };
 
 type ApiProtocolDetail = {

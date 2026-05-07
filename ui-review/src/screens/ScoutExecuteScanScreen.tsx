@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
 import { Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -55,7 +55,7 @@ type LoadedSlice = {
     hu: Float32Array;
 };
 
-type PostScoutScanType = Extract<WorkflowSequenceType, "helical" | "axial" | "4d">;
+type PostScoutScanType = Extract<WorkflowSequenceType, "helical" | "axial" | "4d"> | "gated_helical" | "gated_axial";
 
 const DEFAULT_POST_SCOUT_SCAN_TYPE: PostScoutScanType = "helical";
 
@@ -71,6 +71,14 @@ const POST_SCOUT_SCAN_CONFIG: Record<PostScoutScanType, { label: string; route: 
     "4d": {
         label: "4D扫描",
         route: "/fourd-confirm",
+    },
+    gated_helical: {
+        label: "门控螺旋扫描",
+        route: "/gated-helical-confirm",
+    },
+    gated_axial: {
+        label: "门控断层扫描",
+        route: "/gated-axial-confirm",
     },
 };
 
@@ -406,6 +414,7 @@ export default function ScoutExecuteScanScreen() {
     const [postScoutScanType, setPostScoutScanType] = useState<PostScoutScanType>(
         () => resolvePostScoutScanTypeFromWorkflowPlans() ?? DEFAULT_POST_SCOUT_SCAN_TYPE
     );
+    const [gatingBreathingMode, setGatingBreathingMode] = useState<string | null>(null);
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
@@ -416,27 +425,38 @@ export default function ScoutExecuteScanScreen() {
         let cancelled = false;
 
         const workflowType = resolvePostScoutScanTypeFromWorkflowPlans();
-        if (workflowType) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect
-            setPostScoutScanType(workflowType);
-            return () => {
-                cancelled = true;
-            };
-        }
+        // Always fetch session so we can detect gating, even when workflowType is non-null.
 
         const resolveFromSession = async () => {
             try {
                 const scanSession = await fetchSelectedScanSession();
-                if (cancelled || !scanSession) return;
+                if (cancelled || !scanSession) {
+                    if (workflowType) setPostScoutScanType(workflowType);
+                    return;
+                }
 
                 const nextSeries = scanSession.series.find(
                     (series) => series.series_type === "helical" || series.series_type === "axial" || series.series_type === "4d"
                 );
+
+                if (scanSession.acquisition_type === "gating") {
+                    const cfg = (nextSeries as { gating_config?: { breathing_mode?: string } } | undefined)?.gating_config;
+                    if (cfg?.breathing_mode) setGatingBreathingMode(cfg.breathing_mode);
+                    if (nextSeries?.series_type === "helical") setPostScoutScanType("gated_helical");
+                    else setPostScoutScanType("gated_axial");
+                    return;
+                }
+
+                if (workflowType) {
+                    setPostScoutScanType(workflowType);
+                    return;
+                }
                 if (nextSeries?.series_type === "helical" || nextSeries?.series_type === "axial" || nextSeries?.series_type === "4d") {
                     setPostScoutScanType(nextSeries.series_type);
                 }
             } catch (error) {
                 console.error("Failed to resolve post-scout scan type.", error);
+                if (workflowType) setPostScoutScanType(workflowType);
             }
         };
 
@@ -451,11 +471,19 @@ export default function ScoutExecuteScanScreen() {
     const isFourDScoutWorkflow = postScoutScanType === "4d";
     const scoutResultSeries = isFourDScoutWorkflow ? FOUR_D_SCOUT_SERIES : SCOUT_SERIES;
 
+    const postScoutRoute = useMemo(() => {
+        if ((postScoutScanType === "gated_helical" || postScoutScanType === "gated_axial") && gatingBreathingMode) {
+            const sep = postScoutAction.route.includes("?") ? "&" : "?";
+            return `${postScoutAction.route}${sep}breathingMode=${gatingBreathingMode}`;
+        }
+        return postScoutAction.route;
+    }, [postScoutAction.route, postScoutScanType, gatingBreathingMode]);
+
     useEffect(() => {
         if (stage !== "completed") return;
 
         autoNextTimerRef.current = window.setTimeout(() => {
-            navigate(postScoutAction.route);
+            navigate(postScoutRoute);
         }, FOUR_D_AUTO_NEXT_STEP_DELAY_MS);
 
         return () => {
@@ -464,7 +492,7 @@ export default function ScoutExecuteScanScreen() {
                 autoNextTimerRef.current = null;
             }
         };
-    }, [navigate, postScoutAction.route, stage]);
+    }, [navigate, postScoutRoute, stage]);
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -524,7 +552,7 @@ export default function ScoutExecuteScanScreen() {
 
     const handleExecuteScanClick = () => {
         if (stage === "completed") {
-            navigate(postScoutAction.route);
+            navigate(postScoutRoute);
             return;
         }
 

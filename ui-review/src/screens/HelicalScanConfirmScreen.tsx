@@ -23,12 +23,13 @@ import {
     RotateCcw,
 } from "lucide-react";
 import { fetchSelectedScanSession, updateSelectedScanSessionHelicalParam } from "../lib/scanSession";
-import type { ApiScanSessionDetail } from "../lib/scanSession";
+import type { ApiScanSessionDetail, ApiScanSessionHelicalParam } from "../lib/scanSession";
 
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
+import AutoMaPanel from "../components/AutoMaPanel";
 
 // ---------------------------------------------------------------------------
 // Constants for gating waveform / bed positions / DICOM
@@ -1301,7 +1302,8 @@ const HelicalScanConfirmScreen = () => {
     const isGatingWorkflow = false;
 
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
-    const [helicalParamId, setHelicalParamId] = useState<number | null>(null);
+    const [helicalParam, setHelicalParam] = useState<ApiScanSessionHelicalParam | null>(null);
+    const helicalParamId = helicalParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -1311,13 +1313,13 @@ const HelicalScanConfirmScreen = () => {
         const loadSessionDefaults = async () => {
             try {
                 const scanSession = await fetchSelectedScanSession();
-                const helicalParam = scanSession?.series.find((series) => series.series_type === "helical")?.helical_param;
-                if (!helicalParam || cancelled) return;
+                const loaded = scanSession?.series.find((series) => series.series_type === "helical")?.helical_param as ApiScanSessionHelicalParam | null | undefined;
+                if (!loaded || cancelled) return;
 
-                setHelicalParamId(helicalParam.id);
+                setHelicalParam(loaded);
                 setMeasurements({
-                    scanLength: String(helicalParam.scan_length),
-                    scoutFov: String(helicalParam.fov),
+                    scanLength: String(loaded.scan_length),
+                    scoutFov: String(loaded.fov),
                 });
             } catch (error) {
                 console.error("Failed to load helical scan session defaults.", error);
@@ -1362,14 +1364,44 @@ const HelicalScanConfirmScreen = () => {
         return <GatingHelicalConfirmScreen />;
     }
 
-    // Regular helical scan — unchanged
+    const handleAutoMaChange = (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number }) => {
+        if (!helicalParam) return;
+        setHelicalParam((prev) => (prev ? { ...prev, ...patch } : prev));
+        void updateSelectedScanSessionHelicalParam(helicalParam.id, patch).catch((error) => {
+            console.error("Failed to persist Auto mA settings.", error);
+        });
+    };
+
+    const scanLengthNum = Number(measurements.scanLength);
+    const scanLengthForCurve = Number.isFinite(scanLengthNum) ? scanLengthNum : (helicalParam?.scan_length ?? 0);
+    const showAutoMaPanel = helicalParam?.auto_ma ?? false;
+
     return (
         <ScanConfirmScreen
             activeSequenceId="s2"
             activeSequenceStepIndex={0}
             parameterPanelMode="helicalScan"
             helicalParamOverrides={measurements}
-            rightViewportContent={<TomographicScoutViewport onMeasurementChange={setMeasurements} initialMeasurements={measurements} />}
+            autoMaEnabled={showAutoMaPanel}
+            onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
+            rightViewportContent={
+                <>
+                    <TomographicScoutViewport onMeasurementChange={setMeasurements} initialMeasurements={measurements} />
+                    {helicalParam && showAutoMaPanel && (
+                        <AutoMaPanel
+                            mode="helical"
+                            autoMa={helicalParam.auto_ma ?? false}
+                            maMin={helicalParam.ma_min ?? Math.max(40, Math.round((helicalParam.ma ?? 200) * 0.5))}
+                            maMax={helicalParam.ma_max ?? Math.round((helicalParam.ma ?? 200) * 1.2)}
+                            fallbackMa={helicalParam.ma}
+                            scanLength={scanLengthForCurve}
+                            rotationTime={helicalParam.rotation_time}
+                            pitch={helicalParam.pitch}
+                            onChange={handleAutoMaChange}
+                        />
+                    )}
+                </>
+            }
             nextRoute="/helical-execute"
             allowBackNavigation={false}
         />

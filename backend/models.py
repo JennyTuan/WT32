@@ -115,6 +115,12 @@ class Series(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    gating_config = relationship(
+        "GatingConfig",
+        back_populates="series",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class TopogramParam(Base):
@@ -236,6 +242,31 @@ class BreathingTrainingParam(Base):
     fourd_config = relationship("FourDConfig", back_populates="breathing_training_param")
 
 
+class GatingConfig(Base):
+    __tablename__ = "gating_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    series_id = Column(Integer, ForeignKey("series.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    # "breath_hold_inspiration" | "breath_hold_expiration" | "free_breathing"
+    breathing_mode = Column(String(30), nullable=False)
+    # phase window (% of respiratory cycle), only meaningful for free_breathing
+    phase_start_pct = Column(Float, nullable=False, default=30.0)
+    phase_end_pct = Column(Float, nullable=False, default=70.0)
+    # ms delay from window-enter to actual exposure trigger
+    trigger_delay_ms = Column(Integer, nullable=False, default=0)
+    # max number of triggers per respiratory cycle (free breathing)
+    max_triggers_per_cycle = Column(Integer, nullable=False, default=1)
+    # stability thresholds (system auto-decides whether to fire)
+    stability_cv_threshold = Column(Float, nullable=False, default=0.15)
+    baseline_drift_mm_threshold = Column(Float, nullable=False, default=5.0)
+    # breath-hold: max hold seconds before auto-abort
+    breath_hold_timeout_s = Column(Float, nullable=True, default=25.0)
+    # breath-hold stability: amplitude deviation tolerance from baseline (mm)
+    breath_hold_amplitude_tolerance_mm = Column(Float, nullable=True, default=2.0)
+
+    series = relationship("Series", back_populates="gating_config")
+
+
 class ScanSession(Base):
     __tablename__ = "scan_sessions"
 
@@ -330,6 +361,12 @@ class ScanSessionSeries(Base):
     )
     fourd_config = relationship(
         "ScanSessionFourDConfig",
+        back_populates="session_series",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    gating_config = relationship(
+        "ScanSessionGatingConfig",
         back_populates="session_series",
         cascade="all, delete-orphan",
         uselist=False,
@@ -456,6 +493,25 @@ class ScanSessionBreathingTrainingParam(Base):
     tolerance_range = Column(Float, nullable=False)
 
     fourd_config = relationship("ScanSessionFourDConfig", back_populates="breathing_training_param")
+
+
+class ScanSessionGatingConfig(Base):
+    __tablename__ = "scan_session_gating_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scan_session_series_id = Column(Integer, ForeignKey("scan_session_series.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    template_config_id = Column(Integer, ForeignKey("gating_configs.id", ondelete="SET NULL"), nullable=True)
+    breathing_mode = Column(String(30), nullable=False)
+    phase_start_pct = Column(Float, nullable=False, default=30.0)
+    phase_end_pct = Column(Float, nullable=False, default=70.0)
+    trigger_delay_ms = Column(Integer, nullable=False, default=0)
+    max_triggers_per_cycle = Column(Integer, nullable=False, default=1)
+    stability_cv_threshold = Column(Float, nullable=False, default=0.15)
+    baseline_drift_mm_threshold = Column(Float, nullable=False, default=5.0)
+    breath_hold_timeout_s = Column(Float, nullable=True, default=25.0)
+    breath_hold_amplitude_tolerance_mm = Column(Float, nullable=True, default=2.0)
+
+    session_series = relationship("ScanSessionSeries", back_populates="gating_config")
 
 
 class CornerConfig(Base):

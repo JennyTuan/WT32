@@ -26,9 +26,15 @@ TOP0GRAM_DEFAULTS = {
 }
 
 GATING_PROTOCOL_NAMES = {
-    "鑳歌厰娣卞惛姘斿睆鎭紙鏂眰锛?",
-    "鑳歌厰娣卞惛姘斿睆鎭紙铻烘棆锛?",
-    "鑳歌厰鑷敱鍛煎惛锛堣酱鎵級",
+    "胸腔深吸气屏息（断层）",
+    "胸腔深吸气屏息（螺旋）",
+    "胸腔自由呼吸（轴扫）",
+}
+
+GATING_PROTOCOL_BREATHING_MODE = {
+    "胸腔深吸气屏息（断层）": "breath_hold_inspiration",
+    "胸腔深吸气屏息（螺旋）": "breath_hold_inspiration",
+    "胸腔自由呼吸（轴扫）": "free_breathing",
 }
 
 
@@ -396,6 +402,7 @@ CHEST_PROTOCOLS = [
         "scan_mode": "plain",
         "series_kind": "axial",
         "params": {"kv": 120, "ma": 180, "slice_thickness": 1.25, "slice_interval": 20.0, "rotation_time": 1.0, "scan_length": 320.0, "fov": 350.0, "ctdi_vol": 7.5, "dlp": 120.0, "step_count": 16, "auto_ma": False},
+        "gating_config": {"breathing_mode": "breath_hold_inspiration"},
         "recons": [
             recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.25),
             recon("纵隔窗", "S2", 512, 400, 40, 1.25, 1.25),
@@ -408,6 +415,7 @@ CHEST_PROTOCOLS = [
         "scan_mode": "plain",
         "series_kind": "helical",
         "params": {"kv": 120, "ma": 180, "slice_thickness": 1.25, "pitch": 1.2, "rotation_time": 0.5, "scan_length": 350.0, "fov": 350.0, "ctdi_vol": 8.2, "dlp": 287.0, "auto_ma": False},
+        "gating_config": {"breathing_mode": "breath_hold_inspiration"},
         "recons": [
             recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.0),
             recon("纵隔窗", "S2", 512, 400, 40, 2.5, 2.0),
@@ -420,6 +428,7 @@ CHEST_PROTOCOLS = [
         "scan_mode": "plain",
         "series_kind": "axial",
         "params": {"kv": 120, "ma": 120, "slice_thickness": 1.25, "slice_interval": 20.0, "rotation_time": 1.0, "scan_length": 320.0, "fov": 350.0, "ctdi_vol": 5.2, "dlp": 83.2, "step_count": 16, "auto_ma": False},
+        "gating_config": {"breathing_mode": "free_breathing", "phase_start_pct": 30.0, "phase_end_pct": 70.0},
         "recons": [
             recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.25),
             recon("纵隔窗", "S2", 512, 400, 40, 1.25, 1.25),
@@ -718,6 +727,23 @@ def seed_protocol(db, models, protocol_seed: dict) -> None:
     elif protocol_seed["series_kind"] == "4d":
         db.add(models.FourDConfig(series_id=diagnostic_series.id, **protocol_seed["fourd_config"]))
 
+    if acquisition_type == "gating":
+        breathing_mode = GATING_PROTOCOL_BREATHING_MODE.get(protocol.name, "free_breathing")
+        gating_seed = protocol_seed.get("gating_config") or {}
+        gating_defaults = {
+            "breathing_mode": breathing_mode,
+            "phase_start_pct": 30.0,
+            "phase_end_pct": 70.0,
+            "trigger_delay_ms": 0,
+            "max_triggers_per_cycle": 1,
+            "stability_cv_threshold": 0.15,
+            "baseline_drift_mm_threshold": 5.0,
+            "breath_hold_timeout_s": 25.0,
+            "breath_hold_amplitude_tolerance_mm": 2.0,
+        }
+        gating_defaults.update(gating_seed)
+        db.add(models.GatingConfig(series_id=diagnostic_series.id, **gating_defaults))
+
     for recon_seed in protocol_seed["recons"]:
         db.add(
             models.ReconSeries(
@@ -806,7 +832,7 @@ def _migrate_protocol_columns() -> None:
         ))
         conn.execute(text(
             "UPDATE protocols SET acquisition_type = 'gating' "
-            "WHERE name IN ('鑳歌厰娣卞惛姘斿睆鎭紙鏂眰锛?','鑳歌厰娣卞惛姘斿睆鎭紙铻烘棆锛?','鑳歌厰鑷敱鍛煎惛锛堣酱鎵級')"
+            "WHERE name IN ('胸腔深吸气屏息（断层）','胸腔深吸气屏息（螺旋）','胸腔自由呼吸（轴扫）')"
         ))
         conn.execute(text(
             "UPDATE protocols SET acquisition_type = 'regular' "
@@ -833,6 +859,29 @@ def _migrate_protocol_columns() -> None:
             "SELECT acquisition_type FROM protocols WHERE protocols.id = scan_sessions.protocol_id"
             "), CASE WHEN scan_mode = '4d' THEN 'four_d' ELSE 'regular' END)"
         ))
+        # Backfill gating_configs for diagnostic series of gated protocols
+        gating_backfill = [
+            ("胸腔深吸气屏息（断层）", "breath_hold_inspiration"),
+            ("胸腔深吸气屏息（螺旋）", "breath_hold_inspiration"),
+            ("胸腔自由呼吸（轴扫）", "free_breathing"),
+        ]
+        for protocol_name, breathing_mode in gating_backfill:
+            try:
+                conn.execute(
+                    text(
+                        "INSERT INTO gating_configs "
+                        "(series_id, breathing_mode, phase_start_pct, phase_end_pct, trigger_delay_ms, "
+                        "max_triggers_per_cycle, stability_cv_threshold, baseline_drift_mm_threshold, "
+                        "breath_hold_timeout_s, breath_hold_amplitude_tolerance_mm) "
+                        "SELECT s.id, :mode, 30.0, 70.0, 0, 1, 0.15, 5.0, 25.0, 2.0 "
+                        "FROM series s JOIN protocols p ON p.id = s.protocol_id "
+                        "WHERE p.name = :name AND s.series_type IN ('helical','axial') "
+                        "AND NOT EXISTS (SELECT 1 FROM gating_configs g WHERE g.series_id = s.id)"
+                    ),
+                    {"mode": breathing_mode, "name": protocol_name},
+                )
+            except Exception:
+                pass
         conn.commit()
 
 

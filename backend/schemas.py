@@ -355,6 +355,42 @@ class FourDConfig(FourDConfigBase, ORMModel):
     breathing_training_param: Optional[BreathingTrainingParam] = None
 
 
+GatingBreathingMode = Literal["breath_hold_inspiration", "breath_hold_expiration", "free_breathing"]
+
+
+class GatingConfigBase(BaseModel):
+    series_id: int
+    breathing_mode: GatingBreathingMode
+    phase_start_pct: float = 30.0
+    phase_end_pct: float = 70.0
+    trigger_delay_ms: int = 0
+    max_triggers_per_cycle: int = 1
+    stability_cv_threshold: float = 0.15
+    baseline_drift_mm_threshold: float = 5.0
+    breath_hold_timeout_s: Optional[float] = 25.0
+    breath_hold_amplitude_tolerance_mm: Optional[float] = 2.0
+
+
+class GatingConfigCreate(GatingConfigBase):
+    pass
+
+
+class GatingConfigUpdate(BaseModel):
+    breathing_mode: Optional[GatingBreathingMode] = None
+    phase_start_pct: Optional[float] = None
+    phase_end_pct: Optional[float] = None
+    trigger_delay_ms: Optional[int] = None
+    max_triggers_per_cycle: Optional[int] = None
+    stability_cv_threshold: Optional[float] = None
+    baseline_drift_mm_threshold: Optional[float] = None
+    breath_hold_timeout_s: Optional[float] = None
+    breath_hold_amplitude_tolerance_mm: Optional[float] = None
+
+
+class GatingConfig(GatingConfigBase, ORMModel):
+    id: int
+
+
 class Series(SeriesBase, ORMModel):
     id: int
 
@@ -365,6 +401,7 @@ class SeriesDetail(Series, ORMModel):
     axial_param: Optional[AxialParam] = None
     recon_series: List[ReconSeries] = Field(default_factory=list)
     fourd_config: Optional[FourDConfig] = None
+    gating_config: Optional[GatingConfig] = None
 
 
 class ProtocolDetail(ProtocolBase, ORMModel):
@@ -643,6 +680,33 @@ class ScanSessionFourDConfig(ORMModel):
     breathing_training_param: Optional[ScanSessionBreathingTrainingParam] = None
 
 
+class ScanSessionGatingConfigUpdate(BaseModel):
+    breathing_mode: Optional[GatingBreathingMode] = None
+    phase_start_pct: Optional[float] = None
+    phase_end_pct: Optional[float] = None
+    trigger_delay_ms: Optional[int] = None
+    max_triggers_per_cycle: Optional[int] = None
+    stability_cv_threshold: Optional[float] = None
+    baseline_drift_mm_threshold: Optional[float] = None
+    breath_hold_timeout_s: Optional[float] = None
+    breath_hold_amplitude_tolerance_mm: Optional[float] = None
+
+
+class ScanSessionGatingConfig(ORMModel):
+    id: int
+    scan_session_series_id: int
+    template_config_id: Optional[int] = None
+    breathing_mode: GatingBreathingMode
+    phase_start_pct: float
+    phase_end_pct: float
+    trigger_delay_ms: int
+    max_triggers_per_cycle: int
+    stability_cv_threshold: float
+    baseline_drift_mm_threshold: float
+    breath_hold_timeout_s: Optional[float] = None
+    breath_hold_amplitude_tolerance_mm: Optional[float] = None
+
+
 class ScanSessionSeries(ORMModel):
     id: int
     scan_session_id: int
@@ -658,6 +722,7 @@ class ScanSessionSeries(ORMModel):
     axial_param: Optional[ScanSessionAxialParam] = None
     recon_series: List[ScanSessionReconSeries] = Field(default_factory=list)
     fourd_config: Optional[ScanSessionFourDConfig] = None
+    gating_config: Optional[ScanSessionGatingConfig] = None
 
 
 class ScanSessionDetail(ORMModel):

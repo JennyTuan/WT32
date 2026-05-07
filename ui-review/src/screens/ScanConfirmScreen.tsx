@@ -557,6 +557,7 @@ const ScanConfirmScreen = ({
         ...helicalParamOverrides,
     };
     const isTomographicMaLocked = Boolean(autoMaEnabled && onAutoMaEnabledChange);
+    const isHelicalMaLocked = Boolean(autoMaEnabled && onAutoMaEnabledChange);
     const currentProtocolLabel =
         parameterPanelMode === "helicalScan"
             ? "螺旋扫描"
@@ -1026,6 +1027,28 @@ const ScanConfirmScreen = ({
                                 </div>
                             ) : parameterPanelMode === "helicalScan" ? (
                                 <div className="grid grid-cols-2 gap-2">
+                                    {onAutoMaEnabledChange && (
+                                        <div
+                                            className={`col-span-2 p-1.5 px-2.5 bg-white border rounded-md shadow-sm flex items-center justify-between transition-colors ${
+                                                autoMaEnabled ? "border-[#4D94FF]/60" : "border-[#B0C4DE]/40"
+                                            }`}
+                                        >
+                                            <span className="text-[10px] font-black text-[#37474F] uppercase tracking-tighter">智能剂量调节</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => onAutoMaEnabledChange(!autoMaEnabled)}
+                                                className={`relative inline-flex h-[18px] w-[32px] items-center rounded-full transition-colors ${
+                                                    autoMaEnabled ? "bg-[#2563EB]" : "bg-[#CBD5E1]"
+                                                }`}
+                                            >
+                                                <span
+                                                    className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
+                                                        autoMaEnabled ? "translate-x-[16px]" : "translate-x-[2px]"
+                                                    }`}
+                                                />
+                                            </button>
+                                        </div>
+                                    )}
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">进出床</span>
                                         <div className="relative w-full">
@@ -1067,11 +1090,23 @@ const ScanConfirmScreen = ({
                                         <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedHelicalScanDisplayParams.scanLength}</span>
                                     </div>
 
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
+                                    <div
+                                        aria-disabled={isHelicalMaLocked}
+                                        title={isHelicalMaLocked ? "智能剂量调节开启时，mA 由系统自动控制" : undefined}
+                                        className={`p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm group transition-colors ${
+                                            isHelicalMaLocked
+                                                ? "border-[#CBD5E1]/60 opacity-60 cursor-not-allowed"
+                                                : readOnlyMode
+                                                    ? "border-[#B0C4DE]/40 cursor-default"
+                                                    : "border-[#B0C4DE]/40 hover:border-[#4D94FF] cursor-pointer"
+                                        }`}
+                                    >
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">mA</span>
                                         <div className="flex items-center gap-1 mt-[1px]">
                                             <span className="text-[13px] font-black text-[#37474F]">{resolvedHelicalScanDisplayParams.mA}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                            {!isHelicalMaLocked && (
+                                                <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                            )}
                                         </div>
                                     </div>
 

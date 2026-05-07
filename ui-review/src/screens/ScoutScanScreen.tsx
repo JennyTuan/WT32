@@ -684,7 +684,11 @@ const ScoutScanScreen = ({
 
     useEffect(() => {
         fetchSelectedScanSession().then(session => {
-            if (session?.acquisition_type === 'four_d') setIs4DWorkflow(true);
+            // Gating shares the 4-step flow with 4D: 呼吸训练 → 定位像 → 参数确认 → 执行扫描.
+            // The post-scout route is what differs (handled in ScoutExecuteScanScreen).
+            if (session?.acquisition_type === 'four_d' || session?.acquisition_type === 'gating') {
+                setIs4DWorkflow(true);
+            }
         }).catch(() => {});
     }, []);
 
