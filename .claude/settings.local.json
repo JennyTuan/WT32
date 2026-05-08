@@ -74,7 +74,12 @@
       "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"C:/CT-Prototype-backup/CT-Prototype/backend/database.py\"\\); $start=0; $count=0; for \\($i=0; $i -lt $bytes.Length; $i++\\) { if \\($bytes[$i] -eq 10\\) { $count++; if \\($count -eq 27\\) { $start=$i+1 } elseif \\($count -eq 33\\) { $end=$i; break } } }; [System.Text.Encoding]::UTF8.GetString\\($bytes, $start, $end-$start\\))",
       "Bash(python3 -c ' *)",
       "Bash(pandoc --track-changes=all \"C:\\\\Users\\\\24606\\\\Downloads\\\\Gating_Function_Design.docx\" -o \"C:\\\\Users\\\\24606\\\\Downloads\\\\Gating_Function_Design.md\")",
-      "Bash(git -C C:/CT-Prototype-backup/CT-Prototype ls-files backend/data)"
+      "Bash(git -C C:/CT-Prototype-backup/CT-Prototype ls-files backend/data)",
+      "Bash(Get-ChildItem -Path \"C:\\\\CT-Prototype-backup\\\\CT-Prototype\\\\ui-review\\\\public\\\\dicom\\\\test\" -Filter \"*.dcm\")",
+      "Bash(Measure-Object)",
+      "Bash(Select-Object -ExpandProperty Count)",
+      "Bash(Get-ChildItem \"C:\\\\CT-Prototype-backup\\\\CT-Prototype\\\\ui-review\\\\public\\\\dicom\" -Directory)",
+      "Bash(Select-Object -ExpandProperty Name)"
     ]
   }
 }
