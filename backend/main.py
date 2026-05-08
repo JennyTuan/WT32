@@ -49,4 +49,6 @@ app.include_router(scan_sessions.router, prefix="/api")
 app.include_router(disk_manager.router, prefix="/api")
 app.include_router(corners.router, prefix="/api")
 app.include_router(scan_ws_router)
-app.mount("/dicom-out", StaticFiles(directory=DATA_DIR / "dicom_out"), name="dicom_out")
+DICOM_OUT_DIR = DATA_DIR / "dicom_out"
+DICOM_OUT_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/dicom-out", StaticFiles(directory=DICOM_OUT_DIR), name="dicom_out")
