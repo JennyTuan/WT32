@@ -79,7 +79,10 @@
       "Bash(Measure-Object)",
       "Bash(Select-Object -ExpandProperty Count)",
       "Bash(Get-ChildItem \"C:\\\\CT-Prototype-backup\\\\CT-Prototype\\\\ui-review\\\\public\\\\dicom\" -Directory)",
-      "Bash(Select-Object -ExpandProperty Name)"
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(git check-ignore *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(git push *)"
     ]
   }
 }
