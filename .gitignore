@@ -41,8 +41,5 @@ ui-review/dist/
 npm-debug.log*
 
 # Medical image data
-*.dcm
 *.dicom
 *.mha
-dicom/
-DICOM/

@@ -18,3 +18,5 @@
 *.ico binary
 *.woff binary
 *.woff2 binary
+
+*.dcm binary
