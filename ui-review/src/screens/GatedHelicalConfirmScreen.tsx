@@ -38,12 +38,7 @@ export default function GatedHelicalConfirmScreen() {
                         timeoutSeconds={25}
                         amplitudeToleranceMm={2.0}
                     />
-                    <GatingWaveformPanel
-                        mode="breath_hold"
-                        phaseStartPct={0}
-                        phaseEndPct={100}
-                        readOnly
-                    />
+                    <GatingWaveformPanel mode="breath_hold" readOnly />
                     <button
                         onClick={() => setHoldArmed((v) => !v)}
                         style={{

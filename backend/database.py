@@ -428,7 +428,13 @@ CHEST_PROTOCOLS = [
         "scan_mode": "plain",
         "series_kind": "axial",
         "params": {"kv": 120, "ma": 120, "slice_thickness": 1.25, "slice_interval": 20.0, "rotation_time": 1.0, "scan_length": 320.0, "fov": 350.0, "ctdi_vol": 5.2, "dlp": 83.2, "step_count": 16, "auto_ma": False},
-        "gating_config": {"breathing_mode": "free_breathing", "phase_start_pct": 30.0, "phase_end_pct": 70.0},
+        "gating_config": {
+            "breathing_mode": "free_breathing",
+            "target_phase": "max_inspiration",
+            "threshold_normalized": 1.0,
+            "trigger_direction": "rising",
+            "wait_timeout_s": 30.0,
+        },
         "recons": [
             recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.25),
             recon("纵隔窗", "S2", 512, 400, 40, 1.25, 1.25),
@@ -732,10 +738,11 @@ def seed_protocol(db, models, protocol_seed: dict) -> None:
         gating_seed = protocol_seed.get("gating_config") or {}
         gating_defaults = {
             "breathing_mode": breathing_mode,
-            "phase_start_pct": 30.0,
-            "phase_end_pct": 70.0,
+            "target_phase": "max_inspiration",
+            "threshold_normalized": 1.0,
+            "trigger_direction": "rising",
+            "wait_timeout_s": 30.0,
             "trigger_delay_ms": 0,
-            "max_triggers_per_cycle": 1,
             "stability_cv_threshold": 0.15,
             "baseline_drift_mm_threshold": 5.0,
             "breath_hold_timeout_s": 25.0,
@@ -811,6 +818,15 @@ def _migrate_protocol_columns() -> None:
         "ALTER TABLE scan_session_recon_series ADD COLUMN recon_fov FLOAT",
         "ALTER TABLE scan_session_recon_series ADD COLUMN center_x FLOAT",
         "ALTER TABLE scan_session_recon_series ADD COLUMN center_y FLOAT",
+        # Gating: free-breathing prospective trigger fields
+        "ALTER TABLE gating_configs ADD COLUMN target_phase VARCHAR(20)",
+        "ALTER TABLE gating_configs ADD COLUMN threshold_normalized FLOAT",
+        "ALTER TABLE gating_configs ADD COLUMN trigger_direction VARCHAR(10)",
+        "ALTER TABLE gating_configs ADD COLUMN wait_timeout_s FLOAT",
+        "ALTER TABLE scan_session_gating_configs ADD COLUMN target_phase VARCHAR(20)",
+        "ALTER TABLE scan_session_gating_configs ADD COLUMN threshold_normalized FLOAT",
+        "ALTER TABLE scan_session_gating_configs ADD COLUMN trigger_direction VARCHAR(10)",
+        "ALTER TABLE scan_session_gating_configs ADD COLUMN wait_timeout_s FLOAT",
     ]
     with engine.connect() as conn:
         for sql in migrations:
@@ -870,10 +886,11 @@ def _migrate_protocol_columns() -> None:
                 conn.execute(
                     text(
                         "INSERT INTO gating_configs "
-                        "(series_id, breathing_mode, phase_start_pct, phase_end_pct, trigger_delay_ms, "
-                        "max_triggers_per_cycle, stability_cv_threshold, baseline_drift_mm_threshold, "
+                        "(series_id, breathing_mode, target_phase, threshold_normalized, "
+                        "trigger_direction, wait_timeout_s, trigger_delay_ms, "
+                        "stability_cv_threshold, baseline_drift_mm_threshold, "
                         "breath_hold_timeout_s, breath_hold_amplitude_tolerance_mm) "
-                        "SELECT s.id, :mode, 30.0, 70.0, 0, 1, 0.15, 5.0, 25.0, 2.0 "
+                        "SELECT s.id, :mode, 'max_inspiration', 1.0, 'rising', 30.0, 0, 0.15, 5.0, 25.0, 2.0 "
                         "FROM series s JOIN protocols p ON p.id = s.protocol_id "
                         "WHERE p.name = :name AND s.series_type IN ('helical','axial') "
                         "AND NOT EXISTS (SELECT 1 FROM gating_configs g WHERE g.series_id = s.id)"
@@ -882,6 +899,26 @@ def _migrate_protocol_columns() -> None:
                 )
             except Exception:
                 pass
+        # Backfill new fields onto existing gating_configs rows that pre-date this migration
+        try:
+            conn.execute(text(
+                "UPDATE gating_configs SET "
+                "target_phase = COALESCE(target_phase, 'max_inspiration'), "
+                "threshold_normalized = COALESCE(threshold_normalized, 1.0), "
+                "trigger_direction = COALESCE(trigger_direction, 'rising'), "
+                "wait_timeout_s = COALESCE(wait_timeout_s, 30.0) "
+                "WHERE breathing_mode = 'free_breathing'"
+            ))
+            conn.execute(text(
+                "UPDATE scan_session_gating_configs SET "
+                "target_phase = COALESCE(target_phase, 'max_inspiration'), "
+                "threshold_normalized = COALESCE(threshold_normalized, 1.0), "
+                "trigger_direction = COALESCE(trigger_direction, 'rising'), "
+                "wait_timeout_s = COALESCE(wait_timeout_s, 30.0) "
+                "WHERE breathing_mode = 'free_breathing'"
+            ))
+        except Exception:
+            pass
         conn.commit()
 
 

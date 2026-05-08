@@ -72,7 +72,8 @@
       "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"C:/CT-Prototype-backup/CT-Prototype/backend/database.py\"\\); $first3 = $bytes[0..2] -join \",\"; \"First bytes: $first3\"; \"BOM utf-8: 239,187,191\")",
       "PowerShell(Get-Content \"C:/CT-Prototype-backup/CT-Prototype/backend/database.py\" -Encoding utf8 | Select-Object -Index \\(27..32\\))",
       "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"C:/CT-Prototype-backup/CT-Prototype/backend/database.py\"\\); $start=0; $count=0; for \\($i=0; $i -lt $bytes.Length; $i++\\) { if \\($bytes[$i] -eq 10\\) { $count++; if \\($count -eq 27\\) { $start=$i+1 } elseif \\($count -eq 33\\) { $end=$i; break } } }; [System.Text.Encoding]::UTF8.GetString\\($bytes, $start, $end-$start\\))",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(pandoc --track-changes=all \"C:\\\\Users\\\\24606\\\\Downloads\\\\Gating_Function_Design.docx\" -o \"C:\\\\Users\\\\24606\\\\Downloads\\\\Gating_Function_Design.md\")"
     ]
   }
 }

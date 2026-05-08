@@ -98,10 +98,11 @@ export type ApiScanSessionFourDConfig = {
 export type ApiScanSessionGatingConfig = {
     id: number;
     breathing_mode: "free_breathing" | "breath_hold_inspiration" | "breath_hold_expiration";
-    phase_start_pct: number;
-    phase_end_pct: number;
+    target_phase?: "max_inspiration" | "max_expiration" | "custom" | null;
+    threshold_normalized?: number | null;
+    trigger_direction?: "rising" | "falling" | null;
+    wait_timeout_s?: number | null;
     trigger_delay_ms: number;
-    max_triggers_per_cycle: number;
     stability_cv_threshold: number;
     baseline_drift_mm_threshold: number;
     breath_hold_timeout_s?: number | null;

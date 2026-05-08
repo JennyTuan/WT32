@@ -249,20 +249,28 @@ class GatingConfig(Base):
     series_id = Column(Integer, ForeignKey("series.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     # "breath_hold_inspiration" | "breath_hold_expiration" | "free_breathing"
     breathing_mode = Column(String(30), nullable=False)
-    # phase window (% of respiratory cycle), only meaningful for free_breathing
-    phase_start_pct = Column(Float, nullable=False, default=30.0)
-    phase_end_pct = Column(Float, nullable=False, default=70.0)
-    # ms delay from window-enter to actual exposure trigger
+    # --- free-breathing prospective trigger (axial, 19.2mm bed step) ---
+    # target phase preset: max_inspiration / max_expiration / custom
+    target_phase = Column(String(20), nullable=True, default="max_inspiration")
+    # normalized amplitude threshold in [-2.0, +2.0]; +1 = avg max inspiration, -1 = avg max expiration
+    threshold_normalized = Column(Float, nullable=True, default=1.0)
+    # trigger direction across threshold: "rising" | "falling"
+    trigger_direction = Column(String(10), nullable=True, default="rising")
+    # max seconds to wait for one trigger before prompting technician
+    wait_timeout_s = Column(Float, nullable=True, default=30.0)
+    # --- shared stability thresholds ---
     trigger_delay_ms = Column(Integer, nullable=False, default=0)
-    # max number of triggers per respiratory cycle (free breathing)
-    max_triggers_per_cycle = Column(Integer, nullable=False, default=1)
-    # stability thresholds (system auto-decides whether to fire)
     stability_cv_threshold = Column(Float, nullable=False, default=0.15)
     baseline_drift_mm_threshold = Column(Float, nullable=False, default=5.0)
-    # breath-hold: max hold seconds before auto-abort
+    # --- breath-hold (DIBH) ---
     breath_hold_timeout_s = Column(Float, nullable=True, default=25.0)
-    # breath-hold stability: amplitude deviation tolerance from baseline (mm)
     breath_hold_amplitude_tolerance_mm = Column(Float, nullable=True, default=2.0)
+    # --- deprecated (kept for SQLite back-compat; not used by new schema) ---
+    # NOTE: existing sqlite databases declared these as NOT NULL; provide defaults so
+    # ORM inserts succeed without requiring a destructive table rebuild.
+    phase_start_pct = Column(Float, nullable=True, default=0.0, server_default="0")
+    phase_end_pct = Column(Float, nullable=True, default=0.0, server_default="0")
+    max_triggers_per_cycle = Column(Integer, nullable=True, default=1, server_default="1")
 
     series = relationship("Series", back_populates="gating_config")
 
@@ -502,14 +510,19 @@ class ScanSessionGatingConfig(Base):
     scan_session_series_id = Column(Integer, ForeignKey("scan_session_series.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     template_config_id = Column(Integer, ForeignKey("gating_configs.id", ondelete="SET NULL"), nullable=True)
     breathing_mode = Column(String(30), nullable=False)
-    phase_start_pct = Column(Float, nullable=False, default=30.0)
-    phase_end_pct = Column(Float, nullable=False, default=70.0)
+    target_phase = Column(String(20), nullable=True, default="max_inspiration")
+    threshold_normalized = Column(Float, nullable=True, default=1.0)
+    trigger_direction = Column(String(10), nullable=True, default="rising")
+    wait_timeout_s = Column(Float, nullable=True, default=30.0)
     trigger_delay_ms = Column(Integer, nullable=False, default=0)
-    max_triggers_per_cycle = Column(Integer, nullable=False, default=1)
     stability_cv_threshold = Column(Float, nullable=False, default=0.15)
     baseline_drift_mm_threshold = Column(Float, nullable=False, default=5.0)
     breath_hold_timeout_s = Column(Float, nullable=True, default=25.0)
     breath_hold_amplitude_tolerance_mm = Column(Float, nullable=True, default=2.0)
+    # deprecated columns retained for sqlite back-compat (existing DB has NOT NULL)
+    phase_start_pct = Column(Float, nullable=True, default=0.0, server_default="0")
+    phase_end_pct = Column(Float, nullable=True, default=0.0, server_default="0")
+    max_triggers_per_cycle = Column(Integer, nullable=True, default=1, server_default="1")
 
     session_series = relationship("ScanSessionSeries", back_populates="gating_config")
 
