@@ -1214,8 +1214,8 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 if (copies) newSeqs.push(...copies);
             }
             return { ...plan, sequences: newSeqs };
-        });
-        return [...merged, ...edits.copiedPlans];
+        }).filter((plan) => plan.sequences.length > 0);
+        return [...merged, ...edits.copiedPlans.filter((plan) => plan.sequences.length > 0)];
     }, []);
 
     useEffect(() => {

@@ -299,17 +299,6 @@ const ViewScreen = () => {
     /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
     const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";
     const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">("ready");
-    const handleAdvancedProcessing = useCallback(() => {
-        navigate("/phase-filter", {
-            state: fourDState
-                ? {
-                    ...fourDState,
-                    initialBrowseMode: "phase",
-                    skipImageLoad: true,
-                }
-                : undefined,
-        });
-    }, [fourDState, navigate]);
 
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(isFourDEntry ? "4d-preview-recon" : REAL_LUNG_SERIES.seriesId);
@@ -1962,14 +1951,7 @@ const ViewScreen = () => {
             </main>
 
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
-                <div className="flex-1">
-                    <button
-                        onClick={handleAdvancedProcessing}
-                        className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95"
-                    >
-                        <ChevronLeft size={20} /> 高级处理
-                    </button>
-                </div>
+                <div className="flex-1" />
                 <div className="flex-1" />
                 <div className="flex-1 flex justify-end">
                     <button
