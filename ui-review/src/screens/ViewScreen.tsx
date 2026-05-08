@@ -3,7 +3,6 @@ import {
     User,
     Settings,
     Sun,
-    ChevronLeft,
     ChevronRight,
     ChevronDown,
     Layers3,
