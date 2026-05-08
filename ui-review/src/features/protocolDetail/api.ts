@@ -16,8 +16,8 @@ export { buildApiUrl } from "../../lib/apiClient";
 
 export const fetchProtocolCatalogWithFallback = async () => {
     const candidates = API_BASE_URL
-        ? [buildApiUrl("/api/protocols/catalog"), "/api/protocols/catalog"]
-        : ["/api/protocols/catalog", "http://127.0.0.1:8000/api/protocols/catalog"];
+  ? [buildApiUrl("/api/protocols/catalog")]
+  : ["/api/protocols/catalog"];
 
     let lastError: Error | null = null;
 
