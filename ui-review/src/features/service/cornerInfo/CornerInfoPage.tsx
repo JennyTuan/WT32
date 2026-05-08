@@ -33,7 +33,7 @@ export default function CornerInfoPage() {
             setConfig(parsed);
             initialConfigRef.current = parsed;
             setIsDirty(false);
-        } catch {
+        } catch(err) {
             console.error("Failed to load corner config", err);
             showToast("加载配置失败", "error");
         } finally {

@@ -41,6 +41,8 @@ const EXAMPLE_VALUES: Record<string, string> = {
     device_model: "CT-2000",
 };
 
+type CornerKey = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
+
 function getCornerDesc(items: CornerItem[]): string {
     if (items.length === 0) return "暂无配置";
     const hasPatient = items.some(i => ["patient_name","patient_id","patient_gender","patient_age"].includes(i.key));
@@ -136,7 +138,7 @@ interface CornerEditorProps {
 export default function CornerEditor({
     config, onUpdate, onStartAdding, onSave, onResetCorner, onResetAll, saving, isDirty
 }: CornerEditorProps) {
-    const [activeCorner, setActiveCorner] = useState<string>("topLeft");
+    const [activeCorner, setActiveCorner] = useState<CornerKey>("topLeft");
     const [showExamples, setShowExamples] = useState(true);
 
     const sensors = useSensors(
