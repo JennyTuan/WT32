@@ -1616,13 +1616,6 @@ const ViewScreen = () => {
                                 </div>
                             )}
                         </div>
-                        {!isTopogramSeries && imageMode === "2D" && (
-                            <div className="px-3 pb-3">
-                                <button className="h-[32px] w-full bg-white border border-[#B0C4DE] rounded-md text-[10px] font-bold text-[#4D94FF] hover:bg-blue-50 transition-all shadow-sm">
-                                    详情
-                                </button>
-                            </div>
-                        )}
                     </div>
                 </aside>
 
