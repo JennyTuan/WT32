@@ -56,7 +56,6 @@ export default function AutoMaPanel({
     maMax,
     fallbackMa,
     scanLength,
-    rotationTime,
     sliceInterval,
     stepCount,
     pitch,

@@ -4,6 +4,7 @@ import {
     Settings,
     Sun,
     ChevronRight,
+    ChevronUp,
     ChevronDown,
     Layers3,
     SlidersHorizontal,
@@ -21,7 +22,7 @@ import {
     Network,
     Siren,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import type { FourDPostScanState } from "../lib/fourDTypes";
@@ -667,6 +668,16 @@ const ViewScreen = () => {
 
 
     const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
+    const currentSliceIndex = clampSliceIndex(sliceIndex);
+    const sliceProgressPercent = totalSlices > 1 ? (currentSliceIndex / (totalSlices - 1)) * 100 : 0;
+    const canPageBackward = currentSliceIndex > 0;
+    const canPageForward = currentSliceIndex < totalSlices - 1;
+    const handleSliceStep = useCallback((delta: number) => {
+        setSliceIndex((prev) => clampSliceIndex(prev + delta));
+    }, [clampSliceIndex]);
+    const handleSliceSliderChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+        setSliceIndex(clampSliceIndex(Number(event.target.value)));
+    }, [clampSliceIndex]);
 
     useEffect(() => {
         if (imageMode !== "2D") return;
@@ -1690,7 +1701,7 @@ const ViewScreen = () => {
                                 ref={dicomViewerRef}
                                 imageUrls={seriesImageUrls}
                                 onStatusChange={setViewerLoadStatus}
-                                currentImageIndex={clampSliceIndex(sliceIndex)}
+                                currentImageIndex={currentSliceIndex}
                                 onImageIndexChange={setSliceIndex}
                                 activeTool={mapCornerstoneTool(toolMode)}
                                 windowCenter={wl}
@@ -1705,6 +1716,25 @@ const ViewScreen = () => {
                                     setDisplayWw(Math.round(wwidth));
                                 }}
                             />
+                            <div
+                                className="absolute bottom-6 left-1/2 z-20 w-[320px] max-w-[36%] -translate-x-1/2 rounded-full border border-white/10 bg-[#0B1120]/75 px-3 py-2 shadow-2xl backdrop-blur"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={Math.max(0, totalSlices - 1)}
+                                    step={1}
+                                    value={currentSliceIndex}
+                                    onChange={handleSliceSliderChange}
+                                    aria-label={`切片进度 ${currentSliceIndex + 1}/${totalSlices}`}
+                                    className="h-2 w-full cursor-pointer appearance-none rounded-full accent-[#4D94FF] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow"
+                                    style={{
+                                        background: `linear-gradient(to right, #4D94FF ${sliceProgressPercent}%, rgba(148,163,184,0.32) ${sliceProgressPercent}%)`,
+                                    }}
+                                />
+                            </div>
                             {/* ── Annotate click-intercept overlay ── */}
                             {toolMode === "annotate" && (
                                 <div
@@ -1923,6 +1953,31 @@ const ViewScreen = () => {
                                 </button>
                                 );
                             })}
+
+                            {!isMprViewActive && (
+                                <div className="mt-auto flex flex-col items-center gap-1">
+                                    <button
+                                        type="button"
+                                        title="上一张"
+                                        aria-label="上一张"
+                                        disabled={!canPageBackward}
+                                        onClick={() => handleSliceStep(-1)}
+                                        className="flex h-9 w-9 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
+                                    >
+                                        <ChevronUp size={17} strokeWidth={1.8} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="下一张"
+                                        aria-label="下一张"
+                                        disabled={!canPageForward}
+                                        onClick={() => handleSliceStep(1)}
+                                        className="flex h-9 w-9 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
+                                    >
+                                        <ChevronDown size={17} strokeWidth={1.8} />
+                                    </button>
+                                </div>
+                            )}
 
                             <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
 
