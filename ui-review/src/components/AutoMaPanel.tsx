@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Zap } from "lucide-react";
+import { Activity } from "lucide-react";
 
 export type AutoMaPanelProps = {
     mode?: "axial" | "helical";
@@ -87,10 +87,6 @@ export default function AutoMaPanel({
         [autoMa, effectiveSteps, draftMin, draftMax, fallbackMa],
     );
 
-    const meanMa = curve.length ? curve.reduce((a, b) => a + b, 0) / curve.length : fallbackMa;
-    // 原型级 CTDIvol 估算：mean(mA) × 旋转时间 × 经验系数。仅用于 UI 反馈，非真实剂量。
-    const estCtdi = (meanMa * rotationTime * 0.05).toFixed(2);
-    const estDlp = (Number(estCtdi) * (scanLength / 10)).toFixed(2);
 
     const yMaxView = Math.max(maMax, fallbackMa) * 1.15;
     const VIEW_W = 100;
@@ -242,29 +238,6 @@ export default function AutoMaPanel({
                     </div>
                 </div>
 
-                {/* 预计剂量 */}
-                <div className="w-[170px] shrink-0 pl-4 flex flex-col justify-center">
-                    <div className="flex items-center gap-1 text-[9px] font-black uppercase tracking-tighter text-[#FCD34D]">
-                        <Zap size={10} /> 预计剂量（参考）
-                    </div>
-                    <div className="mt-1.5 flex items-baseline justify-between">
-                        <span className="text-[9px] text-[#FCD34D]/70">CTDIvol</span>
-                        <span className="text-[14px] font-black text-[#FDE68A]">
-                            {estCtdi}
-                            <span className="ml-0.5 text-[9px] font-bold text-[#FCD34D]/70">mGy</span>
-                        </span>
-                    </div>
-                    <div className="mt-0.5 flex items-baseline justify-between">
-                        <span className="text-[9px] text-[#FCD34D]/70">DLP</span>
-                        <span className="text-[14px] font-black text-[#FDE68A]">
-                            {estDlp}
-                            <span className="ml-0.5 text-[9px] font-bold text-[#FCD34D]/70">mGy·cm</span>
-                        </span>
-                    </div>
-                    <div className="mt-1 text-[9px] text-[#FCD34D]/50 leading-tight">
-                        非设备实测值，最终以扫描后报告为准
-                    </div>
-                </div>
             </div>
         </div>
     );
