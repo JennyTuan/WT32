@@ -656,7 +656,8 @@ const ViewScreen = () => {
         []
     );
     const fourDPhaseBadgeLabel = `Phase ${FOUR_D_PHASE_LABELS[selectedPhaseIndex] ?? `${selectedPhaseIndex * 10}%`}`;
-    const isPlaybackEnabled = !isFourDPlaybackBlockedByReview;
+    const hasMultipleSlices = totalSlices > 1;
+    const isPlaybackEnabled = !isFourDPlaybackBlockedByReview && hasMultipleSlices;
     const isToolSupportedInCurrentView = (mode: ViewerToolMode) => {
         if (!isMprViewActive) return mode !== "rotate";
         if (isFourDMprViewActive) {
@@ -1716,6 +1717,7 @@ const ViewScreen = () => {
                                     setDisplayWw(Math.round(wwidth));
                                 }}
                             />
+                            {hasMultipleSlices && (
                             <div
                                 className="absolute bottom-6 left-1/2 z-20 w-[320px] max-w-[36%] -translate-x-1/2 rounded-full border border-white/10 bg-[#0B1120]/75 px-3 py-2 shadow-2xl backdrop-blur"
                                 onPointerDown={(e) => e.stopPropagation()}
@@ -1735,6 +1737,7 @@ const ViewScreen = () => {
                                     }}
                                 />
                             </div>
+                            )}
                             {/* ── Annotate click-intercept overlay ── */}
                             {toolMode === "annotate" && (
                                 <div
