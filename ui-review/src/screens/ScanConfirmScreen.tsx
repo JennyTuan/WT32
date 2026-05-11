@@ -51,10 +51,14 @@ type ScanConfirmScreenProps = {
     tomographicParamOverrides?: Partial<TomographicScanDisplayParams>;
     helicalParamOverrides?: Partial<HelicalScanDisplayParams>;
     rightViewportContent?: React.ReactNode;
+    rightViewportClassName?: string;
+    extraParamSection?: React.ReactNode;
+    extraParamSectionTitle?: string;
     autoMaEnabled?: boolean;
     onAutoMaEnabledChange?: (value: boolean) => void;
     readOnlyMode?: boolean;
     onExecuteScan?: () => void;
+    patientConfirmBeforeExecute?: boolean;
     executeButtonLabel?: string;
     nextRoute?: string;
     allowBackNavigation?: boolean;
@@ -393,12 +397,16 @@ const ScanConfirmScreen = ({
     forceFourDScoutWorkflow = false,
     parameterPanelMode = "scout",
     tomographicParamOverrides,
+    extraParamSection,
+    extraParamSectionTitle = "门控参数",
     helicalParamOverrides,
     rightViewportContent,
+    rightViewportClassName,
     autoMaEnabled,
     onAutoMaEnabledChange,
     readOnlyMode = false,
     onExecuteScan,
+    patientConfirmBeforeExecute = false,
     executeButtonLabel = "执行扫描",
     nextRoute = "/scout-execute",
     allowBackNavigation = true,
@@ -410,6 +418,7 @@ const ScanConfirmScreen = ({
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [bedMode, setBedMode] = useState<"in" | "out">("in");
     const [patientPosition, setPatientPosition] = useState("HFS");
+    const [activeParamTab, setActiveParamTab] = useState<"main" | "extra">("main");
 
     // Data structure with sequences at the same level
     const [groups, setGroups] = useState<ProtocolGroup[]>([
@@ -886,8 +895,37 @@ const ScanConfirmScreen = ({
                             </div>
                         </div>
 
+                        {extraParamSection && (
+                            <div className="px-2 pt-1.5 shrink-0">
+                                <div className="flex w-full rounded-md border border-[#B0C4DE] bg-white overflow-hidden p-[2px]">
+                                    <button
+                                        type="button"
+                                        onClick={() => setActiveParamTab("main")}
+                                        className={`flex-1 h-[24px] text-[11px] font-bold rounded-sm transition-all ${
+                                            activeParamTab === "main"
+                                                ? "bg-[#4D94FF] text-white shadow-inner"
+                                                : "text-[#90A4AE] hover:bg-gray-50"
+                                        }`}
+                                    >
+                                        扫描参数
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setActiveParamTab("extra")}
+                                        className={`flex-1 h-[24px] text-[11px] font-bold rounded-sm transition-all ${
+                                            activeParamTab === "extra"
+                                                ? "bg-[#4D94FF] text-white shadow-inner"
+                                                : "text-[#90A4AE] hover:bg-gray-50"
+                                        }`}
+                                    >
+                                        {extraParamSectionTitle}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Reorganized Parameter Grid - 2 Column Layout */}
-                        <div className="flex-1 p-2 pt-2 flex flex-col gap-2 overflow-y-auto">
+                        <div className={`flex-1 p-2 pt-2 flex flex-col gap-2 overflow-y-auto ${extraParamSection && activeParamTab !== "main" ? "hidden" : ""}`}>
                             {parameterPanelMode === "tomographicScan" ? (
                                 <div className="grid grid-cols-2 gap-2">
                                      {onAutoMaEnabledChange && (
@@ -1250,6 +1288,12 @@ const ScanConfirmScreen = ({
                             )}
                         </div>
 
+                        {extraParamSection && activeParamTab === "extra" && (
+                            <div className="flex-1 p-2 pt-2 flex flex-col gap-2 overflow-y-auto">
+                                {extraParamSection}
+                            </div>
+                        )}
+
                         {/* Details Button */}
                         <div className="p-2 flex justify-center shrink-0">
                             <button onClick={handleOpenDetails} disabled={readOnlyMode} className={`h-[32px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border shadow-sm transition-all ${readOnlyMode ? "bg-[#F1F5F9] border-[#CBD5E1] text-[#94A3B8] cursor-not-allowed" : "bg-white border-[#B0C4DE] text-[#4D94FF] hover:bg-blue-50 active:scale-95"}`}>
@@ -1260,7 +1304,7 @@ const ScanConfirmScreen = ({
                 </aside>
 
                 {/* Right Viewport Card */}
-                <section className="flex-1 bg-[#1A222B] rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden relative">
+                <section className={rightViewportClassName ?? "flex-1 bg-[#1A222B] rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden relative"}>
                     {rightViewportContent ?? (
                         <div className="flex-1 flex items-center justify-center overflow-hidden">
                             <div className="w-full h-full opacity-10 bg-gradient-to-br from-blue-900/40 to-transparent flex items-center justify-center text-[#546E7A] uppercase font-thin text-[52px] tracking-[16px]">
@@ -1290,6 +1334,10 @@ const ScanConfirmScreen = ({
                     <button
                         onClick={() => {
                             if (onExecuteScan) {
+                                if (patientConfirmBeforeExecute) {
+                                    setShowPatientConfirm(true);
+                                    return;
+                                }
                                 onExecuteScan();
                                 return;
                             }
@@ -1391,6 +1439,10 @@ const ScanConfirmScreen = ({
                 onClose={() => setShowPatientConfirm(false)}
                 onConfirm={() => {
                     setShowPatientConfirm(false);
+                    if (onExecuteScan) {
+                        onExecuteScan();
+                        return;
+                    }
                     navigate(nextRoute);
                 }}
                 patientData={selectedPatient ? {

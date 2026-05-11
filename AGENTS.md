@@ -20,7 +20,8 @@
 | 患者管理 | 登记、查询、新增患者信息 |
 | 扫描协议管理 | 100+ 预置协议模板，覆盖 7 个解剖部位 |
 | 扫描工作流 | 定位像 → 螺旋/断层扫描 → 图像重建的完整流程 |
-| 4D 呼吸门控 | 诊断确认 → 断层采集 → 时相回顾 → 重扫选择 |
+| 呼吸门控（前瞻） | DIBH 屏息 或 自由呼吸阈值穿越触发，单相位结果 |
+| 4D 呼吸门控（回顾） | 诊断确认 → 断层采集 → 时相回顾 → 重扫选择 |
 | DICOM 图像查看 | Cornerstone3D，支持 Stack 与 MPR 视图 |
 | 设备服务功能 | 球管预热、空气校准、日检、硬件测试、磁盘管理、性能评估、QA 报告等 |
 
@@ -209,7 +210,7 @@ Protocol                    →克隆→  ScanSession
 
 **series 表**：
 - `series_type`：topogram / helical / axial / 4d
-- `acquisition_type`：`regular` | `4d` — **判断是否走 4D 门控分支的唯一依据**，禁止按协议名称字符串匹配
+- `acquisition_type`：`regular` | `gating` | `four_d` — **判断走哪条扫描分支的唯一依据**，禁止按协议名称字符串匹配。`gating` 走前瞻式门控（单相位），`four_d` 走回顾式 4D（多时相），二者不可混淆
 
 **helical_params 表**（主要扫描参数）：
 - `kv`：管电压（kV）
@@ -247,10 +248,22 @@ Protocol                    →克隆→  ScanSession
 → 图像查看 (/image-viewer)
 ```
 
-### 4D 呼吸门控流程
+### 呼吸门控流程（前瞻式，单相位）
 
 ```
-选择 4D 协议（acquisition_type = "4d"）
+选择门控协议（acquisition_type = "gating"）
+→ /gated-helical-confirm （螺旋仅 DIBH 屏息）
+  或 /gated-axial-confirm （轴扫支持 DIBH 与 自由呼吸阈值穿越）
+→ /gated-execute
+   • 屏息：波形稳定后自动曝光，单次完成
+   • 自由呼吸：等待触发 → 曝光 → 床进 19.2 mm，逐床推进
+→ /image-viewer  ← 单相位结果，无 PhaseReview / RescanSelect
+```
+
+### 4D 呼吸门控流程（回顾式，多时相）
+
+```
+选择 4D 协议（acquisition_type = "four_d"）
 → 诊断扫描确认 (/fourd-confirm)
 → 4D 断层采集（WebSocket 实时呼吸波形）
 → 时相回顾 (/fourd-phase-review) ← 浏览各时相图像
@@ -275,7 +288,7 @@ Protocol                    →克隆→  ScanSession
 3. **剂量展示必须准确**：CTDIvol、DLP 等剂量指标显示时须标注单位（mGy、mGy·cm），并说明"预计值/参考值"
 4. **不允许绕过确认流程**：扫描执行前必须经过参数确认页，不能跳过
 5. **DOM 不等于"动态扫描"**：DOM（Dynamic Organ Dose Modulation）是器官剂量保护，与 4D 动态扫描是完全不同的概念，文案和代码均需区分
-6. **4D 判定使用字段，不使用名称匹配**：`acquisition_type === "4d"` 是唯一判断依据
+6. **分支判定使用字段，不使用名称匹配**：`acquisition_type` 的 `regular` / `gating` / `four_d` 是唯一判断依据；尤其门控（前瞻、单相位）与 4D（回顾、多时相）属于不同流程，不可混用
 7. **模板与会话隔离**：协议模板修改不应影响已进行中的扫描会话；会话内改参不应反写模板（除非用户明确操作）
 8. **儿童/婴幼儿协议特殊保护**：age_group = child/infant 时，剂量相关默认值应更保守
 

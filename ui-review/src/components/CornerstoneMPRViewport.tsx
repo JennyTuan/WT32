@@ -7,7 +7,7 @@ import {
   type Types,
   volumeLoader,
 } from '@cornerstonejs/core';
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type RefObject } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 
 import {
   buildWadoImageId,
@@ -33,6 +33,13 @@ type VolumePreset = string;
 type InterpolationMode = 'NEAREST' | 'LINEAR' | 'FAST_LINEAR';
 type VoiLutMode = 'LINEAR' | 'LINEAR_EXACT' | 'SIGMOID';
 type PanelId = 'axial' | 'coronal' | 'sagittal';
+export type ObliqueAxis = 'horizontal' | 'vertical';
+export type ObliqueConfig = {
+  enabled: boolean;
+  panel: PanelId;
+  axis: ObliqueAxis;
+  angleDeg: number;
+};
 type NumericTypedArray =
   | Int8Array
   | Uint8Array
@@ -69,6 +76,9 @@ interface CornerstoneMPRViewportProps {
   phaseOptions?: Array<{ index: number; value: number }>;
   selectedPhaseIndex?: number;
   onPhaseChange?: (phase: number) => void;
+  oblique?: ObliqueConfig;
+  onObliquePanelChange?: (panel: PanelId) => void;
+  onObliqueAngleChange?: (angleDeg: number) => void;
   /**
    * Optional list of URL-sets (e.g. one per 4D phase) to warm the cornerstone
    * volume cache in the background after mount, so phase-cine playback hits
@@ -118,16 +128,205 @@ const SLAB_THICKNESS_MM = 150;
 const AXIAL_COLOR = '#EF4444';
 const CORONAL_COLOR = '#22C55E';
 const SAGITTAL_COLOR = '#FACC15';
+const PANEL_IDS: PanelId[] = ['axial', 'coronal', 'sagittal'];
+const PANEL_COLORS: Record<PanelId, string> = {
+  axial: AXIAL_COLOR,
+  coronal: CORONAL_COLOR,
+  sagittal: SAGITTAL_COLOR,
+};
+const DEG_TO_RAD = Math.PI / 180;
+const BASE_MPR_CAMERAS: Record<PanelId, { viewPlaneNormal: Types.Point3; viewUp: Types.Point3; viewRight: Types.Point3 }> = {
+  axial: {
+    viewPlaneNormal: [0, 0, -1],
+    viewUp: [0, -1, 0],
+    viewRight: [1, 0, 0],
+  },
+  coronal: {
+    viewPlaneNormal: [0, -1, 0],
+    viewUp: [0, 0, 1],
+    viewRight: [1, 0, 0],
+  },
+  sagittal: {
+    viewPlaneNormal: [1, 0, 0],
+    viewUp: [0, 0, 1],
+    viewRight: [0, 1, 0],
+  },
+};
+
+function normalizeVector(vector: Types.Point3): Types.Point3 {
+  const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function rotateVectorAroundAxis(vector: Types.Point3, axis: Types.Point3, angleDeg: number): Types.Point3 {
+  const [x, y, z] = vector;
+  const [u, v, w] = normalizeVector(axis);
+  const angle = angleDeg * DEG_TO_RAD;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const dot = u * x + v * y + w * z;
+
+  return normalizeVector([
+    u * dot * (1 - cos) + x * cos + (-w * y + v * z) * sin,
+    v * dot * (1 - cos) + y * cos + (w * x - u * z) * sin,
+    w * dot * (1 - cos) + z * cos + (-v * x + u * y) * sin,
+  ]);
+}
+
+function getPanelCamera(panel: PanelId, oblique?: ObliqueConfig): Types.OrientationVectors {
+  const base = BASE_MPR_CAMERAS[panel];
+  if (!oblique?.enabled || oblique.panel !== panel || Math.abs(oblique.angleDeg) < 0.1) {
+    return {
+      viewPlaneNormal: base.viewPlaneNormal,
+      viewUp: base.viewUp,
+    };
+  }
+
+  const rotationAxis = oblique.axis === 'horizontal' ? base.viewRight : base.viewUp;
+  return {
+    viewPlaneNormal: rotateVectorAroundAxis(base.viewPlaneNormal, rotationAxis, oblique.angleDeg),
+    viewUp: rotateVectorAroundAxis(base.viewUp, rotationAxis, oblique.angleDeg),
+  };
+}
+
+function clampObliqueAngle(value: number) {
+  return Math.min(45, Math.max(-45, Math.round(value)));
+}
+
+function dot(a: Types.Point3, b: Types.Point3) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function cross(a: Types.Point3, b: Types.Point3): Types.Point3 {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function getReferenceLineAngle(displayPanel: PanelId, targetPanel: PanelId, oblique?: ObliqueConfig) {
+  if (targetPanel === displayPanel) return null;
+
+  const targetCamera = getPanelCamera(
+    targetPanel,
+    oblique?.enabled && oblique.panel === targetPanel ? oblique : undefined
+  );
+  const displayCamera = BASE_MPR_CAMERAS[displayPanel];
+  const intersectionDirection = normalizeVector(cross(targetCamera.viewPlaneNormal, displayCamera.viewPlaneNormal));
+  if (Math.hypot(intersectionDirection[0], intersectionDirection[1], intersectionDirection[2]) < 0.01) return null;
+
+  const x = dot(intersectionDirection, displayCamera.viewRight);
+  const y = -dot(intersectionDirection, displayCamera.viewUp);
+  return Math.atan2(y, x) / DEG_TO_RAD;
+}
 
 function CrosshairOverlay({
   horizontalColor,
   verticalColor,
+  panel,
+  oblique,
+  onObliquePanelChange,
+  onObliqueAngleChange,
 }: {
   horizontalColor: string;
   verticalColor: string;
+  panel: PanelId;
+  oblique?: ObliqueConfig;
+  onObliquePanelChange?: (panel: PanelId) => void;
+  onObliqueAngleChange?: (angleDeg: number) => void;
 }) {
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ targetPanel: PanelId; startPointerAngle: number; startObliqueAngle: number } | null>(null);
+  const referenceLines = (oblique?.enabled ? PANEL_IDS : [])
+    .filter((targetPanel) => targetPanel !== panel)
+    .map((targetPanel) => ({
+      targetPanel,
+      angle: getReferenceLineAngle(panel, targetPanel, oblique),
+      color: PANEL_COLORS[targetPanel],
+      active: oblique?.panel === targetPanel,
+    }))
+    .filter((item): item is { targetPanel: PanelId; angle: number; color: string; active: boolean } => item.angle !== null);
+
+  const getPointerAngle = (clientX: number, clientY: number) => {
+    const rect = overlayRef.current?.getBoundingClientRect();
+    if (!rect) return 0;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    return Math.atan2(clientY - cy, clientX - cx) / DEG_TO_RAD;
+  };
+
+  const startDragAt = (targetPanel: PanelId, clientX: number, clientY: number) => {
+    if (!oblique?.enabled) return false;
+    onObliquePanelChange?.(targetPanel);
+    dragRef.current = {
+      targetPanel,
+      startPointerAngle: getPointerAngle(clientX, clientY),
+      startObliqueAngle: oblique.panel === targetPanel ? oblique.angleDeg : 0,
+    };
+
+    return true;
+  };
+
+  const moveDragAt = (clientX: number, clientY: number) => {
+    if (!dragRef.current) return;
+    const pointerDelta = getPointerAngle(clientX, clientY) - dragRef.current.startPointerAngle;
+    onObliqueAngleChange?.(clampObliqueAngle(dragRef.current.startObliqueAngle + pointerDelta));
+  };
+
+  const startObliquePointerDrag = (targetPanel: PanelId, event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!oblique?.enabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    startDragAt(targetPanel, event.clientX, event.clientY);
+
+    const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
+      if (!dragRef.current) return;
+      moveEvent.preventDefault();
+      moveDragAt(moveEvent.clientX, moveEvent.clientY);
+    };
+
+    const handlePointerUp = (upEvent: globalThis.PointerEvent) => {
+      upEvent.preventDefault();
+      dragRef.current = null;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+  };
+
+  const startObliqueMouseDrag = (targetPanel: PanelId, event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!oblique?.enabled || event.button !== 0 || dragRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    startDragAt(targetPanel, event.clientX, event.clientY);
+
+    const handleMouseMove = (moveEvent: globalThis.MouseEvent) => {
+      if (!dragRef.current) return;
+      moveEvent.preventDefault();
+      moveDragAt(moveEvent.clientX, moveEvent.clientY);
+    };
+
+    const handleMouseUp = (upEvent: globalThis.MouseEvent) => {
+      upEvent.preventDefault();
+      dragRef.current = null;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleBaseClass =
+    'pointer-events-auto absolute z-[6] h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-[#0B1120]/55 cursor-grab active:cursor-grabbing';
+
   return (
-    <div className={CROSSHAIR_OVERLAY_CLASS}>
+    <div ref={overlayRef} className={CROSSHAIR_OVERLAY_CLASS}>
       <div
         className="absolute left-1/2 top-0 bottom-0 w-px -translate-x-1/2"
         style={{ backgroundColor: verticalColor, boxShadow: `0 0 10px ${verticalColor}66` }}
@@ -137,6 +336,57 @@ function CrosshairOverlay({
         style={{ backgroundColor: horizontalColor, boxShadow: `0 0 10px ${horizontalColor}66` }}
       />
       <div className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 bg-white/25" />
+      {referenceLines.map(({ targetPanel, angle, color, active }) => {
+        const lineOpacity = active ? 0.8 : 0.32;
+        const handleOpacity = active ? 0.92 : 0.46;
+        return (
+          <div key={targetPanel} className="absolute inset-0">
+          <div
+            className="pointer-events-none absolute left-1/2 top-1/2 z-[4] h-[3px] w-[76%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+            style={{
+              backgroundColor: color,
+              opacity: lineOpacity,
+              boxShadow: active ? `0 0 12px ${color}` : `0 0 8px ${color}66`,
+              transform: `translate(-50%, -50%) rotate(${angle}deg)`,
+            }}
+          />
+          <div
+            className="pointer-events-auto absolute left-1/2 top-1/2 z-[5] h-8 w-[76%] -translate-x-1/2 -translate-y-1/2 rounded-full cursor-grab active:cursor-grabbing"
+            style={{ backgroundColor: `${color}1f`, transform: `translate(-50%, -50%) rotate(${angle}deg)` }}
+            onPointerDown={(event) => startObliquePointerDrag(targetPanel, event)}
+            onMouseDown={(event) => startObliqueMouseDrag(targetPanel, event)}
+            title="Drag to rotate oblique plane"
+          />
+          {[-26, 26].map((offset) => (
+            <div
+              key={`${targetPanel}-${offset}`}
+              className={handleBaseClass}
+              style={{
+                left: `${50 + offset * Math.cos(angle * DEG_TO_RAD)}%`,
+                top: `${50 + offset * Math.sin(angle * DEG_TO_RAD)}%`,
+                borderColor: color,
+                opacity: handleOpacity,
+                boxShadow: active ? `0 0 13px ${color}` : `0 0 8px ${color}66`,
+              }}
+              onPointerDown={(event) => startObliquePointerDrag(targetPanel, event)}
+              onMouseDown={(event) => startObliqueMouseDrag(targetPanel, event)}
+              title="Drag to rotate oblique plane"
+            >
+              <div
+                className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                style={{ backgroundColor: color }}
+              />
+            </div>
+          ))}
+          {active && (
+            <div
+              className="pointer-events-none absolute left-1/2 top-1/2 z-[6] h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed"
+              style={{ borderColor: `${color}cc` }}
+            />
+          )}
+        </div>
+        );
+      })}
     </div>
   );
 }
@@ -282,6 +532,9 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       phaseOptions,
       selectedPhaseIndex,
       onPhaseChange,
+      oblique,
+      onObliquePanelChange,
+      onObliqueAngleChange,
       preloadImageUrlsList,
     },
     ref
@@ -928,6 +1181,31 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     }, [interpolationMode, invert, layoutMode, renderMode, sharpening, slabThickness, smoothing, status, voiLutMode, volumePanelMode, volumePreset, volumeSampleDistanceMultiplier, vpAxial, vpCoronal, vpSagittal, vpSlab]);
 
     useEffect(() => {
+      if (status !== 'ready') return;
+      const engine = engineRef.current;
+      if (!engine) return;
+
+      const panelViewportIds: Array<[PanelId, string]> = [
+        ['axial', vpAxial],
+        ['coronal', vpCoronal],
+        ['sagittal', vpSagittal],
+      ];
+
+      panelViewportIds.forEach(([panel, viewportId]) => {
+        const vp = engine.getViewport(viewportId) as Types.IVolumeViewport | undefined;
+        if (!vp) return;
+        const camera = getPanelCamera(panel, oblique);
+        try {
+          vp.setOrientation(camera, true, true);
+        } catch {
+          vp.setCamera(camera);
+          vp.resetCamera({ resetOrientation: false, resetRotation: false, suppressEvents: true });
+          vp.render();
+        }
+      });
+    }, [oblique, status, vpAxial, vpCoronal, vpSagittal]);
+
+    useEffect(() => {
       const engine = engineRef.current;
       if (!engine || status !== 'ready' || currentSliceIndex === undefined) return;
       const vp = engine.getViewport(vpAxial) as Types.IVolumeViewport | undefined;
@@ -1069,8 +1347,22 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-1' : ''}`}
           style={{ minHeight: 0 }}
         >
-          {showCrosshairs && <CrosshairOverlay horizontalColor={CORONAL_COLOR} verticalColor={SAGITTAL_COLOR} />}
+          {showCrosshairs && (
+            <CrosshairOverlay
+              horizontalColor={CORONAL_COLOR}
+              verticalColor={SAGITTAL_COLOR}
+              panel="axial"
+              oblique={oblique}
+              onObliquePanelChange={onObliquePanelChange}
+              onObliqueAngleChange={onObliqueAngleChange}
+            />
+          )}
           <div className={PANEL_LABEL_CLASS}>Axial</div>
+          {oblique?.enabled && oblique.panel === 'axial' && (
+            <div className="pointer-events-none absolute left-2 top-7 z-10 rounded border border-[#FB923C]/40 bg-black/55 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-[#FB923C]">
+              Oblique {Math.round(oblique.angleDeg)} deg
+            </div>
+          )}
           {renderPhaseBadge('axial')}
           {renderAnnotateLayer('axial', axialRef)}
           {renderTextAnnotations('axial')}
@@ -1080,8 +1372,22 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-2 row-start-1 row-span-2' : ''}`}
           style={{ minHeight: 0 }}
         >
-          {showCrosshairs && <CrosshairOverlay horizontalColor={AXIAL_COLOR} verticalColor={SAGITTAL_COLOR} />}
+          {showCrosshairs && (
+            <CrosshairOverlay
+              horizontalColor={AXIAL_COLOR}
+              verticalColor={SAGITTAL_COLOR}
+              panel="coronal"
+              oblique={oblique}
+              onObliquePanelChange={onObliquePanelChange}
+              onObliqueAngleChange={onObliqueAngleChange}
+            />
+          )}
           <div className={PANEL_LABEL_CLASS}>Coronal</div>
+          {oblique?.enabled && oblique.panel === 'coronal' && (
+            <div className="pointer-events-none absolute left-2 top-7 z-10 rounded border border-[#FB923C]/40 bg-black/55 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-[#FB923C]">
+              Oblique {Math.round(oblique.angleDeg)} deg
+            </div>
+          )}
           {renderPhaseBadge('coronal')}
           {renderAnnotateLayer('coronal', coronalRef)}
           {renderTextAnnotations('coronal')}
@@ -1091,8 +1397,22 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-2' : ''}`}
           style={{ minHeight: 0 }}
         >
-          {showCrosshairs && <CrosshairOverlay horizontalColor={AXIAL_COLOR} verticalColor={CORONAL_COLOR} />}
+          {showCrosshairs && (
+            <CrosshairOverlay
+              horizontalColor={AXIAL_COLOR}
+              verticalColor={CORONAL_COLOR}
+              panel="sagittal"
+              oblique={oblique}
+              onObliquePanelChange={onObliquePanelChange}
+              onObliqueAngleChange={onObliqueAngleChange}
+            />
+          )}
           <div className={PANEL_LABEL_CLASS}>Sagittal</div>
+          {oblique?.enabled && oblique.panel === 'sagittal' && (
+            <div className="pointer-events-none absolute left-2 top-7 z-10 rounded border border-[#FB923C]/40 bg-black/55 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-[#FB923C]">
+              Oblique {Math.round(oblique.angleDeg)} deg
+            </div>
+          )}
           {renderPhaseBadge('sagittal')}
           {renderAnnotateLayer('sagittal', sagittalRef)}
           {renderTextAnnotations('sagittal')}

@@ -34,6 +34,8 @@ interface GatingWaveformPanelProps {
     stabilityCvThreshold?: number;
     baselineDriftThresholdMm?: number;
     readOnly?: boolean;
+    /** Optional bed-position strip rendered as a footer inside the same panel. */
+    bedStrip?: { total: number; completed?: number };
 }
 
 const SAMPLES = 240;
@@ -57,6 +59,27 @@ function generateWaveform(now: number, jitter: number, drift: number): number[] 
     return out;
 }
 
+function findWaveExtrema(samples: number[]) {
+    const extrema: { index: number; value: number; type: "peak" | "valley" }[] = [];
+    const radius = 5;
+    const minSpacing = Math.floor(CYCLE_SAMPLES * 0.42);
+    let lastIndex = -minSpacing;
+
+    for (let i = radius; i < samples.length - radius; i += 1) {
+        const value = samples[i];
+        const neighborhood = samples.slice(i - radius, i + radius + 1);
+        const isPeak = value === Math.max(...neighborhood) && value > 0.72;
+        const isValley = value === Math.min(...neighborhood) && value < -0.72;
+
+        if ((isPeak || isValley) && i - lastIndex >= minSpacing) {
+            extrema.push({ index: i, value, type: isPeak ? "peak" : "valley" });
+            lastIndex = i;
+        }
+    }
+
+    return extrema;
+}
+
 export default function GatingWaveformPanel({
     mode,
     threshold = 1.0,
@@ -64,6 +87,7 @@ export default function GatingWaveformPanel({
     onThresholdChange,
     onTelemetry,
     triggerMarkers = [],
+    bedStrip,
     stabilityCvThreshold = 0.15,
     baselineDriftThresholdMm = 5.0,
     readOnly = false,
@@ -149,6 +173,7 @@ export default function GatingWaveformPanel({
             .map((v, i) => `${i === 0 ? "M" : "L"}${(i * stepX).toFixed(1)},${yToPx(v).toFixed(1)}`)
             .join(" ");
     }, [samples]);
+    const extrema = useMemo(() => findWaveExtrema(samples), [samples]);
 
     const handlePointerDown = (e: React.PointerEvent<SVGRectElement>) => {
         if (readOnly || mode !== "free_breathing") return;
@@ -225,6 +250,18 @@ export default function GatingWaveformPanel({
                 {/* waveform */}
                 <path d={path} stroke="#38bdf8" strokeWidth={1.7} fill="none" />
 
+                {extrema.map((point) => (
+                    <circle
+                        key={`${point.type}-${point.index}`}
+                        cx={point.index * stepX}
+                        cy={yToPx(point.value)}
+                        r={4}
+                        fill={point.type === "peak" ? "#ef4444" : "#2563eb"}
+                        stroke="#0f172a"
+                        strokeWidth={1.4}
+                    />
+                ))}
+
                 {/* current marker */}
                 <circle cx={width - 2} cy={yToPx(currentValue)} r={3.5}
                     fill={crossingNow ? "#22c55e" : "#38bdf8"} />
@@ -253,6 +290,35 @@ export default function GatingWaveformPanel({
                     <span style={{ color: "#94a3b8" }}>方向</span>
                     <span style={{ color: "#e2e8f0", fontWeight: 600 }}>
                         {direction === "rising" ? "上行穿越" : "下行穿越"}
+                    </span>
+                </div>
+            )}
+
+            {bedStrip && bedStrip.total > 0 && (
+                <div style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    marginTop: 10, paddingTop: 8, borderTop: "1px solid #1e293b",
+                }}>
+                    <span style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                        床位示意
+                    </span>
+                    <div style={{ display: "flex", flex: 1, gap: 2, alignItems: "flex-end", height: 12 }}>
+                        {Array.from({ length: bedStrip.total }).map((_, i) => {
+                            const done = i < (bedStrip.completed ?? 0);
+                            return (
+                                <div
+                                    key={i}
+                                    title={`床位 ${i + 1}`}
+                                    style={{
+                                        flex: 1, height: 6, borderRadius: 2,
+                                        background: done ? "#3b82f6" : "#1e293b",
+                                    }}
+                                />
+                            );
+                        })}
+                    </div>
+                    <span style={{ color: "#e2e8f0", fontFamily: "monospace", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
+                        {bedStrip.completed ?? 0}/{bedStrip.total}
                     </span>
                 </div>
             )}

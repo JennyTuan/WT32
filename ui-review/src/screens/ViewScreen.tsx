@@ -27,7 +27,11 @@ import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import type { FourDPostScanState } from "../lib/fourDTypes";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
-import CornerstoneMPRViewport, { type CornerstoneMPRHandle } from "../components/CornerstoneMPRViewport";
+import CornerstoneMPRViewport, {
+    type CornerstoneMPRHandle,
+    type ObliqueAxis,
+    type ObliqueConfig,
+} from "../components/CornerstoneMPRViewport";
 import {
     loadFourDManifest,
     type FourDManifest,
@@ -398,6 +402,10 @@ const ViewScreen = () => {
     const [imageSmoothing, setImageSmoothing] = useState(0);
     const [imageSharpening, setImageSharpening] = useState(0);
     const [volumeQuality, setVolumeQuality] = useState<"performance" | "standard" | "fine">("standard");
+    const [obliqueEnabled, setObliqueEnabled] = useState(false);
+    const [obliquePanel, setObliquePanel] = useState<ObliqueConfig["panel"]>("axial");
+    const [obliqueAxis, setObliqueAxis] = useState<ObliqueAxis>("horizontal");
+    const [obliqueAngleDeg, setObliqueAngleDeg] = useState(0);
     const [isBrowseModeOpen, setIsBrowseModeOpen] = useState(false);
     const [isLayoutOpen, setIsLayoutOpen] = useState(false);
     const [isVolumePresetOpen, setIsVolumePresetOpen] = useState(false);
@@ -412,6 +420,15 @@ const ViewScreen = () => {
     );
     const volumeSampleDistanceMultiplier =
         volumeQuality === "performance" ? 1.25 : volumeQuality === "fine" ? 0.45 : 0.75;
+    const obliqueConfig = useMemo<ObliqueConfig>(
+        () => ({
+            enabled: obliqueEnabled,
+            panel: obliquePanel,
+            axis: obliqueAxis,
+            angleDeg: obliqueAngleDeg,
+        }),
+        [obliqueAngleDeg, obliqueAxis, obliqueEnabled, obliquePanel]
+    );
     const applyWindowPreset = useCallback((preset: typeof WINDOW_PRESETS[number]) => {
         setWw(preset.ww);
         setWl(preset.wl);
@@ -1536,6 +1553,86 @@ const ViewScreen = () => {
                                                 </div>
                                             </div>
                                             </PanelSection>
+
+                                            <PanelSection title="斜切">
+                                                <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                                                    <span className="text-[11px] font-semibold text-[#546E7A]">启用斜切</span>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={obliqueEnabled}
+                                                        onChange={(event) => setObliqueEnabled(event.target.checked)}
+                                                        className="h-4 w-4 accent-[#FB923C]"
+                                                    />
+                                                </div>
+                                                <div className="grid grid-cols-3 gap-1">
+                                                    {([
+                                                        { value: "axial" as const, label: "Ax" },
+                                                        { value: "coronal" as const, label: "Co" },
+                                                        { value: "sagittal" as const, label: "Sa" },
+                                                    ]).map((opt) => (
+                                                        <button
+                                                            key={opt.value}
+                                                            type="button"
+                                                            onClick={() => setObliquePanel(opt.value)}
+                                                            className={`h-[30px] rounded-md border text-[11px] font-black transition-colors ${
+                                                                obliquePanel === opt.value
+                                                                    ? "border-[#FB923C] bg-[#FFF7ED] text-[#C2410C]"
+                                                                    : "border-[#DCE6F2] bg-white text-[#546E7A] hover:border-[#FB923C]/50"
+                                                            }`}
+                                                        >
+                                                            {opt.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-1">
+                                                    {([
+                                                        { value: "horizontal" as const, label: "水平轴" },
+                                                        { value: "vertical" as const, label: "垂直轴" },
+                                                    ]).map((opt) => (
+                                                        <button
+                                                            key={opt.value}
+                                                            type="button"
+                                                            onClick={() => setObliqueAxis(opt.value)}
+                                                            className={`h-[30px] rounded-md border text-[11px] font-bold transition-colors ${
+                                                                obliqueAxis === opt.value
+                                                                    ? "border-[#FB923C] bg-[#FFF7ED] text-[#C2410C]"
+                                                                    : "border-[#DCE6F2] bg-white text-[#546E7A] hover:border-[#FB923C]/50"
+                                                            }`}
+                                                        >
+                                                            {opt.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                <div className="flex items-start gap-2">
+                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">角度</span>
+                                                    <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
+                                                        <div className="grid grid-cols-[minmax(0,1fr)_46px] items-center gap-2">
+                                                            <input
+                                                                type="range"
+                                                                min={-45}
+                                                                max={45}
+                                                                step={1}
+                                                                value={obliqueAngleDeg}
+                                                                onChange={(event) => setObliqueAngleDeg(Number(event.target.value))}
+                                                                className="h-[18px] w-full max-w-[120px] accent-[#FB923C]"
+                                                            />
+                                                            <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">
+                                                                {obliqueAngleDeg}°
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setObliqueEnabled(false);
+                                                        setObliqueAngleDeg(0);
+                                                    }}
+                                                    className="h-[30px] rounded-md border border-[#DCE6F2] bg-white text-[11px] font-bold text-[#546E7A] transition-colors hover:border-[#FB923C]/50 hover:text-[#C2410C]"
+                                                >
+                                                    复位
+                                                </button>
+                                            </PanelSection>
                                         </>
                                     )}
 
@@ -1675,6 +1772,9 @@ const ViewScreen = () => {
                                     volumePreset={selectedVolumePreset}
                                     volumeSampleDistanceMultiplier={volumeSampleDistanceMultiplier}
                                     slabThickness={slabThickness}
+                                    oblique={obliqueConfig}
+                                    onObliquePanelChange={setObliquePanel}
+                                    onObliqueAngleChange={setObliqueAngleDeg}
                                     invert={isImageInverted}
                                     interpolationMode={selectedInterpolationMode}
                                     voiLutMode={selectedVoiLutMode}

@@ -1,18 +1,24 @@
-﻿import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Zap } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import DicomViewer from "../components/DicomViewer";
+import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import { fetchSelectedScanSession } from "../lib/scanSession";
 
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
 type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "rendering" | "completed";
+type ExecuteMode = "helical" | "gated_helical" | "gated_axial";
 
 const HOLD_DURATION_MS = 3000;
 const EXPOSURE_DURATION_MS = 1500;
 const RENDER_DURATION_MS = 1600;
 const LIVE_FRAME_INTERVAL_MS = 85;
 const AUTO_NAVIGATE_DELAY_MS = 700;
+const GATED_AXIAL_BED_STEP_MM = 19.2;
+const GATED_AXIAL_SLICES_PER_BED = 16;
+const GATED_AXIAL_BREATH_CYCLE_MS = 1200;
+const GATED_AXIAL_SLICE_INTERVAL_MS = GATED_AXIAL_BREATH_CYCLE_MS / GATED_AXIAL_SLICES_PER_BED;
 const HELICAL_RESULT_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
     count: 118,
@@ -20,13 +26,15 @@ const HELICAL_RESULT_SERIES = {
     fallbackWindowLevel: 45,
 };
 
-function HelicalExecuteIdleViewport() {
+function HelicalExecuteIdleViewport({ isGated }: { isGated: boolean }) {
     return (
         <div className="relative h-full w-full overflow-hidden bg-black">
             <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
                     <div className="text-[14px] font-semibold tracking-[0.28em] text-[#7E8CA0]">LIVE VIEW</div>
-                    <div className="mt-3 text-[12px] text-[#566474]">等待触发扫描，影像将在扫描过程中实时显示</div>
+                    <div className="mt-3 text-[12px] text-[#566474]">
+                        {isGated ? "等待物理按键确认，系统将在指定呼吸相位曝光" : "等待触发扫描，影像将在扫描过程中实时显示"}
+                    </div>
                 </div>
             </div>
         </div>
@@ -74,17 +82,123 @@ function HelicalLiveViewport({ playbackActive }: { playbackActive: boolean }) {
     );
 }
 
+function AxialRealtimeViewport({
+    stage,
+    completedBeds,
+    currentSlice,
+    totalBeds,
+    threshold,
+    direction,
+}: {
+    stage: ScanStage;
+    completedBeds: number;
+    currentSlice: number;
+    totalBeds: number;
+    threshold: number;
+    direction: "rising" | "falling";
+}) {
+    const imageUrls = useMemo(
+        () =>
+            Array.from(
+                { length: HELICAL_RESULT_SERIES.count },
+                (_, index) => `${HELICAL_RESULT_SERIES.basePath}/1-${String(index + 1).padStart(3, "0")}.dcm`
+            ),
+        []
+    );
+    const completedImages = completedBeds * GATED_AXIAL_SLICES_PER_BED + currentSlice;
+    const totalImages = Math.max(1, totalBeds * GATED_AXIAL_SLICES_PER_BED);
+    const progress = Math.min(completedImages / totalImages, 1);
+    const scanActive = stage === "enabled" || stage === "exposing" || stage === "rendering";
+    const showDicom = stage === "exposing" || stage === "rendering" || stage === "completed";
+    const displayIndex = Math.min(
+        imageUrls.length - 1,
+        Math.max(0, (completedBeds * GATED_AXIAL_SLICES_PER_BED + Math.max(0, currentSlice - 1)) % imageUrls.length)
+    );
+    const displayBed = Math.min(completedBeds + (stage === "completed" ? 0 : 1), totalBeds || 1);
+
+    return (
+        <div className="flex h-full min-h-0 flex-col bg-white">
+            <div className="relative flex-1 min-h-0 overflow-hidden bg-black">
+                <div className="absolute left-4 top-3 z-20 rounded border border-white/10 bg-black/60 px-3 py-2 text-white shadow-lg">
+                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">AXIAL LIVE</div>
+                    <div className="mt-1 text-[12px] font-bold">
+                        {stage === "completed" ? "采集完成" : scanActive ? "实时采集中" : "等待物理按键"}
+                    </div>
+                </div>
+
+                {showDicom ? (
+                    <div className="absolute inset-0">
+                        <DicomViewer
+                            imageUrls={imageUrls}
+                            currentImageIndex={displayIndex}
+                            activeTool="pan"
+                            windowCenter={HELICAL_RESULT_SERIES.fallbackWindowLevel}
+                            windowWidth={HELICAL_RESULT_SERIES.fallbackWindowWidth}
+                        />
+                    </div>
+                ) : (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black">
+                        <div className="text-center">
+                            <div className="text-[14px] font-semibold tracking-[0.28em] text-[#64748B]">AXIAL LIVE</div>
+                            <div className="mt-3 text-[12px] text-[#475569]">等待物理按键触发，曝光后显示实时轴扫图像</div>
+                        </div>
+                    </div>
+                )}
+
+                <div className="absolute bottom-4 left-4 right-4">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+                        <span>
+                            床位 {displayBed} / {totalBeds || 1}
+                            <span className="ml-3 text-slate-400">Slice {stage === "completed" ? GATED_AXIAL_SLICES_PER_BED : Math.max(1, currentSlice)} / {GATED_AXIAL_SLICES_PER_BED}</span>
+                        </span>
+                        <span>{Math.round(progress * 100)}%</span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
+                        <div className="h-full rounded-full bg-[linear-gradient(90deg,#38BDF8,#22C55E)] transition-[width] duration-200" style={{ width: `${progress * 100}%` }} />
+                    </div>
+                </div>
+            </div>
+            <div className="h-[178px] shrink-0 border-t border-[#B0C4DE]/70">
+                <GatingMonitorPanel
+                    threshold={threshold}
+                    direction={direction}
+                    bedStrip={{ total: totalBeds, completed: completedBeds }}
+                    scanActive={scanActive && completedBeds < totalBeds}
+                    exposing={stage === "exposing"}
+                    bedPhase={currentSlice / GATED_AXIAL_SLICES_PER_BED}
+                    readOnly
+                />
+            </div>
+        </div>
+    );
+}
+
 export default function HelicalExecuteScanScreen() {
     const navigate = useNavigate();
+    const [params] = useSearchParams();
+    const executeMode = (params.get("mode") ?? "helical") as ExecuteMode;
+    const isGated = executeMode === "gated_helical" || executeMode === "gated_axial";
+    const isGatedAxial = executeMode === "gated_axial";
     const [stage, setStage] = useState<ScanStage>("idle");
     const [holdProgress, setHoldProgress] = useState(0);
     const [guideVisible, setGuideVisible] = useState(true);
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
+    const [completedBeds, setCompletedBeds] = useState(0);
+    const [currentSlice, setCurrentSlice] = useState(0);
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
     const exposureTimerRef = useRef<number | null>(null);
+    const axialProgressTimerRef = useRef<number | null>(null);
     const autoNavigateTimerRef = useRef<number | null>(null);
+
+    const scanLengthMm = Number(params.get("scanLengthMm") ?? measurements.scanLength);
+    const totalBeds = useMemo(() => {
+        if (!Number.isFinite(scanLengthMm) || scanLengthMm <= 0) return 1;
+        return Math.max(1, Math.ceil(scanLengthMm / GATED_AXIAL_BED_STEP_MM));
+    }, [scanLengthMm]);
+    const threshold = Number(params.get("threshold") ?? "1.0");
+    const direction = (params.get("direction") ?? "rising") as "rising" | "falling";
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -99,6 +213,17 @@ export default function HelicalExecuteScanScreen() {
         const loadSessionMeasurements = async () => {
             try {
                 const scanSession = await fetchSelectedScanSession();
+                if (isGatedAxial) {
+                    const axialParam = scanSession?.series.find((series) => series.series_type === "axial")?.axial_param;
+                    if (!axialParam || cancelled) return;
+
+                    setMeasurements({
+                        scanLength: params.get("scanLengthMm") ?? String(axialParam.scan_length),
+                        scoutFov: params.get("scoutFov") ?? String(axialParam.fov),
+                    });
+                    return;
+                }
+
                 const helicalParam = scanSession?.series.find((series) => series.series_type === "helical")?.helical_param;
                 if (!helicalParam || cancelled) return;
 
@@ -116,7 +241,7 @@ export default function HelicalExecuteScanScreen() {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [isGatedAxial, params]);
 
     useEffect(() => {
         if (stage !== "completed") return;
@@ -138,6 +263,9 @@ export default function HelicalExecuteScanScreen() {
             clearHoldRaf();
             if (exposureTimerRef.current !== null) {
                 window.clearTimeout(exposureTimerRef.current);
+            }
+            if (axialProgressTimerRef.current !== null) {
+                window.clearInterval(axialProgressTimerRef.current);
             }
             if (autoNavigateTimerRef.current !== null) {
                 window.clearTimeout(autoNavigateTimerRef.current);
@@ -166,11 +294,43 @@ export default function HelicalExecuteScanScreen() {
         clearHoldRaf();
         setHoldProgress(1);
         setStage("enabled");
+        setCompletedBeds(0);
+        setCurrentSlice(0);
 
         window.setTimeout(() => {
             setStage("exposing");
             setGuideVisible(false);
         }, 180);
+
+        if (isGatedAxial) {
+            if (axialProgressTimerRef.current !== null) {
+                window.clearInterval(axialProgressTimerRef.current);
+            }
+
+            axialProgressTimerRef.current = window.setInterval(() => {
+                setCurrentSlice((prevSlice) => {
+                    const nextSlice = prevSlice + 1;
+                    if (nextSlice < GATED_AXIAL_SLICES_PER_BED) {
+                        return nextSlice;
+                    }
+
+                    setCompletedBeds((prevBed) => {
+                        const nextBed = Math.min(totalBeds, prevBed + 1);
+                        if (nextBed >= totalBeds) {
+                            if (axialProgressTimerRef.current !== null) {
+                                window.clearInterval(axialProgressTimerRef.current);
+                                axialProgressTimerRef.current = null;
+                            }
+                            setStage("rendering");
+                            window.setTimeout(() => setStage("completed"), 500);
+                        }
+                        return nextBed;
+                    });
+                    return 0;
+                });
+            }, GATED_AXIAL_SLICE_INTERVAL_MS);
+            return;
+        }
 
         exposureTimerRef.current = window.setTimeout(() => {
             setStage("rendering");
@@ -185,7 +345,7 @@ export default function HelicalExecuteScanScreen() {
         }
 
         if (stage === "idle" || stage === "arming") {
-            triggerScanSequence();
+            setGuideVisible(true);
         }
     };
 
@@ -228,11 +388,15 @@ export default function HelicalExecuteScanScreen() {
             : stage === "enabled"
                 ? "Scan enabled"
                 : stage === "exposing"
-                    ? "Helical scan in progress..."
+                    ? isGated
+                        ? "Gated exposure in progress..."
+                        : "Helical scan in progress..."
                     : stage === "rendering"
                         ? "Rendering images..."
                         : stage === "completed"
-                            ? "Helical scan completed"
+                            ? isGated
+                                ? "Gated scan completed"
+                                : "Helical scan completed"
                             : "Waiting";
 
     const guideTitle =
@@ -241,21 +405,42 @@ export default function HelicalExecuteScanScreen() {
             : stage === "enabled"
                 ? "System enabled"
                 : stage === "exposing"
-                    ? "Running helical scan"
-                    : "Hold the green button";
+                    ? isGated
+                        ? "Running gated scan"
+                        : "Running helical scan"
+                    : isGated
+                        ? "Hold for gated exposure"
+                        : "Hold the green button";
 
     const showLiveViewport = stage === "exposing" || stage === "rendering" || stage === "completed";
+    const rightViewport = isGatedAxial ? (
+        <AxialRealtimeViewport
+            stage={stage}
+            completedBeds={completedBeds}
+            currentSlice={currentSlice}
+            totalBeds={totalBeds}
+            threshold={threshold}
+            direction={direction}
+        />
+    ) : showLiveViewport ? (
+        <HelicalLiveViewport playbackActive={stage !== "completed"} />
+    ) : (
+        <HelicalExecuteIdleViewport isGated={isGated} />
+    );
 
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
             <ScanConfirmScreen
                 activeSequenceId="s2"
                 activeSequenceStepIndex={stage === "completed" ? 2 : 1}
-                parameterPanelMode="helicalScan"
-                helicalParamOverrides={measurements}
-                rightViewportContent={showLiveViewport ? <HelicalLiveViewport playbackActive={stage !== "completed"} /> : <HelicalExecuteIdleViewport />}
+                parameterPanelMode={isGatedAxial ? "tomographicScan" : "helicalScan"}
+                helicalParamOverrides={isGatedAxial ? undefined : measurements}
+                tomographicParamOverrides={isGatedAxial ? measurements : undefined}
+                rightViewportContent={rightViewport}
+                rightViewportClassName={isGatedAxial ? "flex-1 rounded-lg border border-[#B0C4DE] bg-white shadow-sm flex flex-col overflow-hidden relative" : undefined}
                 readOnlyMode
                 onExecuteScan={handleExecuteScanClick}
+                patientConfirmBeforeExecute={stage !== "completed"}
                 executeButtonLabel={stage === "completed" ? "图像浏览" : "执行扫描"}
             />
 
@@ -263,7 +448,11 @@ export default function HelicalExecuteScanScreen() {
                 <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
                     <div className="border-b border-slate-200 px-5 py-4">
                         <div className="text-[14px] font-black text-slate-700">Physical button guide</div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">Hold for three seconds to enable and start the helical scan.</div>
+                        <div className="mt-1 text-[11px] font-medium text-slate-400">
+                            {isGated
+                                ? "Hold for three seconds to enable exposure at the selected respiratory phase."
+                                : "Hold for three seconds to enable and start the helical scan."}
+                        </div>
                     </div>
 
                     <div className="flex flex-1 flex-col">
@@ -320,4 +509,3 @@ export default function HelicalExecuteScanScreen() {
         </div>
     );
 }
-

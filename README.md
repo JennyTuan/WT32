@@ -11,7 +11,8 @@
 - 患者管理（登记、查询、新增）
 - 扫描协议管理（100+ 预置协议，支持头部/颈部/胸部/脊柱/腹部/盆腔/四肢等）
 - 完整扫描工作流（定位像 → 螺旋扫描 → 图像重建）
-- **4D 呼吸门控扫描**（诊断确认 → 断层采集 → 时相回顾 → 重扫选择）
+- **呼吸门控扫描**（前瞻式触发：屏息 DIBH 或自由呼吸阈值穿越）
+- **4D 呼吸门控扫描**（回顾式多时相：诊断确认 → 断层采集 → 时相回顾 → 重扫选择）
 - DICOM 图像查看（基于 Cornerstone3D，支持 Stack 与 MPR 视图）
 - 设备服务功能（球管预热、空气校准、日检、硬件测试、电池/磁盘管理、性能评估、QA 报告、角点信息等）
 - 前端以 1024×768 平板外壳模拟设备屏幕，根据窗口自动缩放
@@ -172,9 +173,12 @@ patients          (独立表)
 scan_sessions     (扫描会话，记录工作流状态)
 ```
 
-### 4D 扫描关键字段
+### 采集类型与分支判定
 
-- `series.acquisition_type` / `fourd_configs.acquisition_type`：`regular` | `4d`，用于在扫描流程中判断是否走 4D 门控分支（代替旧的字符串名匹配）。
+- `series.acquisition_type`：`regular` | `gating` | `four_d`，用于在扫描流程中判断走哪条分支（代替旧的字符串名匹配）：
+  - `regular` — 常规螺旋/轴扫
+  - `gating` — 前瞻式呼吸门控（屏息或自由呼吸阈值触发），见 `GatingConfig`
+  - `four_d` — 回顾式 4D 呼吸门控，见 `fourd_configs`
 
 ### 主要字段
 
@@ -249,6 +253,9 @@ WS  /ws/scan-control
 | `/sequence-confirm` | SequenceScanConfirmScreen | 序列参数确认 |
 | `/helical-confirm` | HelicalScanConfirmScreen | 螺旋参数确认 |
 | `/helical-execute` | HelicalExecuteScanScreen | 螺旋扫描执行 |
+| `/gated-helical-confirm` | GatedHelicalConfirmScreen | 门控螺旋确认（DIBH 屏息） |
+| `/gated-axial-confirm` | GatedAxialConfirmScreen | 门控轴扫确认（屏息 / 自由呼吸阈值触发） |
+| `/gated-execute` | GatedExecuteScanScreen | 门控扫描执行（屏息引导或逐床触发） |
 | `/fourd-confirm` | FourDDiagnosticConfirmScreen | 4D 诊断扫描确认 |
 | `/fourd-phase-review` | FourDPhaseReviewScreen | 4D 时相回顾（含 FourDPhaseReviewModal） |
 | `/fourd-rescan-select` | FourDRescanSelectScreen | 4D 重扫选择（呼吸波形编辑、峰谷拖拽、剂量区标识） |
@@ -295,10 +302,23 @@ WS  /ws/scan-control
 → 图像查看 (/image-viewer)
 ```
 
-### 4D 呼吸门控流程
+### 呼吸门控流程（前瞻式，单相位）
 
 ```
-选择 4D 协议 (acquisition_type = "4d")
+选择门控协议 (acquisition_type = "gating")
+→ 门控确认屏
+   ├─ 螺旋分支 (/gated-helical-confirm)：仅支持 DIBH 深吸气屏息
+   └─ 轴扫分支 (/gated-axial-confirm)：DIBH 屏息 或 自由呼吸阈值穿越触发
+→ 门控执行 (/gated-execute)
+   ├─ 屏息：波形稳定后自动曝光，单次完成
+   └─ 自由呼吸：等待触发 → 曝光 → 床进 19.2 mm，逐床推进直至覆盖扫描长度
+→ 图像查看 (/image-viewer)        ← 单相位结果，无时相回顾/重扫
+```
+
+### 4D 呼吸门控流程（回顾式，多时相）
+
+```
+选择 4D 协议 (acquisition_type = "four_d")
 → 诊断扫描确认 (/fourd-confirm)
 → 4D 断层采集 (WebSocket 实时呼吸波形)
 → 时相回顾 (/fourd-phase-review) ← 浏览各时相图像

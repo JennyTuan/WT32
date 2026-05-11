@@ -19,7 +19,7 @@ export default function GatedHelicalConfirmScreen() {
             activeSequenceId="s2"
             activeSequenceStepIndex={0}
             parameterPanelMode="helicalScan"
-            nextRoute="/gated-execute?mode=helical&breathingMode=breath_hold_inspiration"
+            nextRoute="/helical-execute?mode=gated_helical&breathingMode=breath_hold_inspiration"
             allowBackNavigation={false}
             rightViewportContent={
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 12 }}>

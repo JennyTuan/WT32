@@ -111,9 +111,49 @@ CT（Computed Tomography，计算机断层扫描）是一种利用 X 射线从�
 ```
 
 **项目关键代码**：
-- `acquisition_type === "4d"` — 唯一的 4D 判断条件
+- `acquisition_type === "four_d"` — 唯一的 4D 判断条件
 - `lib/fourDTypes.ts` — 4D 相关类型（BedPhaseCell、PhaseSelections 等）
 - `lib/fourDDicomSource.ts`、`lib/fourDImageSource.ts`
+
+### 2.5 呼吸门控扫描（Respiratory Gating）
+
+**定义**：通过实时监测患者的呼吸信号，将 X 射线曝光"锁定"到呼吸周期中的特定时相（或屏息平台）进行采集。门控是**前瞻式（prospective）**采集——在目标时相瞬间触发一次曝光，每个床位/每次扫描只产出一相结果，不做事后多时相重建。
+
+**与 4D 的本质区别**（不要混淆）：
+- **4D**：回顾式（retrospective）连续采集 → 事后按呼吸信号分相 → 10 个时相 → 需要时相回顾与重扫选择
+- **门控**：前瞻式触发采集 → 每床位一相 → 执行扫描结束即闭环，下一步直接进图像查看，**没有**多时相、PhaseReview、RescanSelect 等概念
+
+**两种典型实现**（项目均已支持）：
+
+1. **屏息门控（Breath-Hold / DIBH）**
+   - 让患者屏住呼吸（深吸气末 DIBH，或深呼气末），波形稳定在目标幅度区间后系统自动开始曝光
+   - 典型临床用途：左乳放疗（DIBH 通过吸气抬高/拉远心脏，降低心脏受量）、肺与上腹部减少呼吸运动伪影
+   - 项目实现：螺旋门控仅支持屏息分支（一次屏息内完成扫描）；轴扫门控也支持屏息分支
+
+2. **自由呼吸阈值穿越触发（Free-Breathing Prospective Triggering）**
+   - 对无法屏息的患者，监测呼吸波形幅度，当波形以指定方向（上升/下降）穿越设定阈值时触发一次曝光
+   - 每个床位等待一次有效触发 → 曝光 → 床进一步 → 进入下一床位等待，逐床推进直至覆盖扫描长度
+   - 项目实现：仅在轴扫门控中提供（前瞻"step-and-shoot"式）
+
+**呼吸信号来源**：与 4D 一致，通过体表标记（腹部压力带、红外标记等）获取波形。波形峰对应吸气末，谷对应呼气末。
+
+**核心可调参数**（对应 `GatingConfig` 字段）：
+- 呼吸模式 `breathing_mode`：`breath_hold_inspiration` / `breath_hold_expiration` / `free_breathing`
+- 目标时相 `target_phase`：`max_inspiration` / `max_expiration` / `custom`（仅自由呼吸分支）
+- 归一化幅度阈值 `threshold_normalized`、触发方向 `trigger_direction`（rising/falling）、等待超时 `wait_timeout_s`
+- 触发延时 `trigger_delay_ms`、波形稳定性阈值 `stability_cv_threshold`、基线漂移阈值 `baseline_drift_mm_threshold`
+- 屏息超时 `breath_hold_timeout_s`、屏息幅度容差 `breath_hold_amplitude_tolerance_mm`（DIBH 分支）
+
+**项目演示约定**（非通用事实，仅本项目当前 UI/数据约定）：
+- 归一化阈值范围 [-2.0, +2.0]，约定 +1.0 ≈ 平均最大吸气、-1.0 ≈ 平均最大呼气
+- 自由呼吸轴扫床步固定 19.2 mm（对应探测器准直），UI 不开放修改
+- DIBH 默认屏息超时 25 s、幅度容差 ±2.0 mm；超时由系统提示技师介入
+
+**项目关键代码**：
+- `acquisition_type === "gating"` — 唯一的门控判断条件（与 `"four_d"` 区分）
+- 后端模型：`GatingConfig`（series 维度模板）/ `ScanSessionGatingConfig`（会话副本）
+- 前端组件：`components/GatingWaveformPanel.tsx`、`components/BreathHoldGuide.tsx`
+- 流程屏：`GatedHelicalConfirmScreen` / `GatedAxialConfirmScreen` / `GatedExecuteScanScreen`
 
 ---
 
