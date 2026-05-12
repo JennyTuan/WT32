@@ -24,8 +24,9 @@ const LIVE_FRAME_INTERVAL_MS = 85;
 const AUTO_NAVIGATE_DELAY_MS = 700;
 const GATED_AXIAL_BED_STEP_MM = 19.2;
 const GATED_AXIAL_SLICES_PER_BED = 16;
-const GATED_AXIAL_BREATH_CYCLE_MS = 1200;
+const GATED_AXIAL_BREATH_CYCLE_MS = 1800;
 const GATED_AXIAL_SLICE_INTERVAL_MS = GATED_AXIAL_BREATH_CYCLE_MS / GATED_AXIAL_SLICES_PER_BED;
+const GATED_AXIAL_STABILITY_WAIT_MS = [1800, 2600, 1400, 2200];
 const HELICAL_RESULT_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
     count: 118,
@@ -96,6 +97,8 @@ function AxialRealtimeViewport({
     totalBeds,
     threshold,
     direction,
+    supplementalBeds,
+    waitingForBreath,
 }: {
     stage: ScanStage;
     completedBeds: number;
@@ -103,6 +106,8 @@ function AxialRealtimeViewport({
     totalBeds: number;
     threshold: number;
     direction: "rising" | "falling";
+    supplementalBeds?: number[];
+    waitingForBreath?: boolean;
 }) {
     const imageUrls = useMemo(
         () =>
@@ -112,16 +117,39 @@ function AxialRealtimeViewport({
             ),
         []
     );
-    const completedImages = completedBeds * GATED_AXIAL_SLICES_PER_BED + currentSlice;
+    const supplementalBedSet = useMemo(() => new Set(supplementalBeds ?? []), [supplementalBeds]);
+    const hasSupplementalBeds = supplementalBedSet.size > 0;
+    const supplementalCompletedBeds = useMemo(
+        () => (supplementalBeds ?? []).slice(0, completedBeds),
+        [completedBeds, supplementalBeds]
+    );
+    const completedBedNumbers = useMemo(() => {
+        if (!hasSupplementalBeds) {
+            return Array.from({ length: completedBeds }, (_, index) => index + 1);
+        }
+        const alreadyScanned = Array.from({ length: totalBeds }, (_, index) => index + 1).filter(
+            (bedNumber) => !supplementalBedSet.has(bedNumber)
+        );
+        return [...alreadyScanned, ...supplementalCompletedBeds].sort((a, b) => a - b);
+    }, [completedBeds, hasSupplementalBeds, supplementalBedSet, supplementalCompletedBeds, totalBeds]);
+    const currentBedNumber = hasSupplementalBeds
+        ? (supplementalBeds ?? [])[completedBeds] ?? null
+        : Math.min(completedBeds + (stage === "completed" ? 0 : 1), totalBeds || 1);
+    const completedImages = hasSupplementalBeds
+        ? (completedBedNumbers.length * GATED_AXIAL_SLICES_PER_BED + currentSlice)
+        : (completedBeds * GATED_AXIAL_SLICES_PER_BED + currentSlice);
     const totalImages = Math.max(1, totalBeds * GATED_AXIAL_SLICES_PER_BED);
     const progress = Math.min(completedImages / totalImages, 1);
     const scanActive = stage === "enabled" || stage === "exposing" || stage === "rendering";
     const showDicom = stage === "exposing" || stage === "rendering" || stage === "completed";
+    const activeBedForImage = hasSupplementalBeds ? currentBedNumber ?? 1 : completedBeds + 1;
     const displayIndex = Math.min(
         imageUrls.length - 1,
-        Math.max(0, (completedBeds * GATED_AXIAL_SLICES_PER_BED + Math.max(0, currentSlice - 1)) % imageUrls.length)
+        Math.max(0, (((activeBedForImage - 1) * GATED_AXIAL_SLICES_PER_BED) + Math.max(0, currentSlice - 1)) % imageUrls.length)
     );
-    const displayBed = Math.min(completedBeds + (stage === "completed" ? 0 : 1), totalBeds || 1);
+    const displayBed = stage === "completed" && hasSupplementalBeds
+        ? (supplementalBeds ?? [])[Math.max(0, (supplementalBeds?.length ?? 1) - 1)] ?? totalBeds
+        : currentBedNumber ?? totalBeds;
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-white">
@@ -129,7 +157,7 @@ function AxialRealtimeViewport({
                 <div className="absolute left-4 top-3 z-20 rounded border border-white/10 bg-black/60 px-3 py-2 text-white shadow-lg">
                     <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">AXIAL LIVE</div>
                     <div className="mt-1 text-[12px] font-bold">
-                        {stage === "completed" ? "采集完成" : scanActive ? "实时采集中" : "等待物理按键"}
+                        {stage === "completed" ? "采集完成" : waitingForBreath ? "等待呼吸稳定" : scanActive ? "实时采集中" : "等待物理按键"}
                     </div>
                 </div>
 
@@ -147,7 +175,9 @@ function AxialRealtimeViewport({
                     <div className="absolute inset-0 flex items-center justify-center bg-black">
                         <div className="text-center">
                             <div className="text-[14px] font-semibold tracking-[0.28em] text-[#64748B]">AXIAL LIVE</div>
-                            <div className="mt-3 text-[12px] text-[#475569]">等待物理按键触发，曝光后显示实时轴扫图像</div>
+                            <div className="mt-3 text-[12px] text-[#475569]">
+                                {waitingForBreath ? "呼吸波形不稳，等待进入触发窗" : "等待物理按键触发，曝光后显示实时轴扫图像"}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -169,10 +199,17 @@ function AxialRealtimeViewport({
                 <GatingMonitorPanel
                     threshold={threshold}
                     direction={direction}
-                    bedStrip={{ total: totalBeds, completed: completedBeds }}
-                    scanActive={scanActive && completedBeds < totalBeds}
+                    bedStrip={{
+                        total: totalBeds,
+                        completed: completedBeds,
+                        completedIndices: hasSupplementalBeds ? completedBedNumbers : undefined,
+                        currentIndex: hasSupplementalBeds ? currentBedNumber : undefined,
+                        pendingIndices: hasSupplementalBeds ? supplementalBeds : undefined,
+                    }}
+                    scanActive={scanActive && (hasSupplementalBeds ? completedBeds < (supplementalBeds?.length ?? 0) : completedBeds < totalBeds)}
                     exposing={stage === "exposing"}
                     bedPhase={currentSlice / GATED_AXIAL_SLICES_PER_BED}
+                    waitingForStableBreath={waitingForBreath}
                     readOnly
                 />
             </div>
@@ -192,11 +229,13 @@ export default function HelicalExecuteScanScreen() {
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [completedBeds, setCompletedBeds] = useState(0);
     const [currentSlice, setCurrentSlice] = useState(0);
+    const [axialWaitingForBreath, setAxialWaitingForBreath] = useState(false);
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
     const exposureTimerRef = useRef<number | null>(null);
     const axialProgressTimerRef = useRef<number | null>(null);
+    const axialWaitTimerRef = useRef<number | null>(null);
     const autoNavigateTimerRef = useRef<number | null>(null);
 
     const scanLengthMm = Number(params.get("scanLengthMm") ?? measurements.scanLength);
@@ -216,7 +255,14 @@ export default function HelicalExecuteScanScreen() {
             .filter((n) => Number.isFinite(n));
         return parsed.length > 0 ? parsed : null;
     }, [params]);
-    const isSupplementalRun = !!supplementalIndices;
+    const supplementalBedTargets = useMemo(() => {
+        if (!supplementalIndices) return null;
+        const unique = Array.from(new Set(supplementalIndices))
+            .filter((bedNumber) => bedNumber >= 1 && bedNumber <= totalBeds)
+            .sort((a, b) => a - b);
+        return unique.length > 0 ? unique : null;
+    }, [supplementalIndices, totalBeds]);
+    const isSupplementalRun = !!supplementalBedTargets;
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -312,6 +358,9 @@ export default function HelicalExecuteScanScreen() {
             if (axialProgressTimerRef.current !== null) {
                 window.clearInterval(axialProgressTimerRef.current);
             }
+            if (axialWaitTimerRef.current !== null) {
+                window.clearTimeout(axialWaitTimerRef.current);
+            }
             if (autoNavigateTimerRef.current !== null) {
                 window.clearTimeout(autoNavigateTimerRef.current);
             }
@@ -341,41 +390,79 @@ export default function HelicalExecuteScanScreen() {
         setStage("enabled");
         setCompletedBeds(0);
         setCurrentSlice(0);
+        setAxialWaitingForBreath(false);
+
+        if (isGatedAxial) {
+            const targetBedCount = supplementalBedTargets?.length ?? totalBeds;
+
+            if (axialProgressTimerRef.current !== null) {
+                window.clearInterval(axialProgressTimerRef.current);
+            }
+            if (axialWaitTimerRef.current !== null) {
+                window.clearTimeout(axialWaitTimerRef.current);
+                axialWaitTimerRef.current = null;
+            }
+
+            const scheduleBedExposure = (targetIndex: number) => {
+                setStage("enabled");
+                setAxialWaitingForBreath(true);
+                setCurrentSlice(0);
+                const waitMs = GATED_AXIAL_STABILITY_WAIT_MS[targetIndex % GATED_AXIAL_STABILITY_WAIT_MS.length];
+
+                axialWaitTimerRef.current = window.setTimeout(() => {
+                    axialWaitTimerRef.current = null;
+                    setAxialWaitingForBreath(false);
+                    setStage("exposing");
+                    setGuideVisible(false);
+                    beginBedExposure();
+                }, waitMs);
+            };
+
+            const beginBedExposure = () => {
+                if (axialProgressTimerRef.current !== null) {
+                    window.clearInterval(axialProgressTimerRef.current);
+                }
+
+                axialProgressTimerRef.current = window.setInterval(() => {
+                    setCurrentSlice((prevSlice) => {
+                        const nextSlice = prevSlice + 1;
+                        if (nextSlice < GATED_AXIAL_SLICES_PER_BED) {
+                            return nextSlice;
+                        }
+
+                        setCompletedBeds((prevBed) => {
+                            const nextBed = Math.min(targetBedCount, prevBed + 1);
+                            setCurrentSlice(0);
+                            if (nextBed >= targetBedCount) {
+                                if (axialProgressTimerRef.current !== null) {
+                                    window.clearInterval(axialProgressTimerRef.current);
+                                    axialProgressTimerRef.current = null;
+                                }
+                                setAxialWaitingForBreath(false);
+                                setStage("rendering");
+                                window.setTimeout(() => setStage("completed"), 500);
+                            } else {
+                                if (axialProgressTimerRef.current !== null) {
+                                    window.clearInterval(axialProgressTimerRef.current);
+                                    axialProgressTimerRef.current = null;
+                                }
+                                window.setTimeout(() => scheduleBedExposure(nextBed), 180);
+                            }
+                            return nextBed;
+                        });
+                        return 0;
+                    });
+                }, GATED_AXIAL_SLICE_INTERVAL_MS);
+            };
+
+            scheduleBedExposure(0);
+            return;
+        }
 
         window.setTimeout(() => {
             setStage("exposing");
             setGuideVisible(false);
         }, 180);
-
-        if (isGatedAxial) {
-            if (axialProgressTimerRef.current !== null) {
-                window.clearInterval(axialProgressTimerRef.current);
-            }
-
-            axialProgressTimerRef.current = window.setInterval(() => {
-                setCurrentSlice((prevSlice) => {
-                    const nextSlice = prevSlice + 1;
-                    if (nextSlice < GATED_AXIAL_SLICES_PER_BED) {
-                        return nextSlice;
-                    }
-
-                    setCompletedBeds((prevBed) => {
-                        const nextBed = Math.min(totalBeds, prevBed + 1);
-                        if (nextBed >= totalBeds) {
-                            if (axialProgressTimerRef.current !== null) {
-                                window.clearInterval(axialProgressTimerRef.current);
-                                axialProgressTimerRef.current = null;
-                            }
-                            setStage("rendering");
-                            window.setTimeout(() => setStage("completed"), 500);
-                        }
-                        return nextBed;
-                    });
-                    return 0;
-                });
-            }, GATED_AXIAL_SLICE_INTERVAL_MS);
-            return;
-        }
 
         exposureTimerRef.current = window.setTimeout(() => {
             setStage("rendering");
@@ -435,7 +522,9 @@ export default function HelicalExecuteScanScreen() {
         stage === "arming"
             ? `Hold to trigger ${Math.max(0, ((1 - holdProgress) * 3)).toFixed(1)}s`
             : stage === "enabled"
-                ? "Scan enabled"
+                ? axialWaitingForBreath
+                    ? "Waiting for stable respiration..."
+                    : "Scan enabled"
                 : stage === "exposing"
                     ? isGated
                         ? "Gated exposure in progress..."
@@ -452,7 +541,9 @@ export default function HelicalExecuteScanScreen() {
         stage === "arming"
             ? "Keep holding the green button"
             : stage === "enabled"
-                ? "System enabled"
+                ? axialWaitingForBreath
+                    ? "Waiting for stable respiration"
+                    : "System enabled"
                 : stage === "exposing"
                     ? isGated
                         ? "Running gated scan"
@@ -470,6 +561,8 @@ export default function HelicalExecuteScanScreen() {
             totalBeds={totalBeds}
             threshold={threshold}
             direction={direction}
+            supplementalBeds={supplementalBedTargets ?? undefined}
+            waitingForBreath={axialWaitingForBreath}
         />
     ) : showLiveViewport ? (
         <HelicalLiveViewport playbackActive={stage !== "completed"} />
@@ -479,9 +572,9 @@ export default function HelicalExecuteScanScreen() {
 
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
-            {isSupplementalRun && supplementalIndices && (
+            {isSupplementalRun && supplementalBedTargets && (
                 <div className="absolute left-1/2 top-3 z-50 -translate-x-1/2 rounded-full border border-[#f59e0b] bg-[#451a03]/90 px-4 py-1 text-[12px] font-bold text-[#fbbf24] shadow-lg">
-                    补扫模式 · 仅采集触发 {supplementalIndices.map((i) => `T${i}`).join("、")}
+                    补扫模式 · 仅补采床位段 {supplementalBedTargets.join("、")}
                 </div>
             )}
             <ScanConfirmScreen

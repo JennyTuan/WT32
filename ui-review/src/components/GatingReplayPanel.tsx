@@ -194,11 +194,6 @@ export default function GatingReplayPanel({
             {/* ── stats row ───────────────────────────────────────────── */}
             <div className="flex items-center gap-1.5 px-3 border-b border-[#1e293b] whitespace-nowrap overflow-hidden" style={{ height: HEADER_HEIGHT }}>
                 <span className="text-[11px] font-bold tracking-wide text-[#93c5fd] shrink-0">门控回放</span>
-                <span className="text-[10px] text-[#94a3b8] truncate min-w-0">
-                    {result.mode === "gated_axial" ? "轴扫" : "螺旋"}
-                    {" · "}
-                    {result.breathingMode === "free_breathing" ? "自由呼吸·阈值穿越" : "DIBH"}
-                </span>
                 <div className="flex-1" />
                 <button
                     type="button"
@@ -521,4 +516,3 @@ export default function GatingReplayPanel({
         </div>
     );
 }
-

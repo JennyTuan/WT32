@@ -7,10 +7,17 @@ interface GatingMonitorPanelProps {
     threshold?: number;
     direction?: TriggerDirection;
     onThresholdChange?: (value: number) => void;
-    bedStrip?: { total: number; completed?: number };
+    bedStrip?: {
+        total: number;
+        completed?: number;
+        completedIndices?: number[];
+        currentIndex?: number | null;
+        pendingIndices?: number[];
+    };
     scanActive?: boolean;
     exposing?: boolean;
     bedPhase?: number;
+    waitingForStableBreath?: boolean;
     readOnly?: boolean;
 }
 
@@ -64,6 +71,7 @@ export default function GatingMonitorPanel({
     scanActive = false,
     exposing = false,
     bedPhase,
+    waitingForStableBreath = false,
     readOnly = false,
 }: GatingMonitorPanelProps) {
     const svgRef = useRef<SVGSVGElement | null>(null);
@@ -71,8 +79,8 @@ export default function GatingMonitorPanel({
     const [draggingThreshold, setDraggingThreshold] = useState(false);
 
     const noisePhase = Math.floor(tick / 600) % 3;
-    const jitter = noisePhase === 1 ? 1.6 : 0.6;
-    const drift = noisePhase === 2 ? 1.2 : 0.2;
+    const jitter = waitingForStableBreath ? 2.1 : noisePhase === 1 ? 1.6 : 0.6;
+    const drift = waitingForStableBreath ? 1.8 : noisePhase === 2 ? 1.2 : 0.2;
 
     useEffect(() => {
         const id = window.setInterval(() => setTick((t) => t + 2), 50);
@@ -81,8 +89,23 @@ export default function GatingMonitorPanel({
 
     const visibleCycles = SAMPLES / CYCLE_SAMPLES;
     const completedBeds = bedStrip?.completed ?? 0;
+    const completedIndexSet = useMemo(
+        () => new Set(bedStrip?.completedIndices ?? []),
+        [bedStrip?.completedIndices]
+    );
+    const pendingIndexSet = useMemo(
+        () => new Set(bedStrip?.pendingIndices ?? []),
+        [bedStrip?.pendingIndices]
+    );
+    const stripHasExplicitState =
+        completedIndexSet.size > 0 ||
+        pendingIndexSet.size > 0 ||
+        bedStrip?.currentIndex !== undefined;
+    const activeCycleIndex = stripHasExplicitState && bedStrip?.currentIndex
+        ? bedStrip.currentIndex - 1
+        : completedBeds;
     const visibleStartCycle = scanActive && bedStrip
-        ? Math.max(0, completedBeds - (visibleCycles - 1))
+        ? Math.max(0, activeCycleIndex - (visibleCycles - 1))
         : tick / CYCLE_SAMPLES;
     const phaseLockedTick = scanActive && bedStrip
         ? Math.round(visibleStartCycle * CYCLE_SAMPLES)
@@ -129,7 +152,7 @@ export default function GatingMonitorPanel({
     const risingPhase = Math.acos(-thresholdForPhase) / (Math.PI * 2);
     const triggerPhase = direction === "rising" ? risingPhase : 1 - risingPhase;
     const currentPhaseX = scanActive && bedStrip
-        ? ((completedBeds + (bedPhase ?? 0) - visibleStartCycle) * CYCLE_SAMPLES) * stepX
+        ? ((activeCycleIndex + (bedPhase ?? 0) - visibleStartCycle) * CYCLE_SAMPLES) * stepX
         : null;
 
     const handlePointerDown = (e: React.PointerEvent<SVGRectElement>) => {
@@ -147,8 +170,14 @@ export default function GatingMonitorPanel({
     };
     const handlePointerUp = () => setDraggingThreshold(false);
 
-    const stabilityLabel = stability === "stable" ? "稳定" : stability === "unstable" ? "呼吸不稳" : "采样中…";
-    const stabilityOk = stability === "stable";
+    const stabilityLabel = waitingForStableBreath
+        ? "呼吸不稳"
+        : stability === "stable"
+            ? "稳定"
+            : stability === "unstable"
+                ? "呼吸不稳"
+                : "采样中…";
+    const stabilityOk = !waitingForStableBreath && stability === "stable";
 
     return (
         <div className="h-full bg-white overflow-hidden flex flex-col">
@@ -266,14 +295,17 @@ export default function GatingMonitorPanel({
                             />
                         ))}
 
-                        {scanActive && bedStrip && Array.from({ length: completedBeds }).map((_, i) => {
-                            const bedIndex = i;
+                        {scanActive && bedStrip && (stripHasExplicitState
+                            ? Array.from(completedIndexSet).filter((bedNumber) => pendingIndexSet.has(bedNumber))
+                            : Array.from({ length: completedBeds }, (_, i) => i + 1)
+                        ).map((bedNumber) => {
+                            const bedIndex = bedNumber - 1;
                             const visibleIndex = (bedIndex + triggerPhase - visibleStartCycle) * CYCLE_SAMPLES;
                             if (visibleIndex < 0 || visibleIndex >= SAMPLES) return null;
                             const x = visibleIndex * stepX;
                             const y = ampToY(threshold);
                             return (
-                                <g key={`trigger-${bedIndex}`}>
+                                <g key={`trigger-${bedNumber}`}>
                                     <line
                                         x1={x}
                                         y1="0"
@@ -293,7 +325,7 @@ export default function GatingMonitorPanel({
                                         strokeWidth="1.5"
                                     />
                                     <text x={x + 7} y={Math.max(12, y - 8)} fill="#92400E" fontSize="9" fontWeight="800">
-                                        EXP {bedIndex + 1}
+                                        EXP {bedNumber}
                                     </text>
                                 </g>
                             );
@@ -336,10 +368,21 @@ export default function GatingMonitorPanel({
                     </span>
                     <div className="flex flex-1 gap-1 items-end h-3">
                         {Array.from({ length: bedStrip.total }).map((_, i) => {
-                            const done = i < (bedStrip.completed ?? 0);
-                            const current = scanActive && !done && i === (bedStrip.completed ?? 0);
+                            const bedNumber = i + 1;
+                            const done = stripHasExplicitState
+                                ? completedIndexSet.has(bedNumber)
+                                : i < (bedStrip.completed ?? 0);
+                            const current = stripHasExplicitState
+                                ? scanActive && bedStrip.currentIndex === bedNumber
+                                : scanActive && !done && i === (bedStrip.completed ?? 0);
+                            const pendingSupplemental = stripHasExplicitState && pendingIndexSet.has(bedNumber) && !done && !current;
+                            const currentTitle = waitingForStableBreath ? " · 等待呼吸稳定" : " · 补采中";
                             return (
-                                <div key={i} className="flex-1 flex flex-col gap-0.5" title={`床位 ${i + 1}`}>
+                                <div
+                                    key={i}
+                                    className="flex-1 flex flex-col gap-0.5"
+                                    title={`床位 ${bedNumber}${done ? " · 已扫" : current ? currentTitle : pendingSupplemental ? " · 待补采" : ""}`}
+                                >
                                     <div
                                         className={`h-1.5 w-full rounded-sm ${
                                             done
@@ -348,6 +391,8 @@ export default function GatingMonitorPanel({
                                                     ? exposing
                                                         ? "bg-[#FACC15] shadow-[0_0_8px_rgba(250,204,21,0.85)]"
                                                         : "bg-[#FDBA74] animate-pulse"
+                                                    : pendingSupplemental
+                                                        ? "bg-[#FDE68A]"
                                                     : "bg-[#E2E8F0]"
                                         }`}
                                     />
@@ -361,7 +406,7 @@ export default function GatingMonitorPanel({
                         })}
                     </div>
                     <div className="text-[9px] font-mono font-bold text-[#475569] shrink-0 tabular-nums">
-                        {bedStrip.completed ?? 0}/{bedStrip.total}
+                        {stripHasExplicitState ? completedIndexSet.size : bedStrip.completed ?? 0}/{bedStrip.total}
                     </div>
                 </div>
             )}
