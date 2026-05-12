@@ -45,6 +45,11 @@ import {
     fetchSelectedScanSession,
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
+import {
+    loadGatingResult,
+    type GatingResult,
+} from "../lib/gatingResult";
+import GatingReplayPanel from "../components/GatingReplayPanel";
 
 type ImageItem = { id: string; name: string };
 type SeriesType = "topogram" | "helical" | "axial" | "4d" | "static";
@@ -300,6 +305,15 @@ const ViewScreen = () => {
     const fourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode }) | null;
     const isFourDEntry = !!fourDState?.scanResult;
 
+    // ─── Gating 回放状态 ──────────────────────────────────────────────────────
+    const gatingNavState = location.state as { gatingMode?: "gated_helical" | "gated_axial"; breathingMode?: string } | null;
+    const isGatingEntry = !!gatingNavState?.gatingMode;
+    const [gatingResult, setGatingResult] = useState<GatingResult | null>(null);
+    useEffect(() => {
+        if (!isGatingEntry) return;
+        setGatingResult(loadGatingResult());
+    }, [isGatingEntry]);
+
     /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
     const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";
     const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">("ready");
@@ -320,7 +334,7 @@ const ViewScreen = () => {
     // Across-phase aggregation for the MPR 4th panel (ITV visualisation)
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
     const [slabThickness, setSlabThickness] = useState(5);
-    const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry ? "3D" : "2D");
+    const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry || isGatingEntry ? "3D" : "2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
     const [toolMode, setToolMode] = useState<ViewerToolMode>("wl");
     const [ww, setWw] = useState(350);
@@ -729,6 +743,12 @@ const ViewScreen = () => {
         if (!isTopogramSeries) return;
         setImageMode("2D");
     }, [isTopogramSeries]);
+
+    // Gating entry: any non-topogram series must stay in 3D MPR mode (no 2D toggle exposed).
+    useEffect(() => {
+        if (!isGatingEntry || isTopogramSeries) return;
+        setImageMode("3D");
+    }, [isGatingEntry, isTopogramSeries, selectedSeriesId]);
 
     useEffect(() => {
         if (!isFourDLungReconSeries) return;
@@ -1153,7 +1173,7 @@ const ViewScreen = () => {
                             <SlidersHorizontal size={14} className="text-[#4D94FF]" />
                             <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">PARAMS</span>
                         </div>
-                        {!isFourDLungReconSeries && !isTopogramSeries ? (
+                        {!isFourDLungReconSeries && !isTopogramSeries && !isGatingEntry ? (
                             <div className="flex items-center gap-1 rounded-full border border-[#DCE6F2] bg-[#F1F5F9] p-[3px] shadow-sm overflow-hidden">
                                 {(["2D", "3D"] as const).map((mode) => {
                                     const active = imageMode === mode;
@@ -1429,6 +1449,7 @@ const ViewScreen = () => {
                                                 </div>
                                             </PanelSection>
 
+                                            {!isGatingEntry && (
                                             <PanelSection title="体绘制">
                                             <div className="flex items-center gap-2 relative">
                                                 <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">体绘制</span>
@@ -1498,6 +1519,7 @@ const ViewScreen = () => {
                                                 )}
                                             </div>
                                             </PanelSection>
+                                            )}
 
                                             <PanelSection title="投影">
 
@@ -1554,6 +1576,7 @@ const ViewScreen = () => {
                                             </div>
                                             </PanelSection>
 
+                                            {!isGatingEntry && (
                                             <PanelSection title="斜切">
                                                 <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                     <span className="text-[11px] font-semibold text-[#546E7A]">启用斜切</span>
@@ -1633,6 +1656,7 @@ const ViewScreen = () => {
                                                     复位
                                                 </button>
                                             </PanelSection>
+                                            )}
                                         </>
                                     )}
 
@@ -1728,7 +1752,8 @@ const ViewScreen = () => {
                     </div>
                 </aside>
 
-                <div className="flex-1 min-w-0 flex overflow-hidden rounded-lg border border-[#B0C4DE]">
+                <div className="flex-1 min-w-0 flex flex-col overflow-hidden rounded-lg border border-[#B0C4DE]">
+                <div className="flex flex-1 min-h-0 overflow-hidden">
                 <div className={viewportContainerClassName}>
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
                     {!isTopogramSeries && imageMode === "3D" && (
@@ -1767,8 +1792,8 @@ const ViewScreen = () => {
                                     windowWidth={ww}
                                     activeTool={mapCornerstoneTool(toolMode)}
                                     renderMode={selectedRenderMode}
-                                    layoutMode="four-up"
-                                    volumePanelMode="volume3d"
+                                    layoutMode={isGatingEntry ? "three-up" : "four-up"}
+                                    volumePanelMode={isGatingEntry ? "slab" : "volume3d"}
                                     volumePreset={selectedVolumePreset}
                                     volumeSampleDistanceMultiplier={volumeSampleDistanceMultiplier}
                                     slabThickness={slabThickness}
@@ -2097,6 +2122,25 @@ const ViewScreen = () => {
                             )}
                         </div>
                     </aside>
+                </div>
+                {isGatingEntry && gatingResult && !isTopogramSeries && (
+                    <GatingReplayPanel
+                        result={gatingResult}
+                        currentSliceIndex={currentSliceIndex}
+                        totalSlices={totalSlices}
+                        onJumpToSlice={(slice) => setSliceIndex(clampSliceIndex(slice))}
+                        onSupplementalScan={(indices) => {
+                            const mode = gatingNavState?.gatingMode ?? "gated_axial";
+                            const breathingMode =
+                                gatingNavState?.breathingMode ??
+                                (mode === "gated_helical" ? "breath_hold_inspiration" : "free_breathing");
+                            navigate(
+                                `/helical-execute?mode=${mode}&breathingMode=${breathingMode}` +
+                                `&supplemental=${indices.join(",")}`
+                            );
+                        }}
+                    />
+                )}
                 </div>
             </main>
 

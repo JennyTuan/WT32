@@ -82,7 +82,11 @@
       "Bash(Select-Object -ExpandProperty Name)",
       "Bash(git check-ignore *)",
       "Bash(echo \"exit: $?\")",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(mkdir -p .claude)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(node_modules/.bin/tsc -b)",
+      "Bash(./node_modules/.bin/tsc -b)"
     ]
   }
 }

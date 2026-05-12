@@ -4,6 +4,13 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import DicomViewer from "../components/DicomViewer";
 import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import { fetchSelectedScanSession } from "../lib/scanSession";
+import {
+    applySupplementalScan,
+    generateMockGatingResult,
+    loadGatingResult,
+    saveGatingResult,
+    type GatingBreathingMode,
+} from "../lib/gatingResult";
 
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
@@ -199,6 +206,17 @@ export default function HelicalExecuteScanScreen() {
     }, [scanLengthMm]);
     const threshold = Number(params.get("threshold") ?? "1.0");
     const direction = (params.get("direction") ?? "rising") as "rising" | "falling";
+    const breathingMode = (params.get("breathingMode") ?? (isGatedAxial ? "free_breathing" : "breath_hold_inspiration")) as GatingBreathingMode;
+    const supplementalIndices = useMemo(() => {
+        const raw = params.get("supplemental");
+        if (!raw) return null;
+        const parsed = raw
+            .split(",")
+            .map((s) => Number.parseInt(s, 10))
+            .filter((n) => Number.isFinite(n));
+        return parsed.length > 0 ? parsed : null;
+    }, [params]);
+    const isSupplementalRun = !!supplementalIndices;
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -246,8 +264,35 @@ export default function HelicalExecuteScanScreen() {
     useEffect(() => {
         if (stage !== "completed") return;
 
+        if (isGated) {
+            if (isSupplementalRun) {
+                // Merge: replace the selected triggers in the prior result.
+                const prior = loadGatingResult();
+                if (prior && supplementalIndices) {
+                    saveGatingResult(applySupplementalScan(prior, supplementalIndices));
+                }
+            } else {
+                const totalSlices = isGatedAxial
+                    ? Math.max(1, totalBeds) * GATED_AXIAL_SLICES_PER_BED
+                    : HELICAL_RESULT_SERIES.count;
+                const result = generateMockGatingResult({
+                    mode: isGatedAxial ? "gated_axial" : "gated_helical",
+                    breathingMode,
+                    totalSlices,
+                    slicesPerBed: isGatedAxial ? GATED_AXIAL_SLICES_PER_BED : undefined,
+                    threshold,
+                    direction,
+                });
+                saveGatingResult(result);
+            }
+        }
+
         autoNavigateTimerRef.current = window.setTimeout(() => {
-            navigate("/image-viewer");
+            navigate("/image-viewer", {
+                state: isGated
+                    ? { gatingMode: isGatedAxial ? "gated_axial" : "gated_helical", breathingMode }
+                    : undefined,
+            });
         }, AUTO_NAVIGATE_DELAY_MS);
 
         return () => {
@@ -256,7 +301,7 @@ export default function HelicalExecuteScanScreen() {
                 autoNavigateTimerRef.current = null;
             }
         };
-    }, [navigate, stage]);
+    }, [navigate, stage, isGated, isGatedAxial, totalBeds, breathingMode, threshold, direction, isSupplementalRun, supplementalIndices]);
 
     useEffect(() => {
         return () => {
@@ -340,7 +385,11 @@ export default function HelicalExecuteScanScreen() {
 
     const handleExecuteScanClick = () => {
         if (stage === "completed") {
-            navigate("/image-viewer");
+            navigate("/image-viewer", {
+                state: isGated
+                    ? { gatingMode: isGatedAxial ? "gated_axial" : "gated_helical", breathingMode }
+                    : undefined,
+            });
             return;
         }
 
@@ -430,6 +479,11 @@ export default function HelicalExecuteScanScreen() {
 
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
+            {isSupplementalRun && supplementalIndices && (
+                <div className="absolute left-1/2 top-3 z-50 -translate-x-1/2 rounded-full border border-[#f59e0b] bg-[#451a03]/90 px-4 py-1 text-[12px] font-bold text-[#fbbf24] shadow-lg">
+                    补扫模式 · 仅采集触发 {supplementalIndices.map((i) => `T${i}`).join("、")}
+                </div>
+            )}
             <ScanConfirmScreen
                 activeSequenceId="s2"
                 activeSequenceStepIndex={stage === "completed" ? 2 : 1}
