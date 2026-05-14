@@ -26,6 +26,7 @@ import type { ChangeEvent, ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import type { FourDPostScanState } from "../lib/fourDTypes";
+import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import CornerstoneMPRViewport, {
     type CornerstoneMPRHandle,
@@ -69,6 +70,8 @@ type Series = {
     /** WW/WL preset applied when this series is selected */
     defaultWw?: number;
     defaultWl?: number;
+    dicomBasePath?: string;
+    dicomFilePrefix?: "image" | "lung";
 };
 /** A scan acquisition group (topogram/helical/axial) — may contain multiple recon series */
 type ScanGroup = {
@@ -254,10 +257,82 @@ const REALISTIC_SCOUT_SERIES = {
     basePath: "/daae3df7f522b56724aed7e3e544c0fe/series-000002",
 };
 
-const getSeriesDicomUrl = (sliceIndex: number, seriesType?: SeriesType) => {
+// Brain-helical demo dataset (脑部螺旋). Mirrors the REAL_LUNG_SERIES / REALISTIC_SCOUT_SERIES
+// shape but points at the JPEG Lossless head data under /dicom-out/HeadStrokeDemo/.
+// Selected only when an active workflow plan has title "脑部螺旋" — see useIsBrainHelicalDemo.
+const BRAIN_HELICAL_PROTOCOL_TITLE = "脑部螺旋";
+const BRAIN_HELICAL_VIEW_SERIES = {
+    studyName: "Head Stroke Demo",
+    studyId: "study-head-stroke-demo",
+    seriesId: "series-head-stroke-thick",
+    seriesName: "Thick Brain 5.0 Head Brain FC21",
+    count: 36,
+    rows: 512,
+    cols: 512,
+    thickness: "5.0 mm",
+    kV: "120",
+    mAs: "Auto",
+    fov: "240.0 mm",
+    matrix: "512",
+    kernel: "FC21",
+    basePath: "/dicom-out/HeadStrokeDemo/ThickBrain",
+};
+const BRAIN_HELICAL_RECON_SERIES = [
+    {
+        ...BRAIN_HELICAL_VIEW_SERIES,
+        defaultWw: 100,
+        defaultWl: 35,
+    },
+    {
+        studyName: "Head Stroke Demo",
+        studyId: "study-head-stroke-demo",
+        seriesId: "series-head-stroke-thin",
+        seriesName: "Thin Brain 1.0 Head Brain FC21",
+        count: 219,
+        rows: 512,
+        cols: 512,
+        thickness: "1.0 mm",
+        kV: "120",
+        mAs: "Auto",
+        fov: "240.0 mm",
+        matrix: "512",
+        kernel: "FC21",
+        basePath: "/dicom-out/HeadStrokeDemo/ThinBrain",
+        defaultWw: 100,
+        defaultWl: 35,
+    },
+] as const;
+const BRAIN_HELICAL_VIEW_TOPOGRAM = {
+    seriesName: "topogram",
+    count: 1,
+    thickness: "2.0 mm",
+    kV: "120",
+    mAs: "50",
+    fov: "500.0 mm",
+    matrix: "512",
+    kernel: "FL03",
+    basePath: "/dicom-out/HeadStrokeDemo/Topogram",
+};
+
+const getSeriesDicomUrl = (
+    sliceIndex: number,
+    seriesType?: SeriesType,
+    brainHelical?: boolean,
+    series?: Pick<Series, "dicomBasePath" | "dicomFilePrefix">,
+) => {
+    if (series?.dicomBasePath) {
+        const prefix = series.dicomFilePrefix === "lung" ? "1-" : "image-";
+        return `${series.dicomBasePath}/${prefix}${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
+    }
     if (seriesType === "topogram") {
+        if (brainHelical) {
+            return `${BRAIN_HELICAL_VIEW_TOPOGRAM.basePath}/image-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
+        }
         const imageNumber = REALISTIC_SCOUT_SERIES.firstImageNumber + sliceIndex;
         return `${REALISTIC_SCOUT_SERIES.basePath}/image-${String(imageNumber).padStart(6, "0")}.dcm`;
+    }
+    if (brainHelical) {
+        return `${BRAIN_HELICAL_VIEW_SERIES.basePath}/image-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
     }
     return `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
 };
@@ -275,6 +350,25 @@ const mapCornerstoneTool = (toolMode: ViewerToolMode) => {
 };
 
 const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count / 2));
+
+const parseDicomNumber = (value: string | undefined, fallback: number) => {
+    if (!value) return fallback;
+    const firstValue = value.split("\\")[0]?.trim();
+    const parsed = Number(firstValue);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const isBrainHelicalName = (value: string | null | undefined) =>
+    typeof value === "string" && value.includes(BRAIN_HELICAL_PROTOCOL_TITLE);
+
+const isBrainHelicalScanSession = (session: ApiScanSessionDetail | null) => {
+    if (!session) return false;
+    return (
+        session.acquisition_type === "regular" &&
+        session.body_part.toLowerCase() === "head" &&
+        (session.protocol_id === 1 || isBrainHelicalName(session.name) || isBrainHelicalName(session.session_name))
+    );
+};
 
 function WindowLevelIcon({ size = 20 }: { size?: number }) {
     return (
@@ -308,6 +402,18 @@ const ViewScreen = () => {
     // ─── Gating 回放状态 ──────────────────────────────────────────────────────
     const gatingNavState = location.state as { gatingMode?: "gated_helical" | "gated_axial"; breathingMode?: string } | null;
     const isGatingEntry = !!gatingNavState?.gatingMode;
+
+    // ─── 脑部螺旋 demo 数据切换 ───────────────────────────────────────────────
+    // Active only when the workflow plan title matches AND this is NOT a 4D/gating entry,
+    // so门控 / 4D 浏览路径完全不受影响。
+    const isBrainHelicalWorkflow = useMemo(() => {
+        if (isFourDEntry || isGatingEntry) return false;
+        return loadSelectedScanWorkflowPlans().some((plan) => isBrainHelicalName(plan.title));
+    }, [isFourDEntry, isGatingEntry]);
+    // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
+    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const isBrainHelicalDemo = isBrainHelicalWorkflow || (!isFourDEntry && !isGatingEntry && isBrainHelicalScanSession(scanSession));
+    const effectiveLungSeries = isBrainHelicalDemo ? BRAIN_HELICAL_VIEW_SERIES : REAL_LUNG_SERIES;
     const [gatingResult, setGatingResult] = useState<GatingResult | null>(null);
     useEffect(() => {
         if (!isGatingEntry) return;
@@ -319,7 +425,7 @@ const ViewScreen = () => {
     const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">("ready");
 
     // Will be updated to the first session series when session loads
-    const [selectedSeriesId, setSelectedSeriesId] = useState(isFourDEntry ? "4d-preview-recon" : REAL_LUNG_SERIES.seriesId);
+    const [selectedSeriesId, setSelectedSeriesId] = useState(isFourDEntry ? "4d-preview-recon" : effectiveLungSeries.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
     const [selectedFourDMpId, setSelectedFourDMpId] = useState<FourDDicomMpId>("MP1");
     const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("phase");
@@ -335,7 +441,7 @@ const ViewScreen = () => {
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
     const [slabThickness, setSlabThickness] = useState(5);
     const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry || isGatingEntry ? "3D" : "2D");
-    const [sliceIndex, setSliceIndex] = useState(Math.floor(REAL_LUNG_SERIES.count / 2));
+    const [sliceIndex, setSliceIndex] = useState(Math.floor(effectiveLungSeries.count / 2));
     const [toolMode, setToolMode] = useState<ViewerToolMode>("wl");
     const [ww, setWw] = useState(350);
     const [wl, setWl] = useState(45);
@@ -344,7 +450,6 @@ const ViewScreen = () => {
     const [displayWw, setDisplayWw] = useState(350);
     const [displayWl, setDisplayWl] = useState(45);
     // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
-    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     // Ref for imperative control of the Cornerstone viewport (zoom/fit/reset in 2D mode)
     const dicomViewerRef = useRef<DicomViewerHandle>(null);
     // Ref for the 3D MPR Cornerstone viewport
@@ -374,6 +479,7 @@ const ViewScreen = () => {
     const dragRef = useRef<{ dragging: boolean; x: number; y: number }>({ dragging: false, x: 0, y: 0 });
     const measureStartRef = useRef<{ x: number; y: number } | null>(null);
     const defaultWindowRef = useRef({ ww: 350, wl: 45 });
+    const dicomWindowAppliedSeriesRef = useRef<string | null>(null);
     const [annotations, setAnnotations] = useState<Annotation[]>([]);
     const [draftMeasure, setDraftMeasure] = useState<{
         sx1: number;
@@ -465,6 +571,24 @@ const ViewScreen = () => {
         // ── Helper: build an ImageItem array using the static DICOM dataset ──────
         const makeImages = (count: number, prefix: string): ImageItem[] =>
             Array.from({ length: count }, (_, i) => ({ id: `${prefix}-img-${i + 1}`, name: `Image ${i + 1}` }));
+        const makeBrainHelicalSeries = (seriesType: SeriesType): Series[] =>
+            BRAIN_HELICAL_RECON_SERIES.map((series) => ({
+                id: series.seriesId,
+                name: series.seriesName,
+                count: series.count,
+                kernel: series.kernel,
+                thickness: series.thickness,
+                kV: series.kV,
+                mAs: series.mAs,
+                fov: series.fov,
+                matrix: series.matrix,
+                seriesType,
+                images: makeImages(series.count, series.seriesId),
+                defaultWw: series.defaultWw,
+                defaultWl: series.defaultWl,
+                dicomBasePath: series.basePath,
+                dicomFilePrefix: "image",
+            }));
 
         // ── Static fallback (no scan session in localStorage) ────────────────────
         if (!scanSession) {
@@ -494,25 +618,37 @@ const ViewScreen = () => {
                     }],
                 }];
             }
+            if (isBrainHelicalDemo) {
+                return [{
+                    id: BRAIN_HELICAL_VIEW_SERIES.studyId,
+                    name: BRAIN_HELICAL_VIEW_SERIES.studyName,
+                    scanGroups: [{
+                        id: "brain-helical-group",
+                        label: "Brain Reconstruction",
+                        type: "static" as SeriesType,
+                        series: makeBrainHelicalSeries("static"),
+                    }],
+                }];
+            }
             return [{
-                id: REAL_LUNG_SERIES.studyId,
-                name: REAL_LUNG_SERIES.studyName,
+                id: effectiveLungSeries.studyId,
+                name: effectiveLungSeries.studyName,
                 scanGroups: [{
                     id: "static-group",
-                    label: REAL_LUNG_SERIES.seriesName,
+                    label: effectiveLungSeries.seriesName,
                     type: "static" as SeriesType,
                     series: [{
-                        id: REAL_LUNG_SERIES.seriesId,
-                        name: REAL_LUNG_SERIES.seriesName,
-                        count: REAL_LUNG_SERIES.count,
-                        kernel: REAL_LUNG_SERIES.kernel,
-                        thickness: REAL_LUNG_SERIES.thickness,
-                        kV: REAL_LUNG_SERIES.kV,
-                        mAs: REAL_LUNG_SERIES.mAs,
-                        fov: REAL_LUNG_SERIES.fov,
-                        matrix: REAL_LUNG_SERIES.matrix,
+                        id: effectiveLungSeries.seriesId,
+                        name: effectiveLungSeries.seriesName,
+                        count: effectiveLungSeries.count,
+                        kernel: effectiveLungSeries.kernel,
+                        thickness: effectiveLungSeries.thickness,
+                        kV: effectiveLungSeries.kV,
+                        mAs: effectiveLungSeries.mAs,
+                        fov: effectiveLungSeries.fov,
+                        matrix: effectiveLungSeries.matrix,
                         seriesType: "static" as SeriesType,
-                        images: makeImages(REAL_LUNG_SERIES.count, "qin"),
+                        images: makeImages(effectiveLungSeries.count, isBrainHelicalDemo ? "brain" : "qin"),
                     }],
                 }],
             }];
@@ -551,10 +687,12 @@ const ViewScreen = () => {
             } else {
                 // helical / axial / 4d — leaf items are the recon series
                 const p = s.helical_param ?? s.axial_param;
-                const leafSeries: Series[] = s.recon_series.map((r) => ({
+                const leafSeries: Series[] = isBrainHelicalDemo && type !== "4d"
+                    ? makeBrainHelicalSeries(type)
+                    : s.recon_series.map((r) => ({
                     id: `${prefix}-recon${r.id}`,
                     name: r.recon_name,
-                    count: REAL_LUNG_SERIES.count,
+                    count: effectiveLungSeries.count,
                     kernel: r.kernel,
                     thickness: `${r.slice_thickness} mm`,
                     kV: p ? String(p.kv) : "—",
@@ -562,17 +700,17 @@ const ViewScreen = () => {
                     fov: p ? `${p.fov} mm` : "—",
                     matrix: String(r.matrix),
                     seriesType: type,
-                    images: makeImages(REAL_LUNG_SERIES.count, `${prefix}-recon${r.id}`),
+                    images: makeImages(effectiveLungSeries.count, `${prefix}-recon${r.id}`),
                     defaultWw: r.window_width,
                     defaultWl: r.window_level,
-                }));
+                    }));
 
                 // Fallback if protocol has no recon series configured
                 if (leafSeries.length === 0) {
                     leafSeries.push({
                         id: `${prefix}-scan`,
                         name: s.series_label,
-                        count: REAL_LUNG_SERIES.count,
+                        count: effectiveLungSeries.count,
                         kernel: "—",
                         thickness: p ? `${(p as { slice_thickness?: number }).slice_thickness ?? "—"} mm` : "—",
                         kV: p ? String(p.kv) : "—",
@@ -580,7 +718,7 @@ const ViewScreen = () => {
                         fov: p ? `${p.fov} mm` : "—",
                         matrix: "512",
                         seriesType: type,
-                        images: makeImages(REAL_LUNG_SERIES.count, `${prefix}-scan`),
+                        images: makeImages(effectiveLungSeries.count, `${prefix}-scan`),
                     });
                 }
 
@@ -595,24 +733,33 @@ const ViewScreen = () => {
 
         // If the session has no series at all (e.g. just created), add the static fallback so the viewer never crashes
         if (scanGroups.length === 0) {
+            if (isBrainHelicalDemo) {
+                scanGroups.push({
+                    id: "brain-helical-group",
+                    label: "Brain Reconstruction",
+                    type: "static" as SeriesType,
+                    series: makeBrainHelicalSeries("static"),
+                });
+            } else {
             scanGroups.push({
                 id: "static-group",
-                label: REAL_LUNG_SERIES.seriesName,
+                label: effectiveLungSeries.seriesName,
                 type: "static" as SeriesType,
                 series: [{
-                    id: REAL_LUNG_SERIES.seriesId,
-                    name: REAL_LUNG_SERIES.seriesName,
-                    count: REAL_LUNG_SERIES.count,
-                    kernel: REAL_LUNG_SERIES.kernel,
-                    thickness: REAL_LUNG_SERIES.thickness,
-                    kV: REAL_LUNG_SERIES.kV,
-                    mAs: REAL_LUNG_SERIES.mAs,
-                    fov: REAL_LUNG_SERIES.fov,
-                    matrix: REAL_LUNG_SERIES.matrix,
+                    id: effectiveLungSeries.seriesId,
+                    name: effectiveLungSeries.seriesName,
+                    count: effectiveLungSeries.count,
+                    kernel: effectiveLungSeries.kernel,
+                    thickness: effectiveLungSeries.thickness,
+                    kV: effectiveLungSeries.kV,
+                    mAs: effectiveLungSeries.mAs,
+                    fov: effectiveLungSeries.fov,
+                    matrix: effectiveLungSeries.matrix,
                     seriesType: "static" as SeriesType,
-                    images: Array.from({ length: REAL_LUNG_SERIES.count }, (_, i) => ({ id: `qin-img-${i + 1}`, name: `Image ${i + 1}` })),
+                    images: Array.from({ length: effectiveLungSeries.count }, (_, i) => ({ id: `${isBrainHelicalDemo ? "brain" : "qin"}-img-${i + 1}`, name: `Image ${i + 1}` })),
                 }],
             });
+            }
         }
 
         return [{
@@ -620,22 +767,22 @@ const ViewScreen = () => {
             name: scanSession.name || "扫描序列",
             scanGroups,
         }];
-    }, [scanSession, isFourDEntry]);
+    }, [scanSession, isFourDEntry, isBrainHelicalDemo, effectiveLungSeries]);
 
     const seriesList = studyTree.flatMap((study) => study.scanGroups.flatMap((g) => g.series));
     // Guard: if seriesList is somehow still empty, always fall back to the static series
     const safeSeriesList = seriesList.length > 0 ? seriesList : [{
-        id: REAL_LUNG_SERIES.seriesId,
-        name: REAL_LUNG_SERIES.seriesName,
-        count: REAL_LUNG_SERIES.count,
-        kernel: REAL_LUNG_SERIES.kernel,
-        thickness: REAL_LUNG_SERIES.thickness,
-        kV: REAL_LUNG_SERIES.kV,
-        mAs: REAL_LUNG_SERIES.mAs,
-        fov: REAL_LUNG_SERIES.fov,
-        matrix: REAL_LUNG_SERIES.matrix,
+        id: effectiveLungSeries.seriesId,
+        name: effectiveLungSeries.seriesName,
+        count: effectiveLungSeries.count,
+        kernel: effectiveLungSeries.kernel,
+        thickness: effectiveLungSeries.thickness,
+        kV: effectiveLungSeries.kV,
+        mAs: effectiveLungSeries.mAs,
+        fov: effectiveLungSeries.fov,
+        matrix: effectiveLungSeries.matrix,
         seriesType: "static" as SeriesType,
-        images: Array.from({ length: REAL_LUNG_SERIES.count }, (_, i) => ({ id: `qin-img-${i + 1}`, name: `Image ${i + 1}` })),
+        images: Array.from({ length: effectiveLungSeries.count }, (_, i) => ({ id: `${isBrainHelicalDemo ? "brain" : "qin"}-img-${i + 1}`, name: `Image ${i + 1}` })),
     }];
     const selectedSeries =
         safeSeriesList.find((s) => s.id === selectedSeriesId) ??
@@ -837,6 +984,11 @@ const ViewScreen = () => {
             if (isFourDEntry && preferred && prev !== preferred.id) {
                 return preferred.id;
             }
+            if (isBrainHelicalDemo && !safeSeriesList.find((s) => s.id === prev && s.dicomBasePath)) {
+                setSliceIndex(getSeriesMidSliceIndex(first.count));
+                dicomWindowAppliedSeriesRef.current = null;
+                return first.id;
+            }
             // If current ID is still the static placeholder and we now have session data, switch to first session series
             if (prev === REAL_LUNG_SERIES.seriesId && scanSession) return first.id;
             // If selected ID is no longer in the list (series was removed), fall back to first
@@ -844,7 +996,7 @@ const ViewScreen = () => {
             return prev;
         });
         // Apply target series WW/WL preset on session load (4D入口优先使用4D重建序列预设)
-        if (scanSession && target?.defaultWw != null && target.defaultWl != null) {
+        if (target?.defaultWw != null && target.defaultWl != null) {
             setWw(target.defaultWw);
             setWl(target.defaultWl);
             setDisplayWw(target.defaultWw);
@@ -852,16 +1004,17 @@ const ViewScreen = () => {
             defaultWindowRef.current = { ww: target.defaultWw, wl: target.defaultWl };
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [scanSession, isFourDEntry, preferredSeriesForFourDEntry]);
+    }, [scanSession, isFourDEntry, isBrainHelicalDemo, preferredSeriesForFourDEntry]);
 
     const seriesImageUrls = useMemo(
-        () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index, selectedSeries.seriesType)),
-        [selectedSeries.seriesType, totalSlices]
+        () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index, selectedSeries.seriesType, isBrainHelicalDemo, selectedSeries)),
+        [selectedSeries, totalSlices, isBrainHelicalDemo]
     );
     const handleSeriesSelect = useCallback((seriesId: string) => {
         const nextSeries = safeSeriesList.find((series) => series.id === seriesId);
         setSelectedSeriesId(seriesId);
-        setSliceIndex(getSeriesMidSliceIndex(nextSeries?.count ?? REAL_LUNG_SERIES.count));
+        setSliceIndex(getSeriesMidSliceIndex(nextSeries?.count ?? effectiveLungSeries.count));
+        dicomWindowAppliedSeriesRef.current = null;
         setAnnotations([]);
         setDraftMeasure(null);
         measureStartRef.current = null;
@@ -874,7 +1027,7 @@ const ViewScreen = () => {
             setDisplayWl(nextSeries.defaultWl);
             defaultWindowRef.current = { ww: nextSeries.defaultWw, wl: nextSeries.defaultWl };
         }
-    }, [seriesList]);
+    }, [effectiveLungSeries.count, safeSeriesList]);
     const screenPointInViewport = (clientX: number, clientY: number) => {
         const viewport = viewportRef.current;
         if (!viewport) return null;
@@ -906,7 +1059,7 @@ const ViewScreen = () => {
     useEffect(() => {
         const loadSlice = async () => {
             try {
-                const url = getSeriesDicomUrl(clampSliceIndex(sliceIndex), selectedSeries.seriesType);
+                const url = getSeriesDicomUrl(clampSliceIndex(sliceIndex), selectedSeries.seriesType, isBrainHelicalDemo, selectedSeries);
                 const response = await fetch(url);
                 if (!response.ok) {
                     throw new Error(`Failed to fetch ${url}`);
@@ -917,8 +1070,8 @@ const ViewScreen = () => {
 
                 const rows = dataSet.uint16("x00280010") ?? 0;
                 const cols = dataSet.uint16("x00280011") ?? 0;
-                const wcFromTag = Number(dataSet.string("x00281050") ?? "45");
-                const wwFromTag = Number(dataSet.string("x00281051") ?? "350");
+                const wcFromTag = parseDicomNumber(dataSet.string("x00281050"), 45);
+                const wwFromTag = parseDicomNumber(dataSet.string("x00281051"), 350);
                 const patientName = cleanOverlayText(formatPersonName(dataSet.string("x00100010")));
                 const patientId = cleanOverlayText(dataSet.string("x00100020"));
                 const patientSex = cleanOverlayText(dataSet.string("x00100040"));
@@ -941,7 +1094,8 @@ const ViewScreen = () => {
                 const parsedWw = Number.isFinite(wwFromTag) && wwFromTag > 1 ? wwFromTag : 350;
                 const parsedWl = Number.isFinite(wcFromTag) ? wcFromTag : 45;
                 defaultWindowRef.current = { ww: parsedWw, wl: parsedWl };
-                if (sliceIndex === getSeriesMidSliceIndex(selectedSeries.count)) {
+                if (dicomWindowAppliedSeriesRef.current !== selectedSeries.id) {
+                    dicomWindowAppliedSeriesRef.current = selectedSeries.id;
                     setWw(parsedWw);
                     setWl(parsedWl);
                     setDisplayWw(parsedWw);
@@ -982,7 +1136,7 @@ const ViewScreen = () => {
         };
 
         loadSlice();
-    }, [sliceIndex, selectedSeriesId, selectedSeries.name, selectedSeries.seriesType, clampSliceIndex]);
+    }, [sliceIndex, selectedSeriesId, selectedSeries.id, selectedSeries.name, selectedSeries.seriesType, selectedSeries.count, clampSliceIndex, isBrainHelicalDemo]);
 
     // (3D canvas renderCurrentSlice removed — now handled by CornerstoneMPRViewport)
 
@@ -1840,6 +1994,8 @@ const ViewScreen = () => {
                                 onWindowLevelChange={(wc, wwidth) => {
                                     setDisplayWl(Math.round(wc));
                                     setDisplayWw(Math.round(wwidth));
+                                    setWl(Math.round(wc));
+                                    setWw(Math.round(wwidth));
                                 }}
                             />
                             {hasMultipleSlices && (
@@ -2027,6 +2183,8 @@ const ViewScreen = () => {
                                     action: () => {
                                         if (imageMode === "2D") {
                                             dicomViewerRef.current?.reset();
+                                            setWw(defaultWindowRef.current.ww);
+                                            setWl(defaultWindowRef.current.wl);
                                             setDisplayWw(defaultWindowRef.current.ww);
                                             setDisplayWl(defaultWindowRef.current.wl);
                                         } else {

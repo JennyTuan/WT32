@@ -44,3 +44,10 @@ app.include_router(scan_ws_router)
 DICOM_OUT_DIR = DATA_DIR / "dicom_out"
 DICOM_OUT_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/dicom-out", StaticFiles(directory=DICOM_OUT_DIR), name="dicom_out")
+HEAD_STROKE_DEMO_PLAIN_DIR = DATA_DIR / "Head Stroke Demo [Plain]"
+if HEAD_STROKE_DEMO_PLAIN_DIR.exists():
+    app.mount(
+        "/dicom-head-stroke-plain",
+        StaticFiles(directory=HEAD_STROKE_DEMO_PLAIN_DIR),
+        name="dicom_head_stroke_plain",
+    )

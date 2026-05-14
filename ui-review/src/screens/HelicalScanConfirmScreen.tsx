@@ -28,7 +28,18 @@ import type { ApiScanSessionDetail, ApiScanSessionHelicalParam } from "../lib/sc
 import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
-import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
+import { TomographicScoutViewport, type TomographicScoutSeriesOverride } from "./SequenceScanConfirmScreen";
+
+// Demo dataset for the "脑部螺旋" (brain helical, non-gating) protocol — JPEG Lossless
+// DICOM served from backend/data/dicom_out/HeadStrokeDemo/. Other protocols and the
+// gating/4D path do NOT use this override and keep their legacy loader unchanged.
+const BRAIN_HELICAL_PROTOCOL_TITLE = "脑部螺旋";
+const BRAIN_HELICAL_SCOUT_OVERRIDE: TomographicScoutSeriesOverride = {
+    kind: "topogram",
+    url: "/dicom-out/HeadStrokeDemo/Topogram/image-001.dcm",
+    fallbackWindowWidth: 130,
+    fallbackWindowLevel: 130,
+};
 import AutoMaPanel, { type NoiseLevel } from "../components/AutoMaPanel";
 
 // ---------------------------------------------------------------------------
@@ -1301,6 +1312,12 @@ const GatingHelicalConfirmScreen = () => {
 const HelicalScanConfirmScreen = () => {
     const isGatingWorkflow = false;
 
+    const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(() => {
+        const plans = loadSelectedScanWorkflowPlans();
+        const isBrainHelical = plans.some((plan) => plan.title === BRAIN_HELICAL_PROTOCOL_TITLE);
+        return isBrainHelical ? BRAIN_HELICAL_SCOUT_OVERRIDE : undefined;
+    }, []);
+
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [helicalParam, setHelicalParam] = useState<ApiScanSessionHelicalParam | null>(null);
     const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("standard");
@@ -1395,6 +1412,7 @@ const HelicalScanConfirmScreen = () => {
                         initialMeasurements={measurements}
                         scanPositionRatio={scanPositionRatio}
                         onScanPositionRatioChange={setScanPositionRatio}
+                        seriesOverride={scoutSeriesOverride}
                     />
                     {helicalParam && showAutoMaPanel && (
                         <AutoMaPanel

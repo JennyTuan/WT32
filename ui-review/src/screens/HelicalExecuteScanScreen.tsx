@@ -3,7 +3,8 @@ import { Zap } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import DicomViewer from "../components/DicomViewer";
 import GatingMonitorPanel from "../components/GatingMonitorPanel";
-import { fetchSelectedScanSession } from "../lib/scanSession";
+import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
+import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import {
     applySupplementalScan,
     generateMockGatingResult,
@@ -11,6 +12,50 @@ import {
     saveGatingResult,
     type GatingBreathingMode,
 } from "../lib/gatingResult";
+
+// Demo dataset for the "脑部螺旋" (brain helical, non-gating) protocol — JPEG Lossless
+// Thin Brain reconstruction (219 slices). Used only when executeMode === "helical"
+// AND the active workflow plan title matches; gated_helical / gated_axial paths are
+// untouched and keep using HELICAL_RESULT_SERIES.
+const BRAIN_HELICAL_PROTOCOL_TITLE = "脑部螺旋";
+const BRAIN_HELICAL_RESULT_SERIES = {
+    basePath: "/dicom-out/HeadStrokeDemo/ThinBrain",
+    count: 219,
+    fallbackWindowWidth: 100,
+    fallbackWindowLevel: 35,
+};
+
+type HelicalResultSeriesConfig = {
+    basePath: string;
+    count: number;
+    fallbackWindowWidth: number;
+    fallbackWindowLevel: number;
+};
+
+const SCAN_SESSION_DETAIL_CACHE_KEY = "selectedScanSessionDetail";
+
+const isBrainHelicalName = (value: string | null | undefined) =>
+    typeof value === "string" && value.includes(BRAIN_HELICAL_PROTOCOL_TITLE);
+
+const isBrainHelicalScanSession = (session: ApiScanSessionDetail | null) => {
+    if (!session) return false;
+    return (
+        session.acquisition_type === "regular" &&
+        session.body_part.toLowerCase() === "head" &&
+        (session.protocol_id === 1 || isBrainHelicalName(session.name) || isBrainHelicalName(session.session_name))
+    );
+};
+
+const loadCachedBrainHelicalSession = () => {
+    try {
+        const raw = localStorage.getItem(SCAN_SESSION_DETAIL_CACHE_KEY);
+        if (!raw) return null;
+        const session = JSON.parse(raw) as ApiScanSessionDetail;
+        return isBrainHelicalScanSession(session) ? session : null;
+    } catch {
+        return null;
+    }
+};
 
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
@@ -49,10 +94,24 @@ function HelicalExecuteIdleViewport({ isGated }: { isGated: boolean }) {
     );
 }
 
-function HelicalLiveViewport({ playbackActive }: { playbackActive: boolean }) {
-    const imageUrls = Array.from(
-        { length: HELICAL_RESULT_SERIES.count },
-        (_, index) => `${HELICAL_RESULT_SERIES.basePath}/1-${String(index + 1).padStart(3, "0")}.dcm`
+function HelicalLiveViewport({
+    playbackActive,
+    seriesOverride,
+}: {
+    playbackActive: boolean;
+    seriesOverride?: HelicalResultSeriesConfig;
+}) {
+    const series = seriesOverride ?? HELICAL_RESULT_SERIES;
+    const useOverride = !!seriesOverride;
+    const imageUrls = useMemo(
+        () =>
+            Array.from({ length: series.count }, (_, index) => {
+                const name = useOverride
+                    ? `image-${String(index + 1).padStart(3, "0")}.dcm`
+                    : `1-${String(index + 1).padStart(3, "0")}.dcm`;
+                return `${series.basePath}/${name}`;
+            }),
+        [series.basePath, series.count, useOverride],
     );
     const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
@@ -79,12 +138,13 @@ function HelicalLiveViewport({ playbackActive }: { playbackActive: boolean }) {
     return (
         <div className="relative h-full w-full overflow-hidden bg-black">
             <DicomViewer
+                key={series.basePath}
                 imageUrls={imageUrls}
                 currentImageIndex={currentImageIndex}
                 onImageIndexChange={setCurrentImageIndex}
                 activeTool="pan"
-                windowCenter={HELICAL_RESULT_SERIES.fallbackWindowLevel}
-                windowWidth={HELICAL_RESULT_SERIES.fallbackWindowWidth}
+                windowCenter={series.fallbackWindowLevel}
+                windowWidth={series.fallbackWindowWidth}
             />
         </div>
     );
@@ -224,6 +284,26 @@ export default function HelicalExecuteScanScreen() {
     const executeMode = (params.get("mode") ?? "helical") as ExecuteMode;
     const isGated = executeMode === "gated_helical" || executeMode === "gated_axial";
     const isGatedAxial = executeMode === "gated_axial";
+    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(() => loadCachedBrainHelicalSession());
+
+    useEffect(() => {
+        fetchSelectedScanSession({ preferCache: true })
+            .then((session) => {
+                if (session) setScanSession(session);
+            })
+            .catch(() => { /* live viewport falls back to workflow-plan detection */ });
+    }, []);
+
+    // Brain-helical demo override: only when running NON-gated helical for the "脑部螺旋"
+    // protocol. Gated paths intentionally fall through to the legacy HELICAL_RESULT_SERIES.
+    const helicalResultOverride = useMemo<HelicalResultSeriesConfig | undefined>(() => {
+        if (executeMode !== "helical") return undefined;
+        const plans = loadSelectedScanWorkflowPlans();
+        const isBrainHelical =
+            plans.some((plan) => isBrainHelicalName(plan.title)) ||
+            isBrainHelicalScanSession(scanSession);
+        return isBrainHelical ? BRAIN_HELICAL_RESULT_SERIES : undefined;
+    }, [executeMode, scanSession]);
     const [stage, setStage] = useState<ScanStage>("idle");
     const [holdProgress, setHoldProgress] = useState(0);
     const [guideVisible, setGuideVisible] = useState(true);
@@ -566,7 +646,7 @@ export default function HelicalExecuteScanScreen() {
             waitingForBreath={axialWaitingForBreath}
         />
     ) : showLiveViewport ? (
-        <HelicalLiveViewport playbackActive={stage !== "completed"} />
+        <HelicalLiveViewport playbackActive={stage !== "completed"} seriesOverride={helicalResultOverride} />
     ) : (
         <HelicalExecuteIdleViewport isGated={isGated} />
     );

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
 import { Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { fetchSelectedScanSession } from "../lib/scanSession";
+import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import DicomViewer from "../components/DicomViewer";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
 const HOLD_DURATION_MS = 3000;
@@ -30,8 +31,24 @@ const FOUR_D_SCOUT_SERIES = {
     fallbackWindowWidth: 500,
     fallbackWindowLevel: 50,
 };
+const BRAIN_HELICAL_PROTOCOL_TITLE = "脑部螺旋";
+const BRAIN_HELICAL_SCOUT_EXECUTE_SERIES = {
+    basePath: "/dicom-head-stroke-plain/Series%20001%20%5BTopogram%5D",
+    count: 1,
+    firstImageNumber: 1,
+    fileNamePrefix: "",
+    fileNamePadding: 0,
+    fileNames: ["1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.6.0.dcm"],
+    directImage: true,
+    useCornerstoneViewer: true,
+    fallbackWindowWidth: 130,
+    fallbackWindowLevel: 130,
+};
 
-type ScoutDicomSeries = typeof SCOUT_SERIES;
+type ScoutDicomSeries = typeof SCOUT_SERIES & {
+    fileNames?: string[];
+    useCornerstoneViewer?: boolean;
+};
 
 type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "rendering" | "completed";
 
@@ -96,6 +113,34 @@ const resolvePostScoutScanTypeFromWorkflowPlans = (): PostScoutScanType | null =
     return null;
 };
 
+const SCAN_SESSION_DETAIL_CACHE_KEY = "selectedScanSessionDetail";
+
+const isBrainHelicalName = (value: string | null | undefined) =>
+    typeof value === "string" && value.includes(BRAIN_HELICAL_PROTOCOL_TITLE);
+
+const isBrainHelicalScanSession = (session: ApiScanSessionDetail | null) => {
+    if (!session) return false;
+    return (
+        session.acquisition_type === "regular" &&
+        session.body_part.toLowerCase() === "head" &&
+        (session.protocol_id === 1 || isBrainHelicalName(session.name) || isBrainHelicalName(session.session_name))
+    );
+};
+
+const loadCachedBrainHelicalSession = () => {
+    try {
+        const raw = localStorage.getItem(SCAN_SESSION_DETAIL_CACHE_KEY);
+        if (!raw) return null;
+        const session = JSON.parse(raw) as ApiScanSessionDetail;
+        return isBrainHelicalScanSession(session) ? session : null;
+    } catch {
+        return null;
+    }
+};
+
+const isBrainHelicalWorkflow = () =>
+    loadSelectedScanWorkflowPlans().some((plan) => isBrainHelicalName(plan.title));
+
 function clamp01(value: number) {
     return Math.min(1, Math.max(0, value));
 }
@@ -116,8 +161,33 @@ function ScoutProjectionViewport({
     const metaRef = useRef<ProjectionMeta | null>(null);
     const [meta, setMeta] = useState<ProjectionMeta | null>(null);
     const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const imageUrls = useMemo(
+        () =>
+            series.fileNames?.length
+                ? series.fileNames.map((fileName) => `${series.basePath}/${fileName}`)
+                : Array.from({ length: series.count }, (_, index) => {
+                    const imageNumber = series.firstImageNumber + index;
+                    const fileName = `${series.fileNamePrefix}${String(imageNumber).padStart(series.fileNamePadding, "0")}.dcm`;
+                    return `${series.basePath}/${fileName}`;
+                }),
+        [series]
+    );
 
     useEffect(() => {
+        if (series.useCornerstoneViewer) {
+            setLoadState("ready");
+            setMeta({
+                width: 512,
+                height: 512,
+                ww: series.fallbackWindowWidth,
+                wl: series.fallbackWindowLevel,
+                kvp: "120",
+                mas: "198",
+                thickness: "2.0",
+            });
+            return;
+        }
+
         let cancelled = false;
 
         const loadSlices = async () => {
@@ -345,15 +415,35 @@ function ScoutProjectionViewport({
 
     return (
         <div ref={viewportRef} className="absolute inset-0 overflow-hidden bg-black">
-            <canvas
-                ref={canvasRef}
-                className="absolute inset-0 h-full w-full"
-                style={{
-                    clipPath: `inset(${(1 - renderProgress) * 100}% 0 0 0)`,
-                    opacity: active ? 1 : 0,
-                    transition: "opacity 180ms ease",
-                }}
-            />
+            {series.useCornerstoneViewer ? (
+                <div
+                    className="absolute inset-0 h-full w-full"
+                    style={{
+                        clipPath: `inset(${(1 - renderProgress) * 100}% 0 0 0)`,
+                        opacity: active ? 1 : 0,
+                        transition: "opacity 180ms ease",
+                    }}
+                >
+                    <DicomViewer
+                        key={series.basePath}
+                        imageUrls={imageUrls}
+                        currentImageIndex={0}
+                        activeTool="pan"
+                        windowCenter={series.fallbackWindowLevel}
+                        windowWidth={series.fallbackWindowWidth}
+                    />
+                </div>
+            ) : (
+                <canvas
+                    ref={canvasRef}
+                    className="absolute inset-0 h-full w-full"
+                    style={{
+                        clipPath: `inset(${(1 - renderProgress) * 100}% 0 0 0)`,
+                        opacity: active ? 1 : 0,
+                        transition: "opacity 180ms ease",
+                    }}
+                />
+            )}
 
             <div className="pointer-events-none absolute inset-x-0 top-0 h-14 bg-gradient-to-b from-black/55 to-transparent" />
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/55 to-transparent" />
@@ -414,6 +504,7 @@ export default function ScoutExecuteScanScreen() {
     const [postScoutScanType, setPostScoutScanType] = useState<PostScoutScanType>(
         () => resolvePostScoutScanTypeFromWorkflowPlans() ?? DEFAULT_POST_SCOUT_SCAN_TYPE
     );
+    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(() => loadCachedBrainHelicalSession());
     const [gatingBreathingMode, setGatingBreathingMode] = useState<string | null>(null);
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
@@ -434,6 +525,7 @@ export default function ScoutExecuteScanScreen() {
                     if (workflowType) setPostScoutScanType(workflowType);
                     return;
                 }
+                setScanSession(scanSession);
 
                 const nextSeries = scanSession.series.find(
                     (series) => series.series_type === "helical" || series.series_type === "axial" || series.series_type === "4d"
@@ -469,7 +561,12 @@ export default function ScoutExecuteScanScreen() {
 
     const postScoutAction = POST_SCOUT_SCAN_CONFIG[postScoutScanType];
     const isFourDScoutWorkflow = postScoutScanType === "4d";
-    const scoutResultSeries = isFourDScoutWorkflow ? FOUR_D_SCOUT_SERIES : SCOUT_SERIES;
+    const isBrainHelicalScoutWorkflow = isBrainHelicalWorkflow() || isBrainHelicalScanSession(scanSession);
+    const scoutResultSeries = isFourDScoutWorkflow
+        ? FOUR_D_SCOUT_SERIES
+        : isBrainHelicalScoutWorkflow
+            ? BRAIN_HELICAL_SCOUT_EXECUTE_SERIES
+            : SCOUT_SERIES;
 
     const postScoutRoute = useMemo(() => {
         if ((postScoutScanType === "gated_helical" || postScoutScanType === "gated_axial") && gatingBreathingMode) {

@@ -1,11 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
+import { imageLoader, metaData } from "@cornerstonejs/core";
 import { Hand, Move, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { fetchSelectedScanSession, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
 import type { ApiScanSessionAxialParam } from "../lib/scanSession";
 import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
 import AutoMaPanel, { type NoiseLevel } from "../components/AutoMaPanel";
 import ScanConfirmScreen from "./ScanConfirmScreen";
+import { buildWadoImageId, initCornerstone } from "../lib/cornerstone/initCornerstone";
+
+// Optional cornerstone-backed loading source. When provided, TomographicScoutViewport
+// loads via cornerstone (so JPEG Lossless / other compressed transfer syntaxes work).
+// When omitted, the legacy dicom-parser path is used unchanged.
+//   - kind: "topogram" → render a real scanner-produced AP/LAT localizer image as-is
+//   - kind: "axialStack" → synthesize a coronal-band projection from a stack of axial slices
+export type TomographicScoutSeriesOverride =
+    | {
+          kind: "topogram";
+          url: string;
+          fallbackWindowWidth?: number;
+          fallbackWindowLevel?: number;
+      }
+    | {
+          kind: "axialStack";
+          urls: string[];
+          fallbackWindowWidth?: number;
+          fallbackWindowLevel?: number;
+      };
 
 const SCOUT_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
@@ -63,12 +84,14 @@ export function TomographicScoutViewport({
     scanPositionRatio = 0.5,
     onScanPositionRatioChange,
     hideTools = false,
+    seriesOverride,
 }: {
     onMeasurementChange: (values: { scanLength: string; scoutFov: string }) => void;
     initialMeasurements?: { scanLength?: string; scoutFov?: string };
     scanPositionRatio?: number;
     onScanPositionRatioChange?: (ratio: number) => void;
     hideTools?: boolean;
+    seriesOverride?: TomographicScoutSeriesOverride;
 }) {
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -114,70 +137,207 @@ export function TomographicScoutViewport({
     useEffect(() => {
         let cancelled = false;
 
+        const loadAxialStackViaCornerstone = async (
+            override: Extract<TomographicScoutSeriesOverride, { kind: "axialStack" }>,
+        ): Promise<LoadedSlice[]> => {
+            await initCornerstone();
+            const fallbackWw = override.fallbackWindowWidth ?? SCOUT_SERIES.fallbackWindowWidth;
+            const fallbackWl = override.fallbackWindowLevel ?? SCOUT_SERIES.fallbackWindowLevel;
+            const slices: LoadedSlice[] = [];
+            const concurrency = 8;
+            for (let start = 0; start < override.urls.length; start += concurrency) {
+                const batch = override.urls.slice(start, start + concurrency);
+                const loadedBatch = await Promise.all(
+                    batch.map(async (url, idxInBatch) => {
+                        const indexInSeries = start + idxInBatch;
+                        const imageId = buildWadoImageId(url);
+                        const image = await imageLoader.loadAndCacheImage(imageId);
+                        const rows = image.rows;
+                        const cols = image.columns;
+                        const slope = (image as { slope?: number }).slope ?? 1;
+                        const intercept = (image as { intercept?: number }).intercept ?? 0;
+                        const plane = (metaData.get("imagePlaneModule", imageId) ?? {}) as {
+                            imagePositionPatient?: number[];
+                            columnPixelSpacing?: number;
+                            pixelSpacing?: number[];
+                            sliceThickness?: number;
+                        };
+                        const voi = (metaData.get("voiLutModule", imageId) ?? {}) as {
+                            windowCenter?: number | number[];
+                            windowWidth?: number | number[];
+                        };
+                        const general = (metaData.get("generalImageModule", imageId) ?? {}) as {
+                            instanceNumber?: number;
+                        };
+                        const positionZ = plane.imagePositionPatient?.[2] ?? indexInSeries;
+                        const pixelSpacingX = plane.columnPixelSpacing ?? plane.pixelSpacing?.[1] ?? 1;
+                        const sliceThickness = Number.isFinite(plane.sliceThickness) && (plane.sliceThickness ?? 0) > 0
+                            ? (plane.sliceThickness as number)
+                            : 1;
+                        const wwRaw = Array.isArray(voi.windowWidth) ? voi.windowWidth[0] : voi.windowWidth;
+                        const wlRaw = Array.isArray(voi.windowCenter) ? voi.windowCenter[0] : voi.windowCenter;
+                        const ww = Number.isFinite(wwRaw) ? (wwRaw as number) : fallbackWw;
+                        const wl = Number.isFinite(wlRaw) ? (wlRaw as number) : fallbackWl;
+                        const pixelData = image.getPixelData() as Int16Array | Uint16Array;
+                        const hu = new Float32Array(pixelData.length);
+                        for (let i = 0; i < pixelData.length; i += 1) {
+                            hu[i] = pixelData[i] * slope + intercept;
+                        }
+                        return {
+                            instanceNumber: general.instanceNumber ?? indexInSeries + 1,
+                            positionZ,
+                            rows,
+                            cols,
+                            pixelSpacingX,
+                            sliceThickness,
+                            hu,
+                            ww,
+                            wl,
+                        } as LoadedSlice;
+                    }),
+                );
+                slices.push(...loadedBatch);
+            }
+            return slices;
+        };
+
+        const loadViaDicomParser = async (): Promise<LoadedSlice[]> => {
+            const sliceNumbers = Array.from({ length: SCOUT_SERIES.count }, (_, index) => index + 1);
+            const slices: LoadedSlice[] = [];
+            const concurrency = 8;
+
+            for (let start = 0; start < sliceNumbers.length; start += concurrency) {
+                const batch = sliceNumbers.slice(start, start + concurrency);
+                const loadedBatch = await Promise.all(
+                    batch.map(async (sliceNumber) => {
+                        const fileName = `1-${String(sliceNumber).padStart(3, "0")}.dcm`;
+                        const response = await fetch(`${SCOUT_SERIES.basePath}/${fileName}`);
+                        if (!response.ok) throw new Error(`Failed to fetch ${fileName}`);
+
+                        const byteArray = new Uint8Array(await response.arrayBuffer());
+                        const dataSet = dicomParser.parseDicom(byteArray);
+                        const rows = dataSet.uint16("x00280010") ?? 0;
+                        const cols = dataSet.uint16("x00280011") ?? 0;
+                        const bitsAllocated = dataSet.uint16("x00280100") ?? 16;
+                        const pixelRepresentation = dataSet.uint16("x00280103") ?? 0;
+                        const intercept = Number(dataSet.string("x00281052") ?? "0");
+                        const slope = Number(dataSet.string("x00281053") ?? "1");
+                        const positionZ = Number((dataSet.string("x00200032") ?? "0\\0\\0").split("\\")[2] ?? 0);
+                        const pixelSpacing = (dataSet.string("x00280030") ?? "1\\1").split("\\").map(Number);
+                        const sliceThickness = Number(dataSet.string("x00180050") ?? "1");
+                        const pixelDataElement = dataSet.elements.x7fe00010;
+                        if (!pixelDataElement || rows === 0 || cols === 0) throw new Error(`Missing pixel data for ${fileName}`);
+
+                        const pixelData = byteArray.slice(
+                            pixelDataElement.dataOffset,
+                            pixelDataElement.dataOffset + pixelDataElement.length
+                        );
+                        const pixelBuffer = pixelData.buffer.slice(
+                            pixelData.byteOffset,
+                            pixelData.byteOffset + pixelData.byteLength
+                        );
+
+                        const values =
+                            bitsAllocated === 16
+                                ? pixelRepresentation === 1
+                                    ? new Int16Array(pixelBuffer)
+                                    : new Uint16Array(pixelBuffer)
+                                : new Uint16Array(pixelBuffer);
+
+                        const hu = new Float32Array(values.length);
+                        for (let i = 0; i < values.length; i += 1) {
+                            hu[i] = values[i] * slope + intercept;
+                        }
+
+                        return {
+                            instanceNumber: Number(dataSet.string("x00200013") ?? sliceNumber),
+                            positionZ,
+                            rows,
+                            cols,
+                            pixelSpacingX: pixelSpacing[1] || 1,
+                            sliceThickness: Number.isFinite(sliceThickness) && sliceThickness > 0 ? sliceThickness : 1,
+                            hu,
+                            ww: Number(dataSet.string("x00281051") ?? `${SCOUT_SERIES.fallbackWindowWidth}`),
+                            wl: Number(dataSet.string("x00281050") ?? `${SCOUT_SERIES.fallbackWindowLevel}`),
+                        };
+                    })
+                );
+                slices.push(...loadedBatch);
+            }
+            return slices;
+        };
+
+        const loadTopogramViaCornerstone = async (
+            override: Extract<TomographicScoutSeriesOverride, { kind: "topogram" }>,
+        ): Promise<{ output: Uint8ClampedArray; meta: ProjectionMeta }> => {
+            await initCornerstone();
+            const fallbackWw = override.fallbackWindowWidth ?? SCOUT_SERIES.fallbackWindowWidth;
+            const fallbackWl = override.fallbackWindowLevel ?? SCOUT_SERIES.fallbackWindowLevel;
+            const imageId = buildWadoImageId(override.url);
+            const image = await imageLoader.loadAndCacheImage(imageId);
+            const rows = image.rows;
+            const cols = image.columns;
+            const slope = (image as { slope?: number }).slope ?? 1;
+            const intercept = (image as { intercept?: number }).intercept ?? 0;
+            const plane = (metaData.get("imagePlaneModule", imageId) ?? {}) as {
+                columnPixelSpacing?: number;
+                rowPixelSpacing?: number;
+                pixelSpacing?: number[];
+            };
+            const voi = (metaData.get("voiLutModule", imageId) ?? {}) as {
+                windowCenter?: number | number[];
+                windowWidth?: number | number[];
+            };
+            const general = (metaData.get("imagePixelModule", imageId) ?? {}) as {
+                photometricInterpretation?: string;
+            };
+            const wwRaw = Array.isArray(voi.windowWidth) ? voi.windowWidth[0] : voi.windowWidth;
+            const wlRaw = Array.isArray(voi.windowCenter) ? voi.windowCenter[0] : voi.windowCenter;
+            const ww = Number.isFinite(wwRaw) && (wwRaw ?? 0) > 1 ? (wwRaw as number) : fallbackWw;
+            const wl = Number.isFinite(wlRaw) ? (wlRaw as number) : fallbackWl;
+            const pixelSpacingX = plane.columnPixelSpacing ?? plane.pixelSpacing?.[1] ?? 1;
+            const pixelSpacingY = plane.rowPixelSpacing ?? plane.pixelSpacing?.[0] ?? 1;
+            const invert = (general.photometricInterpretation ?? "").toUpperCase() === "MONOCHROME1";
+
+            const pixelData = image.getPixelData() as Int16Array | Uint16Array;
+            const minVal = wl - ww / 2;
+            const maxVal = wl + ww / 2;
+            const range = Math.max(maxVal - minVal, 1);
+            const output = new Uint8ClampedArray(cols * rows);
+            for (let i = 0; i < pixelData.length; i += 1) {
+                const value = pixelData[i] * slope + intercept;
+                const normalized = clamp01((value - minVal) / range);
+                const gray = Math.round(normalized * 255);
+                output[i] = invert ? 255 - gray : gray;
+            }
+            return {
+                output,
+                meta: {
+                    width: cols,
+                    height: rows,
+                    pixelSpacingX,
+                    // For a topogram, the vertical pixel pitch (mm/row) defines the Z extent the
+                    // crop box maps onto — feed pixelSpacingY in place of sliceThickness.
+                    sliceThickness: pixelSpacingY,
+                },
+            };
+        };
+
         const loadProjection = async () => {
             try {
-                const sliceNumbers = Array.from({ length: SCOUT_SERIES.count }, (_, index) => index + 1);
-                const slices: LoadedSlice[] = [];
-                const concurrency = 8;
-
-                for (let start = 0; start < sliceNumbers.length; start += concurrency) {
-                    const batch = sliceNumbers.slice(start, start + concurrency);
-                    const loadedBatch = await Promise.all(
-                        batch.map(async (sliceNumber) => {
-                            const fileName = `1-${String(sliceNumber).padStart(3, "0")}.dcm`;
-                            const response = await fetch(`${SCOUT_SERIES.basePath}/${fileName}`);
-                            if (!response.ok) throw new Error(`Failed to fetch ${fileName}`);
-
-                            const byteArray = new Uint8Array(await response.arrayBuffer());
-                            const dataSet = dicomParser.parseDicom(byteArray);
-                            const rows = dataSet.uint16("x00280010") ?? 0;
-                            const cols = dataSet.uint16("x00280011") ?? 0;
-                            const bitsAllocated = dataSet.uint16("x00280100") ?? 16;
-                            const pixelRepresentation = dataSet.uint16("x00280103") ?? 0;
-                            const intercept = Number(dataSet.string("x00281052") ?? "0");
-                            const slope = Number(dataSet.string("x00281053") ?? "1");
-                            const positionZ = Number((dataSet.string("x00200032") ?? "0\\0\\0").split("\\")[2] ?? 0);
-                            const pixelSpacing = (dataSet.string("x00280030") ?? "1\\1").split("\\").map(Number);
-                            const sliceThickness = Number(dataSet.string("x00180050") ?? "1");
-                            const pixelDataElement = dataSet.elements.x7fe00010;
-                            if (!pixelDataElement || rows === 0 || cols === 0) throw new Error(`Missing pixel data for ${fileName}`);
-
-                            const pixelData = byteArray.slice(
-                                pixelDataElement.dataOffset,
-                                pixelDataElement.dataOffset + pixelDataElement.length
-                            );
-                            const pixelBuffer = pixelData.buffer.slice(
-                                pixelData.byteOffset,
-                                pixelData.byteOffset + pixelData.byteLength
-                            );
-
-                            const values =
-                                bitsAllocated === 16
-                                    ? pixelRepresentation === 1
-                                        ? new Int16Array(pixelBuffer)
-                                        : new Uint16Array(pixelBuffer)
-                                    : new Uint16Array(pixelBuffer);
-
-                            const hu = new Float32Array(values.length);
-                            for (let i = 0; i < values.length; i += 1) {
-                                hu[i] = values[i] * slope + intercept;
-                            }
-
-                            return {
-                                instanceNumber: Number(dataSet.string("x00200013") ?? sliceNumber),
-                                positionZ,
-                                rows,
-                                cols,
-                                pixelSpacingX: pixelSpacing[1] || 1,
-                                sliceThickness: Number.isFinite(sliceThickness) && sliceThickness > 0 ? sliceThickness : 1,
-                                hu,
-                                ww: Number(dataSet.string("x00281051") ?? `${SCOUT_SERIES.fallbackWindowWidth}`),
-                                wl: Number(dataSet.string("x00281050") ?? `${SCOUT_SERIES.fallbackWindowLevel}`),
-                            };
-                        })
-                    );
-                    slices.push(...loadedBatch);
+                if (seriesOverride?.kind === "topogram") {
+                    const { output, meta } = await loadTopogramViaCornerstone(seriesOverride);
+                    if (cancelled) return;
+                    projectionRef.current = output;
+                    metaRef.current = meta;
+                    setLoadState("ready");
+                    return;
                 }
+
+                const slices =
+                    seriesOverride?.kind === "axialStack"
+                        ? await loadAxialStackViaCornerstone(seriesOverride)
+                        : await loadViaDicomParser();
 
                 slices.sort((a, b) => b.positionZ - a.positionZ || a.instanceNumber - b.instanceNumber);
                 if (!slices.length) throw new Error("No scout slices loaded");
@@ -229,7 +389,7 @@ export function TomographicScoutViewport({
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [seriesOverride]);
 
     useEffect(() => {
         const meta = metaRef.current;
