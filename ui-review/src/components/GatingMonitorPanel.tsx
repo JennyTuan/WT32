@@ -18,22 +18,62 @@ interface GatingMonitorPanelProps {
     exposing?: boolean;
     bedPhase?: number;
     waitingForStableBreath?: boolean;
+    showScanMarkers?: boolean;
     readOnly?: boolean;
 }
 
 const SAMPLES = 240;
 const CYCLE_SAMPLES = 48;
 
-function generateWaveform(now: number, jitter: number, drift: number): number[] {
+function generateRawWaveform(now: number, jitter: number, drift: number): number[] {
     const out: number[] = [];
     for (let i = 0; i < SAMPLES; i++) {
-        const t = (now + i) / CYCLE_SAMPLES;
-        const base = -Math.cos(2 * Math.PI * t);
-        const noise = (Math.sin(t * 17.3) * 0.06 + Math.sin(t * 5.7) * 0.04) * jitter;
-        const driftTerm = drift * (i / SAMPLES) * 0.2;
-        out.push(base + noise + driftTerm);
+        const sample = now + i;
+        const t = sample / CYCLE_SAMPLES;
+        const phaseModulation = 0.045 * Math.sin(t * 0.73) + 0.026 * Math.sin(t * 1.41);
+        const amplitude = 1 + 0.09 * Math.sin(t * 0.52) + 0.045 * Math.sin(t * 1.13);
+        const baseline = drift * (i / SAMPLES) * 0.18 + 0.08 * Math.sin(t * 0.31);
+        const breath = -Math.cos(2 * Math.PI * (t + phaseModulation)) * amplitude;
+        const sensorNoise =
+            Math.sin(sample * 0.91) * 0.035 +
+            Math.sin(sample * 1.83 + 0.8) * 0.022 +
+            Math.sin(sample * 3.97) * 0.012;
+        const artifactCenter = 36 + ((Math.floor(now / 85) * 53) % 168);
+        const artifactWidth = waitingArtifactWidth(jitter);
+        const artifact =
+            Math.exp(-((i - artifactCenter) ** 2) / (2 * artifactWidth ** 2)) *
+            0.16 *
+            Math.sin(Math.floor(now / 85) * 1.7);
+        out.push(breath + baseline + (sensorNoise + artifact) * jitter);
     }
     return out;
+}
+
+function waitingArtifactWidth(jitter: number) {
+    return jitter > 1.8 ? 6 : 9;
+}
+
+function filterRespirationWaveform(raw: number[]): number[] {
+    if (raw.length === 0) return raw;
+    const alpha = 0.22;
+    const lowPass: number[] = [];
+    let value = raw[0];
+    for (const sample of raw) {
+        value += alpha * (sample - value);
+        lowPass.push(value);
+    }
+
+    return lowPass.map((_, index) => {
+        let sum = 0;
+        let weight = 0;
+        for (let offset = -3; offset <= 3; offset++) {
+            const sampleIndex = Math.max(0, Math.min(lowPass.length - 1, index + offset));
+            const w = 4 - Math.abs(offset);
+            sum += lowPass[sampleIndex] * w;
+            weight += w;
+        }
+        return sum / weight;
+    });
 }
 
 function findWaveExtrema(samples: number[]) {
@@ -72,6 +112,7 @@ export default function GatingMonitorPanel({
     exposing = false,
     bedPhase,
     waitingForStableBreath = false,
+    showScanMarkers = true,
     readOnly = false,
 }: GatingMonitorPanelProps) {
     const svgRef = useRef<SVGSVGElement | null>(null);
@@ -110,7 +151,11 @@ export default function GatingMonitorPanel({
     const phaseLockedTick = scanActive && bedStrip
         ? Math.round(visibleStartCycle * CYCLE_SAMPLES)
         : tick;
-    const samples = useMemo(() => generateWaveform(phaseLockedTick, jitter, drift), [phaseLockedTick, jitter, drift]);
+    const rawSamples = useMemo(
+        () => generateRawWaveform(phaseLockedTick, jitter, drift),
+        [phaseLockedTick, jitter, drift]
+    );
+    const samples = useMemo(() => filterRespirationWaveform(rawSamples), [rawSamples]);
 
     const stability: StabilityState = useMemo(() => {
         const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
@@ -138,6 +183,10 @@ export default function GatingMonitorPanel({
         () => samples.map((v, i) => `${i === 0 ? "M" : "L"}${(i * stepX).toFixed(1)},${ampToY(v).toFixed(1)}`).join(" "),
         [samples, stepX]
     );
+    const rawWavePath = useMemo(
+        () => rawSamples.map((v, i) => `${i === 0 ? "M" : "L"}${(i * stepX).toFixed(1)},${ampToY(v).toFixed(1)}`).join(" "),
+        [rawSamples, stepX]
+    );
     const waveFill = useMemo(
         () => `M 0,${VBH} L ${samples.map((v, i) => `${(i * stepX).toFixed(1)},${ampToY(v).toFixed(1)}`).join(" L ")} L ${VBW},${VBH} Z`,
         [samples, stepX]
@@ -145,9 +194,6 @@ export default function GatingMonitorPanel({
     const extrema = useMemo(() => findWaveExtrema(samples), [samples]);
 
     const thresholdY = ampToY(threshold);
-    const yPlus1 = ampToY(1);
-    const yMinus1 = ampToY(-1);
-    const yZero = ampToY(0);
     const thresholdForPhase = Math.max(-0.95, Math.min(0.95, threshold));
     const risingPhase = Math.acos(-thresholdForPhase) / (Math.PI * 2);
     const triggerPhase = direction === "rising" ? risingPhase : 1 - risingPhase;
@@ -205,16 +251,6 @@ export default function GatingMonitorPanel({
                     </div>
                 </div>
 
-                {/* gridlines at +1 / 0 / -1 with light labels */}
-                <div className="absolute inset-x-2 top-6 bottom-2 flex flex-col justify-between pointer-events-none opacity-20">
-                    {["+1 平均最大吸气", "0", "−1 平均最大呼气"].map((label) => (
-                        <div key={label} className="flex items-center gap-2">
-                            <span className="text-[8px] w-28 text-right font-mono font-black text-[#64748B]">{label}</span>
-                            <div className="flex-1 h-[0.5px] bg-[#94A3B8]" />
-                        </div>
-                    ))}
-                </div>
-
                 <div className="absolute left-0 right-0 top-6 bottom-2 px-3">
                     <svg
                         ref={svgRef}
@@ -230,26 +266,6 @@ export default function GatingMonitorPanel({
                                 <stop offset="100%" stopColor="#3B82F6" stopOpacity="0.01" />
                             </linearGradient>
                         </defs>
-
-                        {/* mid (0), +1 and -1 baselines as dotted greys */}
-                        <line x1="0" y1={yZero} x2={VBW} y2={yZero} stroke="#94A3B8" strokeWidth="1" strokeDasharray="3 3" opacity="0.4" />
-                        <line x1="0" y1={yPlus1} x2={VBW} y2={yPlus1} stroke="#CBD5E1" strokeWidth="1" strokeDasharray="2 4" opacity="0.6" />
-                        <line x1="0" y1={yMinus1} x2={VBW} y2={yMinus1} stroke="#CBD5E1" strokeWidth="1" strokeDasharray="2 4" opacity="0.6" />
-
-                        {scanActive && bedStrip && Array.from({ length: visibleCycles + 1 }).map((_, i) => {
-                            const x = i * CYCLE_SAMPLES * stepX;
-                            const bedNumber = Math.floor(visibleStartCycle + i) + 1;
-                            return (
-                                <g key={`cycle-${i}`}>
-                                    <line x1={x} y1="0" x2={x} y2={VBH} stroke="#CBD5E1" strokeWidth="1" opacity="0.45" />
-                                    {i < visibleCycles && (
-                                        <text x={x + 5} y={VBH - 6} fill="#64748B" fontSize="8" fontWeight="800">
-                                            BED {bedNumber}
-                                        </text>
-                                    )}
-                                </g>
-                            );
-                        })}
 
                         {/* threshold line — color reflects trigger direction (rising=red toward inhale, falling=amber toward exhale) */}
                         <line
@@ -275,6 +291,15 @@ export default function GatingMonitorPanel({
                         {/* waveform fill + path */}
                         <path d={waveFill} fill="url(#gated-wave-fill)" />
                         <path
+                            d={rawWavePath}
+                            fill="none"
+                            stroke="#94A3B8"
+                            strokeWidth="1.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            opacity="0.58"
+                        />
+                        <path
                             d={wavePath}
                             fill="none"
                             stroke="#2563EB"
@@ -295,7 +320,7 @@ export default function GatingMonitorPanel({
                             />
                         ))}
 
-                        {scanActive && bedStrip && (stripHasExplicitState
+                        {showScanMarkers && scanActive && bedStrip && (stripHasExplicitState
                             ? Array.from(completedIndexSet).filter((bedNumber) => pendingIndexSet.has(bedNumber))
                             : Array.from({ length: completedBeds }, (_, i) => i + 1)
                         ).map((bedNumber) => {
@@ -331,7 +356,7 @@ export default function GatingMonitorPanel({
                             );
                         })}
 
-                        {currentPhaseX !== null && currentPhaseX >= 0 && currentPhaseX <= VBW && (
+                        {showScanMarkers && currentPhaseX !== null && currentPhaseX >= 0 && currentPhaseX <= VBW && (
                             <g>
                                 <line x1={currentPhaseX} y1="0" x2={currentPhaseX} y2={VBH} stroke="#06B6D4" strokeWidth="1.8" opacity="0.9" />
                                 <circle

@@ -374,22 +374,6 @@ export default function GatingReplayPanel({
                     })}
                 </svg>
 
-                {/* current-trigger badge */}
-                <div className="absolute right-3 top-2 rounded-md bg-[#0f172a]/85 border border-[#334155] px-2 py-1 text-[11px]">
-                    <span className="text-[#94a3b8]">当前曝光：</span>
-                    {currentTrigger ? (
-                        <>
-                            <span className="font-bold text-[#facc15]">T{currentTrigger.index}</span>
-                            <span className="text-[#94a3b8]"> · 偏差 </span>
-                            <span className="font-mono">{currentTrigger.deviation.toFixed(2)}</span>
-                            <span className="text-[#94a3b8]"> · 时刻 </span>
-                            <span className="font-mono">{fmtSec(currentTrigger.sampleIndex / result.sampleRate)}</span>
-                        </>
-                    ) : (
-                        <span className="text-[#94a3b8]">—</span>
-                    )}
-                </div>
-
                 {/* trigger list overlay (slides up from bottom) */}
                 {listOpen && (
                     <div

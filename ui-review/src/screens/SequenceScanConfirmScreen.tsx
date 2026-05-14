@@ -4,7 +4,7 @@ import { Hand, Move, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { fetchSelectedScanSession, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
 import type { ApiScanSessionAxialParam } from "../lib/scanSession";
 import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
-import AutoMaPanel from "../components/AutoMaPanel";
+import AutoMaPanel, { type NoiseLevel } from "../components/AutoMaPanel";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
 const SCOUT_SERIES = {
@@ -534,6 +534,7 @@ export function TomographicScoutViewport({
 const SequenceScanConfirmScreen = () => {
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [axialParam, setAxialParam] = useState<ApiScanSessionAxialParam | null>(null);
+    const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("standard");
     const axialParamId = axialParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
 
@@ -562,10 +563,12 @@ const SequenceScanConfirmScreen = () => {
         };
     }, []);
 
-    const handleAutoMaChange = (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number }) => {
-        if (!axialParam) return;
-        setAxialParam((prev) => (prev ? { ...prev, ...patch } : prev));
-        void updateSelectedScanSessionAxialParam(axialParam.id, patch).catch((error) => {
+    const handleAutoMaChange = (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number; noise_level?: NoiseLevel }) => {
+        const { noise_level, ...rest } = patch;
+        if (noise_level) setNoiseLevel(noise_level);
+        if (!axialParam || Object.keys(rest).length === 0) return;
+        setAxialParam((prev) => (prev ? { ...prev, ...rest } : prev));
+        void updateSelectedScanSessionAxialParam(axialParam.id, rest).catch((error) => {
             console.error("Failed to persist Auto mA settings.", error);
         });
     };
@@ -622,6 +625,7 @@ const SequenceScanConfirmScreen = () => {
                             sliceInterval={axialParam.slice_interval}
                             rotationTime={axialParam.rotation_time}
                             stepCount={axialParam.step_count}
+                            noiseLevel={noiseLevel}
                             onChange={handleAutoMaChange}
                         />
                     )}

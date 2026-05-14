@@ -210,6 +210,7 @@ function AxialRealtimeViewport({
                     exposing={stage === "exposing"}
                     bedPhase={currentSlice / GATED_AXIAL_SLICES_PER_BED}
                     waitingForStableBreath={waitingForBreath}
+                    showScanMarkers={false}
                     readOnly
                 />
             </div>

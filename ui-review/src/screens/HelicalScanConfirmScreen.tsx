@@ -29,7 +29,7 @@ import { formatPatientCardSubtitle, loadSelectedPatient } from "../lib/patientSe
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import { TomographicScoutViewport } from "./SequenceScanConfirmScreen";
-import AutoMaPanel from "../components/AutoMaPanel";
+import AutoMaPanel, { type NoiseLevel } from "../components/AutoMaPanel";
 
 // ---------------------------------------------------------------------------
 // Constants for gating waveform / bed positions / DICOM
@@ -1303,6 +1303,7 @@ const HelicalScanConfirmScreen = () => {
 
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [helicalParam, setHelicalParam] = useState<ApiScanSessionHelicalParam | null>(null);
+    const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("standard");
     const helicalParamId = helicalParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
 
@@ -1364,10 +1365,12 @@ const HelicalScanConfirmScreen = () => {
         return <GatingHelicalConfirmScreen />;
     }
 
-    const handleAutoMaChange = (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number }) => {
-        if (!helicalParam) return;
-        setHelicalParam((prev) => (prev ? { ...prev, ...patch } : prev));
-        void updateSelectedScanSessionHelicalParam(helicalParam.id, patch).catch((error) => {
+    const handleAutoMaChange = (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number; noise_level?: NoiseLevel }) => {
+        const { noise_level, ...rest } = patch;
+        if (noise_level) setNoiseLevel(noise_level);
+        if (!helicalParam || Object.keys(rest).length === 0) return;
+        setHelicalParam((prev) => (prev ? { ...prev, ...rest } : prev));
+        void updateSelectedScanSessionHelicalParam(helicalParam.id, rest).catch((error) => {
             console.error("Failed to persist Auto mA settings.", error);
         });
     };
@@ -1397,6 +1400,7 @@ const HelicalScanConfirmScreen = () => {
                             scanLength={scanLengthForCurve}
                             rotationTime={helicalParam.rotation_time}
                             pitch={helicalParam.pitch}
+                            noiseLevel={noiseLevel}
                             onChange={handleAutoMaChange}
                         />
                     )}
