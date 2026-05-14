@@ -86,7 +86,8 @@
       "Bash(mkdir -p .claude)",
       "Bash(echo \"exit=$?\")",
       "Bash(node_modules/.bin/tsc -b)",
-      "Bash(./node_modules/.bin/tsc -b)"
+      "Bash(./node_modules/.bin/tsc -b)",
+      "Bash(python -c \"import pydicom; ds=pydicom.dcmread\\(r'backend/data/20160504 192137 [ - CT Acute Stroke]/Series 001 [CT - 2 0]/1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.2.0.dcm'\\); print\\(ds\\)\")"
     ]
   }
 }

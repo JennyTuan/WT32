@@ -60,10 +60,14 @@ function getHandleCursor(toolMode: "crop" | "pan", handle: DragHandle) {
 export function TomographicScoutViewport({
     onMeasurementChange,
     initialMeasurements,
+    scanPositionRatio = 0.5,
+    onScanPositionRatioChange,
     hideTools = false,
 }: {
     onMeasurementChange: (values: { scanLength: string; scoutFov: string }) => void;
     initialMeasurements?: { scanLength?: string; scoutFov?: string };
+    scanPositionRatio?: number;
+    onScanPositionRatioChange?: (ratio: number) => void;
     hideTools?: boolean;
 }) {
     const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -78,6 +82,13 @@ export function TomographicScoutViewport({
         startY: number;
         initialBox: CropBox;
     } | null>(null);
+    const cropBoxRef = useRef<CropBox>({
+        x: 0.18,
+        y: 0.2,
+        width: 0.54,
+        height: 0.46,
+    });
+    const positionDragRef = useRef<{ pointerId: number } | null>(null);
     const panStateRef = useRef<{
         pointerId: number;
         startX: number;
@@ -95,6 +106,10 @@ export function TomographicScoutViewport({
     const [toolMode, setToolMode] = useState<"crop" | "pan">("crop");
     const [zoom, setZoom] = useState(1);
     const [offset, setOffset] = useState({ x: 0, y: 0 });
+
+    useEffect(() => {
+        cropBoxRef.current = cropBox;
+    }, [cropBox]);
 
     useEffect(() => {
         let cancelled = false;
@@ -287,7 +302,22 @@ export function TomographicScoutViewport({
     }, [cropBox, onMeasurementChange]);
 
     useEffect(() => {
+        const updateScanPositionFromPointer = (clientY: number) => {
+            const viewport = viewportRef.current;
+            if (!viewport || !onScanPositionRatioChange) return;
+            const rect = viewport.getBoundingClientRect();
+            const currentBox = cropBoxRef.current;
+            const cropTop = rect.top + currentBox.y * rect.height;
+            const cropHeight = Math.max(1, currentBox.height * rect.height);
+            onScanPositionRatioChange(clamp01((clientY - cropTop) / cropHeight));
+        };
+
         const handleMove = (event: PointerEvent) => {
+            if (positionDragRef.current?.pointerId === event.pointerId) {
+                updateScanPositionFromPointer(event.clientY);
+                return;
+            }
+
             const viewport = viewportRef.current;
             if (!viewport) return;
 
@@ -338,6 +368,9 @@ export function TomographicScoutViewport({
         };
 
         const handleUp = (event: PointerEvent) => {
+            if (positionDragRef.current?.pointerId === event.pointerId) {
+                positionDragRef.current = null;
+            }
             if (dragStateRef.current?.pointerId === event.pointerId) {
                 dragStateRef.current = null;
             }
@@ -354,7 +387,7 @@ export function TomographicScoutViewport({
             window.removeEventListener("pointerup", handleUp);
             window.removeEventListener("pointercancel", handleUp);
         };
-    }, []);
+    }, [onScanPositionRatioChange]);
 
     const measurementLabels = useMemo(() => {
         const meta = metaRef.current;
@@ -364,6 +397,10 @@ export function TomographicScoutViewport({
             scoutFov: (cropBox.width * meta.width * meta.pixelSpacingX).toFixed(1),
         };
     }, [cropBox]);
+    const measurementScanLength = Number(measurementLabels.scanLength);
+    const scanPositionMm = Number.isFinite(measurementScanLength)
+        ? clamp01(scanPositionRatio) * measurementScanLength
+        : null;
 
     const startPan = (event: React.PointerEvent<HTMLDivElement>) => {
         if (toolMode !== "pan") return;
@@ -400,6 +437,19 @@ export function TomographicScoutViewport({
             startY: event.clientY,
             initialBox: cropBox,
         };
+    };
+
+    const startPositionDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (!onScanPositionRatioChange || toolMode === "pan") return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        positionDragRef.current = { pointerId: event.pointerId };
+        const rect = viewportRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const cropTop = rect.top + cropBox.y * rect.height;
+        const cropHeight = Math.max(1, cropBox.height * rect.height);
+        onScanPositionRatioChange(clamp01((event.clientY - cropTop) / cropHeight));
     };
 
     return (
@@ -444,6 +494,19 @@ export function TomographicScoutViewport({
                             <div className="absolute inset-0 border border-white/20">
                                 <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/20" />
                                 <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-white/20" />
+                            </div>
+
+                            <div
+                                className="absolute left-0 right-0 z-40 h-10 -translate-y-1/2 cursor-ns-resize touch-none"
+                                style={{ top: `${clamp01(scanPositionRatio) * 100}%`, pointerEvents: "auto" }}
+                                title="扫描位置"
+                                onPointerDown={startPositionDrag}
+                                onPointerDownCapture={startPositionDrag}
+                            >
+                                <div className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[#FBBF24] shadow-[0_0_10px_rgba(251,191,36,0.8)]" />
+                                <div className="absolute left-2 top-1/2 -translate-y-1/2 rounded bg-[#0F172A]/90 px-1.5 py-0.5 text-[9px] font-mono font-bold text-[#FBBF24] ring-1 ring-[#FBBF24]/40">
+                                    Z {scanPositionMm !== null ? scanPositionMm.toFixed(1) : "--"} mm
+                                </div>
                             </div>
 
                             <div
@@ -535,6 +598,7 @@ const SequenceScanConfirmScreen = () => {
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [axialParam, setAxialParam] = useState<ApiScanSessionAxialParam | null>(null);
     const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("standard");
+    const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
     const axialParamId = axialParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
 
@@ -601,6 +665,15 @@ const SequenceScanConfirmScreen = () => {
 
     const scanLengthNum = Number(measurements.scanLength);
     const scanLengthForCurve = Number.isFinite(scanLengthNum) ? scanLengthNum : (axialParam?.scan_length ?? 0);
+    const axialBedCount = Math.max(1, axialParam?.step_count ?? Math.round(scanLengthForCurve / Math.max(1, axialParam?.slice_interval ?? 1)));
+    const setAxialScanPositionRatio = (ratio: number) => {
+        if (axialBedCount <= 1) {
+            setScanPositionRatio(0);
+            return;
+        }
+        const bedIndex = Math.round(Math.min(1, Math.max(0, ratio)) * (axialBedCount - 1));
+        setScanPositionRatio(bedIndex / (axialBedCount - 1));
+    };
 
     const showAutoMaPanel = axialParam?.auto_ma ?? false;
 
@@ -614,7 +687,12 @@ const SequenceScanConfirmScreen = () => {
             onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
             rightViewportContent={
                 <>
-                    <TomographicScoutViewport onMeasurementChange={setMeasurements} initialMeasurements={measurements} />
+                    <TomographicScoutViewport
+                        onMeasurementChange={setMeasurements}
+                        initialMeasurements={measurements}
+                        scanPositionRatio={scanPositionRatio}
+                        onScanPositionRatioChange={setAxialScanPositionRatio}
+                    />
                     {axialParam && showAutoMaPanel && (
                         <AutoMaPanel
                             autoMa={axialParam.auto_ma ?? false}
@@ -626,6 +704,8 @@ const SequenceScanConfirmScreen = () => {
                             rotationTime={axialParam.rotation_time}
                             stepCount={axialParam.step_count}
                             noiseLevel={noiseLevel}
+                            scanPositionRatio={scanPositionRatio}
+                            onScanPositionRatioChange={setAxialScanPositionRatio}
                             onChange={handleAutoMaChange}
                         />
                     )}

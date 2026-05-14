@@ -1304,6 +1304,7 @@ const HelicalScanConfirmScreen = () => {
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [helicalParam, setHelicalParam] = useState<ApiScanSessionHelicalParam | null>(null);
     const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("standard");
+    const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
     const helicalParamId = helicalParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
 
@@ -1389,7 +1390,12 @@ const HelicalScanConfirmScreen = () => {
             onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
             rightViewportContent={
                 <>
-                    <TomographicScoutViewport onMeasurementChange={setMeasurements} initialMeasurements={measurements} />
+                    <TomographicScoutViewport
+                        onMeasurementChange={setMeasurements}
+                        initialMeasurements={measurements}
+                        scanPositionRatio={scanPositionRatio}
+                        onScanPositionRatioChange={setScanPositionRatio}
+                    />
                     {helicalParam && showAutoMaPanel && (
                         <AutoMaPanel
                             mode="helical"
@@ -1401,6 +1407,8 @@ const HelicalScanConfirmScreen = () => {
                             rotationTime={helicalParam.rotation_time}
                             pitch={helicalParam.pitch}
                             noiseLevel={noiseLevel}
+                            scanPositionRatio={scanPositionRatio}
+                            onScanPositionRatioChange={setScanPositionRatio}
                             onChange={handleAutoMaChange}
                         />
                     )}
