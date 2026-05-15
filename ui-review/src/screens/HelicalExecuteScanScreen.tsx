@@ -72,6 +72,16 @@ const GATED_AXIAL_SLICES_PER_BED = 16;
 const GATED_AXIAL_BREATH_CYCLE_MS = 1800;
 const GATED_AXIAL_SLICE_INTERVAL_MS = GATED_AXIAL_BREATH_CYCLE_MS / GATED_AXIAL_SLICES_PER_BED;
 const GATED_AXIAL_STABILITY_WAIT_MS = [1800, 2600, 1400, 2200];
+// Demo-shortened wait_timeout (real default per CONTEXT: 30s). When no valid
+// threshold-cross / stable signal arrives within this window the scan must
+// pause and hand control back to the technician.
+const GATED_AXIAL_WAIT_TIMEOUT_MS = 6000;
+// In a fresh (non-supplemental) gated_axial demo run, force the 2nd bed's
+// first attempt to time out so the technician-intervention branch is shown.
+const GATED_AXIAL_TIMEOUT_DEMO_BED_INDEX = 1;
+const GATED_AXIAL_TIMEOUT_DEMO_UNREACHABLE_WAIT_MS = GATED_AXIAL_WAIT_TIMEOUT_MS + 4000;
+// Mock value applied when technician chooses "临时降阈值" in the timeout dialog.
+const GATED_AXIAL_LOWERED_THRESHOLD = 0.7;
 const HELICAL_RESULT_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
     count: 118,
@@ -159,6 +169,9 @@ function AxialRealtimeViewport({
     direction,
     supplementalBeds,
     waitingForBreath,
+    waitElapsedMs = 0,
+    waitTimeoutMs,
+    waitTimedOut = false,
 }: {
     stage: ScanStage;
     completedBeds: number;
@@ -168,6 +181,9 @@ function AxialRealtimeViewport({
     direction: "rising" | "falling";
     supplementalBeds?: number[];
     waitingForBreath?: boolean;
+    waitElapsedMs?: number;
+    waitTimeoutMs?: number;
+    waitTimedOut?: boolean;
 }) {
     const imageUrls = useMemo(
         () =>
@@ -217,7 +233,15 @@ function AxialRealtimeViewport({
                 <div className="absolute left-4 top-3 z-20 rounded border border-white/10 bg-black/60 px-3 py-2 text-white shadow-lg">
                     <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">AXIAL LIVE</div>
                     <div className="mt-1 text-[12px] font-bold">
-                        {stage === "completed" ? "采集完成" : waitingForBreath ? "等待呼吸稳定" : scanActive ? "实时采集中" : "等待物理按键"}
+                        {stage === "completed"
+                            ? "采集完成"
+                            : waitTimedOut
+                                ? "等待超时 · 需技师介入"
+                                : waitingForBreath
+                                    ? "等待呼吸稳定"
+                                    : scanActive
+                                        ? "实时采集中"
+                                        : "等待物理按键"}
                     </div>
                 </div>
 
@@ -236,7 +260,13 @@ function AxialRealtimeViewport({
                         <div className="text-center">
                             <div className="text-[14px] font-semibold tracking-[0.28em] text-[#64748B]">AXIAL LIVE</div>
                             <div className="mt-3 text-[12px] text-[#475569]">
-                                {waitingForBreath ? "呼吸波形不稳，等待进入触发窗" : "等待物理按键触发，曝光后显示实时轴扫图像"}
+                                {waitTimedOut
+                                    ? "呼吸信号长时间未进入触发窗，扫描已暂停，等待技师处理"
+                                    : waitingForBreath
+                                        ? waitTimeoutMs
+                                            ? `呼吸波形不稳，等待进入触发窗 ${(waitElapsedMs / 1000).toFixed(1)}s / ${(waitTimeoutMs / 1000).toFixed(0)}s`
+                                            : "呼吸波形不稳，等待进入触发窗"
+                                        : "等待物理按键触发，曝光后显示实时轴扫图像"}
                             </div>
                         </div>
                     </div>
@@ -311,6 +341,10 @@ export default function HelicalExecuteScanScreen() {
     const [completedBeds, setCompletedBeds] = useState(0);
     const [currentSlice, setCurrentSlice] = useState(0);
     const [axialWaitingForBreath, setAxialWaitingForBreath] = useState(false);
+    const [bedWaitElapsedMs, setBedWaitElapsedMs] = useState(0);
+    const [bedWaitTimedOut, setBedWaitTimedOut] = useState(false);
+    const [activeThresholdOverride, setActiveThresholdOverride] = useState<number | null>(null);
+    const [thresholdLowered, setThresholdLowered] = useState(false);
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
@@ -318,6 +352,10 @@ export default function HelicalExecuteScanScreen() {
     const axialProgressTimerRef = useRef<number | null>(null);
     const axialWaitTimerRef = useRef<number | null>(null);
     const autoNavigateTimerRef = useRef<number | null>(null);
+    const bedWaitTickRef = useRef<number | null>(null);
+    const bedWaitStartRef = useRef<number | null>(null);
+    const pendingBedIndexRef = useRef<number | null>(null);
+    const bedAttemptsRef = useRef<Map<number, number>>(new Map());
 
     const scanLengthMm = Number(params.get("scanLengthMm") ?? measurements.scanLength);
     const totalBeds = useMemo(() => {
@@ -326,6 +364,7 @@ export default function HelicalExecuteScanScreen() {
     }, [scanLengthMm]);
     const threshold = Number(params.get("threshold") ?? "1.0");
     const direction = (params.get("direction") ?? "rising") as "rising" | "falling";
+    const effectiveThreshold = activeThresholdOverride ?? threshold;
     const breathingMode = (params.get("breathingMode") ?? (isGatedAxial ? "free_breathing" : "breath_hold_inspiration")) as GatingBreathingMode;
     const supplementalIndices = useMemo(() => {
         const raw = params.get("supplemental");
@@ -407,7 +446,7 @@ export default function HelicalExecuteScanScreen() {
                     breathingMode,
                     totalSlices,
                     slicesPerBed: isGatedAxial ? GATED_AXIAL_SLICES_PER_BED : undefined,
-                    threshold,
+                    threshold: effectiveThreshold,
                     direction,
                 });
                 saveGatingResult(result);
@@ -428,7 +467,7 @@ export default function HelicalExecuteScanScreen() {
                 autoNavigateTimerRef.current = null;
             }
         };
-    }, [navigate, stage, isGated, isGatedAxial, totalBeds, breathingMode, threshold, direction, isSupplementalRun, supplementalIndices]);
+    }, [navigate, stage, isGated, isGatedAxial, totalBeds, breathingMode, effectiveThreshold, direction, isSupplementalRun, supplementalIndices]);
 
     useEffect(() => {
         return () => {
@@ -444,6 +483,9 @@ export default function HelicalExecuteScanScreen() {
             }
             if (autoNavigateTimerRef.current !== null) {
                 window.clearTimeout(autoNavigateTimerRef.current);
+            }
+            if (bedWaitTickRef.current !== null) {
+                window.clearInterval(bedWaitTickRef.current);
             }
         };
     }, []);
@@ -465,6 +507,141 @@ export default function HelicalExecuteScanScreen() {
         rafRef.current = requestAnimationFrame(tick);
     };
 
+    const stopBedWaitTick = () => {
+        if (bedWaitTickRef.current !== null) {
+            window.clearInterval(bedWaitTickRef.current);
+            bedWaitTickRef.current = null;
+        }
+        bedWaitStartRef.current = null;
+    };
+
+    const axialTargetBedCount = supplementalBedTargets?.length ?? totalBeds;
+
+    const beginBedExposure = () => {
+        if (axialProgressTimerRef.current !== null) {
+            window.clearInterval(axialProgressTimerRef.current);
+        }
+
+        axialProgressTimerRef.current = window.setInterval(() => {
+            setCurrentSlice((prevSlice) => {
+                const nextSlice = prevSlice + 1;
+                if (nextSlice < GATED_AXIAL_SLICES_PER_BED) {
+                    return nextSlice;
+                }
+
+                setCompletedBeds((prevBed) => {
+                    const nextBed = Math.min(axialTargetBedCount, prevBed + 1);
+                    setCurrentSlice(0);
+                    if (nextBed >= axialTargetBedCount) {
+                        if (axialProgressTimerRef.current !== null) {
+                            window.clearInterval(axialProgressTimerRef.current);
+                            axialProgressTimerRef.current = null;
+                        }
+                        setAxialWaitingForBreath(false);
+                        setStage("rendering");
+                        window.setTimeout(() => setStage("completed"), 500);
+                    } else {
+                        if (axialProgressTimerRef.current !== null) {
+                            window.clearInterval(axialProgressTimerRef.current);
+                            axialProgressTimerRef.current = null;
+                        }
+                        window.setTimeout(() => scheduleBedExposure(nextBed), 180);
+                    }
+                    return nextBed;
+                });
+                return 0;
+            });
+        }, GATED_AXIAL_SLICE_INTERVAL_MS);
+    };
+
+    const scheduleBedExposure = (targetIndex: number) => {
+        // Clear any stale timers from a previous attempt at this or another bed.
+        if (axialWaitTimerRef.current !== null) {
+            window.clearTimeout(axialWaitTimerRef.current);
+            axialWaitTimerRef.current = null;
+        }
+        stopBedWaitTick();
+
+        setStage("enabled");
+        setAxialWaitingForBreath(true);
+        setBedWaitTimedOut(false);
+        setBedWaitElapsedMs(0);
+        setCurrentSlice(0);
+        pendingBedIndexRef.current = targetIndex;
+
+        const attemptCount = bedAttemptsRef.current.get(targetIndex) ?? 0;
+        // Demo branch: on a fresh run, the 2nd bed's first attempt never receives
+        // a valid threshold-cross within wait_timeout → forces the technician
+        // intervention dialog. Retries always succeed.
+        const isDemoTimeoutBed =
+            !isSupplementalRun &&
+            targetIndex === GATED_AXIAL_TIMEOUT_DEMO_BED_INDEX &&
+            attemptCount === 0;
+        const triggerWaitMs = isDemoTimeoutBed
+            ? GATED_AXIAL_TIMEOUT_DEMO_UNREACHABLE_WAIT_MS
+            : GATED_AXIAL_STABILITY_WAIT_MS[targetIndex % GATED_AXIAL_STABILITY_WAIT_MS.length];
+
+        bedWaitStartRef.current = performance.now();
+
+        // Trigger-arrival timer (fires when a valid gating event is detected).
+        axialWaitTimerRef.current = window.setTimeout(() => {
+            axialWaitTimerRef.current = null;
+            stopBedWaitTick();
+            setBedWaitElapsedMs(0);
+            setAxialWaitingForBreath(false);
+            setBedWaitTimedOut(false);
+            setStage("exposing");
+            setGuideVisible(false);
+            beginBedExposure();
+        }, triggerWaitMs);
+
+        // Elapsed + wait_timeout watcher.
+        bedWaitTickRef.current = window.setInterval(() => {
+            const startedAt = bedWaitStartRef.current;
+            if (startedAt === null) return;
+            const elapsed = performance.now() - startedAt;
+            setBedWaitElapsedMs(elapsed);
+            if (elapsed >= GATED_AXIAL_WAIT_TIMEOUT_MS) {
+                if (axialWaitTimerRef.current !== null) {
+                    window.clearTimeout(axialWaitTimerRef.current);
+                    axialWaitTimerRef.current = null;
+                }
+                stopBedWaitTick();
+                setBedWaitTimedOut(true);
+            }
+        }, 100);
+    };
+
+    const handleTimeoutRetry = () => {
+        const targetIndex = pendingBedIndexRef.current;
+        if (targetIndex === null) return;
+        const prev = bedAttemptsRef.current.get(targetIndex) ?? 0;
+        bedAttemptsRef.current.set(targetIndex, prev + 1);
+        scheduleBedExposure(targetIndex);
+    };
+
+    const handleTimeoutLowerThreshold = () => {
+        setActiveThresholdOverride(GATED_AXIAL_LOWERED_THRESHOLD);
+        setThresholdLowered(true);
+        handleTimeoutRetry();
+    };
+
+    const handleTimeoutAbort = () => {
+        if (axialWaitTimerRef.current !== null) {
+            window.clearTimeout(axialWaitTimerRef.current);
+            axialWaitTimerRef.current = null;
+        }
+        if (axialProgressTimerRef.current !== null) {
+            window.clearInterval(axialProgressTimerRef.current);
+            axialProgressTimerRef.current = null;
+        }
+        stopBedWaitTick();
+        setBedWaitTimedOut(false);
+        setAxialWaitingForBreath(false);
+        setStage("idle");
+        navigate("/gated-axial-confirm");
+    };
+
     const triggerScanSequence = () => {
         clearHoldRaf();
         setHoldProgress(1);
@@ -472,9 +649,14 @@ export default function HelicalExecuteScanScreen() {
         setCompletedBeds(0);
         setCurrentSlice(0);
         setAxialWaitingForBreath(false);
+        setBedWaitTimedOut(false);
+        setBedWaitElapsedMs(0);
 
         if (isGatedAxial) {
-            const targetBedCount = supplementalBedTargets?.length ?? totalBeds;
+            // Fresh run resets per-bed attempt history and any threshold override.
+            bedAttemptsRef.current = new Map();
+            setActiveThresholdOverride(null);
+            setThresholdLowered(false);
 
             if (axialProgressTimerRef.current !== null) {
                 window.clearInterval(axialProgressTimerRef.current);
@@ -483,58 +665,7 @@ export default function HelicalExecuteScanScreen() {
                 window.clearTimeout(axialWaitTimerRef.current);
                 axialWaitTimerRef.current = null;
             }
-
-            const scheduleBedExposure = (targetIndex: number) => {
-                setStage("enabled");
-                setAxialWaitingForBreath(true);
-                setCurrentSlice(0);
-                const waitMs = GATED_AXIAL_STABILITY_WAIT_MS[targetIndex % GATED_AXIAL_STABILITY_WAIT_MS.length];
-
-                axialWaitTimerRef.current = window.setTimeout(() => {
-                    axialWaitTimerRef.current = null;
-                    setAxialWaitingForBreath(false);
-                    setStage("exposing");
-                    setGuideVisible(false);
-                    beginBedExposure();
-                }, waitMs);
-            };
-
-            const beginBedExposure = () => {
-                if (axialProgressTimerRef.current !== null) {
-                    window.clearInterval(axialProgressTimerRef.current);
-                }
-
-                axialProgressTimerRef.current = window.setInterval(() => {
-                    setCurrentSlice((prevSlice) => {
-                        const nextSlice = prevSlice + 1;
-                        if (nextSlice < GATED_AXIAL_SLICES_PER_BED) {
-                            return nextSlice;
-                        }
-
-                        setCompletedBeds((prevBed) => {
-                            const nextBed = Math.min(targetBedCount, prevBed + 1);
-                            setCurrentSlice(0);
-                            if (nextBed >= targetBedCount) {
-                                if (axialProgressTimerRef.current !== null) {
-                                    window.clearInterval(axialProgressTimerRef.current);
-                                    axialProgressTimerRef.current = null;
-                                }
-                                setAxialWaitingForBreath(false);
-                                setStage("rendering");
-                                window.setTimeout(() => setStage("completed"), 500);
-                            } else {
-                                if (axialProgressTimerRef.current !== null) {
-                                    window.clearInterval(axialProgressTimerRef.current);
-                                    axialProgressTimerRef.current = null;
-                                }
-                                window.setTimeout(() => scheduleBedExposure(nextBed), 180);
-                            }
-                            return nextBed;
-                        });
-                        return 0;
-                    });
-                }, GATED_AXIAL_SLICE_INTERVAL_MS);
-            };
+            stopBedWaitTick();
 
             scheduleBedExposure(0);
             return;
@@ -634,16 +765,40 @@ export default function HelicalExecuteScanScreen() {
                         : "Hold the green button";
 
     const showLiveViewport = stage === "exposing" || stage === "rendering" || stage === "completed";
+
+    const executeButtonLabel = (() => {
+        if (stage === "completed") return "图像浏览";
+        if (bedWaitTimedOut) return "等待技师处理";
+        if (stage === "rendering") return "图像重建中…";
+        if (stage === "exposing") return isGated ? "门控曝光中…" : "扫描中…";
+        if (stage === "enabled") {
+            if (isGatedAxial && axialWaitingForBreath) return "等待呼吸信号…";
+            return "扫描就绪…";
+        }
+        if (stage === "arming") return "请按住物理按键";
+        return "执行扫描";
+    })();
+    // Only allow click on the bottom-right button at the very start (kick off
+    // the guide overlay) and at the very end (navigate to image viewer). During
+    // arming / enabled / exposing / rendering, or while the timeout dialog is
+    // open, the button must be inert so it can't be mistaken for "click again
+    // to trigger another scan".
+    const executeButtonClickable =
+        !bedWaitTimedOut &&
+        (stage === "idle" || stage === "arming" || stage === "completed");
     const rightViewport = isGatedAxial ? (
         <AxialRealtimeViewport
             stage={stage}
             completedBeds={completedBeds}
             currentSlice={currentSlice}
             totalBeds={totalBeds}
-            threshold={threshold}
+            threshold={effectiveThreshold}
             direction={direction}
             supplementalBeds={supplementalBedTargets ?? undefined}
             waitingForBreath={axialWaitingForBreath}
+            waitElapsedMs={bedWaitElapsedMs}
+            waitTimeoutMs={GATED_AXIAL_WAIT_TIMEOUT_MS}
+            waitTimedOut={bedWaitTimedOut}
         />
     ) : showLiveViewport ? (
         <HelicalLiveViewport playbackActive={stage !== "completed"} seriesOverride={helicalResultOverride} />
@@ -667,9 +822,9 @@ export default function HelicalExecuteScanScreen() {
                 rightViewportContent={rightViewport}
                 rightViewportClassName={isGatedAxial ? "flex-1 rounded-lg border border-[#B0C4DE] bg-white shadow-sm flex flex-col overflow-hidden relative" : undefined}
                 readOnlyMode
-                onExecuteScan={handleExecuteScanClick}
+                onExecuteScan={executeButtonClickable ? handleExecuteScanClick : undefined}
                 patientConfirmBeforeExecute={stage !== "completed"}
-                executeButtonLabel={stage === "completed" ? "图像浏览" : "执行扫描"}
+                executeButtonLabel={executeButtonLabel}
             />
 
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
@@ -734,6 +889,59 @@ export default function HelicalExecuteScanScreen() {
                     </div>
                 </div>
             </div>
+
+            {isGatedAxial && bedWaitTimedOut && (
+                <div className="absolute inset-0 z-[60] flex items-center justify-center bg-slate-900/55 backdrop-blur-[1px]">
+                    <div className="w-[460px] rounded-2xl border border-[#F59E0B]/60 bg-white shadow-[0_30px_60px_rgba(15,23,42,0.35)]">
+                        <div className="flex items-center gap-3 border-b border-amber-100 bg-amber-50 px-6 py-4">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                                <span className="text-[18px] font-black leading-none">!</span>
+                            </div>
+                            <div>
+                                <div className="text-[14px] font-black text-amber-900">门控等待超时</div>
+                                <div className="mt-0.5 text-[11px] font-medium text-amber-700">
+                                    床位 {(pendingBedIndexRef.current ?? 0) + 1} / {totalBeds} · 等待 {(GATED_AXIAL_WAIT_TIMEOUT_MS / 1000).toFixed(0)} s 内未检测到有效触发
+                                </div>
+                            </div>
+                        </div>
+                        <div className="space-y-3 px-6 py-5 text-[12px] leading-relaxed text-slate-600">
+                            <p>
+                                呼吸波形在设定阈值 <span className="font-black text-slate-800">{effectiveThreshold.toFixed(2)}</span>（{direction === "rising" ? "上升" : "下降"}方向）上未稳定穿越触发窗，当前床位曝光已暂停。
+                            </p>
+                            <p>请确认患者呼吸状态、传感器位置和波形质量，然后选择处理方式：</p>
+                            {thresholdLowered && (
+                                <p className="rounded-md bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-700">
+                                    已临时降低阈值至 {GATED_AXIAL_LOWERED_THRESHOLD.toFixed(2)}，本次扫描结果将以此阈值标注。
+                                </p>
+                            )}
+                        </div>
+                        <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4">
+                            <button
+                                type="button"
+                                onClick={handleTimeoutAbort}
+                                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[12px] font-bold text-slate-600 transition hover:bg-slate-100"
+                            >
+                                中止扫描
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleTimeoutLowerThreshold}
+                                disabled={thresholdLowered}
+                                className="rounded-md border border-amber-400 bg-white px-4 py-2 text-[12px] font-bold text-amber-700 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                临时降阈值至 {GATED_AXIAL_LOWERED_THRESHOLD.toFixed(2)}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleTimeoutRetry}
+                                className="rounded-md bg-[#1D4ED8] px-4 py-2 text-[12px] font-bold text-white shadow-sm transition hover:bg-[#1E40AF]"
+                            >
+                                重试当前床位
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
