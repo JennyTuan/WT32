@@ -5,13 +5,11 @@ import DicomViewer from "../components/DicomViewer";
 import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
-import {
-    applySupplementalScan,
-    generateMockGatingResult,
-    loadGatingResult,
-    saveGatingResult,
-    type GatingBreathingMode,
-} from "../lib/gatingResult";
+
+type GatingBreathingMode =
+    | "free_breathing"
+    | "breath_hold_inspiration"
+    | "breath_hold_expiration";
 
 // Demo dataset for the "脑部螺旋" (brain helical, non-gating) protocol — JPEG Lossless
 // Thin Brain reconstruction (219 slices). Used only when executeMode === "helical"
@@ -76,8 +74,8 @@ const GATED_AXIAL_STABILITY_WAIT_MS = [1800, 2600, 1400, 2200];
 // threshold-cross / stable signal arrives within this window the scan must
 // pause and hand control back to the technician.
 const GATED_AXIAL_WAIT_TIMEOUT_MS = 6000;
-// In a fresh (non-supplemental) gated_axial demo run, force the 2nd bed's
-// first attempt to time out so the technician-intervention branch is shown.
+// In a fresh gated_axial demo run, force the 2nd bed's first attempt to time
+// out so the technician-intervention branch is shown.
 const GATED_AXIAL_TIMEOUT_DEMO_BED_INDEX = 1;
 const GATED_AXIAL_TIMEOUT_DEMO_UNREACHABLE_WAIT_MS = GATED_AXIAL_WAIT_TIMEOUT_MS + 4000;
 // Mock value applied when technician chooses "临时降阈值" in the timeout dialog.
@@ -167,7 +165,6 @@ function AxialRealtimeViewport({
     totalBeds,
     threshold,
     direction,
-    supplementalBeds,
     waitingForBreath,
     waitElapsedMs = 0,
     waitTimeoutMs,
@@ -179,7 +176,6 @@ function AxialRealtimeViewport({
     totalBeds: number;
     threshold: number;
     direction: "rising" | "falling";
-    supplementalBeds?: number[];
     waitingForBreath?: boolean;
     waitElapsedMs?: number;
     waitTimeoutMs?: number;
@@ -193,39 +189,21 @@ function AxialRealtimeViewport({
             ),
         []
     );
-    const supplementalBedSet = useMemo(() => new Set(supplementalBeds ?? []), [supplementalBeds]);
-    const hasSupplementalBeds = supplementalBedSet.size > 0;
-    const supplementalCompletedBeds = useMemo(
-        () => (supplementalBeds ?? []).slice(0, completedBeds),
-        [completedBeds, supplementalBeds]
+    const currentBedNumber = Math.min(
+        completedBeds + (stage === "completed" ? 0 : 1),
+        totalBeds || 1
     );
-    const completedBedNumbers = useMemo(() => {
-        if (!hasSupplementalBeds) {
-            return Array.from({ length: completedBeds }, (_, index) => index + 1);
-        }
-        const alreadyScanned = Array.from({ length: totalBeds }, (_, index) => index + 1).filter(
-            (bedNumber) => !supplementalBedSet.has(bedNumber)
-        );
-        return [...alreadyScanned, ...supplementalCompletedBeds].sort((a, b) => a - b);
-    }, [completedBeds, hasSupplementalBeds, supplementalBedSet, supplementalCompletedBeds, totalBeds]);
-    const currentBedNumber = hasSupplementalBeds
-        ? (supplementalBeds ?? [])[completedBeds] ?? null
-        : Math.min(completedBeds + (stage === "completed" ? 0 : 1), totalBeds || 1);
-    const completedImages = hasSupplementalBeds
-        ? (completedBedNumbers.length * GATED_AXIAL_SLICES_PER_BED + currentSlice)
-        : (completedBeds * GATED_AXIAL_SLICES_PER_BED + currentSlice);
+    const completedImages = completedBeds * GATED_AXIAL_SLICES_PER_BED + currentSlice;
     const totalImages = Math.max(1, totalBeds * GATED_AXIAL_SLICES_PER_BED);
     const progress = Math.min(completedImages / totalImages, 1);
     const scanActive = stage === "enabled" || stage === "exposing" || stage === "rendering";
     const showDicom = stage === "exposing" || stage === "rendering" || stage === "completed";
-    const activeBedForImage = hasSupplementalBeds ? currentBedNumber ?? 1 : completedBeds + 1;
+    const activeBedForImage = completedBeds + 1;
     const displayIndex = Math.min(
         imageUrls.length - 1,
         Math.max(0, (((activeBedForImage - 1) * GATED_AXIAL_SLICES_PER_BED) + Math.max(0, currentSlice - 1)) % imageUrls.length)
     );
-    const displayBed = stage === "completed" && hasSupplementalBeds
-        ? (supplementalBeds ?? [])[Math.max(0, (supplementalBeds?.length ?? 1) - 1)] ?? totalBeds
-        : currentBedNumber ?? totalBeds;
+    const displayBed = currentBedNumber;
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-white">
@@ -292,11 +270,8 @@ function AxialRealtimeViewport({
                     bedStrip={{
                         total: totalBeds,
                         completed: completedBeds,
-                        completedIndices: hasSupplementalBeds ? completedBedNumbers : undefined,
-                        currentIndex: hasSupplementalBeds ? currentBedNumber : undefined,
-                        pendingIndices: hasSupplementalBeds ? supplementalBeds : undefined,
                     }}
-                    scanActive={scanActive && (hasSupplementalBeds ? completedBeds < (supplementalBeds?.length ?? 0) : completedBeds < totalBeds)}
+                    scanActive={scanActive && completedBeds < totalBeds}
                     exposing={stage === "exposing"}
                     bedPhase={currentSlice / GATED_AXIAL_SLICES_PER_BED}
                     waitingForStableBreath={waitingForBreath}
@@ -366,23 +341,6 @@ export default function HelicalExecuteScanScreen() {
     const direction = (params.get("direction") ?? "rising") as "rising" | "falling";
     const effectiveThreshold = activeThresholdOverride ?? threshold;
     const breathingMode = (params.get("breathingMode") ?? (isGatedAxial ? "free_breathing" : "breath_hold_inspiration")) as GatingBreathingMode;
-    const supplementalIndices = useMemo(() => {
-        const raw = params.get("supplemental");
-        if (!raw) return null;
-        const parsed = raw
-            .split(",")
-            .map((s) => Number.parseInt(s, 10))
-            .filter((n) => Number.isFinite(n));
-        return parsed.length > 0 ? parsed : null;
-    }, [params]);
-    const supplementalBedTargets = useMemo(() => {
-        if (!supplementalIndices) return null;
-        const unique = Array.from(new Set(supplementalIndices))
-            .filter((bedNumber) => bedNumber >= 1 && bedNumber <= totalBeds)
-            .sort((a, b) => a - b);
-        return unique.length > 0 ? unique : null;
-    }, [supplementalIndices, totalBeds]);
-    const isSupplementalRun = !!supplementalBedTargets;
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -430,29 +388,6 @@ export default function HelicalExecuteScanScreen() {
     useEffect(() => {
         if (stage !== "completed") return;
 
-        if (isGated) {
-            if (isSupplementalRun) {
-                // Merge: replace the selected triggers in the prior result.
-                const prior = loadGatingResult();
-                if (prior && supplementalIndices) {
-                    saveGatingResult(applySupplementalScan(prior, supplementalIndices));
-                }
-            } else {
-                const totalSlices = isGatedAxial
-                    ? Math.max(1, totalBeds) * GATED_AXIAL_SLICES_PER_BED
-                    : HELICAL_RESULT_SERIES.count;
-                const result = generateMockGatingResult({
-                    mode: isGatedAxial ? "gated_axial" : "gated_helical",
-                    breathingMode,
-                    totalSlices,
-                    slicesPerBed: isGatedAxial ? GATED_AXIAL_SLICES_PER_BED : undefined,
-                    threshold: effectiveThreshold,
-                    direction,
-                });
-                saveGatingResult(result);
-            }
-        }
-
         autoNavigateTimerRef.current = window.setTimeout(() => {
             navigate("/image-viewer", {
                 state: isGated
@@ -467,7 +402,7 @@ export default function HelicalExecuteScanScreen() {
                 autoNavigateTimerRef.current = null;
             }
         };
-    }, [navigate, stage, isGated, isGatedAxial, totalBeds, breathingMode, effectiveThreshold, direction, isSupplementalRun, supplementalIndices]);
+    }, [navigate, stage, isGated, isGatedAxial, breathingMode]);
 
     useEffect(() => {
         return () => {
@@ -515,7 +450,7 @@ export default function HelicalExecuteScanScreen() {
         bedWaitStartRef.current = null;
     };
 
-    const axialTargetBedCount = supplementalBedTargets?.length ?? totalBeds;
+    const axialTargetBedCount = totalBeds;
 
     const beginBedExposure = () => {
         if (axialProgressTimerRef.current !== null) {
@@ -574,7 +509,6 @@ export default function HelicalExecuteScanScreen() {
         // a valid threshold-cross within wait_timeout → forces the technician
         // intervention dialog. Retries always succeed.
         const isDemoTimeoutBed =
-            !isSupplementalRun &&
             targetIndex === GATED_AXIAL_TIMEOUT_DEMO_BED_INDEX &&
             attemptCount === 0;
         const triggerWaitMs = isDemoTimeoutBed
@@ -794,7 +728,6 @@ export default function HelicalExecuteScanScreen() {
             totalBeds={totalBeds}
             threshold={effectiveThreshold}
             direction={direction}
-            supplementalBeds={supplementalBedTargets ?? undefined}
             waitingForBreath={axialWaitingForBreath}
             waitElapsedMs={bedWaitElapsedMs}
             waitTimeoutMs={GATED_AXIAL_WAIT_TIMEOUT_MS}
@@ -808,11 +741,6 @@ export default function HelicalExecuteScanScreen() {
 
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
-            {isSupplementalRun && supplementalBedTargets && (
-                <div className="absolute left-1/2 top-3 z-50 -translate-x-1/2 rounded-full border border-[#f59e0b] bg-[#451a03]/90 px-4 py-1 text-[12px] font-bold text-[#fbbf24] shadow-lg">
-                    补扫模式 · 仅补采床位段 {supplementalBedTargets.join("、")}
-                </div>
-            )}
             <ScanConfirmScreen
                 activeSequenceId="s2"
                 activeSequenceStepIndex={stage === "completed" ? 2 : 1}

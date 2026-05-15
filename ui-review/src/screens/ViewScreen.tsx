@@ -46,11 +46,6 @@ import {
     fetchSelectedScanSession,
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
-import {
-    loadGatingResult,
-    type GatingResult,
-} from "../lib/gatingResult";
-import GatingReplayPanel from "../components/GatingReplayPanel";
 
 type ImageItem = { id: string; name: string };
 type SeriesType = "topogram" | "helical" | "axial" | "4d" | "static";
@@ -414,12 +409,6 @@ const ViewScreen = () => {
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const isBrainHelicalDemo = isBrainHelicalWorkflow || (!isFourDEntry && !isGatingEntry && isBrainHelicalScanSession(scanSession));
     const effectiveLungSeries = isBrainHelicalDemo ? BRAIN_HELICAL_VIEW_SERIES : REAL_LUNG_SERIES;
-    const [gatingResult, setGatingResult] = useState<GatingResult | null>(null);
-    useEffect(() => {
-        if (!isGatingEntry) return;
-        setGatingResult(loadGatingResult());
-    }, [isGatingEntry]);
-
     /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
     const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";
     const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">("ready");
@@ -2281,24 +2270,6 @@ const ViewScreen = () => {
                         </div>
                     </aside>
                 </div>
-                {isGatingEntry && gatingResult && !isTopogramSeries && (
-                    <GatingReplayPanel
-                        result={gatingResult}
-                        currentSliceIndex={currentSliceIndex}
-                        totalSlices={totalSlices}
-                        onJumpToSlice={(slice) => setSliceIndex(clampSliceIndex(slice))}
-                        onSupplementalScan={(indices) => {
-                            const mode = gatingNavState?.gatingMode ?? "gated_axial";
-                            const breathingMode =
-                                gatingNavState?.breathingMode ??
-                                (mode === "gated_helical" ? "breath_hold_inspiration" : "free_breathing");
-                            navigate(
-                                `/helical-execute?mode=${mode}&breathingMode=${breathingMode}` +
-                                `&supplemental=${indices.join(",")}`
-                            );
-                        }}
-                    />
-                )}
                 </div>
             </main>
 
