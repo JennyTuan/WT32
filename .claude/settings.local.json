@@ -93,7 +93,9 @@
       "Bash(./node_modules/.bin/tsc --noEmit)",
       "Bash(npx --no-install tsc --noEmit)",
       "Bash(npx --package=typescript -- tsc --noEmit)",
-      "Bash(npx --package=typescript@5.6 -- tsc --noEmit -p tsconfig.app.json)"
+      "Bash(npx --package=typescript@5.6 -- tsc --noEmit -p tsconfig.app.json)",
+      "Bash(cd /c/CT-Prototype-backup/CT-Prototype/ui-review && grep -E '@cornerstonejs|vtk\\\\.js' package.json)",
+      "Bash(cd /c/CT-Prototype-backup/CT-Prototype/ui-review && ls node_modules/@cornerstonejs/tools/dist/esm/tools/ 2>/dev/null | grep -iE \"crop|clip\" | head)"
     ]
   }
 }

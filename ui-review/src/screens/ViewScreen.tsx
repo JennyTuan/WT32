@@ -138,6 +138,29 @@ const VOLUME_PRESETS = [
 
 type VolumePreset = typeof VOLUME_PRESETS[number];
 
+/**
+ * Smart 3D volume preset defaults by body part. Control-end use case is
+ * "quick coverage / sanity check", so we pick the preset whose opacity
+ * transfer function makes the *primary tissue of that body part* visible
+ * in volume rendering without manual tweaking.
+ *
+ * Falls back to "CT-Lung" (the initial default) for unknown body parts.
+ */
+const PRESET_BY_BODY_PART: Record<string, VolumePreset> = {
+    HEAD: "CT-Bone",            // skull bone surface; brain itself isn't VR-friendly
+    NECK: "CT-Soft-Tissue",     // soft-tissue dominant; carotids only show with contrast
+    CHEST: "CT-Lung",           // lung parenchyma + airways
+    SPINE: "CT-Bone",           // vertebral cortex
+    ABDOMEN: "CT-Soft-Tissue",  // organ silhouette; CT-Liver-Vasculature only on enhanced
+    PELVIS: "CT-Bone",          // pelvic bone + sacrum
+    EXTREMITY: "CT-Bone",       // bones
+};
+const resolveDefaultVolumePreset = (bodyPart?: string | null): VolumePreset => {
+    if (!bodyPart) return "CT-Lung";
+    const key = bodyPart.trim().toUpperCase();
+    return PRESET_BY_BODY_PART[key] ?? "CT-Lung";
+};
+
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
 
 const formatDicomDate = (value?: string) => {
@@ -503,6 +526,17 @@ const ViewScreen = () => {
 
     const [selectedLayout, setSelectedLayout] = useState("三维四窗");
     const [selectedVolumePreset, setSelectedVolumePreset] = useState<VolumePreset>("CT-Lung");
+    // Apply the body-part-derived default volume preset exactly once per scan
+    // session load. After this, the user is free to switch presets; we don't
+    // fight them on later series changes within the same session.
+    const appliedDefaultPresetRef = useRef(false);
+    useEffect(() => {
+        if (appliedDefaultPresetRef.current) return;
+        if (!scanSession) return;
+        const preset = resolveDefaultVolumePreset(scanSession.body_part);
+        setSelectedVolumePreset(preset);
+        appliedDefaultPresetRef.current = true;
+    }, [scanSession]);
     const [selectedRenderMode, setSelectedRenderMode] = useState<"MIP" | "MinIP">("MIP");
     const [selectedVoiLutMode, setSelectedVoiLutMode] = useState<"LINEAR" | "LINEAR_EXACT" | "SIGMOID">("LINEAR");
     const [selectedInterpolationMode, setSelectedInterpolationMode] = useState<"LINEAR" | "NEAREST" | "FAST_LINEAR">("LINEAR");

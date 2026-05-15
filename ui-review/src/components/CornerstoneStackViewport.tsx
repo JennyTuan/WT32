@@ -409,6 +409,35 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       return () => element.removeEventListener(Enums.Events.IMAGE_RENDERED, handleImageRendered);
     }, [status, onWindowLevelChange]);
 
+    // ─── Stack-image change sync ─────────────────────────────────────────────
+    // Authoritative slice-index mirror: whenever Cornerstone advances to a new
+    // image (wheel, programmatic, or any built-in tool), pull the current
+    // imageIdIndex from the viewport and report it up. This makes the React
+    // state robust to any code path that bypasses our manual wheel callback —
+    // we no longer rely on whoever changed the slice to remember to call
+    // onImageIndexChange.
+    useEffect(() => {
+      const element = elementRef.current;
+      const viewport = viewportRef.current;
+      if (!element || !viewport || status !== 'ready' || !onImageIndexChange) {
+        return;
+      }
+      let lastReported = viewport.getCurrentImageIdIndex();
+      const handleStackNewImage = () => {
+        try {
+          const idx = viewport.getCurrentImageIdIndex();
+          if (idx !== lastReported) {
+            lastReported = idx;
+            onImageIndexChange(idx);
+          }
+        } catch {
+          /* viewport torn down — ignore */
+        }
+      };
+      element.addEventListener(Enums.Events.STACK_NEW_IMAGE, handleStackNewImage);
+      return () => element.removeEventListener(Enums.Events.STACK_NEW_IMAGE, handleStackNewImage);
+    }, [status, onImageIndexChange]);
+
     // Pixel-level denoise/sharpen pass for the rendered 2D canvas.
     // Cornerstone redraws the original image first; this pass then writes processed pixels back.
     useEffect(() => {
