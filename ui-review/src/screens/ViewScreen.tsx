@@ -426,6 +426,9 @@ const ViewScreen = () => {
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
     const [slabThickness, setSlabThickness] = useState(5);
     const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry ? "3D" : "2D");
+    // Currently-selected MPR panel for cine / paging. Defaults to axial — the
+    // clinical primary view. Clicking another panel updates this.
+    const [activeMprOrientation, setActiveMprOrientation] = useState<"axial" | "coronal" | "sagittal">("axial");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(effectiveLungSeries.count / 2));
     const [toolMode, setToolMode] = useState<ViewerToolMode>("wl");
     const [ww, setWw] = useState(350);
@@ -837,8 +840,12 @@ const ViewScreen = () => {
     const canPageBackward = currentSliceIndex > 0;
     const canPageForward = currentSliceIndex < totalSlices - 1;
     const handleSliceStep = useCallback((delta: number) => {
+        if (imageMode === "3D") {
+            mprRef.current?.advanceSlice(activeMprOrientation, delta);
+            return;
+        }
         setSliceIndex((prev) => clampSliceIndex(prev + delta));
-    }, [clampSliceIndex]);
+    }, [clampSliceIndex, imageMode, activeMprOrientation]);
     const handleSliceSliderChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
         setSliceIndex(clampSliceIndex(Number(event.target.value)));
     }, [clampSliceIndex]);
@@ -1135,10 +1142,17 @@ const ViewScreen = () => {
     useEffect(() => {
         if (!isPlaying || isFourDLungReconSeries) return;
         const timer = window.setInterval(() => {
-            setSliceIndex((prev) => (prev >= totalSlices - 1 ? 0 : prev + 1));
+            if (imageMode === "3D") {
+                // 3D MPR: advance the active panel's slice via the volume
+                // viewport API. Cornerstone's crosshairs tool keeps the
+                // reference lines in the other two panels in sync.
+                mprRef.current?.advanceSlice(activeMprOrientation, 1);
+            } else {
+                setSliceIndex((prev) => (prev >= totalSlices - 1 ? 0 : prev + 1));
+            }
         }, 250);
         return () => window.clearInterval(timer);
-    }, [isPlaying, totalSlices, isFourDLungReconSeries]);
+    }, [isPlaying, totalSlices, isFourDLungReconSeries, imageMode, activeMprOrientation]);
 
     useEffect(() => {
         if (isPlaybackEnabled) return;
@@ -1923,6 +1937,8 @@ const ViewScreen = () => {
                                     renderMode={selectedRenderMode}
                                     layoutMode="four-up"
                                     volumePanelMode="volume3d"
+                                    activeOrientation={activeMprOrientation}
+                                    onActiveOrientationChange={setActiveMprOrientation}
                                     volumePreset={selectedVolumePreset}
                                     volumeSampleDistanceMultiplier={volumeSampleDistanceMultiplier}
                                     slabThickness={slabThickness}
@@ -2215,30 +2231,28 @@ const ViewScreen = () => {
                                 );
                             })}
 
-                            {!isMprViewActive && (
-                                <div className="mt-auto flex flex-col items-center gap-1">
-                                    <button
-                                        type="button"
-                                        title="上一张"
-                                        aria-label="上一张"
-                                        disabled={!canPageBackward}
-                                        onClick={() => handleSliceStep(-1)}
-                                        className="flex h-9 w-9 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
-                                    >
-                                        <ChevronUp size={17} strokeWidth={1.8} />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        title="下一张"
-                                        aria-label="下一张"
-                                        disabled={!canPageForward}
-                                        onClick={() => handleSliceStep(1)}
-                                        className="flex h-9 w-9 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
-                                    >
-                                        <ChevronDown size={17} strokeWidth={1.8} />
-                                    </button>
-                                </div>
-                            )}
+                            <div className="mt-auto flex flex-col items-center gap-[2px]">
+                                <button
+                                    type="button"
+                                    title="上一张"
+                                    aria-label="上一张"
+                                    disabled={isMprViewActive ? false : !canPageBackward}
+                                    onClick={() => handleSliceStep(-1)}
+                                    className="flex h-6 w-7 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
+                                >
+                                    <ChevronUp size={13} strokeWidth={1.8} />
+                                </button>
+                                <button
+                                    type="button"
+                                    title="下一张"
+                                    aria-label="下一张"
+                                    disabled={isMprViewActive ? false : !canPageForward}
+                                    onClick={() => handleSliceStep(1)}
+                                    className="flex h-6 w-7 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
+                                >
+                                    <ChevronDown size={13} strokeWidth={1.8} />
+                                </button>
+                            </div>
 
                             <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
 

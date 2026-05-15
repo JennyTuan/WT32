@@ -19,11 +19,20 @@ import {
 } from '../lib/cornerstone/initCornerstone';
 import { buildMhaImageIds, buildStitchedMhaImageIds, isMhaVolumeUrl } from '../lib/cornerstone/mhaImageLoader';
 
+export type MprPanelId = 'axial' | 'coronal' | 'sagittal';
+
 export type CornerstoneMPRHandle = {
   zoomIn: () => void;
   zoomOut: () => void;
   resetAll: () => void;
   forceWindowLevel: (wc: number, ww: number) => void;
+  /**
+   * Advance the slice of one MPR panel by `delta` (wraps at boundaries).
+   * Cornerstone's built-in crosshairs/reference-line tools handle the
+   * cross-panel visual sync; the other two panels' reference lines update
+   * automatically as the active panel's slice moves.
+   */
+  advanceSlice: (panel: MprPanelId, delta: number) => void;
 };
 
 type RenderMode = 'MPR' | 'MIP' | 'VR' | 'MinIP';
@@ -79,6 +88,15 @@ interface CornerstoneMPRViewportProps {
   oblique?: ObliqueConfig;
   onObliquePanelChange?: (panel: PanelId) => void;
   onObliqueAngleChange?: (angleDeg: number) => void;
+  /**
+   * Currently-selected MPR panel for cine / paging actions. The selected
+   * panel receives a blue inset ring; play and the "上一张/下一张" buttons
+   * advance the slice along this panel's axis. Crosshairs in the other two
+   * panels move automatically because Cornerstone's crosshairs tool keeps
+   * them in sync with the volume's camera/focal point.
+   */
+  activeOrientation?: PanelId;
+  onActiveOrientationChange?: (panel: PanelId) => void;
   /**
    * Optional list of URL-sets (e.g. one per 4D phase) to warm the cornerstone
    * volume cache in the background after mount, so phase-cine playback hits
@@ -535,6 +553,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       oblique,
       onObliquePanelChange,
       onObliqueAngleChange,
+      activeOrientation,
+      onActiveOrientationChange,
       preloadImageUrlsList,
     },
     ref
@@ -689,6 +709,30 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           vp?.setProperties({ voiRange: { lower, upper } });
           vp?.render();
         });
+      },
+      advanceSlice: (panel, delta) => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        const vpId =
+          panel === 'axial' ? vpAxial : panel === 'coronal' ? vpCoronal : vpSagittal;
+        const vp = engine.getViewport(vpId) as Types.IVolumeViewport | undefined;
+        if (!vp) return;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const total = (vp as any).getNumberOfSlices?.() ?? 0;
+          if (!total || total <= 1) return;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const current = (vp as any).getSliceIndex?.() ?? 0;
+          let next = current + delta;
+          // Wrap at boundaries so cine loops continuously.
+          while (next < 0) next += total;
+          next = next % total;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (vp as any).setSliceIndex?.(next);
+          vp.render();
+        } catch {
+          /* ignore — viewport not ready */
+        }
       },
     }));
 
@@ -1344,7 +1388,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       >
         <div
           ref={axialRef}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-1' : ''}`}
+          onPointerDown={() => onActiveOrientationChange?.('axial')}
+          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-1' : ''} ${activeOrientation === 'axial' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
           style={{ minHeight: 0 }}
         >
           {showCrosshairs && (
@@ -1369,7 +1414,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         </div>
         <div
           ref={coronalRef}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-2 row-start-1 row-span-2' : ''}`}
+          onPointerDown={() => onActiveOrientationChange?.('coronal')}
+          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-2 row-start-1 row-span-2' : ''} ${activeOrientation === 'coronal' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
           style={{ minHeight: 0 }}
         >
           {showCrosshairs && (
@@ -1394,7 +1440,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         </div>
         <div
           ref={sagittalRef}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-2' : ''}`}
+          onPointerDown={() => onActiveOrientationChange?.('sagittal')}
+          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-2' : ''} ${activeOrientation === 'sagittal' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
           style={{ minHeight: 0 }}
         >
           {showCrosshairs && (
