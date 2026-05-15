@@ -394,20 +394,16 @@ const ViewScreen = () => {
     const fourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode }) | null;
     const isFourDEntry = !!fourDState?.scanResult;
 
-    // ─── Gating 回放状态 ──────────────────────────────────────────────────────
-    const gatingNavState = location.state as { gatingMode?: "gated_helical" | "gated_axial"; breathingMode?: string } | null;
-    const isGatingEntry = !!gatingNavState?.gatingMode;
-
     // ─── 脑部螺旋 demo 数据切换 ───────────────────────────────────────────────
-    // Active only when the workflow plan title matches AND this is NOT a 4D/gating entry,
-    // so门控 / 4D 浏览路径完全不受影响。
+    // Active only when the workflow plan title matches AND this is NOT a 4D entry,
+    // so 4D 浏览路径完全不受影响。
     const isBrainHelicalWorkflow = useMemo(() => {
-        if (isFourDEntry || isGatingEntry) return false;
+        if (isFourDEntry) return false;
         return loadSelectedScanWorkflowPlans().some((plan) => isBrainHelicalName(plan.title));
-    }, [isFourDEntry, isGatingEntry]);
+    }, [isFourDEntry]);
     // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
-    const isBrainHelicalDemo = isBrainHelicalWorkflow || (!isFourDEntry && !isGatingEntry && isBrainHelicalScanSession(scanSession));
+    const isBrainHelicalDemo = isBrainHelicalWorkflow || (!isFourDEntry && isBrainHelicalScanSession(scanSession));
     const effectiveLungSeries = isBrainHelicalDemo ? BRAIN_HELICAL_VIEW_SERIES : REAL_LUNG_SERIES;
     /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
     const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";
@@ -429,7 +425,7 @@ const ViewScreen = () => {
     // Across-phase aggregation for the MPR 4th panel (ITV visualisation)
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
     const [slabThickness, setSlabThickness] = useState(5);
-    const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry || isGatingEntry ? "3D" : "2D");
+    const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry ? "3D" : "2D");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(effectiveLungSeries.count / 2));
     const [toolMode, setToolMode] = useState<ViewerToolMode>("wl");
     const [ww, setWw] = useState(350);
@@ -880,12 +876,6 @@ const ViewScreen = () => {
         setImageMode("2D");
     }, [isTopogramSeries]);
 
-    // Gating entry: any non-topogram series must stay in 3D MPR mode (no 2D toggle exposed).
-    useEffect(() => {
-        if (!isGatingEntry || isTopogramSeries) return;
-        setImageMode("3D");
-    }, [isGatingEntry, isTopogramSeries, selectedSeriesId]);
-
     useEffect(() => {
         if (!isFourDLungReconSeries) return;
         setSelectedLayout("多平面重建");
@@ -1316,7 +1306,7 @@ const ViewScreen = () => {
                             <SlidersHorizontal size={14} className="text-[#4D94FF]" />
                             <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">PARAMS</span>
                         </div>
-                        {!isFourDLungReconSeries && !isTopogramSeries && !isGatingEntry ? (
+                        {!isFourDLungReconSeries && !isTopogramSeries ? (
                             <div className="flex items-center gap-1 rounded-full border border-[#DCE6F2] bg-[#F1F5F9] p-[3px] shadow-sm overflow-hidden">
                                 {(["2D", "3D"] as const).map((mode) => {
                                     const active = imageMode === mode;
@@ -1592,7 +1582,6 @@ const ViewScreen = () => {
                                                 </div>
                                             </PanelSection>
 
-                                            {!isGatingEntry && (
                                             <PanelSection title="体绘制">
                                             <div className="flex items-center gap-2 relative">
                                                 <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">体绘制</span>
@@ -1662,7 +1651,6 @@ const ViewScreen = () => {
                                                 )}
                                             </div>
                                             </PanelSection>
-                                            )}
 
                                             <PanelSection title="投影">
 
@@ -1719,7 +1707,6 @@ const ViewScreen = () => {
                                             </div>
                                             </PanelSection>
 
-                                            {!isGatingEntry && (
                                             <PanelSection title="斜切">
                                                 <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                     <span className="text-[11px] font-semibold text-[#546E7A]">启用斜切</span>
@@ -1799,7 +1786,6 @@ const ViewScreen = () => {
                                                     复位
                                                 </button>
                                             </PanelSection>
-                                            )}
                                         </>
                                     )}
 
@@ -1935,8 +1921,8 @@ const ViewScreen = () => {
                                     windowWidth={ww}
                                     activeTool={mapCornerstoneTool(toolMode)}
                                     renderMode={selectedRenderMode}
-                                    layoutMode={isGatingEntry ? "three-up" : "four-up"}
-                                    volumePanelMode={isGatingEntry ? "slab" : "volume3d"}
+                                    layoutMode="four-up"
+                                    volumePanelMode="volume3d"
                                     volumePreset={selectedVolumePreset}
                                     volumeSampleDistanceMultiplier={volumeSampleDistanceMultiplier}
                                     slabThickness={slabThickness}

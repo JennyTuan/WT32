@@ -6,11 +6,6 @@ import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 
-type GatingBreathingMode =
-    | "free_breathing"
-    | "breath_hold_inspiration"
-    | "breath_hold_expiration";
-
 // Demo dataset for the "脑部螺旋" (brain helical, non-gating) protocol — JPEG Lossless
 // Thin Brain reconstruction (219 slices). Used only when executeMode === "helical"
 // AND the active workflow plan title matches; gated_helical / gated_axial paths are
@@ -340,7 +335,6 @@ export default function HelicalExecuteScanScreen() {
     const threshold = Number(params.get("threshold") ?? "1.0");
     const direction = (params.get("direction") ?? "rising") as "rising" | "falling";
     const effectiveThreshold = activeThresholdOverride ?? threshold;
-    const breathingMode = (params.get("breathingMode") ?? (isGatedAxial ? "free_breathing" : "breath_hold_inspiration")) as GatingBreathingMode;
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -389,11 +383,7 @@ export default function HelicalExecuteScanScreen() {
         if (stage !== "completed") return;
 
         autoNavigateTimerRef.current = window.setTimeout(() => {
-            navigate("/image-viewer", {
-                state: isGated
-                    ? { gatingMode: isGatedAxial ? "gated_axial" : "gated_helical", breathingMode }
-                    : undefined,
-            });
+            navigate("/image-viewer");
         }, AUTO_NAVIGATE_DELAY_MS);
 
         return () => {
@@ -402,7 +392,7 @@ export default function HelicalExecuteScanScreen() {
                 autoNavigateTimerRef.current = null;
             }
         };
-    }, [navigate, stage, isGated, isGatedAxial, breathingMode]);
+    }, [navigate, stage]);
 
     useEffect(() => {
         return () => {
@@ -618,11 +608,7 @@ export default function HelicalExecuteScanScreen() {
 
     const handleExecuteScanClick = () => {
         if (stage === "completed") {
-            navigate("/image-viewer", {
-                state: isGated
-                    ? { gatingMode: isGatedAxial ? "gated_axial" : "gated_helical", breathingMode }
-                    : undefined,
-            });
+            navigate("/image-viewer");
             return;
         }
 
