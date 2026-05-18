@@ -12,20 +12,36 @@ class ORMModel(BaseModel):
 
 class PatientBase(BaseModel):
     name: str
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
     patient_id: str
+    id_number: Optional[str] = None
     gender: str
     birth_date: date
     height: Optional[float] = None
     weight: Optional[float] = None
 
 
-class PatientCreate(PatientBase):
-    pass
+class PatientCreate(BaseModel):
+    # name is optional on input — backend auto-derives it from last_name + first_name
+    # when not provided (one of them must be present).
+    name: Optional[str] = None
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
+    patient_id: str
+    id_number: Optional[str] = None
+    gender: str
+    birth_date: date
+    height: Optional[float] = None
+    weight: Optional[float] = None
 
 
 class PatientUpdate(BaseModel):
     name: Optional[str] = None
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
     patient_id: Optional[str] = None
+    id_number: Optional[str] = None
     gender: Optional[str] = None
     birth_date: Optional[date] = None
     height: Optional[float] = None
@@ -35,6 +51,7 @@ class PatientUpdate(BaseModel):
 class Patient(PatientBase, ORMModel):
     id: int
     created_at: datetime
+    latest_scan_status: Optional[str] = None  # draft / in_progress / completed / cancelled
 
 
 class ContrastConfigBase(BaseModel):
@@ -786,3 +803,61 @@ class CornerConfig(CornerConfigBase, ORMModel):
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+
+# ---------------- System Log ----------------
+
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+
+class SystemLogCreate(BaseModel):
+    level: LogLevel
+    source: str
+    event: str
+    message: str
+    details: Optional[str] = None
+    scan_session_id: Optional[int] = None
+
+
+class SystemLog(ORMModel):
+    id: int
+    timestamp: datetime
+    level: str
+    source: str
+    event: str
+    message: str
+    details: Optional[str] = None
+    scan_session_id: Optional[int] = None
+
+
+# ---------------- Dose Log ----------------
+
+class DoseLog(ORMModel):
+    id: int
+    created_at: datetime
+    scanned_at: datetime
+
+    patient_id: Optional[int] = None
+    scan_session_id: Optional[int] = None
+    scan_session_series_id: Optional[int] = None
+
+    patient_name_snapshot: Optional[str] = None
+    patient_id_snapshot: Optional[str] = None
+    protocol_name_snapshot: Optional[str] = None
+
+    series_order: Optional[int] = None
+    series_type: str
+    series_label: Optional[str] = None
+    body_part: Optional[str] = None
+    scan_mode: Optional[str] = None
+
+    kv: Optional[int] = None
+    ma: Optional[float] = None
+    rotation_time: Optional[float] = None
+    pitch: Optional[float] = None
+    scan_length: Optional[float] = None
+    collimator: Optional[str] = None
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
+
+    operator: Optional[str] = None

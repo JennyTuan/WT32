@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models, schemas
 from ..database import get_db
+from . import logs as logs_module
 
 router = APIRouter(prefix="/scan-sessions", tags=["scan-sessions"])
 
@@ -423,6 +424,14 @@ def start_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     scan_session = _get_scan_session_or_404(scan_session_id, db)
     scan_session.status = "in_progress"
     scan_session.started_at = datetime.utcnow()
+    logs_module.write_system_log(
+        db,
+        level="INFO",
+        source="scan_sessions",
+        event="scan_started",
+        message=f"Scan session {scan_session.id} started ({scan_session.name})",
+        scan_session_id=scan_session.id,
+    )
     db.commit()
     db.refresh(scan_session)
     return _get_scan_session_or_404(scan_session.id, db)
@@ -435,6 +444,21 @@ def complete_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     if scan_session.started_at is None:
         scan_session.started_at = datetime.utcnow()
     scan_session.completed_at = datetime.utcnow()
+
+    dose_rows = logs_module.write_dose_logs_for_session(
+        db, scan_session, scanned_at=scan_session.completed_at
+    )
+    logs_module.write_system_log(
+        db,
+        level="INFO",
+        source="scan_sessions",
+        event="scan_completed",
+        message=(
+            f"Scan session {scan_session.id} completed ({scan_session.name}); "
+            f"emitted {len(dose_rows)} dose log(s)"
+        ),
+        scan_session_id=scan_session.id,
+    )
     db.commit()
     db.refresh(scan_session)
     return _get_scan_session_or_404(scan_session.id, db)
@@ -444,6 +468,14 @@ def complete_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
 def cancel_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     scan_session = _get_scan_session_or_404(scan_session_id, db)
     scan_session.status = "cancelled"
+    logs_module.write_system_log(
+        db,
+        level="WARNING",
+        source="scan_sessions",
+        event="scan_cancelled",
+        message=f"Scan session {scan_session.id} cancelled ({scan_session.name})",
+        scan_session_id=scan_session.id,
+    )
     db.commit()
     db.refresh(scan_session)
     return _get_scan_session_or_404(scan_session.id, db)

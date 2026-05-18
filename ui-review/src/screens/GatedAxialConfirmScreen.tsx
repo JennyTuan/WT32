@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import GatingMonitorPanel from "../components/GatingMonitorPanel";
-import BreathHoldGuide from "../components/BreathHoldGuide";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { fetchSelectedScanSession } from "../lib/scanSession";
 
@@ -35,7 +34,6 @@ export default function GatedAxialConfirmScreen() {
     const [threshold, setThreshold] = useState<number>(1.0);
     const [direction, setDirection] = useState<TriggerDirection>("rising");
     const [waitTimeoutS, setWaitTimeoutS] = useState<number>(30);
-    const [holdArmed, setHoldArmed] = useState(false);
 
     // Live measurements driven by FourDScoutViewport. Initial values mirror the viewport's
     // default crop box (height 0.48, width 0.56) × FULL_RANGE_MM (500) so totalBeds and the
@@ -102,7 +100,8 @@ export default function GatedAxialConfirmScreen() {
         ? `/helical-execute?mode=gated_axial&breathingMode=free_breathing` +
           `&targetPhase=${targetPhase}&threshold=${threshold}&direction=${direction}` +
           `&waitTimeoutS=${waitTimeoutS}&scanLengthMm=${scanLengthMm || 320}&scoutFov=${scoutMeasurements.scoutFov}`
-        : `/helical-execute?mode=gated_axial&breathingMode=${breathingMode}`;
+        : `/helical-execute?mode=gated_axial&breathingMode=${breathingMode}` +
+          `&scanLengthMm=${scanLengthMm || 320}&scoutFov=${scoutMeasurements.scoutFov}`;
 
     // ---------- left-aside extras (free-breathing only) ----------
     const gatingParamCard = isFreeBreathing ? (
@@ -194,21 +193,26 @@ export default function GatedAxialConfirmScreen() {
             </div>
         </div>
     ) : (
-        <div className="flex h-full flex-col gap-3 p-3 text-[#E2E8F0]">
-            <div className="rounded-md border border-[#1E293B] bg-[#0F172A] p-3 text-[12px]">
-                <div className="text-[13px] font-semibold mb-1">门控-断层 · 深吸气屏息</div>
-                <div className="text-[#94A3B8]">技师对讲指导患者屏息；波形进入平台后启用「开始扫描」按钮。</div>
+        // DIBH branch — same scout (with crop box) on top as the free-breathing
+        // branch, so the technician can still pick the scan range; bottom is
+        // the bare waveform for stability monitoring. No software-driven
+        // preview of the breath-hold ceremony.
+        <div className="relative h-full w-full overflow-hidden bg-black">
+            <div className="absolute inset-x-0 top-0 bottom-[160px]">
+                <FourDScoutViewport
+                    enableImageTools
+                    onCropBoxChange={({ width, height }) => {
+                        const FULL_RANGE_MM = 500;
+                        setScoutMeasurements({
+                            scanLength: (height * FULL_RANGE_MM).toFixed(1),
+                            scoutFov: (width * FULL_RANGE_MM).toFixed(1),
+                        });
+                    }}
+                />
             </div>
-            <BreathHoldGuide armed={holdArmed} timeoutSeconds={25} amplitudeToleranceMm={2.0} />
-            <GatingWaveformPanel mode="breath_hold" readOnly />
-            <button
-                onClick={() => setHoldArmed((v) => !v)}
-                className={`rounded-md px-3 py-2 text-[13px] font-semibold text-white transition-colors ${
-                    holdArmed ? "bg-red-800 hover:bg-red-700" : "bg-sky-500 hover:bg-sky-400"
-                }`}
-            >
-                {holdArmed ? "取消屏息引导" : "开始屏息引导（演示）"}
-            </button>
+            <div className="absolute inset-x-0 bottom-0 px-3 pb-2">
+                <GatingWaveformPanel mode="breath_hold" readOnly bare />
+            </div>
         </div>
     );
 
@@ -217,16 +221,12 @@ export default function GatedAxialConfirmScreen() {
             activeSequenceId="s2"
             activeSequenceStepIndex={0}
             parameterPanelMode="tomographicScan"
-            tomographicParamOverrides={isFreeBreathing ? scoutMeasurements : undefined}
+            tomographicParamOverrides={scoutMeasurements}
             extraParamSection={gatingParamCard}
             nextRoute={nextRoute}
             allowBackNavigation={false}
             rightViewportContent={rightContent}
-            rightViewportClassName={
-                isFreeBreathing
-                    ? "flex-1 rounded-lg border border-[#B0C4DE] bg-white shadow-sm flex flex-col overflow-hidden relative"
-                    : undefined
-            }
+            rightViewportClassName="flex-1 rounded-lg border border-[#B0C4DE] bg-white shadow-sm flex flex-col overflow-hidden relative"
         />
     );
 }

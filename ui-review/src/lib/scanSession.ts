@@ -243,29 +243,15 @@ const inferBirthDate = (age: number) => {
     return `${birthYear}-01-01`;
 };
 
-const readCachedBackendPatientId = (patientId: string) => {
-    const raw = localStorage.getItem(PATIENT_CACHE_KEY);
-    if (!raw) return null;
-
-    try {
-        const cached = JSON.parse(raw) as { patientId: string; backendPatientId: number };
-        if (cached.patientId !== patientId) return null;
-        return Number.isFinite(cached.backendPatientId) ? cached.backendPatientId : null;
-    } catch {
-        return null;
-    }
-};
-
 const cacheBackendPatientId = (patientId: string, backendPatientId: number) => {
     localStorage.setItem(PATIENT_CACHE_KEY, JSON.stringify({ patientId, backendPatientId }));
 };
 
-const resolveBackendPatientId = async (selectedPatient: SelectedPatientSession) => {
-    const cachedPatientId = readCachedBackendPatientId(selectedPatient.patientId);
-    if (cachedPatientId) {
-        return cachedPatientId;
-    }
+const clearCachedBackendPatientId = () => {
+    localStorage.removeItem(PATIENT_CACHE_KEY);
+};
 
+const resolveBackendPatientId = async (selectedPatient: SelectedPatientSession) => {
     const response = await fetch(
         buildApiUrl(`/api/patients/lookup/${encodeURIComponent(selectedPatient.patientId)}`)
     );
@@ -278,6 +264,7 @@ const resolveBackendPatientId = async (selectedPatient: SelectedPatientSession) 
         throw new Error(`Failed to lookup patient: ${response.status}`);
     }
 
+    clearCachedBackendPatientId();
     const createResponse = await fetch(buildApiUrl("/api/patients/"), {
         method: "POST",
         headers: {

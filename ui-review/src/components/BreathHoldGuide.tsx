@@ -2,26 +2,31 @@ import { useEffect, useRef, useState } from "react";
 
 export type BreathHoldStage = "idle" | "countdown" | "holding" | "stable" | "scanning" | "release" | "aborted";
 
-interface BreathHoldGuideProps {
-    /** When true, runs the countdown → hold flow. */
+/**
+ * Shared DIBH state machine. Separated from BreathHoldGuide so screens that
+ * need a compact / custom layout (e.g. the helical DIBH execute panel) can
+ * drive their own UI off the same authoritative state, without re-rendering
+ * the full circular badge.
+ */
+export interface BreathHoldStateMachineOptions {
     armed: boolean;
-    timeoutSeconds?: number;
-    amplitudeToleranceMm?: number;
+    timeoutSeconds: number;
+    forceFailure: boolean;
     onStageChange?: (stage: BreathHoldStage) => void;
-    /** Called once when the system judges the hold stable enough to scan. */
     onStableHold?: () => void;
-    /** Reset back to idle. */
     onAbort?: () => void;
 }
 
-export default function BreathHoldGuide({
-    armed,
-    timeoutSeconds = 25,
-    amplitudeToleranceMm = 2.0,
-    onStageChange,
-    onStableHold,
-    onAbort,
-}: BreathHoldGuideProps) {
+export interface BreathHoldStateMachineState {
+    stage: BreathHoldStage;
+    countdown: number;
+    holdElapsed: number;
+}
+
+export function useBreathHoldStateMachine(
+    opts: BreathHoldStateMachineOptions
+): BreathHoldStateMachineState {
+    const { armed, timeoutSeconds, forceFailure, onStageChange, onStableHold, onAbort } = opts;
     const [stage, setStage] = useState<BreathHoldStage>("idle");
     const [countdown, setCountdown] = useState(3);
     const [holdElapsed, setHoldElapsed] = useState(0);
@@ -55,8 +60,10 @@ export default function BreathHoldGuide({
         const id = window.setInterval(() => {
             setHoldElapsed((s) => {
                 const next = s + 0.1;
-                // Mock stability judgement: stable after 1.0s of hold
-                if (!stableFiredRef.current && next >= 1.0 && stageRef.current === "holding") {
+                // Mock stability judgement: stable after 1.0s of hold.
+                // forceFailure skips this transition so the guide stays in
+                // `holding` until timeoutSeconds expires → onAbort fires.
+                if (!stableFiredRef.current && next >= 1.0 && stageRef.current === "holding" && !forceFailure) {
                     stableFiredRef.current = true;
                     setStage("stable");
                     onStableHold?.();
@@ -69,7 +76,47 @@ export default function BreathHoldGuide({
             });
         }, 100);
         return () => window.clearInterval(id);
-    }, [stage, timeoutSeconds, onStableHold, onAbort]);
+    }, [stage, timeoutSeconds, onStableHold, onAbort, forceFailure]);
+
+    return { stage, countdown, holdElapsed };
+}
+
+interface BreathHoldGuideProps {
+    /** When true, runs the countdown → hold flow. */
+    armed: boolean;
+    timeoutSeconds?: number;
+    amplitudeToleranceMm?: number;
+    /**
+     * Demo flag: when true, the guide stays in `holding` without ever
+     * transitioning to `stable` — simulates a patient who can't maintain a
+     * stable plateau. After `timeoutSeconds`, fires `onAbort`. Use this for
+     * the first-attempt failure demo.
+     */
+    forceFailure?: boolean;
+    onStageChange?: (stage: BreathHoldStage) => void;
+    /** Called once when the system judges the hold stable enough to scan. */
+    onStableHold?: () => void;
+    /** Reset back to idle. */
+    onAbort?: () => void;
+}
+
+export default function BreathHoldGuide({
+    armed,
+    timeoutSeconds = 25,
+    amplitudeToleranceMm = 2.0,
+    forceFailure = false,
+    onStageChange,
+    onStableHold,
+    onAbort,
+}: BreathHoldGuideProps) {
+    const { stage, countdown, holdElapsed } = useBreathHoldStateMachine({
+        armed,
+        timeoutSeconds,
+        forceFailure,
+        onStageChange,
+        onStableHold,
+        onAbort,
+    });
 
     const ringColor =
         stage === "stable" || stage === "scanning" ? "#22c55e" :

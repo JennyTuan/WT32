@@ -12,7 +12,10 @@ class Patient(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
+    last_name = Column(String(50), nullable=True)
+    first_name = Column(String(50), nullable=True)
     patient_id = Column(String(50), nullable=False, unique=True, index=True)
+    id_number = Column(String(50), nullable=True)
     gender = Column(String(20), nullable=False)
     birth_date = Column(Date, nullable=False)
     height = Column(Float, nullable=True)
@@ -536,3 +539,53 @@ class CornerConfig(Base):
     config_json = Column(Text, nullable=False)  # Stores the JSON representation of the configuration
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+
+class SystemLog(Base):
+    __tablename__ = "system_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    level = Column(String(10), nullable=False, index=True)  # DEBUG / INFO / WARNING / ERROR / CRITICAL
+    source = Column(String(50), nullable=False, index=True)  # module name, e.g. "scan_sessions", "main"
+    event = Column(String(50), nullable=False, index=True)  # short event code, e.g. "scan_started"
+    message = Column(Text, nullable=False)
+    details = Column(Text, nullable=True)  # optional JSON blob
+    scan_session_id = Column(Integer, ForeignKey("scan_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+
+
+class DoseLog(Base):
+    __tablename__ = "dose_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    scanned_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    # FKs kept SET NULL so log rows survive even if upstream rows are deleted.
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="SET NULL"), nullable=True, index=True)
+    scan_session_id = Column(Integer, ForeignKey("scan_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    scan_session_series_id = Column(Integer, ForeignKey("scan_session_series.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Snapshots — frozen at write time so the log remains meaningful even after deletes/edits.
+    patient_name_snapshot = Column(String(100), nullable=True)
+    patient_id_snapshot = Column(String(50), nullable=True, index=True)
+    protocol_name_snapshot = Column(String(100), nullable=True)
+
+    # Scan context
+    series_order = Column(Integer, nullable=True)
+    series_type = Column(String(20), nullable=False, index=True)  # topogram / helical / axial
+    series_label = Column(String(100), nullable=True)
+    body_part = Column(String(100), nullable=True)
+    scan_mode = Column(String(20), nullable=True)
+
+    # Dose parameters (nullable — different series types populate different subsets)
+    kv = Column(Integer, nullable=True)
+    ma = Column(Float, nullable=True)
+    rotation_time = Column(Float, nullable=True)
+    pitch = Column(Float, nullable=True)  # helical only
+    scan_length = Column(Float, nullable=True)
+    collimator = Column(String(50), nullable=True)
+    ctdi_vol = Column(Float, nullable=True)
+    dlp = Column(Float, nullable=True)
+
+    operator = Column(String(50), nullable=True)  # reserved for future

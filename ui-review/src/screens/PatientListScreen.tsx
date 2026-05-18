@@ -24,6 +24,13 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 import AddPatientScreen from './AddPatientScreen';
 import { saveSelectedPatient } from '../lib/patientSession';
+import {
+    listPatients,
+    calcAgeFromBirthDate,
+    mapGenderToZh,
+    mapStatusToZh,
+    type ApiPatient,
+} from '../lib/patientsApi';
 
 type CheckStatus = '待进行' | '已完成' | '已终止';
 
@@ -34,30 +41,43 @@ type PatientRecord = {
     name: string;
     gender: string;
     age: number;
-    type: string;
     checkStatus: CheckStatus;
 };
 
-const INITIAL_PATIENT_DATA: PatientRecord[] = [
-    { id: 1, serial: 6, patientId: 'P001', name: '张三', gender: '男', age: 45, type: 'CT胸部扫描', checkStatus: '待进行' },
-    { id: 2, serial: 6, patientId: 'P002', name: '李四', gender: '女', age: 32, type: 'MRI头部', checkStatus: '已完成' },
-    { id: 3, serial: 5, patientId: 'P003', name: '王五', gender: '男', age: 28, type: 'CT腹部', checkStatus: '待进行' },
-    { id: 4, serial: 5, patientId: 'P004', name: '赵六', gender: '女', age: 55, type: '螺旋扫描', checkStatus: '已终止' },
-    { id: 5, serial: 4, patientId: 'P005', name: '孙七', gender: '男', age: 19, type: '定位像', checkStatus: '待进行' },
-    { id: 6, serial: 4, patientId: 'P006', name: '周八', gender: '女', age: 64, type: 'CT增强', checkStatus: '已完成' },
-    { id: 7, serial: 3, patientId: 'P007', name: '吴九', gender: '男', age: 41, type: '骨盆扫描', checkStatus: '已终止' },
-    { id: 8, serial: 3, patientId: 'P008', name: '郑十', gender: '女', age: 37, type: '颈椎平扫', checkStatus: '待进行' },
-];
+const mapApiPatientToRecord = (p: ApiPatient, index: number): PatientRecord => ({
+    id: p.id,
+    serial: index + 1,
+    patientId: p.patient_id,
+    name: p.name,
+    gender: mapGenderToZh(p.gender),
+    age: calcAgeFromBirthDate(p.birth_date),
+    checkStatus: mapStatusToZh(p.latest_scan_status),
+});
 
 const PatientListScreen = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'completed'
-    const [patients, setPatients] = useState<PatientRecord[]>(INITIAL_PATIENT_DATA);
+    const [patients, setPatients] = useState<PatientRecord[]>([]);
     const [selectedRows, setSelectedRows] = useState<number[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [showAddModal, setShowAddModal] = useState(false);
     const [isNameMasked, setIsNameMasked] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
+
+    const refreshPatients = async () => {
+        try {
+            const apiList = await listPatients();
+            setPatients(apiList.map(mapApiPatientToRecord));
+            setLoadError(null);
+        } catch (err) {
+            setLoadError(err instanceof Error ? err.message : '加载患者列表失败');
+        }
+    };
+
+    useEffect(() => {
+        void refreshPatients();
+    }, []);
 
     const checkStatusClass: Record<CheckStatus, string> = {
         待进行: 'bg-[#FFF3E0] text-[#FA8C16] border border-[#FFD591]',
@@ -78,8 +98,7 @@ const PatientListScreen = () => {
             : patient.checkStatus !== '已完成';
         const matchesQuery = normalizedQuery.length === 0
             || patient.name.toLowerCase().includes(normalizedQuery)
-            || patient.patientId.toLowerCase().includes(normalizedQuery)
-            || patient.type.toLowerCase().includes(normalizedQuery);
+            || patient.patientId.toLowerCase().includes(normalizedQuery);
 
         return matchesTab && matchesQuery;
     });
@@ -298,7 +317,6 @@ const PatientListScreen = () => {
                                             <th className="px-4 text-left border-r border-white/10">姓名</th>
                                             <th className="px-4 text-left border-r border-white/10">性别</th>
                                             <th className="px-4 text-left border-r border-white/10">年龄</th>
-                                            <th className="px-4 text-left border-r border-white/10">检查类型</th>
                                             <th className="px-4 text-center">{activeTab === 'completed' ? '图像状态' : '检查状态'}</th>
                                         </tr>
                                     </thead>
@@ -323,15 +341,13 @@ const PatientListScreen = () => {
                                                 <td className="px-4 font-bold text-[#37474F]">{maskName(patient.name)}</td>
                                                 <td className="px-4">{patient.gender}</td>
                                                 <td className="px-4">{patient.age}</td>
-                                                <td className="px-4 text-[#78909C]">{patient.type}</td>
                                                 <td className="text-center">
                                                     {activeTab === 'completed' ? (
                                                         <button
                                                             type="button"
                                                             onClick={(event) => {
                                                                 event.stopPropagation();
-                                                                const is4D = patient.type.toLowerCase().includes("4d");
-                                                                navigate(is4D ? "/image-viewer-gating" : "/image-viewer");
+                                                                navigate("/image-viewer");
                                                             }}
                                                             className="inline-flex h-[24px] px-2 rounded-full items-center justify-center gap-1 text-[11px] font-bold bg-[#E3F2FD] text-[#1E88E5] border border-[#BBDEFB]"
                                                         >
@@ -404,7 +420,6 @@ const PatientListScreen = () => {
                                             name: selectedPatient.name,
                                             gender: selectedPatient.gender,
                                             age: selectedPatient.age,
-                                            checkType: selectedPatient.type,
                                         });
                                     }
                                     navigate('/protocol-select');
@@ -421,8 +436,21 @@ const PatientListScreen = () => {
                     </div>
                 </footer>
 
+                {loadError && (
+                    <div className="absolute top-[88px] left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-red-50 border border-red-200 text-red-600 text-[12px] rounded shadow">
+                        {loadError}
+                    </div>
+                )}
+
                 {/* Modal Integration - Constrained to this relative container */}
-                <AddPatientScreen isOpen={showAddModal} onClose={() => setShowAddModal(false)} />
+                <AddPatientScreen
+                    isOpen={showAddModal}
+                    onClose={() => setShowAddModal(false)}
+                    onCreated={() => {
+                        setShowAddModal(false);
+                        void refreshPatients();
+                    }}
+                />
             </div>
     );
 };

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 import json
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./backend/app.db"
@@ -12,6 +12,15 @@ engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
 )
+
+
+@event.listens_for(engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -781,6 +790,10 @@ def _migrate_protocol_columns() -> None:
     from sqlalchemy import text
 
     migrations = [
+        # Patient additions
+        "ALTER TABLE patients ADD COLUMN last_name VARCHAR(50)",
+        "ALTER TABLE patients ADD COLUMN first_name VARCHAR(50)",
+        "ALTER TABLE patients ADD COLUMN id_number VARCHAR(50)",
         "ALTER TABLE protocols ADD COLUMN is_factory BOOLEAN NOT NULL DEFAULT 0",
         "ALTER TABLE protocols ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT 1",
         "ALTER TABLE protocols ADD COLUMN updated_at DATETIME",
@@ -922,11 +935,64 @@ def _migrate_protocol_columns() -> None:
         conn.commit()
 
 
+def _cleanup_scan_session_orphans() -> None:
+    """Remove stale child rows left by older SQLite connections without FK enforcement."""
+    from sqlalchemy import text
+
+    cleanup_sql = [
+        (
+            "DELETE FROM scan_session_breathing_training_params "
+            "WHERE scan_session_fourd_config_id NOT IN (SELECT id FROM scan_session_fourd_configs)"
+        ),
+        (
+            "DELETE FROM scan_session_topogram_params "
+            "WHERE scan_session_series_id NOT IN (SELECT id FROM scan_session_series)"
+        ),
+        (
+            "DELETE FROM scan_session_helical_params "
+            "WHERE scan_session_series_id NOT IN (SELECT id FROM scan_session_series)"
+        ),
+        (
+            "DELETE FROM scan_session_axial_params "
+            "WHERE scan_session_series_id NOT IN (SELECT id FROM scan_session_series)"
+        ),
+        (
+            "DELETE FROM scan_session_recon_series "
+            "WHERE scan_session_series_id NOT IN (SELECT id FROM scan_session_series)"
+        ),
+        (
+            "DELETE FROM scan_session_fourd_configs "
+            "WHERE scan_session_series_id NOT IN (SELECT id FROM scan_session_series)"
+        ),
+        (
+            "DELETE FROM scan_session_gating_configs "
+            "WHERE scan_session_series_id NOT IN (SELECT id FROM scan_session_series)"
+        ),
+        (
+            "DELETE FROM scan_session_contrast_configs "
+            "WHERE scan_session_id NOT IN (SELECT id FROM scan_sessions)"
+        ),
+        (
+            "DELETE FROM scan_session_series "
+            "WHERE scan_session_id NOT IN (SELECT id FROM scan_sessions)"
+        ),
+    ]
+
+    with engine.connect() as conn:
+        for sql in cleanup_sql:
+            try:
+                conn.execute(text(sql))
+            except Exception:
+                pass
+        conn.commit()
+
+
 def init_db() -> None:
     from . import models
 
     Base.metadata.create_all(bind=engine)
     _migrate_protocol_columns()
+    _cleanup_scan_session_orphans()
 
     db = SessionLocal()
     try:

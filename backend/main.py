@@ -6,8 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .database import init_db
-from .routers import contrast_configs, corners, disk_manager, patients, protocols, recon_params, scan_params, scan_sessions
+from .database import SessionLocal, init_db
+from .routers import contrast_configs, corners, disk_manager, logs, patients, protocols, recon_params, scan_params, scan_sessions
 from .websocket.scan_ws import router as scan_ws_router
 
 app = FastAPI(title="CT Prototype Backend", version="1.0.0")
@@ -25,6 +25,20 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup():
     init_db()
+    db = SessionLocal()
+    try:
+        logs.write_system_log(
+            db,
+            level="INFO",
+            source="main",
+            event="app_started",
+            message="CT Prototype backend started",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
 
 @app.get("/")
@@ -40,6 +54,7 @@ app.include_router(contrast_configs.router, prefix="/api")
 app.include_router(scan_sessions.router, prefix="/api")
 app.include_router(disk_manager.router, prefix="/api")
 app.include_router(corners.router, prefix="/api")
+app.include_router(logs.router, prefix="/api")
 app.include_router(scan_ws_router)
 DICOM_OUT_DIR = DATA_DIR / "dicom_out"
 DICOM_OUT_DIR.mkdir(parents=True, exist_ok=True)
