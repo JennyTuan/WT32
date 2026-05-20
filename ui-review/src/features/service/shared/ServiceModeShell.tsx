@@ -8,7 +8,6 @@ import {
   Menu,
   Plus,
   Search,
-  Settings,
   User,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -19,6 +18,7 @@ import {
   type ServiceModeSection,
   getServiceModeItem,
 } from "./serviceModeRegistry";
+import SystemMenuButton from "../../../components/SystemMenuButton";
 
 type FooterStatusTone = "idle" | "active" | "success";
 
@@ -111,9 +111,9 @@ export default function ServiceModeShell({
               <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: --</span>
             </div>
             <div className="ml-auto flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-              <div className="text-[9px] font-bold italic">L 60 mm</div>
-              <div className="text-[9px] font-bold">∠ 3.0°</div>
-              <div className="text-[9px] font-bold">热 {currentHeat.toFixed(0)}%</div>
+              <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>60 mm</span></div>
+              <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>3.0°</span></div>
+              <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" /><span>{currentHeat.toFixed(0)}%</span></div>
             </div>
           </div>
         </div>
@@ -135,12 +135,7 @@ export default function ServiceModeShell({
           <div className="p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
             <Lightbulb size={24} />
           </div>
-          <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
-            <Settings size={24} />
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">
-              100
-            </span>
-          </div>
+          <SystemMenuButton iconSize={24} badgeCount={100} />
         </div>
       </header>
 

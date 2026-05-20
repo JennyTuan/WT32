@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    User,
-    Settings,
     Sun,
     ChevronRight,
     ChevronUp,
@@ -19,7 +17,6 @@ import {
     Play,
     Pause,
     Flame,
-    Network,
     Siren,
 } from "lucide-react";
 import type { ChangeEvent, ReactNode } from "react";
@@ -28,6 +25,9 @@ import * as dicomParser from "dicom-parser";
 import type { FourDPostScanState } from "../lib/fourDTypes";
 import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
+import NetworkStatusButton from "../components/NetworkStatusButton";
+import PatientHeaderCard from "../components/PatientHeaderCard";
+import SystemMenuButton from "../components/SystemMenuButton";
 import CornerstoneMPRViewport, {
     type CornerstoneMPRHandle,
     type ObliqueAxis,
@@ -1222,26 +1222,14 @@ const ViewScreen = () => {
         <div className="relative flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl">
             <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
                 <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-3 py-1.5 px-4 bg-[#DCE6F2] border border-[#B0C4DE] rounded-sm min-w-[210px]">
-                        <div className="w-10 h-10 rounded-sm bg-[#4A6982] flex items-center justify-center text-white opacity-90">
-                            <User size={24} />
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-[16px] font-bold text-[#37474F]">
-                                {meta.patientName !== "N/A" ? meta.patientName : "—"}
-                            </span>
-                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">
-                                {meta.patientId !== "N/A" ? `ID: ${meta.patientId}` : "加载中…"}
-                            </span>
-                        </div>
-                    </div>
+                    <PatientHeaderCard
+                        name={meta.patientName !== "N/A" ? meta.patientName : null}
+                        patientId={meta.patientId !== "N/A" ? meta.patientId : null}
+                    />
                     <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-                        <div className="text-[9px] font-bold italic">⊥ 0</div>
-                        <div className="text-[9px] font-bold">∠ 0</div>
-                        <div className="flex items-center gap-1 text-[11px] font-bold">
-                            <Flame size={14} />
-                            <span>0%</span>
-                        </div>
+                        <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
+                        <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
+                        <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" /><span>0%</span></div>
                     </div>
                 </div>
 
@@ -1252,17 +1240,11 @@ const ViewScreen = () => {
 
                 <div className="flex items-center gap-5 pr-2">
                     <div className="p-1 text-[#D32F2F] cursor-pointer hover:opacity-70"><Siren size={30} strokeWidth={1.8} /></div>
-                    <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
-                        <Network size={24} />
-                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">5</span>
-                    </div>
+                    <NetworkStatusButton />
                     <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
                         <Sun size={24} />
                     </div>
-                    <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
-                        <Settings size={24} />
-                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">10</span>
-                    </div>
+                    <SystemMenuButton iconSize={24} badgeCount={10} />
                 </div>
             </header>
 

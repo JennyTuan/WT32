@@ -1,7 +1,6 @@
 ﻿import { useState } from "react";
 import {
     User,
-    Settings,
     Sun,
     ChevronDown,
     ChevronLeft,
@@ -20,6 +19,7 @@ import {
     Zap,
     Radio
 } from "lucide-react";
+import SystemMenuButton from "../components/SystemMenuButton";
 
 interface Sequence {
     id: string;
@@ -102,8 +102,8 @@ const MockScanScreen = () => {
                                 <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: 67890</span>
                             </div>
                             <div className="ml-auto flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-                                <div className="text-[9px] font-bold italic">⊥ 0</div>
-                                <div className="text-[9px] font-bold">∠ 0</div>
+                                <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
+                                <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
                             </div>
                         </div>
                     </div>
@@ -123,10 +123,7 @@ const MockScanScreen = () => {
                             <Sun size={24} />
                             <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">5</span>
                         </div>
-                        <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
-                            <Settings size={24} />
-                            <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">10</span>
-                        </div>
+                        <SystemMenuButton iconSize={24} badgeCount={10} />
                     </div>
                 </header>
 

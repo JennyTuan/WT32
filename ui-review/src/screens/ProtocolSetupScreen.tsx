@@ -2,8 +2,6 @@ import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-    User,
-    Settings,
     Sun,
     Plus,
     Copy,
@@ -20,11 +18,13 @@ import {
     Info,
     Activity,
     Flame,
-    Network,
     Siren,
     AlertTriangle,
 } from "lucide-react";
-import { loadSelectedPatient, formatPatientCardSubtitle } from "../lib/patientSession";
+import { loadSelectedPatient } from "../lib/patientSession";
+import NetworkStatusButton from "../components/NetworkStatusButton";
+import PatientHeaderCard from "../components/PatientHeaderCard";
+import SystemMenuButton from "../components/SystemMenuButton";
 import { saveSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import {
     clearSelectedScanSessionId,
@@ -1923,24 +1923,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             {/* Header */}
             <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
                 <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-3 py-1.5 px-4 bg-[#DCE6F2] border border-[#B0C4DE] rounded-sm min-w-[210px]">
-                        <div className="w-10 h-10 rounded-sm bg-[#4A6982] flex items-center justify-center text-white opacity-90">
-                            <User size={24} />
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-[16px] font-bold tracking-tight">{selectedPatient?.name ?? "未选择患者"}</span>
-                            <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5 opacity-80">
-                                {formatPatientCardSubtitle(selectedPatient)}
-                            </span>
-                        </div>
-                    </div>
+                    <PatientHeaderCard
+                        name={selectedPatient?.name ?? null}
+                        patientId={selectedPatient?.patientId ?? null}
+                    />
                     <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-                        <div className="text-[9px] font-bold italic">⊥ 0</div>
-                        <div className="text-[9px] font-bold">∠ 0</div>
-                        <div className="flex items-center gap-1 text-[11px] font-bold">
-                            <Flame size={14} />
-                            <span>0%</span>
-                        </div>
+                        <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
+                        <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
+                        <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" /><span>0%</span></div>
                     </div>
                 </div>
 
@@ -1955,21 +1945,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                     <div className="p-1 text-[#D32F2F] cursor-pointer hover:opacity-70">
                         <Siren size={30} strokeWidth={1.8} />
                     </div>
-                    <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
-                        <Network size={24} />
-                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">
-                            5
-                        </span>
-                    </div>
+                    <NetworkStatusButton />
                     <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
                         <Sun size={24} />
                     </div>
-                    <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
-                        <Settings size={24} />
-                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D32F2F] text-white text-[9px] flex items-center justify-center rounded-full font-bold border border-white">
-                            10
-                        </span>
-                    </div>
+                    <SystemMenuButton iconSize={24} badgeCount={10} />
                 </div>
             </header>
 

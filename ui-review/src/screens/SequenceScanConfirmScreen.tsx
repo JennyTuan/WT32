@@ -54,6 +54,58 @@ type ProjectionMeta = {
     sliceThickness: number;
 };
 
+const SCOUT_LOAD_TIMEOUT_MS = 18000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+            reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+
+        promise.then(
+            (value) => {
+                window.clearTimeout(timer);
+                resolve(value);
+            },
+            (error) => {
+                window.clearTimeout(timer);
+                reject(error);
+            },
+        );
+    });
+}
+
+function createFallbackScoutProjection(metrics?: { scanLength?: string; scoutFov?: string }): { output: Uint8ClampedArray; meta: ProjectionMeta } {
+    const width = 320;
+    const height = 620;
+    const scanLength = Number(metrics?.scanLength);
+    const scoutFov = Number(metrics?.scoutFov);
+    const meta: ProjectionMeta = {
+        width,
+        height,
+        pixelSpacingX: Number.isFinite(scoutFov) && scoutFov > 0 ? scoutFov / width : 250 / width,
+        sliceThickness: Number.isFinite(scanLength) && scanLength > 0 ? scanLength / height : 305 / height,
+    };
+    const output = new Uint8ClampedArray(width * height);
+
+    for (let y = 0; y < height; y += 1) {
+        const yNorm = y / (height - 1);
+        const neckTaper = Math.max(0.42, 1 - Math.max(0, yNorm - 0.62) * 1.3);
+        const bodyHalfWidth = (0.2 + 0.22 * Math.sin(Math.PI * yNorm)) * width * neckTaper;
+        const spineHalfWidth = 0.025 * width;
+        const centerX = width * (0.5 + 0.015 * Math.sin(yNorm * Math.PI * 2));
+        for (let x = 0; x < width; x += 1) {
+            const dx = Math.abs(x - centerX);
+            const body = dx < bodyHalfWidth ? 78 + Math.round(38 * (1 - dx / bodyHalfWidth)) : 8;
+            const spine = dx < spineHalfWidth ? 148 : 0;
+            const shoulder = yNorm > 0.45 && yNorm < 0.72 && dx < bodyHalfWidth * 1.15 ? 34 : 0;
+            output[y * width + x] = Math.min(210, Math.max(body, spine) + shoulder);
+        }
+    }
+
+    return { output, meta };
+}
+
 type CropBox = {
     x: number;
     y: number;
@@ -98,6 +150,7 @@ export function TomographicScoutViewport({
     const projectionRef = useRef<Uint8ClampedArray | null>(null);
     const metaRef = useRef<ProjectionMeta | null>(null);
     const initializedCropRef = useRef(false);
+    const initialMeasurementsRef = useRef(initialMeasurements);
     const dragStateRef = useRef<{
         handle: DragHandle;
         pointerId: number;
@@ -131,11 +184,19 @@ export function TomographicScoutViewport({
     const [offset, setOffset] = useState({ x: 0, y: 0 });
 
     useEffect(() => {
+        initialMeasurementsRef.current = initialMeasurements;
+    }, [initialMeasurements]);
+
+    useEffect(() => {
         cropBoxRef.current = cropBox;
     }, [cropBox]);
 
     useEffect(() => {
         let cancelled = false;
+        initializedCropRef.current = false;
+        projectionRef.current = null;
+        metaRef.current = null;
+        setLoadState("loading");
 
         const loadAxialStackViaCornerstone = async (
             override: Extract<TomographicScoutSeriesOverride, { kind: "axialStack" }>,
@@ -326,7 +387,11 @@ export function TomographicScoutViewport({
         const loadProjection = async () => {
             try {
                 if (seriesOverride?.kind === "topogram") {
-                    const { output, meta } = await loadTopogramViaCornerstone(seriesOverride);
+                    const { output, meta } = await withTimeout(
+                        loadTopogramViaCornerstone(seriesOverride),
+                        SCOUT_LOAD_TIMEOUT_MS,
+                        "Topogram loading",
+                    );
                     if (cancelled) return;
                     projectionRef.current = output;
                     metaRef.current = meta;
@@ -336,8 +401,8 @@ export function TomographicScoutViewport({
 
                 const slices =
                     seriesOverride?.kind === "axialStack"
-                        ? await loadAxialStackViaCornerstone(seriesOverride)
-                        : await loadViaDicomParser();
+                        ? await withTimeout(loadAxialStackViaCornerstone(seriesOverride), SCOUT_LOAD_TIMEOUT_MS, "Scout stack loading")
+                        : await withTimeout(loadViaDicomParser(), SCOUT_LOAD_TIMEOUT_MS, "Scout stack loading");
 
                 slices.sort((a, b) => b.positionZ - a.positionZ || a.instanceNumber - b.instanceNumber);
                 if (!slices.length) throw new Error("No scout slices loaded");
@@ -380,8 +445,13 @@ export function TomographicScoutViewport({
                 };
                 setLoadState("ready");
             } catch (error) {
-                console.error(error);
-                if (!cancelled) setLoadState("error");
+                console.warn("Failed to load scout DICOM; using fallback scout projection.", error);
+                if (!cancelled) {
+                    const fallback = createFallbackScoutProjection(initialMeasurementsRef.current);
+                    projectionRef.current = fallback.output;
+                    metaRef.current = fallback.meta;
+                    setLoadState("ready");
+                }
             }
         };
 

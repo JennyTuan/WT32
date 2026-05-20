@@ -40,5 +40,5 @@ export const loadSelectedPatient = (): SelectedPatientSession | null => {
 
 export const formatPatientCardSubtitle = (patient: SelectedPatientSession | null) => {
     if (!patient) return "ID: --";
-    return `ID: ${patient.patientId} | ${patient.gender} | ${patient.age}岁`;
+    return `ID: ${patient.patientId}`;
 };

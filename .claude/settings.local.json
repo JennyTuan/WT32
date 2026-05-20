@@ -96,7 +96,8 @@
       "Bash(npx --package=typescript@5.6 -- tsc --noEmit -p tsconfig.app.json)",
       "Bash(cd /c/CT-Prototype-backup/CT-Prototype/ui-review && grep -E '@cornerstonejs|vtk\\\\.js' package.json)",
       "Bash(cd /c/CT-Prototype-backup/CT-Prototype/ui-review && ls node_modules/@cornerstonejs/tools/dist/esm/tools/ 2>/dev/null | grep -iE \"crop|clip\" | head)",
-      "Bash(python -c \"from backend.main import app; from backend.database import SessionLocal; from backend import models; db = SessionLocal\\(\\); print\\('system_logs count:', db.query\\(models.SystemLog\\).count\\(\\)\\); print\\('dose_logs count:', db.query\\(models.DoseLog\\).count\\(\\)\\); latest = db.query\\(models.SystemLog\\).order_by\\(models.SystemLog.id.desc\\(\\)\\).first\\(\\); print\\('latest system log:', latest.level, latest.source, latest.event, latest.message if latest else None\\); db.close\\(\\)\")"
+      "Bash(python -c \"from backend.main import app; from backend.database import SessionLocal; from backend import models; db = SessionLocal\\(\\); print\\('system_logs count:', db.query\\(models.SystemLog\\).count\\(\\)\\); print\\('dose_logs count:', db.query\\(models.DoseLog\\).count\\(\\)\\); latest = db.query\\(models.SystemLog\\).order_by\\(models.SystemLog.id.desc\\(\\)\\).first\\(\\); print\\('latest system log:', latest.level, latest.source, latest.event, latest.message if latest else None\\); db.close\\(\\)\")",
+      "Bash(curl -s -o nul -w \"%{http_code}\" http://localhost:5175/)"
     ]
   }
 }

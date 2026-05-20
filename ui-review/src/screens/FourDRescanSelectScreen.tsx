@@ -9,10 +9,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Flame,
-  Network,
   Plus,
   RotateCcw,
-  Settings,
   Siren,
   Sun,
   Trash2,
@@ -20,6 +18,8 @@ import {
 } from "lucide-react";
 
 import { loadSelectedPatient } from "../lib/patientSession";
+import NetworkStatusButton from "../components/NetworkStatusButton";
+import SystemMenuButton from "../components/SystemMenuButton";
 import type { FourDPostScanState, RescanChoices } from "../lib/fourDTypes";
 
 const BED_TRAVEL_MM = 19.2;
@@ -1106,12 +1106,9 @@ export default function FourDRescanSelectScreen() {
           </div>
 
           <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-            <div className="text-[9px] font-bold italic">⌀ 0</div>
-            <div className="text-[9px] font-bold">⏚ 0</div>
-            <div className="flex items-center gap-1 text-[11px] font-bold">
-              <Flame size={13} />
-              <span>0%</span>
-            </div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" /><span>0%</span></div>
           </div>
         </div>
 
@@ -1124,12 +1121,7 @@ export default function FourDRescanSelectScreen() {
           <div className="cursor-pointer p-1 text-[#D32F2F] hover:opacity-70">
             <Siren size={24} />
           </div>
-          <div className="relative cursor-pointer p-1 hover:opacity-70">
-            <Network size={20} />
-            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-[#D32F2F] text-[9px] font-bold text-white">
-              5
-            </span>
-          </div>
+          <NetworkStatusButton iconSize={20} />
           <button
             type="button"
             aria-label="激光灯"
@@ -1139,12 +1131,7 @@ export default function FourDRescanSelectScreen() {
           >
             <Sun size={20} />
           </button>
-          <div className="relative cursor-pointer p-1 hover:opacity-70">
-            <Settings size={20} />
-            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-[#D32F2F] text-[9px] font-bold text-white">
-              10
-            </span>
-          </div>
+          <SystemMenuButton iconSize={20} badgeCount={10} />
         </div>
       </header>
 
