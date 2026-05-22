@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { AlertTriangle, ChevronRight, Info } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, Info } from "lucide-react";
 import { getFourDImageUrl } from "../lib/fourDImageSource";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
 
@@ -86,7 +86,7 @@ function buildMockPhases(): PhaseData[] {
         label: `床位 ${String(bedNo).padStart(2, "0")}`,
         range,
         segments,
-        selectedSegmentId: segments[0]?.id,
+        selectedSegmentId: undefined,
       };
     });
 
@@ -248,6 +248,9 @@ export default function PhaseFilterScreen() {
   const selectedBed = currentPhase?.beds.find((bed) => bed.id === selectedBedId) ?? currentPhase?.beds[0] ?? null;
   const activeBedNumber = parseBedNumber(selectedBed?.label);
   const bedCodeCount = Math.max(1, fourDViewerState.scanResult.bedCount);
+  const allDuplicatesResolved = phases
+    .filter((p) => p.status === "duplicate")
+    .every((p) => p.beds.length > 0 && p.beds.every((bed) => !!bed.selectedSegmentId));
 
   const setSegmentForBed = (phaseIdx: number, bedId: string, segId: string) => {
     setPhases((prev) =>
@@ -277,6 +280,7 @@ export default function PhaseFilterScreen() {
               .filter(({ p }) => p.status !== "ok")
               .map(({ p, i }) => {
                 const phaseActive = selectedPhaseIdx === i;
+                const phaseResolved = p.beds.length > 0 && p.beds.every((bed) => !!bed.selectedSegmentId);
 
                 return (
                   <div
@@ -296,10 +300,17 @@ export default function PhaseFilterScreen() {
                       }`}
                     >
                       <span className="text-[12px] font-black">Phase {p.label}</span>
-                      <span className="flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
-                        <AlertTriangle size={10} />
-                        待选择
-                      </span>
+                      {phaseResolved ? (
+                        <span className="flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
+                          <CheckCircle2 size={10} />
+                          已选择
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                          <AlertTriangle size={10} />
+                          待选择
+                        </span>
+                      )}
                     </button>
 
                     {phaseActive && (
@@ -426,7 +437,13 @@ export default function PhaseFilterScreen() {
         </div>
         <button
           onClick={() => navigate("/image-viewer", { state: fourDViewerState })}
-          className="flex items-center gap-1.5 rounded-md bg-[#4D94FF] px-6 py-2 text-[12px] font-bold text-white shadow-sm hover:bg-blue-600"
+          disabled={!allDuplicatesResolved}
+          title={allDuplicatesResolved ? undefined : "请先为所有重复相位选择候选段"}
+          className={`flex items-center gap-1.5 rounded-md px-6 py-2 text-[12px] font-bold shadow-sm transition-colors ${
+            allDuplicatesResolved
+              ? "bg-[#4D94FF] text-white hover:bg-blue-600"
+              : "bg-slate-200 text-slate-400 cursor-not-allowed"
+          }`}
         >
           图像浏览
           <ChevronRight size={14} />

@@ -6,7 +6,7 @@ import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import DibhStatusRow from "../components/DibhStatusRow";
 import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/BreathHoldGuide";
-import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
+import { fetchSelectedScanSession, loadSelectedScanSessionId, completeScanSession, cancelScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 
@@ -441,6 +441,9 @@ export default function HelicalExecuteScanScreen() {
     useEffect(() => {
         if (stage !== "completed") return;
 
+        const sessionId = loadSelectedScanSessionId();
+        if (sessionId) void completeScanSession(sessionId);
+
         autoNavigateTimerRef.current = window.setTimeout(() => {
             navigate("/image-viewer");
         }, AUTO_NAVIGATE_DELAY_MS);
@@ -622,6 +625,8 @@ export default function HelicalExecuteScanScreen() {
         setAxialWaitingForBreath(false);
         setPendingBedIndex(null);
         setStage("idle");
+        const sessionId = loadSelectedScanSessionId();
+        if (sessionId) void cancelScanSession(sessionId);
         navigate("/gated-axial-confirm");
     };
 
@@ -746,6 +751,8 @@ export default function HelicalExecuteScanScreen() {
         setHoldProgress(0);
         setDibhExposureProgress(0);
         setGuideVisible(true);
+        const sessionId = loadSelectedScanSessionId();
+        if (sessionId) void cancelScanSession(sessionId);
         navigate("/gated-helical-confirm");
     };
 
@@ -768,6 +775,8 @@ export default function HelicalExecuteScanScreen() {
         setHoldProgress(0);
         setDibhExposureProgress(0);
         setGuideVisible(true);
+        const sessionId = loadSelectedScanSessionId();
+        if (sessionId) void cancelScanSession(sessionId);
         navigate("/gated-helical-confirm");
     };
 

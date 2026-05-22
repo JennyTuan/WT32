@@ -31,6 +31,8 @@ import {
     mapStatusToZh,
     type ApiPatient,
 } from '../lib/patientsApi';
+import { generateMockScanResult } from '../lib/fourDTypes';
+import { saveSelectedScanSessionId } from '../lib/scanSession';
 
 type CheckStatus = '待进行' | '已完成' | '已终止';
 
@@ -42,6 +44,9 @@ type PatientRecord = {
     gender: string;
     age: number;
     checkStatus: CheckStatus;
+    latestSessionId: number | null;
+    latestAcquisitionType: ApiPatient["latest_scan_acquisition_type"];
+    latestScanMode: ApiPatient["latest_scan_mode"];
 };
 
 const mapApiPatientToRecord = (p: ApiPatient, index: number): PatientRecord => ({
@@ -52,6 +57,9 @@ const mapApiPatientToRecord = (p: ApiPatient, index: number): PatientRecord => (
     gender: mapGenderToZh(p.gender),
     age: calcAgeFromBirthDate(p.birth_date),
     checkStatus: mapStatusToZh(p.latest_scan_status),
+    latestSessionId: p.latest_scan_session_id,
+    latestAcquisitionType: p.latest_scan_acquisition_type,
+    latestScanMode: p.latest_scan_mode,
 });
 
 const PatientListScreen = () => {
@@ -77,7 +85,7 @@ const PatientListScreen = () => {
 
     useEffect(() => {
         void refreshPatients();
-    }, []);
+    }, [location.key]);
 
     const checkStatusClass: Record<CheckStatus, string> = {
         待进行: 'bg-[#FFF3E0] text-[#FA8C16] border border-[#FFD591]',
@@ -91,11 +99,13 @@ const PatientListScreen = () => {
         );
     };
 
+    const isTerminalStatus = (status: CheckStatus) => status === '已完成' || status === '已终止';
+
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const filteredPatients = patients.filter((patient) => {
         const matchesTab = activeTab === 'completed'
-            ? patient.checkStatus === '已完成'
-            : patient.checkStatus !== '已完成';
+            ? isTerminalStatus(patient.checkStatus)
+            : !isTerminalStatus(patient.checkStatus);
         const matchesQuery = normalizedQuery.length === 0
             || patient.name.toLowerCase().includes(normalizedQuery)
             || patient.patientId.toLowerCase().includes(normalizedQuery);
@@ -110,7 +120,7 @@ const PatientListScreen = () => {
     const canProceed = selectedRows.length === 1;
     const canDeleteSelected = activeTab !== 'completed'
         && selectedPatients.length > 0
-        && selectedPatients.every((patient) => patient.checkStatus !== '已完成');
+        && selectedPatients.every((patient) => !isTerminalStatus(patient.checkStatus));
     const canExportSelected = selectedPatients.length > 0;
     const backRoute = typeof location.state === 'object' && location.state && 'backRoute' in location.state
         ? location.state.backRoute
@@ -202,7 +212,7 @@ const PatientListScreen = () => {
                                         onClick={() => setActiveTab('pending')}
                                         className={`px-8 h-[32px] text-[13px] font-bold transition-all rounded-md ${activeTab === 'pending' ? 'bg-[#4D94FF] text-white shadow-sm' : 'text-[#4D94FF] hover:bg-white/50'}`}
                                     >
-                                        待检查
+                                        未完成
                                     </button>
                                     <button
                                         onClick={() => setActiveTab('completed')}
@@ -216,7 +226,14 @@ const PatientListScreen = () => {
                             <div className="flex items-center gap-6">
                                 {/* 快速操作图标 - 已移动至此处 */}
                                 <div className="flex items-center gap-4 text-[#90A4AE]">
-                                    <RefreshCw size={18} className="cursor-pointer hover:text-blue-500 transition-colors" />
+                                    <button
+                                        type="button"
+                                        title="刷新"
+                                        onClick={() => void refreshPatients()}
+                                        className="text-[#90A4AE] hover:text-blue-500 transition-colors"
+                                    >
+                                        <RefreshCw size={18} />
+                                    </button>
                                     <button
                                         type="button"
                                         title={isNameMasked ? '关闭脱敏' : '开启脱敏'}
@@ -324,17 +341,33 @@ const PatientListScreen = () => {
                                                 <td className="px-4">{patient.gender}</td>
                                                 <td className="px-4">{patient.age}</td>
                                                 <td className="text-center">
-                                                    {activeTab === 'completed' ? (
+                                                    {activeTab === 'completed' && patient.checkStatus === '已完成' ? (
                                                         <button
                                                             type="button"
                                                             onClick={(event) => {
                                                                 event.stopPropagation();
-                                                                navigate("/image-viewer");
+                                                                if (patient.latestSessionId) {
+                                                                    saveSelectedScanSessionId(patient.latestSessionId);
+                                                                }
+                                                                const isFourD =
+                                                                    patient.latestAcquisitionType === 'four_d'
+                                                                    || patient.latestScanMode === '4d';
+                                                                if (isFourD) {
+                                                                    navigate('/image-viewer', {
+                                                                        state: {
+                                                                            scanResult: generateMockScanResult(9, 10, 165.0),
+                                                                            showSliceLoadingBeforeImageLoad: false,
+                                                                            initialBrowseMode: 'phase',
+                                                                        },
+                                                                    });
+                                                                } else {
+                                                                    navigate('/image-viewer');
+                                                                }
                                                             }}
                                                             className="inline-flex h-[24px] px-2 rounded-full items-center justify-center gap-1 text-[11px] font-bold bg-[#E3F2FD] text-[#1E88E5] border border-[#BBDEFB]"
                                                         >
                                                             <ImageIcon size={12} />
-                                                            可查看图像
+                                                            {patient.latestAcquisitionType === 'four_d' ? '查看 4D 图像' : '可查看图像'}
                                                         </button>
                                                     ) : (
                                                         <span className={`inline-flex min-w-[62px] h-[24px] px-2 rounded-full items-center justify-center text-[11px] font-bold ${checkStatusClass[patient.checkStatus]}`}>

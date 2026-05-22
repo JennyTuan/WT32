@@ -52,6 +52,9 @@ class Patient(PatientBase, ORMModel):
     id: int
     created_at: datetime
     latest_scan_status: Optional[str] = None  # draft / in_progress / completed / cancelled
+    latest_scan_session_id: Optional[int] = None
+    latest_scan_acquisition_type: Optional[str] = None  # regular / gating / four_d
+    latest_scan_mode: Optional[str] = None  # plain / contrast / 4d
 
 
 class ContrastConfigBase(BaseModel):

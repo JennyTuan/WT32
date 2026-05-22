@@ -97,7 +97,18 @@
       "Bash(cd /c/CT-Prototype-backup/CT-Prototype/ui-review && grep -E '@cornerstonejs|vtk\\\\.js' package.json)",
       "Bash(cd /c/CT-Prototype-backup/CT-Prototype/ui-review && ls node_modules/@cornerstonejs/tools/dist/esm/tools/ 2>/dev/null | grep -iE \"crop|clip\" | head)",
       "Bash(python -c \"from backend.main import app; from backend.database import SessionLocal; from backend import models; db = SessionLocal\\(\\); print\\('system_logs count:', db.query\\(models.SystemLog\\).count\\(\\)\\); print\\('dose_logs count:', db.query\\(models.DoseLog\\).count\\(\\)\\); latest = db.query\\(models.SystemLog\\).order_by\\(models.SystemLog.id.desc\\(\\)\\).first\\(\\); print\\('latest system log:', latest.level, latest.source, latest.event, latest.message if latest else None\\); db.close\\(\\)\")",
-      "Bash(curl -s -o nul -w \"%{http_code}\" http://localhost:5175/)"
+      "Bash(curl -s -o nul -w \"%{http_code}\" http://localhost:5175/)",
+      "Bash(curl -s http://127.0.0.1:8000/api/patients/)",
+      "Bash(curl -s -w \"%{http_code}\\\\n\" -o /tmp/patients.json http://127.0.0.1:8000/api/patients/)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/scan-sessions/115/complete -o /tmp/c1.json -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/scan-sessions/114/cancel -o /tmp/c2.json -w \"%{http_code}\\\\n\")",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(p['id'], p['patient_id'], p['name'], p['latest_scan_status']\\) for p in data]\")",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(p['id'], p['patient_id'], p['name'], p['latest_scan_status'], p['latest_scan_session_id'], p['latest_scan_acquisition_type']\\) for p in data]\")",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); print\\(json.dumps\\(data[0], indent=2, default=str, ensure_ascii=False\\)\\)\")",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(p['id'], p['patient_id'], p['name'], p.get\\('latest_scan_status'\\), p.get\\('latest_scan_session_id'\\), p.get\\('latest_scan_acquisition_type'\\), p.get\\('latest_scan_mode'\\)\\) for p in data[:5]]\")",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(p['id'], p['name'], p.get\\('latest_scan_status'\\), p.get\\('latest_scan_session_id'\\), p.get\\('latest_scan_acquisition_type'\\), p.get\\('latest_scan_mode'\\)\\) for p in data]\")",
+      "Bash(curl -s http://127.0.0.1:8000/api/patients/1)",
+      "Bash(python -c \"import json,sys; print\\(json.dumps\\(json.load\\(sys.stdin\\), indent=2, default=str, ensure_ascii=False\\)\\)\")"
     ]
   }
 }

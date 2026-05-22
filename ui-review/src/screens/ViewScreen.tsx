@@ -43,7 +43,10 @@ import {
     type FourDDicomMpId,
 } from "../lib/fourDDicomSource";
 import {
+    clearSelectedScanSessionId,
+    completeScanSession,
     fetchSelectedScanSession,
+    loadSelectedScanSessionId,
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
 
@@ -2294,7 +2297,18 @@ const ViewScreen = () => {
                 <div className="flex-1" />
                 <div className="flex-1 flex justify-end">
                     <button
-                        onClick={() => navigate("/patients", { replace: true, state: { backRoute: "/" } })}
+                        onClick={async () => {
+                            const sessionId = loadSelectedScanSessionId();
+                            if (sessionId) {
+                                try {
+                                    await completeScanSession(sessionId);
+                                } catch (error) {
+                                    console.error("Failed to mark scan session completed.", error);
+                                }
+                                clearSelectedScanSessionId();
+                            }
+                            navigate("/patients", { replace: true, state: { backRoute: "/" } });
+                        }}
                         className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
                     >
                         结束检查 <ChevronRight size={20} />

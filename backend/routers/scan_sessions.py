@@ -440,6 +440,8 @@ def start_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
 @router.post("/{scan_session_id}/complete", response_model=schemas.ScanSessionDetail)
 def complete_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     scan_session = _get_scan_session_or_404(scan_session_id, db)
+    if scan_session.status in ("completed", "cancelled"):
+        return _get_scan_session_or_404(scan_session.id, db)
     scan_session.status = "completed"
     if scan_session.started_at is None:
         scan_session.started_at = datetime.utcnow()
@@ -467,6 +469,8 @@ def complete_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
 @router.post("/{scan_session_id}/cancel", response_model=schemas.ScanSessionDetail)
 def cancel_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     scan_session = _get_scan_session_or_404(scan_session_id, db)
+    if scan_session.status in ("completed", "cancelled"):
+        return _get_scan_session_or_404(scan_session.id, db)
     scan_session.status = "cancelled"
     logs_module.write_system_log(
         db,

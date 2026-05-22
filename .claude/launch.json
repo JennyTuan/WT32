@@ -24,9 +24,8 @@
     },
     {
       "name": "Backend only (FastAPI)",
-      "runtimeExecutable": "uvicorn",
-      "runtimeArgs": ["backend.main:app", "--reload", "--port", "8000"],
-      "cwd": "C:/CT-Prototype-backup/CT-Prototype",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "backend.main:app", "--reload", "--port", "8000"],
       "port": 8000
     }
   ]

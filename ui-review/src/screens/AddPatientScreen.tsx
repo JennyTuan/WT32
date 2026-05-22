@@ -82,10 +82,10 @@ const generateDefaultPatientId = (): string => {
 const emptyForm = () => ({
     lastName: "",
     firstName: "",
-    birthday: "1980-01-01",
-    gender: "male",
-    height: "175",
-    weight: "70",
+    birthday: "",
+    gender: "",
+    height: "",
+    weight: "",
     idNumber: "",
     patientId: generateDefaultPatientId(),
 });
@@ -123,6 +123,10 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
         }
         if (!formData.birthday) {
             setError("请填写出生日期");
+            return;
+        }
+        if (!formData.gender) {
+            setError("请选择性别");
             return;
         }
 
@@ -184,14 +188,15 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
                             value={formData.gender}
                             onChange={update("gender")}
                             options={[
+                                { label: "请选择", value: "" },
                                 { label: "男", value: "male" },
                                 { label: "女", value: "female" },
                             ]}
                             required
                         />
 
-                        <InputBox label="身高" value={formData.height} onChange={update("height")} type="number" placeholder="cm" />
-                        <InputBox label="体重" value={formData.weight} onChange={update("weight")} type="number" placeholder="kg" />
+                        <InputBox label="身高 (cm)" value={formData.height} onChange={update("height")} type="number" placeholder="请输入身高" />
+                        <InputBox label="体重 (kg)" value={formData.weight} onChange={update("weight")} type="number" placeholder="请输入体重" />
 
                         <InputBox label="身份证号" value={formData.idNumber} onChange={update("idNumber")} placeholder="可选" />
                         <InputBox label="患者ID" value={formData.patientId} onChange={update("patientId")} required />

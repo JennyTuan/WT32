@@ -23,7 +23,13 @@ import {
 } from "lucide-react";
 import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb, type RawProtocolCase } from "../lib/protocolDb";
 import { loadSelectedPatient } from "../lib/patientSession";
-import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
+import {
+    cancelScanSession,
+    clearSelectedScanSessionId,
+    fetchSelectedScanSession,
+    loadSelectedScanSessionId,
+    type ApiScanSessionDetail,
+} from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import NetworkStatusButton from "../components/NetworkStatusButton";
 import PatientHeaderCard from "../components/PatientHeaderCard";
@@ -1407,8 +1413,17 @@ const ScanConfirmScreen = ({
                                 继续检查
                             </button>
                             <button
-                                onClick={() => {
+                                onClick={async () => {
                                     setShowAbortConfirm(false);
+                                    const sessionId = loadSelectedScanSessionId();
+                                    if (sessionId) {
+                                        try {
+                                            await cancelScanSession(sessionId);
+                                        } catch (error) {
+                                            console.error("Failed to mark scan session cancelled.", error);
+                                        }
+                                        clearSelectedScanSessionId();
+                                    }
                                     navigate('/patients');
                                 }}
                                 className="flex-1 h-[40px] bg-[#F57C00] text-white font-bold rounded-lg text-[13px] hover:bg-orange-600 shadow-md transition-all active:scale-95"
