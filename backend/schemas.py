@@ -852,6 +852,7 @@ class DoseLog(ORMModel):
     series_type: str
     series_label: Optional[str] = None
     body_part: Optional[str] = None
+    acquisition_type: Optional[str] = None
     scan_mode: Optional[str] = None
 
     kv: Optional[int] = None

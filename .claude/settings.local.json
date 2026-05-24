@@ -108,7 +108,9 @@
       "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(p['id'], p['patient_id'], p['name'], p.get\\('latest_scan_status'\\), p.get\\('latest_scan_session_id'\\), p.get\\('latest_scan_acquisition_type'\\), p.get\\('latest_scan_mode'\\)\\) for p in data[:5]]\")",
       "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(p['id'], p['name'], p.get\\('latest_scan_status'\\), p.get\\('latest_scan_session_id'\\), p.get\\('latest_scan_acquisition_type'\\), p.get\\('latest_scan_mode'\\)\\) for p in data]\")",
       "Bash(curl -s http://127.0.0.1:8000/api/patients/1)",
-      "Bash(python -c \"import json,sys; print\\(json.dumps\\(json.load\\(sys.stdin\\), indent=2, default=str, ensure_ascii=False\\)\\)\")"
+      "Bash(python -c \"import json,sys; print\\(json.dumps\\(json.load\\(sys.stdin\\), indent=2, default=str, ensure_ascii=False\\)\\)\")",
+      "PowerShell(Set-Location ui-review; npx tsc --noEmit; \"exit=$LASTEXITCODE\")",
+      "PowerShell(\\(Get-Location\\).Path)"
     ]
   }
 }

@@ -104,8 +104,8 @@ const PatientListScreen = () => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const filteredPatients = patients.filter((patient) => {
         const matchesTab = activeTab === 'completed'
-            ? isTerminalStatus(patient.checkStatus)
-            : !isTerminalStatus(patient.checkStatus);
+            ? patient.checkStatus === '已完成'
+            : patient.checkStatus !== '已完成';
         const matchesQuery = normalizedQuery.length === 0
             || patient.name.toLowerCase().includes(normalizedQuery)
             || patient.patientId.toLowerCase().includes(normalizedQuery);

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/disk-manager", tags=["disk-manager"])
@@ -40,6 +40,15 @@ class ConfigUpdate(BaseModel):
     auto_cleanup: bool | None = None
 
 
+class AuditLogEntry(BaseModel):
+    timestamp: str
+    action: str
+    partition: str | None = None
+    file_ids: list[str] = Field(default_factory=list)
+    result: str | None = None
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
 def read_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8-sig") as file:
         return json.load(file)
@@ -58,6 +67,38 @@ def append_audit(action: str, detail: dict[str, Any]) -> None:
     }
     with AUDIT_FILE.open("a", encoding="utf-8-sig") as file:
         file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def read_audit_entries() -> list[dict[str, Any]]:
+    if not AUDIT_FILE.exists():
+        return []
+
+    entries: list[dict[str, Any]] = []
+    with AUDIT_FILE.open("r", encoding="utf-8-sig") as file:
+        for line in file:
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                entries.append(parsed)
+    return entries
+
+
+def normalize_audit_entry(entry: dict[str, Any]) -> AuditLogEntry:
+    detail = {key: value for key, value in entry.items() if key not in {"timestamp", "action", "partition", "file_ids", "result"}}
+    file_ids = entry.get("file_ids")
+    return AuditLogEntry(
+        timestamp=str(entry.get("timestamp", "")),
+        action=str(entry.get("action", "")),
+        partition=entry.get("partition"),
+        file_ids=file_ids if isinstance(file_ids, list) else [],
+        result=entry.get("result"),
+        detail=detail,
+    )
 
 
 def build_retain_until() -> str:
@@ -112,6 +153,28 @@ def get_partitions() -> dict[str, Any]:
             "partitions": build_partitions_response(),
             "config": config,
         }
+
+
+@router.get("/audit", response_model=list[AuditLogEntry])
+def list_audit_logs(
+    action: str | None = None,
+    partition: str | None = None,
+    result: str | None = None,
+    limit: int = Query(200, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+) -> list[AuditLogEntry]:
+    with lock:
+        rows = read_audit_entries()
+
+    if action:
+        rows = [row for row in rows if row.get("action") == action]
+    if partition:
+        rows = [row for row in rows if row.get("partition") == partition]
+    if result:
+        rows = [row for row in rows if row.get("result") == result]
+
+    rows.sort(key=lambda row: str(row.get("timestamp", "")), reverse=True)
+    return [normalize_audit_entry(row) for row in rows[offset : offset + limit]]
 
 
 @router.post("/files/reserve")

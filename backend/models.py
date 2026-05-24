@@ -576,6 +576,7 @@ class DoseLog(Base):
     series_type = Column(String(20), nullable=False, index=True)  # topogram / helical / axial
     series_label = Column(String(100), nullable=True)
     body_part = Column(String(100), nullable=True)
+    acquisition_type = Column(String(20), nullable=True)
     scan_mode = Column(String(20), nullable=True)
 
     # Dose parameters (nullable — different series types populate different subsets)

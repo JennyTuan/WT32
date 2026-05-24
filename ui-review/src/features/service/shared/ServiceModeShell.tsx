@@ -110,11 +110,11 @@ export default function ServiceModeShell({
               <span className="text-[14px] font-bold text-[#263238]">暂无选中患者</span>
               <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: --</span>
             </div>
-            <div className="ml-auto flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-              <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>60 mm</span></div>
-              <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>3.0°</span></div>
-              <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" /><span>{currentHeat.toFixed(0)}%</span></div>
-            </div>
+          </div>
+          <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>60 mm</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>3.0°</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" /><span>{currentHeat.toFixed(0)}%</span></div>
           </div>
         </div>
 
@@ -139,9 +139,10 @@ export default function ServiceModeShell({
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden p-4 flex gap-4 bg-[#EEF2F9]">
+      <main className="flex-1 overflow-hidden bg-white">
+       <div className="flex h-full bg-white overflow-hidden">
         <aside
-          className={`${isCollapsed ? "w-[80px]" : "w-[220px]"} bg-white border border-[#B0C4DE] rounded-md shadow-sm flex flex-col p-4 shrink-0 overflow-hidden transition-all duration-300 ease-in-out`}
+          className={`${isCollapsed ? "w-[80px]" : "w-[220px]"} flex flex-col p-4 shrink-0 overflow-hidden border-r border-[#E2EBF5] transition-all duration-300 ease-in-out`}
         >
           <div className="flex items-center justify-between mb-6 h-10">
             {!isCollapsed && (
@@ -266,12 +267,13 @@ export default function ServiceModeShell({
         </aside>
 
         <div className="relative flex min-h-0 flex-1 min-w-0 flex-col">{children}</div>
+       </div>
       </main>
 
-      <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center px-8 shrink-0">
+      <footer className="h-[56px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center px-8 shrink-0">
         <button
           onClick={() => navigate("/")}
-          className="h-[52px] px-10 bg-white border-2 border-[#B0C4DE] rounded-md text-[14px] font-bold text-[#37474F] hover:bg-gray-50 shadow-sm transition-all active:scale-95"
+          className="h-[36px] px-8 bg-white border border-[#B0C4DE] rounded-md text-[13px] font-bold text-[#37474F] hover:bg-gray-50 shadow-sm transition-all active:scale-95"
         >
           首页
         </button>

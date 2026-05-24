@@ -422,16 +422,22 @@ def update_scan_session(scan_session_id: int, payload: schemas.ScanSessionUpdate
 @router.post("/{scan_session_id}/start", response_model=schemas.ScanSessionDetail)
 def start_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     scan_session = _get_scan_session_or_404(scan_session_id, db)
+    if scan_session.status in ("completed", "cancelled"):
+        return _get_scan_session_or_404(scan_session.id, db)
+
+    should_emit_start_log = scan_session.started_at is None
     scan_session.status = "in_progress"
-    scan_session.started_at = datetime.utcnow()
-    logs_module.write_system_log(
-        db,
-        level="INFO",
-        source="scan_sessions",
-        event="scan_started",
-        message=f"Scan session {scan_session.id} started ({scan_session.name})",
-        scan_session_id=scan_session.id,
-    )
+    if scan_session.started_at is None:
+        scan_session.started_at = datetime.utcnow()
+    if should_emit_start_log:
+        logs_module.write_system_log(
+            db,
+            level="INFO",
+            source="scan_sessions",
+            event="scan_started",
+            message=f"Scan session {scan_session.id} started ({scan_session.name})",
+            scan_session_id=scan_session.id,
+        )
     db.commit()
     db.refresh(scan_session)
     return _get_scan_session_or_404(scan_session.id, db)
@@ -443,9 +449,19 @@ def complete_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     if scan_session.status in ("completed", "cancelled"):
         return _get_scan_session_or_404(scan_session.id, db)
     scan_session.status = "completed"
+    should_emit_start_log = scan_session.started_at is None
     if scan_session.started_at is None:
         scan_session.started_at = datetime.utcnow()
     scan_session.completed_at = datetime.utcnow()
+    if should_emit_start_log:
+        logs_module.write_system_log(
+            db,
+            level="INFO",
+            source="scan_sessions",
+            event="scan_started",
+            message=f"Scan session {scan_session.id} started ({scan_session.name})",
+            scan_session_id=scan_session.id,
+        )
 
     dose_rows = logs_module.write_dose_logs_for_session(
         db, scan_session, scanned_at=scan_session.completed_at

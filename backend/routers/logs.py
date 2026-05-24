@@ -121,6 +121,7 @@ def write_dose_logs_for_session(
             series_type=series.series_type,
             series_label=series.series_label,
             body_part=scan_session.body_part,
+            acquisition_type=scan_session.acquisition_type,
             scan_mode=scan_session.scan_mode,
             **fields,
         )
@@ -162,6 +163,7 @@ def list_dose_logs(
     scan_session_id: Optional[int] = None,
     series_type: Optional[str] = None,
     body_part: Optional[str] = None,
+    acquisition_type: Optional[str] = None,
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
 ):
@@ -176,4 +178,6 @@ def list_dose_logs(
         q = q.filter(models.DoseLog.series_type == series_type)
     if body_part:
         q = q.filter(models.DoseLog.body_part == body_part)
+    if acquisition_type:
+        q = q.filter(models.DoseLog.acquisition_type == acquisition_type)
     return q.order_by(models.DoseLog.scanned_at.desc(), models.DoseLog.id.desc()).offset(offset).limit(limit).all()

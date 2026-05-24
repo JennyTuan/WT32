@@ -34,6 +34,9 @@ import DiskManagementScreen from "./screens/DiskManagementScreen";
 import PerformanceEvaluationScreen from "./screens/PerformanceEvaluationScreen";
 import ServicePlaceholderScreen from "./screens/ServicePlaceholderScreen";
 import QAReportPage from "./features/service/qaReport/QAReportPage";
+import ServiceSystemLogPage from "./features/service/reports/ServiceSystemLogPage";
+import ServiceAuditLogPage from "./features/service/reports/ServiceAuditLogPage";
+import ServiceDoseLogsPage from "./features/service/dose/ServiceDoseLogsPage";
 import ProtocolManagementScreen from "./screens/ProtocolManagementScreen";
 import CornerInfoPage from "./features/service/cornerInfo/CornerInfoPage";
 
@@ -145,11 +148,11 @@ export default function App() {
               <Route path="/service/settings/system-settings" element={<ServicePlaceholderScreen currentRoute="/service/settings/system-settings" title="系统设置" description="用于设置系统级参数、时间网络、设备偏好和基础配置。" />} />
               <Route path="/service/settings/organization-info" element={<ServicePlaceholderScreen currentRoute="/service/settings/organization-info" title="机构信息设置" description="用于配置机构名称、标识、科室信息和对外显示内容。" />} />
               <Route path="/service/reports/qa-report" element={<QAReportPage />} />
-              <Route path="/service/reports/system-log" element={<ServicePlaceholderScreen currentRoute="/service/reports/system-log" title="系统日志" description="用于检索系统运行日志、异常信息和关键事件记录。" />} />
+              <Route path="/service/reports/system-log" element={<ServiceSystemLogPage />} />
               <Route path="/service/reports/runtime-stats" element={<ServicePlaceholderScreen currentRoute="/service/reports/runtime-stats" title="运行统计" description="用于查看设备运行时长、使用频率和关键运行指标统计。" />} />
-              <Route path="/service/reports/audit-log" element={<ServicePlaceholderScreen currentRoute="/service/reports/audit-log" title="审计日志" description="用于查看关键操作记录、用户行为轨迹和审计追踪信息。" />} />
+              <Route path="/service/reports/audit-log" element={<ServiceAuditLogPage />} />
               <Route path="/service/dose/settings" element={<ServicePlaceholderScreen currentRoute="/service/dose/settings" title="剂量设置" description="用于配置剂量策略、剂量阈值和扫描剂量相关参数。" />} />
-              <Route path="/service/dose/logs" element={<ServicePlaceholderScreen currentRoute="/service/dose/logs" title="剂量日志" description="用于查看剂量历史、剂量事件记录和相关追踪信息。" />} />
+              <Route path="/service/dose/logs" element={<ServiceDoseLogsPage />} />
 
               <Route path="*" element={<Navigate to="/patients" replace />} />
             </Routes>

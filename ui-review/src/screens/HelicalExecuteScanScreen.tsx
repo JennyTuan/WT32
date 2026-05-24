@@ -6,7 +6,7 @@ import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import DibhStatusRow from "../components/DibhStatusRow";
 import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/BreathHoldGuide";
-import { fetchSelectedScanSession, loadSelectedScanSessionId, completeScanSession, cancelScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
+import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 
@@ -631,6 +631,8 @@ export default function HelicalExecuteScanScreen() {
     };
 
     const triggerScanSequence = () => {
+        const sessionId = loadSelectedScanSessionId();
+        if (sessionId) void startScanSession(sessionId);
         clearHoldRaf();
         setHoldProgress(1);
         setStage("enabled");

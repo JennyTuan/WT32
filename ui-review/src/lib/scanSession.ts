@@ -471,6 +471,14 @@ export const updateSelectedScanSessionAxialParam = async (paramId: number, paylo
 export const updateSelectedScanSessionReconSeries = async (reconId: number, payload: UpdatePayload) =>
     updateSelectedScanSessionEntity<ApiScanSessionReconSeries>(`/api/scan-sessions/recon-series/${reconId}`, payload);
 
+export const startScanSession = async (scanSessionId: number) => {
+    const response = await fetch(buildApiUrl(`/api/scan-sessions/${scanSessionId}/start`), {
+        method: "POST",
+    });
+    if (!response.ok) throw new Error(`Failed to start scan session: ${response.status}`);
+    return (await response.json()) as ApiScanSessionDetail;
+};
+
 export const completeScanSession = async (scanSessionId: number) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/${scanSessionId}/complete`), {
         method: "POST",

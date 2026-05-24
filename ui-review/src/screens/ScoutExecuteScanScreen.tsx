@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
 import { Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { fetchSelectedScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
+import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import DicomViewer from "../components/DicomViewer";
 import ScanConfirmScreen from "./ScanConfirmScreen";
@@ -631,6 +631,8 @@ export default function ScoutExecuteScanScreen() {
     };
 
     const triggerScanSequence = () => {
+        const sessionId = loadSelectedScanSessionId();
+        if (sessionId) void startScanSession(sessionId);
         clearHoldRaf();
         setHoldProgress(1);
         setStage("enabled");

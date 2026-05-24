@@ -840,6 +840,8 @@ def _migrate_protocol_columns() -> None:
         "ALTER TABLE scan_session_gating_configs ADD COLUMN threshold_normalized FLOAT",
         "ALTER TABLE scan_session_gating_configs ADD COLUMN trigger_direction VARCHAR(10)",
         "ALTER TABLE scan_session_gating_configs ADD COLUMN wait_timeout_s FLOAT",
+        # Dose Log additions
+        "ALTER TABLE dose_logs ADD COLUMN acquisition_type VARCHAR(20)",
     ]
     with engine.connect() as conn:
         for sql in migrations:
@@ -887,6 +889,12 @@ def _migrate_protocol_columns() -> None:
             "UPDATE scan_sessions SET acquisition_type = COALESCE(("
             "SELECT acquisition_type FROM protocols WHERE protocols.id = scan_sessions.protocol_id"
             "), CASE WHEN scan_mode = '4d' THEN 'four_d' ELSE 'regular' END)"
+        ))
+        conn.execute(text(
+            "UPDATE dose_logs SET acquisition_type = COALESCE(("
+            "SELECT acquisition_type FROM scan_sessions WHERE scan_sessions.id = dose_logs.scan_session_id"
+            "), CASE WHEN scan_mode = '4d' THEN 'four_d' ELSE 'regular' END) "
+            "WHERE acquisition_type IS NULL OR acquisition_type = ''"
         ))
         # Backfill gating_configs for diagnostic series of gated protocols
         gating_backfill = [
