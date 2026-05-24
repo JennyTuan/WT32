@@ -17,7 +17,6 @@ import {
     CircleDot,
     Info,
     Activity,
-    Flame,
     Siren,
     AlertTriangle,
 } from "lucide-react";

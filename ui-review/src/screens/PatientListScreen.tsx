@@ -12,7 +12,6 @@ import {
     Upload,
     Download,
     Eye,
-    Flame,
     Image as ImageIcon,
     ChevronsLeft,
     ChevronsRight

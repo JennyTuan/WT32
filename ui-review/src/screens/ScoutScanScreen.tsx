@@ -13,7 +13,6 @@ import {
     AlertTriangle,
     Check,
     CheckCircle,
-    Flame,
     Info,
     Siren
 } from "lucide-react";

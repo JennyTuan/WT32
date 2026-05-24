@@ -18,7 +18,6 @@ import {
     UserCircle,
     Info,
     X,
-    Flame,
     Siren
 } from "lucide-react";
 import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb, type RawProtocolCase } from "../lib/protocolDb";

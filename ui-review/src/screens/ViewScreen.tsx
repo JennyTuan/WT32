@@ -16,7 +16,6 @@ import {
     RefreshCw,
     Play,
     Pause,
-    Flame,
     Siren,
 } from "lucide-react";
 import type { ChangeEvent, ReactNode } from "react";

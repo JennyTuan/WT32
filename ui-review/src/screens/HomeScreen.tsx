@@ -1,5 +1,4 @@
 ﻿import {
-    Flame,
     Move,
     ScanLine,
     Siren,

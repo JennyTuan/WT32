@@ -8,7 +8,6 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  Flame,
   Plus,
   RotateCcw,
   Siren,

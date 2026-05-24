@@ -11,7 +11,6 @@ import {
     Trash2,
     Check,
     Info,
-    Flame,
     Siren,
     Zap,
     Hand,

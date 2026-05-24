@@ -10,7 +10,6 @@ import {
     ChevronRight,
     ChevronsUp,
     FilePlus,
-    Flame,
     Info,
     Siren,
     Sun,
