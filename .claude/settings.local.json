@@ -110,7 +110,22 @@
       "Bash(curl -s http://127.0.0.1:8000/api/patients/1)",
       "Bash(python -c \"import json,sys; print\\(json.dumps\\(json.load\\(sys.stdin\\), indent=2, default=str, ensure_ascii=False\\)\\)\")",
       "PowerShell(Set-Location ui-review; npx tsc --noEmit; \"exit=$LASTEXITCODE\")",
-      "PowerShell(\\(Get-Location\\).Path)"
+      "PowerShell(\\(Get-Location\\).Path)",
+      "Bash(python -c \"from backend import models, schemas; from backend.routers import dose_settings; print\\('OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from backend import models, schemas; from backend.routers import dose_settings; print\\('OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from backend import main, database; print\\('OK'\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/api/dose-settings/)",
+      "Bash(git log *)",
+      "Bash(.venv/Scripts/python.exe -c \"from backend import main; print\\('OK'\\)\")",
+      "Read(//c/Users/stn0047/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/b81a614f-51be-4b1f-8c7b-88a3f8885dd0/21eeda3a-b06d-409a-be02-319636f4d6d8/skills/xlsx/**)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/pip.exe install *)",
+      "Bash(.venv/Scripts/python.exe read_xlsx.py)",
+      "PowerShell(cmd /c dir \"C:\\\\Users\\\\stn0047\\\\Downloads\\\\\" /B 2>&1)",
+      "PowerShell($dir = \"C:\\\\Users\\\\stn0047\\\\Downloads\\\\\"; Test-Path $dir; [System.IO.Directory]::GetFiles\\($dir\\) | Select-Object -First 30)",
+      "Read(//c//**)",
+      "Bash(.venv/Scripts/python.exe -c \"from backend import database, models; print\\('OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from backend import main, models, schemas; from backend.routers import dose_settings; print\\('OK'\\)\")"
     ]
   }
 }

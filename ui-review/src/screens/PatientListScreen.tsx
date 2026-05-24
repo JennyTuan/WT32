@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
-    Sun,
     Plus,
     Trash2,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
-    Siren,
     RefreshCw,
     Search,
     Upload,
@@ -19,9 +17,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import AddPatientScreen from './AddPatientScreen';
-import NetworkStatusButton from '../components/NetworkStatusButton';
-import PatientHeaderCard from '../components/PatientHeaderCard';
-import SystemMenuButton from '../components/SystemMenuButton';
+import AppHeader from '../components/AppHeader';
 import { saveSelectedPatient } from '../lib/patientSession';
 import {
     listPatients,
@@ -167,34 +163,11 @@ const PatientListScreen = () => {
 
             {/* 主容器 1024x768 */}
 
-                {/* 1. Header (保持原风格) */}
-                <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
-                    <div className="flex items-center gap-3">
-                        <PatientHeaderCard
-                            name={selectedPatient ? maskName(selectedPatient.name) : null}
-                            patientId={selectedPatient?.patientId ?? null}
-                        />
-                        <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-                            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
-                            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
-                            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" /><span>0%</span></div>
-                        </div>
-                    </div>
-
-                    <div className="text-center">
-                        <div className="text-[28px] font-bold tracking-tight text-[#37474F] leading-none">13:52</div>
-                        <div className="text-[12px] text-[#546E7A] font-medium mt-1 uppercase opacity-80">2月26日 周四</div>
-                    </div>
-
-                    <div className="flex items-center gap-5 pr-2">
-                        <div className="p-1 text-[#D32F2F] cursor-pointer hover:opacity-70"><Siren size={30} strokeWidth={1.8} /></div>
-                        <NetworkStatusButton />
-                        <div className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
-                            <Sun size={24} />
-                        </div>
-                        <SystemMenuButton iconSize={24} badgeCount={10} />
-                    </div>
-                </header>
+                {/* 1. Header */}
+                <AppHeader
+                    patientName={selectedPatient ? maskName(selectedPatient.name) : null}
+                    patientId={selectedPatient?.patientId ?? null}
+                />
 
                 {/* 2. Main Content Area */}
                 <main className="flex-1 overflow-hidden p-2">

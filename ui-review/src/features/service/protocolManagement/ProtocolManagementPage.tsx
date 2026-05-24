@@ -40,6 +40,7 @@ type ApiProtocolSummary = {
   is_enabled: boolean;
   created_at: string;
   updated_at?: string | null;
+  csv_order?: number | null;
   series_count: number;
   supported_modes: string[];
 };
@@ -66,7 +67,7 @@ const formatDate = (iso: string | null | undefined) => {
   return `${year}-${month}-${day}`;
 };
 
-type SortKey = "name" | "id" | "created_at" | "updated_at" | "is_enabled";
+type SortKey = "name" | "id" | "csv_order" | "created_at" | "updated_at" | "is_enabled";
 type SortDir = "asc" | "desc";
 type SourceFilter = "all" | "custom" | "factory";
 type ModalState =
@@ -205,14 +206,14 @@ export default function ProtocolManagementPage() {
   const [protocols, setProtocols] = useState<ApiProtocolSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("custom");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("factory");
   const [bodyPartFilter, setBodyPartFilter] = useState("all");
   const [ageGroupFilter, setAgeGroupFilter] = useState<AgeGroup | "all">("all");
   const [acquisitionTypeFilter, setAcquisitionTypeFilter] = useState<AcquisitionType | "all">("all");
   const [scanModeFilter, setScanModeFilter] = useState<ScanMode | "all">("all");
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("created_at");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortKey, setSortKey] = useState<SortKey>("csv_order");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [modal, setModal] = useState<ModalState>(null);
@@ -263,6 +264,7 @@ export default function ProtocolManagementPage() {
         const get = (p: ApiProtocolSummary): string | number => {
           if (sortKey === "name") return p.name;
           if (sortKey === "id") return p.id;
+          if (sortKey === "csv_order") return p.csv_order ?? p.id;
           if (sortKey === "created_at") return p.created_at;
           if (sortKey === "updated_at") return p.updated_at ?? "";
           return p.is_enabled ? 1 : 0;

@@ -37,6 +37,7 @@ import QAReportPage from "./features/service/qaReport/QAReportPage";
 import ServiceSystemLogPage from "./features/service/reports/ServiceSystemLogPage";
 import ServiceAuditLogPage from "./features/service/reports/ServiceAuditLogPage";
 import ServiceDoseLogsPage from "./features/service/dose/ServiceDoseLogsPage";
+import ServiceDoseSettingsPage from "./features/service/dose/ServiceDoseSettingsPage";
 import ProtocolManagementScreen from "./screens/ProtocolManagementScreen";
 import CornerInfoPage from "./features/service/cornerInfo/CornerInfoPage";
 
@@ -151,7 +152,7 @@ export default function App() {
               <Route path="/service/reports/system-log" element={<ServiceSystemLogPage />} />
               <Route path="/service/reports/runtime-stats" element={<ServicePlaceholderScreen currentRoute="/service/reports/runtime-stats" title="运行统计" description="用于查看设备运行时长、使用频率和关键运行指标统计。" />} />
               <Route path="/service/reports/audit-log" element={<ServiceAuditLogPage />} />
-              <Route path="/service/dose/settings" element={<ServicePlaceholderScreen currentRoute="/service/dose/settings" title="剂量设置" description="用于配置剂量策略、剂量阈值和扫描剂量相关参数。" />} />
+              <Route path="/service/dose/settings" element={<ServiceDoseSettingsPage />} />
               <Route path="/service/dose/logs" element={<ServiceDoseLogsPage />} />
 
               <Route path="*" element={<Navigate to="/patients" replace />} />

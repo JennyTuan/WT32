@@ -7,9 +7,27 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
 from .. import models, schemas
-from ..database import get_db
+from ..database import CSV_PROTOCOL_DESCRIPTION_PREFIX, PROTOCOL_SEEDS, get_db
 
 router = APIRouter(prefix="/protocols", tags=["protocols"])
+
+CURRENT_CSV_PROTOCOL_DESCRIPTIONS = {
+    str(protocol_seed.get("description", ""))
+    for protocol_seed in PROTOCOL_SEEDS
+    if str(protocol_seed.get("description", "")).startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)
+}
+
+
+def _csv_protocol_order(description: str | None) -> int | None:
+    value = str(description or "")
+    if not value.startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX):
+        return None
+    source = value[len(CSV_PROTOCOL_DESCRIPTION_PREFIX):].split(":", 1)[0]
+    first_index = source.split(",", 1)[0]
+    try:
+        return int(first_index)
+    except ValueError:
+        return None
 
 
 def _normalize_protocol_classification(values: dict) -> dict:
@@ -144,6 +162,7 @@ def _build_protocol_summary(protocol: models.Protocol) -> schemas.ProtocolSummar
             "is_enabled": protocol.is_enabled,
             "created_at": protocol.created_at,
             "updated_at": protocol.updated_at,
+            "csv_order": _csv_protocol_order(protocol.description),
             "is_4d": protocol.is_4d,
             "is_enhance": protocol.is_enhance,
             "series_count": len(protocol.series),
@@ -322,6 +341,13 @@ def list_protocol_catalog(db: Session = Depends(get_db)):
     protocols = _protocol_catalog_query(db).order_by(models.Protocol.id.asc()).all()
     visible_protocols: list[models.Protocol] = []
     for protocol in protocols:
+        description = str(protocol.description or "")
+        if protocol.is_factory:
+            if description.startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX):
+                if description not in CURRENT_CSV_PROTOCOL_DESCRIPTIONS:
+                    continue
+            else:
+                continue
         # Hide a legacy bad seed that was incorrectly stored as plain mode while
         # sharing the same display name as the real 4D chest protocol.
         if protocol.body_part == "chest" and protocol.name == "胸腔4D" and protocol.scan_mode == "plain":

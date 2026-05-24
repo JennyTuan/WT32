@@ -447,6 +447,7 @@ class ProtocolSummary(ProtocolBase, ORMModel):
     is_enabled: bool = True
     created_at: datetime
     updated_at: Optional[datetime] = None
+    csv_order: Optional[int] = None
     series_count: int = 0
     supported_modes: List[str] = Field(default_factory=list)
 
@@ -865,3 +866,47 @@ class DoseLog(ORMModel):
     dlp: Optional[float] = None
 
     operator: Optional[str] = None
+
+
+# ===== Dose Settings =====
+
+ThresholdAction = Literal["log_only", "warn", "require_confirm"]
+NoiseLevel = Literal["low", "medium", "high"]
+AgeGroup = Literal["adult", "pediatric", "infant"]
+
+
+class DoseSettingsBase(BaseModel):
+    threshold_action: ThresholdAction = "warn"
+
+    aec_enabled: bool = True
+    aec_noise_level: NoiseLevel = "medium"
+
+    audit_threshold_exceed: bool = True
+
+
+class DoseSettings(ORMModel, DoseSettingsBase):
+    id: int
+    updated_at: datetime
+
+
+class DoseSettingsUpdate(BaseModel):
+    threshold_action: Optional[ThresholdAction] = None
+    aec_enabled: Optional[bool] = None
+    aec_noise_level: Optional[NoiseLevel] = None
+    audit_threshold_exceed: Optional[bool] = None
+
+
+class DrlEntryBase(BaseModel):
+    body_part: str
+    age_group: AgeGroup
+    ctdi_ref: float = Field(ge=0)
+    dlp_ref: float = Field(ge=0)
+
+
+class DrlEntry(ORMModel, DrlEntryBase):
+    id: int
+    updated_at: datetime
+
+
+class DrlBulkReplace(BaseModel):
+    entries: List[DrlEntryBase]

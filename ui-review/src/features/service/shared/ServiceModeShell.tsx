@@ -1,14 +1,11 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
   LayoutGrid,
-  Lightbulb,
   Menu,
-  Plus,
   Search,
-  User,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -18,7 +15,7 @@ import {
   type ServiceModeSection,
   getServiceModeItem,
 } from "./serviceModeRegistry";
-import SystemMenuButton from "../../../components/SystemMenuButton";
+import AppHeader from "../../../components/AppHeader";
 
 type FooterStatusTone = "idle" | "active" | "success";
 
@@ -34,20 +31,6 @@ type ServiceModeShellProps = {
   overlays?: ReactNode;
   footerStatus?: FooterStatus;
 };
-
-const formatClock = (date: Date) =>
-  date.toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-
-const formatDateLabel = (date: Date) =>
-  date.toLocaleDateString("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    weekday: "short",
-  });
 
 const getFooterStatusClassName = (tone: FooterStatusTone) => {
   if (tone === "active") return "bg-[#1E88E5]";
@@ -69,7 +52,6 @@ export default function ServiceModeShell({
   footerStatus = { label: "IDLE", tone: "idle" },
 }: ServiceModeShellProps) {
   const navigate = useNavigate();
-  const [clock, setClock] = useState(new Date());
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
 
@@ -77,11 +59,6 @@ export default function ServiceModeShell({
   const [expandedSections, setExpandedSections] = useState<Record<ServiceModeSection, boolean>>(
     buildExpandedState(currentItem?.section),
   );
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setClock(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const filteredItems = useMemo(() => {
     const keyword = searchKeyword.trim();
@@ -100,44 +77,11 @@ export default function ServiceModeShell({
 
   return (
     <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl relative">
-      <header className="flex items-center justify-between px-4 h-[80px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-3 py-1.5 px-4 bg-[#DCE6F2] border border-[#B0C4DE] rounded-sm min-w-[210px]">
-            <div className="w-10 h-10 rounded-sm bg-[#4A6982] flex items-center justify-center text-white opacity-90">
-              <User size={24} />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[14px] font-bold text-[#263238]">暂无选中患者</span>
-              <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: --</span>
-            </div>
-          </div>
-          <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>60 mm</span></div>
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>3.0°</span></div>
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" /><span>{currentHeat.toFixed(0)}%</span></div>
-          </div>
-        </div>
-
-        <div className="text-center">
-          <div className="text-[28px] font-bold tracking-tight text-[#37474F] leading-none">
-            {formatClock(clock)}
-          </div>
-          <div className="text-[12px] text-[#546E7A] font-medium mt-1">{formatDateLabel(clock)}</div>
-        </div>
-
-        <div className="flex items-center gap-6 pr-2">
-          <div className="p-1 text-[#D32F2F] cursor-pointer hover:opacity-70">
-            <Plus size={32} strokeWidth={1.5} />
-          </div>
-          <div className="p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
-            <LayoutGrid size={24} />
-          </div>
-          <div className="p-1 text-[#546E7A] cursor-pointer hover:opacity-70">
-            <Lightbulb size={24} />
-          </div>
-          <SystemMenuButton iconSize={24} badgeCount={100} />
-        </div>
-      </header>
+      <AppHeader
+        tableLabel="60 mm"
+        gantryLabel="3.0°"
+        heatLabel={`${currentHeat.toFixed(0)}%`}
+      />
 
       <main className="flex-1 overflow-hidden bg-white">
        <div className="flex h-full bg-white overflow-hidden">

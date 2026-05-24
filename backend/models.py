@@ -590,3 +590,38 @@ class DoseLog(Base):
     dlp = Column(Float, nullable=True)
 
     operator = Column(String(50), nullable=True)  # reserved for future
+
+
+class DoseSettings(Base):
+    """Singleton row (id=1) holding all system-level dose configuration."""
+
+    __tablename__ = "dose_settings"
+
+    id = Column(Integer, primary_key=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Threshold policy — what to do when scan dose exceeds protocol-level threshold
+    # (per-protocol thresholds live on the Protocol model; this only controls global response action)
+    threshold_action = Column(String(20), nullable=False, default="warn")  # log_only | warn | require_confirm
+
+    # AEC (Auto Exposure Control) defaults
+    aec_enabled = Column(Boolean, nullable=False, default=True)
+    aec_noise_level = Column(String(10), nullable=False, default="medium")  # low | medium | high
+
+    # Compliance
+    audit_threshold_exceed = Column(Boolean, nullable=False, default=True)
+
+
+class DrlEntry(Base):
+    """Diagnostic Reference Level — by body part × age group."""
+
+    __tablename__ = "drl_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    body_part = Column(String(50), nullable=False, index=True)  # 头颅 / 胸部 / 腹部 / 盆腔 / 脊柱 / 颈部
+    age_group = Column(String(20), nullable=False, index=True)  # adult | pediatric | infant
+    ctdi_ref = Column(Float, nullable=False)
+    dlp_ref = Column(Float, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (UniqueConstraint("body_part", "age_group", name="uq_drl_part_age"),)

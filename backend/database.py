@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import csv
 from datetime import date
 import json
+from pathlib import Path
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -12,6 +14,8 @@ engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
 )
+
+CSV_PROTOCOL_DESCRIPTION_PREFIX = "protocol-csv:"
 
 
 @event.listens_for(engine, "connect")
@@ -670,7 +674,7 @@ def infer_protocol_acquisition_type(name: str, scan_mode: str) -> str:
     return "regular"
 
 
-PROTOCOL_SEEDS = [
+LEGACY_PROTOCOL_SEEDS = [
     *build_protocols("head", "HFS", "in", HEAD_PROTOCOLS),
     *build_protocols("neck", "HFS", "in", NECK_PROTOCOLS),
     *build_protocols("chest", "HFS", "in", CHEST_PROTOCOLS),
@@ -680,12 +684,207 @@ PROTOCOL_SEEDS = [
 ]
 
 
+def _clean_csv_key(key: str) -> str:
+    return " ".join(key.replace("\r", " ").replace("\n", " ").split()).strip()
+
+
+def _csv_value(row: dict[str, str], key: str) -> str:
+    return (row.get(key) or "").strip()
+
+
+def _csv_float(row: dict[str, str], key: str) -> float | None:
+    value = _csv_value(row, key)
+    if not value or value.upper() == "N/A":
+        return None
+    return float(value)
+
+
+def _csv_int(row: dict[str, str], key: str) -> int:
+    value = _csv_float(row, key)
+    return int(round(value or 0))
+
+
+def _csv_patient_weight(value: str) -> str:
+    value = value.strip().replace("＜", "<")
+    if not value:
+        return "50-90kg"
+    return value if value.endswith("kg") else f"{value}kg"
+
+
+def _csv_companion_protocol_name(name: str) -> str:
+    if name.endswith("_B"):
+        return name[:-2]
+    return name.replace("_B_", "_").replace("_B AX", " AX")
+
+
+def _csv_acquisition_key(row: dict[str, str]) -> tuple[str, ...]:
+    recon_only_keys = {
+        "ProtocolName",
+        "Density",
+        "Recon FOV (mm)",
+        "Slice thickness (mm)",
+        "Image increment (mm)",
+        "Filter",
+        "Matrix",
+        "WindowWidth",
+        "WindowCenter",
+        "X_Center",
+        "Y_Center",
+    }
+    return tuple(
+        _csv_value(row, key)
+        for key in sorted(row)
+        if key not in recon_only_keys and not key.startswith("_")
+    )
+
+
+def _csv_recon_seed(row: dict[str, str]) -> dict:
+    slice_thickness = _csv_float(row, "Slice thickness (mm)") or 1.0
+    recon_fov = _csv_float(row, "Recon FOV (mm)") or _csv_float(row, "Surview FOV (mm)") or 250.0
+    return {
+        "name": _csv_value(row, "Density") or "Recon",
+        "kernel": _csv_value(row, "Filter") or "S2",
+        "matrix": _csv_int(row, "Matrix") or 512,
+        "window_width": _csv_int(row, "WindowWidth"),
+        "window_level": _csv_int(row, "WindowCenter"),
+        "slice_thickness": slice_thickness,
+        "increment": _csv_float(row, "Image increment (mm)"),
+        "recon_fov": recon_fov,
+        "center_x": _csv_float(row, "X_Center"),
+        "center_y": _csv_float(row, "Y_Center"),
+    }
+
+
+def _load_company_protocol_seeds() -> list[dict]:
+    path = Path(__file__).resolve().parent.parent / "docs" / "协议组（EN）.csv"
+    if not path.exists():
+        return []
+
+    part_map = {
+        "Head": "head",
+        "Neck": "neck",
+        "Chest": "chest",
+        "Spine": "spine",
+        "Abdomen": "abdomen",
+        "Limbs": "extremity",
+    }
+    age_map = {"Adult": "adult", "Child": "child", "Infant": "infant"}
+    series_map = {"Helical": "helical", "Axial": "axial", "4D": "4d"}
+
+    rows: list[dict[str, str]] = []
+    current_part = ""
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        for idx, raw_row in enumerate(reader, start=1):
+            row = {_clean_csv_key(k): (v or "").strip() for k, v in raw_row.items() if k is not None}
+            if row.get("Part"):
+                current_part = row["Part"]
+            row["Part"] = current_part
+            row["_source_index"] = str(idx)
+            rows.append(row)
+
+    row_keys = {
+        (_csv_value(row, "ProtocolName"), _csv_acquisition_key(row))
+        for row in rows
+    }
+    grouped_rows: dict[tuple[str, tuple[str, ...]], list[dict[str, str]]] = {}
+    group_order: list[tuple[str, tuple[str, ...]]] = []
+    for row in rows:
+        protocol_name = _csv_value(row, "ProtocolName")
+        companion_name = _csv_companion_protocol_name(protocol_name)
+        acquisition_key = _csv_acquisition_key(row)
+        group_name = (
+            companion_name
+            if companion_name != protocol_name and (companion_name, acquisition_key) in row_keys
+            else protocol_name
+        )
+        group_key = (group_name, acquisition_key)
+        if group_key not in grouped_rows:
+            grouped_rows[group_key] = []
+            group_order.append(group_key)
+        grouped_rows[group_key].append(row)
+
+    seeds: list[dict] = []
+    for group_name, group_key in group_order:
+        group_rows = grouped_rows[(group_name, group_key)]
+        row = group_rows[0]
+        scan_type = _csv_value(row, "Scan type")
+        series_kind = series_map.get(scan_type)
+        if not series_kind:
+            continue
+
+        slice_thickness = _csv_float(row, "Slice thickness (mm)") or 1.0
+        image_increment = _csv_float(row, "Image increment (mm)")
+        scan_length = _csv_float(row, "length （mm）") or 0.0
+        recon_fov = _csv_float(row, "Recon FOV (mm)") or _csv_float(row, "Surview FOV (mm)") or 250.0
+        source_indexes = ",".join(_csv_value(item, "_source_index") for item in group_rows)
+        csv_part = _csv_value(row, "Part")
+
+        seed = {
+            "name": group_name,
+            "body_part": part_map.get(csv_part, csv_part.lower()),
+            "age_group": age_map.get(_csv_value(row, "Age Group"), "adult"),
+            "patient_weight": _csv_patient_weight(_csv_value(row, "Patient weight (kg)")),
+            "patient_position": "HFS",
+            "table_direction": "in",
+            "scan_mode": "4d" if series_kind == "4d" else "plain",
+            "series_kind": series_kind,
+            "description": f"{CSV_PROTOCOL_DESCRIPTION_PREFIX}{source_indexes}:{group_name}",
+            "recons": [_csv_recon_seed(item) for item in group_rows],
+        }
+
+        if series_kind == "helical":
+            seed["params"] = {
+                "kv": _csv_int(row, "Kv"),
+                "ma": _csv_int(row, "mA"),
+                "slice_thickness": slice_thickness,
+                "pitch": _csv_float(row, "Pitch") or 1.0,
+                "rotation_time": _csv_float(row, "Rot time (s)") or 1.0,
+                "scan_length": scan_length,
+                "fov": recon_fov,
+                "collimator": _csv_value(row, "Collimation") or None,
+                "ctdi_vol": _csv_float(row, "CTDIvol （mGy）"),
+                "dlp": _csv_float(row, "DLP (mGy*cm)"),
+                "auto_ma": False,
+            }
+        elif series_kind == "axial":
+            seed["params"] = {
+                "kv": _csv_int(row, "Kv"),
+                "ma": _csv_int(row, "mA"),
+                "slice_thickness": slice_thickness,
+                "slice_interval": _csv_float(row, "Increment (mm)") or image_increment or slice_thickness,
+                "rotation_time": _csv_float(row, "Rot time (s)") or 1.0,
+                "scan_length": scan_length,
+                "fov": recon_fov,
+                "collimator": _csv_value(row, "Collimation") or None,
+                "ctdi_vol": _csv_float(row, "CTDIvol （mGy）"),
+                "dlp": _csv_float(row, "DLP (mGy*cm)"),
+                "step_count": _csv_int(row, "cycles"),
+                "auto_ma": False,
+            }
+        else:
+            seed["fourd_config"] = {
+                "breathing_mode": "free_breathing",
+                "phase_count": 17,
+                "acquisition_time": _csv_float(row, "Rot time (s)") or 1.0,
+                "trigger_threshold": 0.0,
+            }
+
+        seeds.append(seed)
+
+    return seeds
+
+
+PROTOCOL_SEEDS = _load_company_protocol_seeds() or LEGACY_PROTOCOL_SEEDS
+
+
 def infer_recon_type(recon_name: str) -> str:
-    if "肺" in recon_name:
+    name = recon_name.lower()
+    if "肺" in recon_name or "lung" in name:
         return "lung"
-    if "骨" in recon_name or "鼻窦" in recon_name:
+    if "骨" in recon_name or "鼻窦" in recon_name or "bone" in name or "sinus" in name:
         return "bone"
-    if "血" in recon_name or "vascular" in recon_name.lower():
+    if "血" in recon_name or "vascular" in name:
         return "vascular"
     return "soft"
 
@@ -772,6 +971,9 @@ def seed_protocol(db, models, protocol_seed: dict) -> None:
                 window_level=recon_seed["window_level"],
                 slice_thickness=recon_seed["slice_thickness"],
                 increment=recon_seed["increment"],
+                recon_fov=recon_seed.get("recon_fov"),
+                center_x=recon_seed.get("center_x"),
+                center_y=recon_seed.get("center_y"),
             )
         )
 
@@ -842,6 +1044,9 @@ def _migrate_protocol_columns() -> None:
         "ALTER TABLE scan_session_gating_configs ADD COLUMN wait_timeout_s FLOAT",
         # Dose Log additions
         "ALTER TABLE dose_logs ADD COLUMN acquisition_type VARCHAR(20)",
+        # Dose Settings: replaced aec_noise_index (Float) with aec_noise_level (String)
+        # Existing rows are backfilled with default 'medium' via the column default.
+        "ALTER TABLE dose_settings ADD COLUMN aec_noise_level VARCHAR(10) NOT NULL DEFAULT 'medium'",
     ]
     with engine.connect() as conn:
         for sql in migrations:
@@ -871,7 +1076,8 @@ def _migrate_protocol_columns() -> None:
         ))
         conn.execute(text(
             "UPDATE protocols SET is_factory = 0 "
-            "WHERE description IS NULL OR description NOT LIKE '%seeded protocol'"
+            "WHERE (description IS NULL OR description NOT LIKE '%seeded protocol') "
+            "AND description NOT LIKE 'protocol-csv:%'"
         ))
         conn.execute(text(
             "UPDATE protocols SET is_4d = 1 WHERE acquisition_type = 'four_d' OR scan_mode = '4d'"
@@ -995,6 +1201,91 @@ def _cleanup_scan_session_orphans() -> None:
         conn.commit()
 
 
+# =============================================================================
+# DRL 默认值 — 数据源：贵司《扫描参数设置.xlsx》协议库
+#
+# 提取规则：每个 (部位 × 人群) 取协议库中代表性"常规"协议的 Dose report
+# CTDIvol / DLP，用于服务模式剂量设置页的系统默认值。
+# 对应 Excel 列：Dose report CTDIvol value (mGy)、
+# Dose report DLP value (mGy*cm)。
+#
+# 体重 / 年龄分档对应关系：
+#   儿童 (pediatric)  ← Excel 中 "30-50kg" 或 "6yrs+" 档（学龄期）
+#   婴幼儿 (infant)   ← Excel 中 "0-10kg" 或 "0-18m" 档
+#   成人 (adult)      ← Excel 中 "50-90kg" 标准成人档
+#
+# 盆腔 (pelvis) 在协议库中无独立成人协议，与"腹部/盆腔"合并扫描；
+# 此处暂取与腹部相同的代表值，待医学物理师细化时再分。
+#
+# ⚠️ 装机前由医学物理师对照本院《扫描参数设置》当前版本复核；
+#    Excel 版本号或临床方案更新时需同步更新本表。
+# =============================================================================
+DRL_SEEDS: list[dict[str, object]] = [
+    # ── 成人 (adult) ──
+    {"body_part": "头颅", "age_group": "adult", "ctdi_ref": 80.0, "dlp_ref": 1320.0},  # Brain
+    {"body_part": "颈部", "age_group": "adult", "ctdi_ref": 80.0, "dlp_ref": 2400.0},  # 颈部软组织
+    {"body_part": "胸部", "age_group": "adult", "ctdi_ref": 50.0, "dlp_ref": 1740.0},  # 胸部
+    {"body_part": "腹部", "age_group": "adult", "ctdi_ref": 50.0, "dlp_ref": 2000.0},  # 腹部
+    {"body_part": "盆腔", "age_group": "adult", "ctdi_ref": 50.0, "dlp_ref": 2000.0},  # 取腹部值，无独立成人盆腔协议
+    {"body_part": "脊柱", "age_group": "adult", "ctdi_ref": 50.0, "dlp_ref": 1250.0},  # 腰椎
+    # ── 儿童 6yrs+ (pediatric) ──
+    {"body_part": "头颅", "age_group": "pediatric", "ctdi_ref": 60.0, "dlp_ref": 720.0},  # 头颅6yrs+
+    {"body_part": "胸部", "age_group": "pediatric", "ctdi_ref": 15.0, "dlp_ref": 230.0},  # 胸腔30-50kg
+    {"body_part": "腹部", "age_group": "pediatric", "ctdi_ref": 25.0, "dlp_ref": 500.0},  # 腹部/盆腔30-50kg
+    {"body_part": "盆腔", "age_group": "pediatric", "ctdi_ref": 25.0, "dlp_ref": 500.0},  # 同腹部
+    # ── 婴幼儿 0-18m / 0-10kg (infant) ──
+    {"body_part": "头颅", "age_group": "infant", "ctdi_ref": 50.0, "dlp_ref": 600.0},  # 头颅0-18m
+    {"body_part": "胸部", "age_group": "infant", "ctdi_ref": 10.0, "dlp_ref": 150.0},  # 胸腔0-10kg
+]
+
+LEGACY_DRL_DEFAULTS: dict[tuple[str, str], set[tuple[float, float]]] = {
+    ("头颅", "adult"): {(60.0, 1000.0), (59.4, 1168.5)},
+    ("颈部", "adult"): {(25.0, 350.0), (25.0, 750.0)},
+    ("胸部", "adult"): {(15.0, 500.0), (14.3, 497.64)},
+    ("腹部", "adult"): {(20.0, 750.0), (20.0, 798.0)},
+    ("盆腔", "adult"): {(20.0, 750.0), (20.0, 798.0)},
+    ("脊柱", "adult"): {(15.0, 250.0), (17.0, 425.0)},
+    ("头颅", "pediatric"): {(35.0, 600.0), (36.8, 441.6)},
+    ("胸部", "pediatric"): {(4.5, 110.0), (8.0, 120.0)},
+    ("腹部", "pediatric"): {(10.0, 200.0), (12.0, 239.4)},
+    ("盆腔", "pediatric"): {(12.0, 250.0), (12.0, 239.4)},
+    ("头颅", "infant"): {(22.0, 350.0), (26.5, 318.0)},
+    ("胸部", "infant"): {(2.5, 75.0), (4.0, 60.0)},
+}
+
+
+def _seed_dose_defaults(db) -> None:
+    from . import models
+
+    # Seed DoseSettings singleton if missing
+    if db.query(models.DoseSettings).filter(models.DoseSettings.id == 1).first() is None:
+        db.add(models.DoseSettings(id=1))
+
+    # Seed or refresh built-in DRL entries (idempotent per body_part × age_group).
+    existing_entries = {
+        (entry.body_part, entry.age_group): entry
+        for entry in db.query(models.DrlEntry).all()
+    }
+    added = 0
+    updated = 0
+    for seed in DRL_SEEDS:
+        key = (seed["body_part"], seed["age_group"])
+        existing = existing_entries.get(key)
+        if existing is None:
+            db.add(models.DrlEntry(**seed))
+            added += 1
+            continue
+        existing_values = (float(existing.ctdi_ref), float(existing.dlp_ref))
+        if existing_values in LEGACY_DRL_DEFAULTS.get(key, set()):
+            existing.ctdi_ref = seed["ctdi_ref"]
+            existing.dlp_ref = seed["dlp_ref"]
+            updated += 1
+
+    if added > 0 or updated > 0:
+        db.commit()
+        print(f"Seeded DRL entries: {added} added, {updated} updated")
+
+
 def init_db() -> None:
     from . import models
 
@@ -1004,7 +1295,44 @@ def init_db() -> None:
 
     db = SessionLocal()
     try:
+        _seed_dose_defaults(db)
         if db.query(models.Protocol).first():
+            seed_uses_company_csv = any(
+                str(protocol_seed.get("description", "")).startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)
+                for protocol_seed in PROTOCOL_SEEDS
+            )
+            current_csv_descriptions = {
+                str(protocol_seed.get("description", ""))
+                for protocol_seed in PROTOCOL_SEEDS
+                if str(protocol_seed.get("description", "")).startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)
+            }
+            deleted_stale_protocols = 0
+            if seed_uses_company_csv and current_csv_descriptions:
+                stale_protocols = (
+                    db.query(models.Protocol)
+                    .filter(
+                        models.Protocol.description.like(f"{CSV_PROTOCOL_DESCRIPTION_PREFIX}%"),
+                        ~models.Protocol.description.in_(current_csv_descriptions),
+                    )
+                    .all()
+                )
+                if stale_protocols:
+                    stale_ids = [protocol.id for protocol in stale_protocols]
+                    referenced_protocol_ids = {
+                        protocol_id
+                        for (protocol_id,) in db.query(models.ScanSession.protocol_id)
+                        .filter(models.ScanSession.protocol_id.in_(stale_ids))
+                        .distinct()
+                        .all()
+                    }
+                    for protocol in stale_protocols:
+                        if protocol.id in referenced_protocol_ids:
+                            continue
+                        db.delete(protocol)
+                        deleted_stale_protocols += 1
+                    if deleted_stale_protocols:
+                        db.flush()
+
             existing_keys = {
                 (
                     protocol.name,
@@ -1014,6 +1342,8 @@ def init_db() -> None:
                     protocol.scan_mode,
                 )
                 for protocol in db.query(models.Protocol).all()
+                if not seed_uses_company_csv
+                or str(protocol.description or "") in current_csv_descriptions
             }
             missing_protocols = [
                 protocol_seed
@@ -1031,9 +1361,12 @@ def init_db() -> None:
             for protocol_seed in missing_protocols:
                 seed_protocol(db, models, protocol_seed)
 
-            if missing_protocols:
+            if missing_protocols or deleted_stale_protocols:
                 db.commit()
-                print(f"Added missing seeded protocols: {len(missing_protocols)}")
+                print(
+                    f"Synced seeded protocols: {len(missing_protocols)} added, "
+                    f"{deleted_stale_protocols} stale removed"
+                )
             print(f"Seeded protocols: {db.query(models.Protocol).count()}")
             return
 

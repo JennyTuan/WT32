@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Download, RefreshCw, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Download, FileText, Printer, RefreshCw, Search, ChevronLeft, ChevronRight } from "lucide-react";
 
 import ServiceModeShell from "../shared/ServiceModeShell";
 import { listDoseLogs, type ApiDoseLog } from "../../../lib/logsApi";
 import { buildCsv, downloadCsv, timestampSuffix } from "../../../lib/csvExport";
+import { printDoseLogReport } from "./printDoseLogReport";
 
 const PAGE_SIZE = 50;
 
@@ -85,6 +86,19 @@ export default function ServiceDoseLogsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(0);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const handler = (event: MouseEvent) => {
+      if (!exportMenuRef.current?.contains(event.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [exportMenuOpen]);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -164,7 +178,26 @@ export default function ServiceDoseLogsPage() {
       { header: "操作者", value: (l) => l.operator ?? "" },
     ]);
     downloadCsv(`dose-log-${timestampSuffix()}.csv`, csv);
+    setExportMenuOpen(false);
   }, [filtered]);
+
+  const handlePrintReport = useCallback(() => {
+    const filterParts: string[] = [];
+    if (seriesTypeFilter !== "全部") {
+      filterParts.push(`序列：${SERIES_TYPE_LABEL[seriesTypeFilter] ?? seriesTypeFilter}`);
+    }
+    if (bodyPartFilter !== "全部") filterParts.push(`部位：${bodyPartFilter}`);
+    if (searchText.trim()) filterParts.push(`关键字：${searchText.trim()}`);
+
+    printDoseLogReport({
+      rows: filtered,
+      totalDlp,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      filtersDescription: filterParts.length > 0 ? filterParts.join(" / ") : "全部",
+    });
+    setExportMenuOpen(false);
+  }, [filtered, totalDlp, dateFrom, dateTo, seriesTypeFilter, bodyPartFilter, searchText]);
 
   return (
     <ServiceModeShell currentRoute="/service/dose/logs" footerStatus={{ label: "IDLE", tone: "idle" }}>
@@ -182,14 +215,42 @@ export default function ServiceDoseLogsPage() {
                 className="w-full pl-9 pr-4 h-10 border border-[#D6E2EF] rounded-lg text-[14px] text-[#37474F] placeholder:text-[#B0C4DE] focus:outline-none focus:border-[#4D94FF]"
               />
             </div>
-            <button
-              onClick={handleExport}
-              disabled={loading || filtered.length === 0}
-              className="px-4 h-10 bg-white border border-[#D6E2EF] text-[#37474F] font-bold rounded-lg flex items-center gap-2 text-[14px] hover:bg-[#F5F8FC] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Download size={14} />
-              导出 CSV
-            </button>
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setExportMenuOpen((v) => !v)}
+                disabled={loading || filtered.length === 0}
+                className="px-4 h-10 bg-white border border-[#D6E2EF] text-[#37474F] font-bold rounded-lg flex items-center gap-2 text-[14px] hover:bg-[#F5F8FC] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Download size={14} />
+                导出
+                <ChevronDown size={14} className={`transition-transform ${exportMenuOpen ? "rotate-180" : ""}`} />
+              </button>
+              {exportMenuOpen && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-[#D6E2EF] bg-white shadow-lg">
+                  <button
+                    onClick={handleExport}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#37474F] hover:bg-[#F5F8FC]"
+                  >
+                    <FileText size={14} className="text-[#90A4AE]" />
+                    <div>
+                      <div className="font-bold">导出 CSV</div>
+                      <div className="text-[11px] text-[#90A4AE]">原始数据，Excel 可打开</div>
+                    </div>
+                  </button>
+                  <div className="h-px bg-[#E2EBF5]" />
+                  <button
+                    onClick={handlePrintReport}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-[#37474F] hover:bg-[#F5F8FC]"
+                  >
+                    <Printer size={14} className="text-[#90A4AE]" />
+                    <div>
+                      <div className="font-bold">打印报告</div>
+                      <div className="text-[11px] text-[#90A4AE]">A4 排版，可签字归档</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={fetchLogs}
               disabled={loading}
