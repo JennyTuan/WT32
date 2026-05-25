@@ -10,6 +10,7 @@ This directory holds project notes that are too detailed for the root README.
 
 ## DOM / Dose Work
 
+- [协议管理与剂量设置逻辑梳理PRD.md](协议管理与剂量设置逻辑梳理PRD.md): Protocol management, scan-session, dose settings, and DOM logic PRD.
 - [WT32_DOM_Research_Report.md](WT32_DOM_Research_Report.md): DOM feature research and product recommendations.
 - [剂量日志页面修改计划.md](剂量日志页面修改计划.md): Dose log page change plan.
 - `DOM_Phase1_ZAxis_mA_Modulation_Implementation.docx`: DOM phase 1 implementation document.
