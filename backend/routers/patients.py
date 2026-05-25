@@ -32,17 +32,19 @@ def _serialize_patient(patient: models.Patient, latest: "LatestSessionInfo | Non
         "latest_scan_session_id": latest.id if latest else None,
         "latest_scan_acquisition_type": latest.acquisition_type if latest else None,
         "latest_scan_mode": latest.scan_mode if latest else None,
+        "latest_scan_name": latest.name if latest else None,
     }
 
 
 class LatestSessionInfo:
-    __slots__ = ("id", "status", "acquisition_type", "scan_mode")
+    __slots__ = ("id", "status", "acquisition_type", "scan_mode", "name")
 
-    def __init__(self, id_: int, status: str, acquisition_type: str | None, scan_mode: str | None):
+    def __init__(self, id_: int, status: str, acquisition_type: str | None, scan_mode: str | None, name: str | None):
         self.id = id_
         self.status = status
         self.acquisition_type = acquisition_type
         self.scan_mode = scan_mode
+        self.name = name
 
 
 @router.get("/", response_model=list[schemas.Patient])
@@ -56,15 +58,16 @@ def list_patients(db: Session = Depends(get_db)):
             models.ScanSession.status,
             models.ScanSession.acquisition_type,
             models.ScanSession.scan_mode,
+            models.ScanSession.name,
             models.ScanSession.created_at,
         )
         .order_by(models.ScanSession.created_at.desc(), models.ScanSession.id.desc())
         .all()
     )
     latest_by_patient: dict[int, LatestSessionInfo] = {}
-    for patient_id, session_id, status_val, acquisition_type, scan_mode, _created in rows:
+    for patient_id, session_id, status_val, acquisition_type, scan_mode, session_name, _created in rows:
         if patient_id not in latest_by_patient:
-            latest_by_patient[patient_id] = LatestSessionInfo(session_id, status_val, acquisition_type, scan_mode)
+            latest_by_patient[patient_id] = LatestSessionInfo(session_id, status_val, acquisition_type, scan_mode, session_name)
     return [_serialize_patient(p, latest_by_patient.get(p.id)) for p in patients]
 
 
@@ -75,6 +78,7 @@ def _latest_status_for(patient_id: int, db: Session) -> LatestSessionInfo | None
             models.ScanSession.status,
             models.ScanSession.acquisition_type,
             models.ScanSession.scan_mode,
+            models.ScanSession.name,
         )
         .filter(models.ScanSession.patient_id == patient_id)
         .order_by(models.ScanSession.created_at.desc(), models.ScanSession.id.desc())
@@ -82,7 +86,7 @@ def _latest_status_for(patient_id: int, db: Session) -> LatestSessionInfo | None
     )
     if not row:
         return None
-    return LatestSessionInfo(row[0], row[1], row[2], row[3])
+    return LatestSessionInfo(row[0], row[1], row[2], row[3], row[4])
 
 
 @router.get("/lookup/{patient_code}", response_model=schemas.Patient)

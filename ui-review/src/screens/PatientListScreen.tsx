@@ -42,6 +42,7 @@ type PatientRecord = {
     latestSessionId: number | null;
     latestAcquisitionType: ApiPatient["latest_scan_acquisition_type"];
     latestScanMode: ApiPatient["latest_scan_mode"];
+    projectName: string | null;
 };
 
 const mapApiPatientToRecord = (p: ApiPatient, index: number): PatientRecord => ({
@@ -55,6 +56,7 @@ const mapApiPatientToRecord = (p: ApiPatient, index: number): PatientRecord => (
     latestSessionId: p.latest_scan_session_id,
     latestAcquisitionType: p.latest_scan_acquisition_type,
     latestScanMode: p.latest_scan_mode,
+    projectName: p.latest_scan_name,
 });
 
 const PatientListScreen = () => {
@@ -288,6 +290,7 @@ const PatientListScreen = () => {
                                             <th className="px-4 text-left border-r border-white/10">姓名</th>
                                             <th className="px-4 text-left border-r border-white/10">性别</th>
                                             <th className="px-4 text-left border-r border-white/10">年龄</th>
+                                            {activeTab === 'completed' && <th className="px-4 text-left border-r border-white/10">项目名称</th>}
                                             <th className="px-4 text-center">{activeTab === 'completed' ? '图像状态' : '检查状态'}</th>
                                         </tr>
                                     </thead>
@@ -312,6 +315,7 @@ const PatientListScreen = () => {
                                                 <td className="px-4 font-bold text-[#37474F]">{maskName(patient.name)}</td>
                                                 <td className="px-4">{patient.gender}</td>
                                                 <td className="px-4">{patient.age}</td>
+                                                {activeTab === 'completed' && <td className="px-4 text-[#37474F]">{patient.projectName ?? '—'}</td>}
                                                 <td className="text-center">
                                                     {activeTab === 'completed' && patient.checkStatus === '已完成' ? (
                                                         <button

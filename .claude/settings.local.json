@@ -125,7 +125,16 @@
       "PowerShell($dir = \"C:\\\\Users\\\\stn0047\\\\Downloads\\\\\"; Test-Path $dir; [System.IO.Directory]::GetFiles\\($dir\\) | Select-Object -First 30)",
       "Read(//c//**)",
       "Bash(.venv/Scripts/python.exe -c \"from backend import database, models; print\\('OK'\\)\")",
-      "Bash(.venv/Scripts/python.exe -c \"from backend import main, models, schemas; from backend.routers import dose_settings; print\\('OK'\\)\")"
+      "Bash(.venv/Scripts/python.exe -c \"from backend import main, models, schemas; from backend.routers import dose_settings; print\\('OK'\\)\")",
+      "Bash(python -c \"import sqlite3; conn = sqlite3.connect\\('backend/app.db'\\); cur = conn.cursor\\(\\); cur.execute\\('PRAGMA table_info\\(scan_sessions\\)'\\); print\\([row[1] for row in cur.fetchall\\(\\)]\\)\")",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:8000/api/patients/)",
+      "Bash(findstr \":8000\")",
+      "Bash(.venv/Scripts/python.exe -m uvicorn backend.main:app --port 8000 --log-level debug)",
+      "Bash(Start-Sleep -Seconds 3)",
+      "Bash(curl -s http://localhost:8000/api/patients/)",
+      "Bash(Select-Object -First 5)",
+      "Bash(curl -s \"http://127.0.0.1:8000/api/patients/\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'OK, {len\\(d\\)} patients, keys: {list\\(d[0].keys\\(\\)\\) if d else []}'\\)\")"
     ]
   }
 }
