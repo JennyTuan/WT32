@@ -591,6 +591,35 @@ def update_scan_session_axial_param(param_id: int, payload: schemas.ScanSessionA
     return entity
 
 
+@router.post("/series/{session_series_id}/recon-series", response_model=schemas.ScanSessionDetail, status_code=status.HTTP_201_CREATED)
+def create_scan_session_recon_series(session_series_id: int, payload: schemas.ScanSessionReconSeriesCreate, db: Session = Depends(get_db)):
+    series = _get_entity_or_404(models.ScanSessionSeries, session_series_id, "Scan session series not found", db)
+    recon = models.ScanSessionReconSeries(
+        scan_session_series_id=series.id,
+        recon_name=payload.recon_name,
+        recon_type=payload.recon_type,
+        kernel=payload.kernel,
+        matrix=payload.matrix,
+        window_width=payload.window_width,
+        window_level=payload.window_level,
+        slice_thickness=payload.slice_thickness,
+        increment=payload.increment,
+    )
+    db.add(recon)
+    db.commit()
+    return _get_scan_session_or_404(series.scan_session_id, db)
+
+
+@router.delete("/recon-series/{recon_id}", response_model=schemas.ScanSessionDetail)
+def delete_scan_session_recon_series(recon_id: int, db: Session = Depends(get_db)):
+    recon = _get_entity_or_404(models.ScanSessionReconSeries, recon_id, "Scan session recon series not found", db)
+    series = _get_entity_or_404(models.ScanSessionSeries, recon.scan_session_series_id, "Scan session series not found", db)
+    scan_session_id = series.scan_session_id
+    db.delete(recon)
+    db.commit()
+    return _get_scan_session_or_404(scan_session_id, db)
+
+
 @router.put("/recon-series/{recon_id}", response_model=schemas.ScanSessionReconSeries)
 def update_scan_session_recon_series(recon_id: int, payload: schemas.ScanSessionReconSeriesUpdate, db: Session = Depends(get_db)):
     entity = _get_entity_or_404(models.ScanSessionReconSeries, recon_id, "Scan session recon series not found", db)

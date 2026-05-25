@@ -139,7 +139,15 @@
       "Bash(findstr LISTENING)",
       "Bash(taskkill /PID 8888 /F)",
       "Bash(.venv/Scripts/python.exe -m uvicorn backend.main:app --port 8000)",
-      "PowerShell(Stop-Process -Id 8888 -Force; Start-Sleep -Seconds 1; $proc = Start-Process -FilePath \"C:\\\\STN\\\\projects\\\\WT32\\\\.venv\\\\Scripts\\\\python.exe\" -ArgumentList \"-m\",\"uvicorn\",\"backend.main:app\",\"--port\",\"8000\" -WorkingDirectory \"C:\\\\STN\\\\projects\\\\WT32\" -PassThru -WindowStyle Hidden; Start-Sleep -Seconds 3; $null = \\(Invoke-WebRequest -Uri \"http://127.0.0.1:8000/api/patients/\" -UseBasicParsing\\).Content | ConvertFrom-Json | Where-Object { $_.patient_id -eq 'P20260525123' } | Select-Object latest_scan_completed_at; Write-Output \"PID: $\\($proc.Id\\)\")"
+      "PowerShell(Stop-Process -Id 8888 -Force; Start-Sleep -Seconds 1; $proc = Start-Process -FilePath \"C:\\\\STN\\\\projects\\\\WT32\\\\.venv\\\\Scripts\\\\python.exe\" -ArgumentList \"-m\",\"uvicorn\",\"backend.main:app\",\"--port\",\"8000\" -WorkingDirectory \"C:\\\\STN\\\\projects\\\\WT32\" -PassThru -WindowStyle Hidden; Start-Sleep -Seconds 3; $null = \\(Invoke-WebRequest -Uri \"http://127.0.0.1:8000/api/patients/\" -UseBasicParsing\\).Content | ConvertFrom-Json | Where-Object { $_.patient_id -eq 'P20260525123' } | Select-Object latest_scan_completed_at; Write-Output \"PID: $\\($proc.Id\\)\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\STN\\\\projects\\\\WT32\\\\ui-review\\\\src\" -Recurse -Name)",
+      "Bash(Select-Object -First 50)",
+      "PowerShell(Stop-Process -Id 13224, 30268 -Force)",
+      "PowerShell(Start-Process -FilePath \"python\" -ArgumentList \"-m uvicorn backend.main:app --reload --port 8000\" -WorkingDirectory \"C:\\\\STN\\\\projects\\\\WT32\" -WindowStyle Hidden)",
+      "PowerShell(Start-Sleep -Seconds 3; try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:8000/api/scan-sessions/\" -UseBasicParsing -TimeoutSec 5; Write-Output \"Backend OK: $\\($r.StatusCode\\)\" } catch { Write-Output \"Not ready: $_\" })",
+      "Bash(python -c \"from backend.database import GATING_CUSTOM_PROTOCOLS, _seed_gating_protocols; print\\([p['name'] for p in GATING_CUSTOM_PROTOCOLS]\\)\")",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, '.'\\); from backend.database import GATING_CUSTOM_PROTOCOLS; print\\([p['name'] for p in GATING_CUSTOM_PROTOCOLS]\\)\")",
+      "PowerShell(& \"C:\\\\STN\\\\projects\\\\WT32\\\\.venv\\\\Scripts\\\\python.exe\" -c \"from backend.database import GATING_CUSTOM_PROTOCOLS; print\\([p['name'] for p in GATING_CUSTOM_PROTOCOLS]\\)\")"
     ]
   }
 }

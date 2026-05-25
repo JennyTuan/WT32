@@ -176,7 +176,7 @@ export default function ServiceDoseSettingsPage() {
         <div className="flex items-start justify-between px-5 pt-4 pb-4">
           <div>
             <div className="text-[16px] font-black text-[#1E293B]">剂量设置</div>
-            <div className="mt-0.5 text-[12px] text-[#94A3B8]">系统级剂量参考、阈值策略、AEC 默认值与合规配置</div>
+            <div className="mt-0.5 text-[12px] text-[#94A3B8]">系统级剂量参考、阈值策略、DOM 默认值与合规配置</div>
           </div>
           <div className="flex items-center gap-3">
             {error && (
@@ -325,16 +325,16 @@ export default function ServiceDoseSettingsPage() {
 
           <Divider />
 
-          {/* ── ③ AEC 自动曝光控制 ── */}
+          {/* ── ③ DOM 三轴电流调制 ── */}
           <SectionLabel
-            title="AEC 自动曝光控制"
-            hint="根据患者体型自动调节 mA，默认噪声等级控制图像质量与剂量平衡"
+            title="DOM 三轴电流调制"
+            hint="基于 XYZ 三轴调制管电流，默认噪声等级控制图像质量与剂量平衡"
           />
           <div className="divide-y divide-[#F1F5F9]">
-            <SettingRow label="启用 AEC（默认）" desc="新建协议时默认启用 AEC；技师在协议页仍可单独关闭">
-              <Toggle checked={settings.aec_enabled} onChange={(v) => updateSettings("aec_enabled", v)} />
+            <SettingRow label="启用 DOM（默认）" desc="新建协议时默认启用 DOM；技师在协议页仍可单独关闭">
+              <Toggle checked={settings.dom_enabled} onChange={(v) => updateSettings("dom_enabled", v)} />
             </SettingRow>
-            <div className={`px-5 pt-4 pb-5 ${!settings.aec_enabled ? "opacity-50 pointer-events-none" : ""}`}>
+            <div className={`px-5 pt-4 pb-5 ${!settings.dom_enabled ? "opacity-50 pointer-events-none" : ""}`}>
               <div className="mb-2 text-[12px] font-bold text-[#475569]">默认噪声等级</div>
               <div className="text-[11px] text-[#94A3B8] mb-3">"低"图像最清晰、剂量较高；"高"剂量最低、噪声较多</div>
               <div className="flex gap-3">
@@ -342,14 +342,14 @@ export default function ServiceDoseSettingsPage() {
                   <button
                     key={opt.value}
                     type="button"
-                    onClick={() => updateSettings("aec_noise_level", opt.value)}
+                    onClick={() => updateSettings("dom_noise_level", opt.value)}
                     className={`flex-1 rounded-lg border-2 px-4 py-3 text-left transition-all ${
-                      settings.aec_noise_level === opt.value
+                      settings.dom_noise_level === opt.value
                         ? "border-[#2563EB] bg-[#EFF6FF]"
                         : "border-[#E2E8F0] bg-[#F8FAFC] hover:border-[#93C5FD]"
                     }`}
                   >
-                    <div className={`text-[16px] font-black ${settings.aec_noise_level === opt.value ? "text-[#1D4ED8]" : "text-[#223547]"}`}>
+                    <div className={`text-[16px] font-black ${settings.dom_noise_level === opt.value ? "text-[#1D4ED8]" : "text-[#223547]"}`}>
                       {opt.label}
                     </div>
                     <div className="mt-1 text-[11px] leading-4 text-[#64748B]">{opt.desc}</div>
@@ -507,4 +507,3 @@ function BareNumberInput({
     />
   );
 }
-

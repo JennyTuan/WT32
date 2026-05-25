@@ -646,6 +646,17 @@ class ScanSessionAxialParam(ORMModel):
     step_count: Optional[int] = None
 
 
+class ScanSessionReconSeriesCreate(BaseModel):
+    recon_name: str = "重建"
+    recon_type: Literal["soft", "bone", "lung", "vascular"] = "soft"
+    kernel: str = "STANDARD"
+    matrix: int = 512
+    window_width: int = 400
+    window_level: int = 40
+    slice_thickness: float = 1.0
+    increment: Optional[float] = None
+
+
 class ScanSessionReconSeriesUpdate(BaseModel):
     recon_name: Optional[str] = None
     recon_type: Optional[Literal["soft", "bone", "lung", "vascular"]] = None

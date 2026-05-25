@@ -475,18 +475,35 @@ const PatientListScreen = () => {
                     <div className="flex-1 flex justify-end">
                         <button
                             onClick={() => {
-                                if (canProceed) {
-                                    if (selectedPatient) {
-                                        saveSelectedPatient({
-                                            id: selectedPatient.id,
-                                            serial: selectedPatient.serial,
-                                            patientId: selectedPatient.patientId,
-                                            name: selectedPatient.name,
-                                            gender: selectedPatient.gender,
-                                            age: selectedPatient.age,
-                                        });
+                                if (canProceed && selectedPatient) {
+                                    saveSelectedPatient({
+                                        id: selectedPatient.id,
+                                        serial: selectedPatient.serial,
+                                        patientId: selectedPatient.patientId,
+                                        name: selectedPatient.name,
+                                        gender: selectedPatient.gender,
+                                        age: selectedPatient.age,
+                                    });
+                                    if (activeTab === 'completed') {
+                                        if (selectedPatient.latestSessionId) {
+                                            saveSelectedScanSessionId(selectedPatient.latestSessionId);
+                                        }
+                                        const isFourD = selectedPatient.latestAcquisitionType === 'four_d'
+                                            || selectedPatient.latestScanMode === '4d';
+                                        if (isFourD) {
+                                            navigate('/image-viewer', {
+                                                state: {
+                                                    scanResult: generateMockScanResult(9, 10, 165.0),
+                                                    showSliceLoadingBeforeImageLoad: false,
+                                                    initialBrowseMode: 'phase',
+                                                },
+                                            });
+                                        } else {
+                                            navigate('/image-viewer');
+                                        }
+                                    } else {
+                                        navigate('/protocol-select');
                                     }
-                                    navigate('/protocol-select');
                                 }
                             }}
                             disabled={!canProceed}
@@ -495,7 +512,7 @@ const PatientListScreen = () => {
                                 : 'bg-[#CBD5E1] text-white cursor-not-allowed shadow-none'
                                 }`}
                         >
-                            下一步 <ChevronRight size={22} />
+                            {activeTab === 'completed' ? '查看图像' : '下一步'} <ChevronRight size={22} />
                         </button>
                     </div>
                 </footer>

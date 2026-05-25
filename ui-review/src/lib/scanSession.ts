@@ -459,6 +459,37 @@ export const deleteSelectedScanSessionSeries = async (sessionSeriesId: number) =
     return scanSession;
 };
 
+export const createScanSessionReconSeries = async (sessionSeriesId: number, payload: {
+    recon_name?: string;
+    recon_type?: "soft" | "bone" | "lung" | "vascular";
+    kernel?: string;
+    matrix?: number;
+    window_width?: number;
+    window_level?: number;
+    slice_thickness?: number;
+    increment?: number | null;
+}) => {
+    const response = await fetch(buildApiUrl(`/api/scan-sessions/series/${sessionSeriesId}/recon-series`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`Failed to create recon series: ${response.status}`);
+    const scanSession = (await response.json()) as ApiScanSessionDetail;
+    if (loadSelectedScanSessionId() === scanSession.id) cacheSelectedScanSession(scanSession);
+    return scanSession;
+};
+
+export const deleteSelectedScanSessionReconSeries = async (reconId: number) => {
+    const response = await fetch(buildApiUrl(`/api/scan-sessions/recon-series/${reconId}`), {
+        method: "DELETE",
+    });
+    if (!response.ok) throw new Error(`Failed to delete recon series: ${response.status}`);
+    const scanSession = (await response.json()) as ApiScanSessionDetail;
+    if (loadSelectedScanSessionId() === scanSession.id) cacheSelectedScanSession(scanSession);
+    return scanSession;
+};
+
 export const updateSelectedScanSessionTopogramParam = async (paramId: number, payload: UpdatePayload) =>
     updateSelectedScanSessionEntity<ApiScanSessionTopogramParam>(`/api/scan-sessions/topogram/${paramId}`, payload);
 

@@ -827,7 +827,7 @@ export function TomographicScoutViewport({
 const SequenceScanConfirmScreen = () => {
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [axialParam, setAxialParam] = useState<ApiScanSessionAxialParam | null>(null);
-    const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("standard");
+    const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("medium");
     const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
     const axialParamId = axialParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);

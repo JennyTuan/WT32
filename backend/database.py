@@ -408,14 +408,31 @@ CHEST_PROTOCOLS = [
         "fourd_config": {"breathing_mode": "free_breathing", "phase_count": 17, "acquisition_time": 1.0, "trigger_threshold": 0.0},
         "recons": [recon("肺窗", "Lung2", 512, 1500, -700, 4.8, 4.8)],
     },
+]
+
+GATING_CUSTOM_PROTOCOLS = [
     {
         "name": "胸腔深吸气屏息（断层）",
+        "body_part": "chest",
         "age_group": "adult",
         "patient_weight": "50-90kg",
+        "patient_position": "HFS",
+        "table_direction": "in",
         "scan_mode": "plain",
         "series_kind": "axial",
-        "params": {"kv": 120, "ma": 180, "slice_thickness": 1.25, "slice_interval": 20.0, "rotation_time": 1.0, "scan_length": 320.0, "fov": 350.0, "ctdi_vol": 7.5, "dlp": 120.0, "step_count": 16, "auto_ma": False},
-        "gating_config": {"breathing_mode": "breath_hold_inspiration"},
+        "params": {
+            "kv": 120, "ma": 180, "slice_thickness": 1.25, "slice_interval": 20.0,
+            "rotation_time": 1.0, "scan_length": 320.0, "fov": 350.0,
+            "ctdi_vol": 7.5, "dlp": 120.0, "step_count": 16, "auto_ma": False,
+        },
+        "gating_config": {
+            "breathing_mode": "breath_hold_inspiration",
+            "trigger_delay_ms": 0,
+            "stability_cv_threshold": 0.15,
+            "baseline_drift_mm_threshold": 5.0,
+            "breath_hold_timeout_s": 25.0,
+            "breath_hold_amplitude_tolerance_mm": 2.0,
+        },
         "recons": [
             recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.25),
             recon("纵隔窗", "S2", 512, 400, 40, 1.25, 1.25),
@@ -423,12 +440,26 @@ CHEST_PROTOCOLS = [
     },
     {
         "name": "胸腔深吸气屏息（螺旋）",
+        "body_part": "chest",
         "age_group": "adult",
         "patient_weight": "50-90kg",
+        "patient_position": "HFS",
+        "table_direction": "in",
         "scan_mode": "plain",
         "series_kind": "helical",
-        "params": {"kv": 120, "ma": 180, "slice_thickness": 1.25, "pitch": 1.2, "rotation_time": 0.5, "scan_length": 350.0, "fov": 350.0, "ctdi_vol": 8.2, "dlp": 287.0, "auto_ma": False},
-        "gating_config": {"breathing_mode": "breath_hold_inspiration"},
+        "params": {
+            "kv": 120, "ma": 180, "slice_thickness": 1.25, "pitch": 1.2,
+            "rotation_time": 0.5, "scan_length": 350.0, "fov": 350.0,
+            "ctdi_vol": 8.2, "dlp": 287.0, "auto_ma": False,
+        },
+        "gating_config": {
+            "breathing_mode": "breath_hold_inspiration",
+            "trigger_delay_ms": 0,
+            "stability_cv_threshold": 0.15,
+            "baseline_drift_mm_threshold": 5.0,
+            "breath_hold_timeout_s": 25.0,
+            "breath_hold_amplitude_tolerance_mm": 2.0,
+        },
         "recons": [
             recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.0),
             recon("纵隔窗", "S2", 512, 400, 40, 2.5, 2.0),
@@ -436,17 +467,29 @@ CHEST_PROTOCOLS = [
     },
     {
         "name": "胸腔自由呼吸（轴扫）",
+        "body_part": "chest",
         "age_group": "adult",
         "patient_weight": "50-90kg",
+        "patient_position": "HFS",
+        "table_direction": "in",
         "scan_mode": "plain",
         "series_kind": "axial",
-        "params": {"kv": 120, "ma": 120, "slice_thickness": 1.25, "slice_interval": 20.0, "rotation_time": 1.0, "scan_length": 320.0, "fov": 350.0, "ctdi_vol": 5.2, "dlp": 83.2, "step_count": 16, "auto_ma": False},
+        "params": {
+            "kv": 120, "ma": 120, "slice_thickness": 1.25, "slice_interval": 20.0,
+            "rotation_time": 1.0, "scan_length": 320.0, "fov": 350.0,
+            "ctdi_vol": 5.2, "dlp": 83.2, "step_count": 16, "auto_ma": False,
+        },
         "gating_config": {
             "breathing_mode": "free_breathing",
             "target_phase": "max_inspiration",
             "threshold_normalized": 1.0,
             "trigger_direction": "rising",
             "wait_timeout_s": 30.0,
+            "trigger_delay_ms": 0,
+            "stability_cv_threshold": 0.15,
+            "baseline_drift_mm_threshold": 5.0,
+            "breath_hold_timeout_s": 25.0,
+            "breath_hold_amplitude_tolerance_mm": 2.0,
         },
         "recons": [
             recon("肺窗", "Lung2", 512, 1500, -700, 1.25, 1.25),
@@ -978,6 +1021,85 @@ def seed_protocol(db, models, protocol_seed: dict) -> None:
         )
 
 
+def _seed_gating_protocols(db, models) -> None:
+    added = 0
+    for seed in GATING_CUSTOM_PROTOCOLS:
+        existing = (
+            db.query(models.Protocol)
+            .filter(
+                models.Protocol.name == seed["name"],
+                models.Protocol.acquisition_type == "gating",
+            )
+            .first()
+        )
+        if existing:
+            continue
+
+        protocol = models.Protocol(
+            name=seed["name"],
+            body_part=seed["body_part"],
+            age_group=seed["age_group"],
+            patient_weight=seed["patient_weight"],
+            patient_position=seed["patient_position"],
+            table_direction=seed["table_direction"],
+            acquisition_type="gating",
+            scan_mode="plain",
+            is_4d=False,
+            is_enhance=False,
+            is_factory=False,
+            is_enabled=True,
+        )
+        db.add(protocol)
+        db.flush()
+
+        topogram = models.Series(
+            protocol_id=protocol.id,
+            series_order=1,
+            series_type="topogram",
+            series_label=f"{protocol.name} Topogram",
+            trigger_mode="manual",
+        )
+        db.add(topogram)
+        db.flush()
+        db.add(models.TopogramParam(series_id=topogram.id, **TOP0GRAM_DEFAULTS))
+
+        diag = models.Series(
+            protocol_id=protocol.id,
+            series_order=2,
+            series_type=seed["series_kind"],
+            series_label=f"{protocol.name} Diagnostic",
+            trigger_mode="manual",
+        )
+        db.add(diag)
+        db.flush()
+
+        if seed["series_kind"] == "helical":
+            db.add(models.HelicalParam(series_id=diag.id, **seed["params"]))
+        else:
+            db.add(models.AxialParam(series_id=diag.id, **seed["params"]))
+
+        db.add(models.GatingConfig(series_id=diag.id, **seed["gating_config"]))
+
+        for r in seed["recons"]:
+            db.add(models.ReconSeries(
+                series_id=diag.id,
+                recon_name=r["name"],
+                recon_type=infer_recon_type(r["name"]),
+                kernel=r["kernel"],
+                matrix=r["matrix"],
+                window_width=r["window_width"],
+                window_level=r["window_level"],
+                slice_thickness=r["slice_thickness"],
+                increment=r["increment"],
+            ))
+
+        added += 1
+
+    if added:
+        db.commit()
+        print(f"Seeded gating protocols: {added} added")
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -1102,6 +1224,14 @@ def _migrate_protocol_columns() -> None:
             "), CASE WHEN scan_mode = '4d' THEN 'four_d' ELSE 'regular' END) "
             "WHERE acquisition_type IS NULL OR acquisition_type = ''"
         ))
+        # Gating protocols are now custom (non-factory) — demote any legacy factory rows
+        conn.execute(text(
+            "UPDATE protocols SET is_factory = 0 "
+            "WHERE name IN ('胸腔深吸气屏息（断层）','胸腔深吸气屏息（螺旋）','胸腔自由呼吸（轴扫）') "
+            "AND acquisition_type = 'gating'"
+        ))
+        conn.commit()
+
         # Backfill gating_configs for diagnostic series of gated protocols
         gating_backfill = [
             ("胸腔深吸气屏息（断层）", "breath_hold_inspiration"),
@@ -1367,6 +1497,7 @@ def init_db() -> None:
                     f"Synced seeded protocols: {len(missing_protocols)} added, "
                     f"{deleted_stale_protocols} stale removed"
                 )
+            _seed_gating_protocols(db, models)
             print(f"Seeded protocols: {db.query(models.Protocol).count()}")
             return
 
@@ -1383,6 +1514,8 @@ def init_db() -> None:
 
         for protocol_seed in PROTOCOL_SEEDS:
             seed_protocol(db, models, protocol_seed)
+
+        _seed_gating_protocols(db, models)
 
         # Seed default corner config
         default_corners = {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
-export type NoiseLevel = "low" | "standard" | "medium" | "high";
+export type NoiseLevel = "low" | "medium" | "high";
 
 export type AutoMaPanelProps = {
     mode?: "axial" | "helical";
@@ -20,16 +20,14 @@ export type AutoMaPanelProps = {
 };
 
 const NOISE_OPTIONS: { value: NoiseLevel; label: string; desc: string }[] = [
-    { value: "low", label: "低噪声", desc: "较高 mA / 较低噪声" },
-    { value: "standard", label: "标准", desc: "默认" },
-    { value: "medium", label: "较高", desc: "较低 mA" },
-    { value: "high", label: "高噪声", desc: "最低剂量" },
+    { value: "low", label: "低", desc: "低噪声容忍，剂量较高、图像最清晰" },
+    { value: "medium", label: "中", desc: "平衡剂量与图像质量（推荐）" },
+    { value: "high", label: "高", desc: "高噪声容忍，剂量最低、噪声较多" },
 ];
 
 const NOISE_FACTOR: Record<NoiseLevel, number> = {
     low: 1.2,
-    standard: 1,
-    medium: 0.85,
+    medium: 1,
     high: 0.7,
 };
 
@@ -148,7 +146,7 @@ export default function AutoMaPanel({
     scanPositionRatio,
     onScanPositionRatioChange,
     onChange,
-    noiseLevel = "standard",
+    noiseLevel = "medium",
 }: AutoMaPanelProps) {
     const [draftMin, setDraftMin] = useState(maMin);
     const [draftMax, setDraftMax] = useState(maMax);
@@ -320,7 +318,7 @@ export default function AutoMaPanel({
                                 <Metric label="mA" value={`${Math.round(axialCursorMa)}`} accent />
                             </>
                         ) : (
-                            <span className="text-[9px] text-[#64748B]">启用 Auto mA 后，点击/拖动曲线查看对应位置</span>
+                            <span className="text-[9px] text-[#64748B]">启用 DOM 后，点击/拖动曲线查看对应位置</span>
                         )}
                     </div>
 
@@ -436,7 +434,7 @@ export default function AutoMaPanel({
 
                     <div>
                         <div className="text-[9px] font-black uppercase tracking-tighter text-[#94A3B8]">噪声等级</div>
-                        <div className="mt-1.5 grid grid-cols-4 gap-1">
+                        <div className="mt-1.5 grid grid-cols-3 gap-1">
                             {NOISE_OPTIONS.map((option) => (
                                 <button
                                     key={option.value}

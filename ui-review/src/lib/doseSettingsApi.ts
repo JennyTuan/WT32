@@ -10,13 +10,29 @@ export type ApiDoseSettings = {
 
   threshold_action: ThresholdAction;
 
-  aec_enabled: boolean;
-  aec_noise_level: NoiseLevel;
+  dom_enabled: boolean;
+  dom_noise_level: NoiseLevel;
 
   audit_threshold_exceed: boolean;
 };
 
 export type DoseSettingsUpdate = Partial<Omit<ApiDoseSettings, "id" | "updated_at">>;
+
+type LegacyDoseSettingsResponse = {
+  id: number;
+  updated_at: string;
+  threshold_action: ThresholdAction;
+  aec_enabled: boolean;
+  aec_noise_level: NoiseLevel;
+  audit_threshold_exceed: boolean;
+};
+
+type LegacyDoseSettingsUpdate = {
+  threshold_action?: ThresholdAction;
+  aec_enabled?: boolean;
+  aec_noise_level?: NoiseLevel;
+  audit_threshold_exceed?: boolean;
+};
 
 export type ApiDrlEntry = {
   id: number;
@@ -37,17 +53,37 @@ export type DrlEntryInput = {
 export async function getDoseSettings(): Promise<ApiDoseSettings> {
   const res = await fetch(buildApiUrl("/api/dose-settings/"));
   if (!res.ok) throw new Error(`Failed to load dose settings (${res.status})`);
-  return res.json();
+  return mapDoseSettings(await res.json());
 }
 
 export async function updateDoseSettings(payload: DoseSettingsUpdate): Promise<ApiDoseSettings> {
   const res = await fetch(buildApiUrl("/api/dose-settings/"), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(toLegacyDoseSettingsPayload(payload)),
   });
   if (!res.ok) throw new Error(`Failed to update dose settings (${res.status})`);
-  return res.json();
+  return mapDoseSettings(await res.json());
+}
+
+function mapDoseSettings(settings: LegacyDoseSettingsResponse): ApiDoseSettings {
+  return {
+    id: settings.id,
+    updated_at: settings.updated_at,
+    threshold_action: settings.threshold_action,
+    dom_enabled: settings.aec_enabled,
+    dom_noise_level: settings.aec_noise_level,
+    audit_threshold_exceed: settings.audit_threshold_exceed,
+  };
+}
+
+function toLegacyDoseSettingsPayload(payload: DoseSettingsUpdate): LegacyDoseSettingsUpdate {
+  return {
+    threshold_action: payload.threshold_action,
+    aec_enabled: payload.dom_enabled,
+    aec_noise_level: payload.dom_noise_level,
+    audit_threshold_exceed: payload.audit_threshold_exceed,
+  };
 }
 
 export async function listDrlEntries(): Promise<ApiDrlEntry[]> {

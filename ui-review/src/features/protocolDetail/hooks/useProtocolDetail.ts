@@ -22,16 +22,20 @@ import {
     createDraftSeries,
     parseNumber
 } from "../api";
-import { 
+import {
     fetchSelectedScanSession,
-    createAdHocScanSessionForSelectedPatient, 
-    createScanSessionSeries, 
-    updateSelectedScanSession, 
-    updateSelectedScanSessionSeries, 
-    updateSelectedScanSessionTopogramParam, 
-    updateSelectedScanSessionHelicalParam, 
-    updateSelectedScanSessionAxialParam, 
-    updateSelectedScanSessionReconSeries 
+    loadSelectedScanSessionId,
+    createAdHocScanSessionForSelectedPatient,
+    createScanSessionSeries,
+    createScanSessionReconSeries,
+    deleteSelectedScanSessionSeries,
+    deleteSelectedScanSessionReconSeries,
+    updateSelectedScanSession,
+    updateSelectedScanSessionSeries,
+    updateSelectedScanSessionTopogramParam,
+    updateSelectedScanSessionHelicalParam,
+    updateSelectedScanSessionAxialParam,
+    updateSelectedScanSessionReconSeries
 } from "../../../lib/scanSession";
 
 export function useProtocolDetail() {
@@ -53,6 +57,12 @@ export function useProtocolDetail() {
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState<string | null>(null);
     const tempSeriesIdRef = useRef(-1);
+    // Snapshot of IDs from the last backend load (scan-flow mode). Used at save-time to compute
+    // which series / recons were locally deleted so we can DELETE them on the backend.
+    const originalSnapshotRef = useRef<{ seriesIds: Set<number>; reconIdsBySeriesId: Map<number, Set<number>> }>({
+        seriesIds: new Set(),
+        reconIdsBySeriesId: new Map(),
+    });
 
     // Derived
     const isFactory = protocol?.is_factory === true;
@@ -112,12 +122,23 @@ export function useProtocolDetail() {
         return () => { cancelled = true; };
     }, []);
 
+    const captureOriginalSnapshot = (mapped: ApiProtocolDetail) => {
+        const seriesIds = new Set<number>();
+        const reconIdsBySeriesId = new Map<number, Set<number>>();
+        for (const s of mapped.series) {
+            seriesIds.add(s.id);
+            reconIdsBySeriesId.set(s.id, new Set(s.recon_series.map((r) => r.id)));
+        }
+        originalSnapshotRef.current = { seriesIds, reconIdsBySeriesId };
+    };
+
     const syncProtocolFromSession = async () => {
         const scanSession = await fetchSelectedScanSession();
         const mappedSession = mapScanSessionToProtocolDetail(scanSession);
         if (mappedSession) {
             setProtocol(mappedSession);
             setSelectedPos(mappedSession.patient_position || "HFS");
+            captureOriginalSnapshot(mappedSession);
             return true;
         }
         return false;
@@ -229,9 +250,9 @@ export function useProtocolDetail() {
         });
     }, [activeRecon, selection.type]);
 
-    // Handlers
+    // Handlers — add/delete operate on local React state in both modes.
+    // In scan flow, the structural diff is applied on Save (see handleSave); Cancel discards.
     const appendDraftSeries = (seriesType: ApiSeriesDetail["series_type"]) => {
-        if (!isNewMode) return;
         const nextId = tempSeriesIdRef.current;
         tempSeriesIdRef.current -= 1;
         setProtocol((current) => {
@@ -244,7 +265,6 @@ export function useProtocolDetail() {
     };
 
     const appendDraftRecon = (seriesId: number) => {
-        if (!isNewMode) return;
         const nextId = tempSeriesIdRef.current;
         tempSeriesIdRef.current -= 1;
         setProtocol((current) => {
@@ -272,7 +292,7 @@ export function useProtocolDetail() {
     };
 
     const handleDeleteActiveSeries = () => {
-        if (!activeSeries || !isNewMode) return;
+        if (!activeSeries) return;
         const remainingSeries = series.filter((seriesItem) => seriesItem.id !== activeSeries.id);
         setProtocol((current) => current ? { ...current, series: remainingSeries } : null);
         if (remainingSeries.length > 0) {
@@ -283,7 +303,7 @@ export function useProtocolDetail() {
     };
 
     const handleDeleteActiveRecon = () => {
-        if (!activeSeries || !activeRecon || !isNewMode) return;
+        if (!activeSeries || !activeRecon) return;
         setProtocol((current) => {
             if (!current) return current;
             return {
@@ -467,13 +487,83 @@ export function useProtocolDetail() {
                 navigate(-1); return;
             }
 
+            // Apply structural diff (deletes + creates) staged in local state
+            const scanSessionId = loadSelectedScanSessionId();
+            if (scanSessionId) {
+                const snapshot = originalSnapshotRef.current;
+                const currentSeriesIds = new Set(series.map((s) => s.id));
+
+                // 1. Delete series removed locally
+                for (const origSeriesId of snapshot.seriesIds) {
+                    if (!currentSeriesIds.has(origSeriesId)) {
+                        await deleteSelectedScanSessionSeries(origSeriesId);
+                    }
+                }
+
+                // 2. For each kept original series, delete its locally-removed recons
+                for (const s of series) {
+                    if (s.id < 0) continue;
+                    const origRecons = snapshot.reconIdsBySeriesId.get(s.id) ?? new Set<number>();
+                    const currentReconIds = new Set(s.recon_series.map((r) => r.id));
+                    for (const origReconId of origRecons) {
+                        if (!currentReconIds.has(origReconId)) {
+                            await deleteSelectedScanSessionReconSeries(origReconId);
+                        }
+                    }
+                }
+
+                // 3. Create newly-added series (negative IDs)
+                for (let i = 0; i < series.length; i++) {
+                    const s = series[i];
+                    if (s.id >= 0) continue;
+                    await createScanSessionSeries(scanSessionId, {
+                        series_order: i + 1,
+                        series_type: s.series_type,
+                        series_label: s.series_label,
+                        topogram_param: s.topogram_param,
+                        helical_param: s.helical_param,
+                        axial_param: s.axial_param,
+                        recon_series: s.recon_series.map((r) => ({
+                            recon_name: r.recon_name,
+                            recon_type: "soft",
+                            kernel: r.kernel,
+                            matrix: r.matrix,
+                            window_width: r.window_width,
+                            window_level: r.window_level,
+                            slice_thickness: r.slice_thickness,
+                            increment: r.increment ?? r.slice_thickness,
+                        })),
+                    });
+                }
+
+                // 4. For each kept original series, create newly-added recons (negative IDs)
+                for (const s of series) {
+                    if (s.id < 0) continue;
+                    for (const r of s.recon_series) {
+                        if (r.id >= 0) continue;
+                        await createScanSessionReconSeries(s.id, {
+                            recon_name: r.recon_name,
+                            recon_type: "soft",
+                            kernel: r.kernel,
+                            matrix: r.matrix,
+                            window_width: r.window_width,
+                            window_level: r.window_level,
+                            slice_thickness: r.slice_thickness,
+                            increment: r.increment ?? r.slice_thickness,
+                        });
+                    }
+                }
+            }
+
             await updateSelectedScanSession({
                 name: basicDraft.name.trim() || protocol.name, body_part: basicDraft.bodyPart,
                 age_group: basicDraft.ageGroup, patient_weight: basicDraft.patientWeight.trim(),
                 patient_position: basicDraft.patientPosition,
             });
 
-            if (selection.type === "series" && activeSeries) {
+            // Skip param update if the active item is a locally-created one (id < 0) —
+            // its values were already persisted via the create call above.
+            if (selection.type === "series" && activeSeries && activeSeries.id >= 0) {
                 await updateSelectedScanSessionSeries(activeSeries.id, { series_label: seriesDraft.seriesLabel.trim() || activeSeries.series_label });
                 if (activeSeries.series_type === "topogram" && activeSeries.topogram_param?.id) {
                     await updateSelectedScanSessionTopogramParam(activeSeries.topogram_param.id, {
@@ -515,7 +605,7 @@ export function useProtocolDetail() {
                         dom: seriesDraft.dom || activeSeries.axial_param.dom || null,
                     });
                 }
-            } else if (selection.type === "recon" && activeRecon) {
+            } else if (selection.type === "recon" && activeRecon && activeRecon.id >= 0) {
                 await updateSelectedScanSessionReconSeries(activeRecon.id, {
                     recon_name: reconDraft.reconName.trim() || activeRecon.recon_name,
                     kernel: reconDraft.kernel.trim() || activeRecon.kernel,

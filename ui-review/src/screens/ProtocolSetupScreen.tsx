@@ -1494,16 +1494,19 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             }
         }
 
-        // 3. 收集 catalog 型被勾选的整个 plan（通过 checkedPlanIds，非复制）
-        const catalogProtocolIdsToRemove = new Set<number>();
+        // 3. 收集被勾选的整个 plan（包括 catalog 型和 session 型，但排除复制和 ad-hoc）
+        // 整计划删除时需要从 selectedProtocolIds 移除，让右侧栏勾选状态同步
+        const protocolIdsToRemove = new Set<number>();
         scanPlans.forEach((plan) => {
-            if (plan.sourceSessionId || plan.id.startsWith("copy-")) return;
-            if (checkedPlanIds.includes(plan.id)) {
-                catalogProtocolIdsToRemove.add(Number(plan.id));
+            if (plan.id.startsWith("copy-") || plan.id.startsWith("session-")) return;
+            if (!checkedPlanIds.includes(plan.id)) return;
+            const protocolId = Number(plan.id);
+            if (Number.isFinite(protocolId)) {
+                protocolIdsToRemove.add(protocolId);
             }
         });
 
-        // 4. 收集 session 型的 series id
+        // 4. 收集 session 型的 series id（用于后端删除）
         const deleteIds = new Set<number>();
         scanPlans.forEach((plan) => {
             if (!plan.sourceSessionId) return;
@@ -1519,12 +1522,12 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             }
         });
 
-        // catalog 型整计划删除
-        if (catalogProtocolIdsToRemove.size > 0) {
-            setSelectedProtocolIds((prev) => prev.filter((id) => !catalogProtocolIdsToRemove.has(id)));
+        // 整计划删除：同步移除 selectedProtocolIds 与本地 session 缓存
+        if (protocolIdsToRemove.size > 0) {
+            setSelectedProtocolIds((prev) => prev.filter((id) => !protocolIdsToRemove.has(id)));
             setScanSessionsByProtocolId((prev) => {
                 const next = { ...prev };
-                catalogProtocolIdsToRemove.forEach((id) => delete next[id]);
+                protocolIdsToRemove.forEach((id) => delete next[id]);
                 return next;
             });
             editsChanged = true;
