@@ -3,6 +3,7 @@ import {
     Plus,
     Trash2,
     ChevronDown,
+    ChevronUp,
     ChevronLeft,
     ChevronRight,
     RefreshCw,
@@ -30,6 +31,7 @@ import { generateMockScanResult } from '../lib/fourDTypes';
 import { saveSelectedScanSessionId } from '../lib/scanSession';
 
 type CheckStatus = '待进行' | '已完成' | '已终止';
+type SortKey = 'serial' | 'patientId' | 'name' | 'gender' | 'age' | 'projectName' | 'examTime' | 'checkStatus';
 
 type PatientRecord = {
     id: number;
@@ -43,6 +45,7 @@ type PatientRecord = {
     latestAcquisitionType: ApiPatient["latest_scan_acquisition_type"];
     latestScanMode: ApiPatient["latest_scan_mode"];
     projectName: string | null;
+    examTime: string | null;
 };
 
 const mapApiPatientToRecord = (p: ApiPatient, index: number): PatientRecord => ({
@@ -57,6 +60,9 @@ const mapApiPatientToRecord = (p: ApiPatient, index: number): PatientRecord => (
     latestAcquisitionType: p.latest_scan_acquisition_type,
     latestScanMode: p.latest_scan_mode,
     projectName: p.latest_scan_name,
+    examTime: p.latest_scan_completed_at
+        ? new Date(p.latest_scan_completed_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+        : null,
 });
 
 const PatientListScreen = () => {
@@ -69,6 +75,17 @@ const PatientListScreen = () => {
     const [showAddModal, setShowAddModal] = useState(false);
     const [isNameMasked, setIsNameMasked] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
+    const [sortKey, setSortKey] = useState<SortKey>('serial');
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+    const handleSort = (key: SortKey) => {
+        if (sortKey === key) {
+            setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortKey(key);
+            setSortDir('asc');
+        }
+    };
 
     const refreshPatients = async () => {
         try {
@@ -105,9 +122,22 @@ const PatientListScreen = () => {
             : patient.checkStatus !== '已完成';
         const matchesQuery = normalizedQuery.length === 0
             || patient.name.toLowerCase().includes(normalizedQuery)
-            || patient.patientId.toLowerCase().includes(normalizedQuery);
+            || patient.patientId.toLowerCase().includes(normalizedQuery)
+            || (activeTab === 'completed' && (patient.projectName ?? '').toLowerCase().includes(normalizedQuery));
 
         return matchesTab && matchesQuery;
+    });
+
+    const sortedPatients = [...filteredPatients].sort((a, b) => {
+        const aVal = a[sortKey] ?? '';
+        const bVal = b[sortKey] ?? '';
+        let cmp: number;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+            cmp = aVal - bVal;
+        } else {
+            cmp = String(aVal).localeCompare(String(bVal), 'zh-CN');
+        }
+        return sortDir === 'asc' ? cmp : -cmp;
     });
 
     const selectedPatient = selectedRows.length === 1
@@ -183,13 +213,13 @@ const PatientListScreen = () => {
                                 {/* 状态切换 Tabs */}
                                 <div className="flex bg-[#EEF2F9] rounded-md border border-[#B0C4DE]/50 overflow-hidden p-1">
                                     <button
-                                        onClick={() => setActiveTab('pending')}
+                                        onClick={() => { setActiveTab('pending'); setSearchQuery(''); setSortKey('serial'); setSortDir('asc'); }}
                                         className={`px-8 h-[32px] text-[13px] font-bold transition-all rounded-md ${activeTab === 'pending' ? 'bg-[#4D94FF] text-white shadow-sm' : 'text-[#4D94FF] hover:bg-white/50'}`}
                                     >
                                         未完成
                                     </button>
                                     <button
-                                        onClick={() => setActiveTab('completed')}
+                                        onClick={() => { setActiveTab('completed'); setSearchQuery(''); setSortKey('examTime'); setSortDir('desc'); }}
                                         className={`px-8 h-[32px] text-[13px] font-bold transition-all rounded-md ${activeTab === 'completed' ? 'bg-[#4D94FF] text-white shadow-sm' : 'text-[#4D94FF] hover:bg-white/50'}`}
                                     >
                                         已完成
@@ -229,7 +259,7 @@ const PatientListScreen = () => {
                                 <div className="relative">
                                     <input
                                         type="text"
-                                        placeholder="搜索患者姓名、ID..."
+                                        placeholder={activeTab === 'completed' ? '搜索患者姓名、ID、项目名称...' : '搜索患者姓名、ID...'}
                                         className="w-[240px] h-[36px] pl-10 pr-4 bg-white border border-[#B0C4DE] rounded-md text-[13px] focus:outline-none focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/20"
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
@@ -285,17 +315,59 @@ const PatientListScreen = () => {
                                                     onChange={toggleSelectAll}
                                                 />
                                             </th>
-                                            <th className="px-4 text-left border-r border-white/10">序号 <ChevronDown size={14} className="inline ml-1 opacity-60" /></th>
-                                            <th className="px-4 text-left border-r border-white/10">患者ID</th>
-                                            <th className="px-4 text-left border-r border-white/10">姓名</th>
-                                            <th className="px-4 text-left border-r border-white/10">性别</th>
-                                            <th className="px-4 text-left border-r border-white/10">年龄</th>
-                                            {activeTab === 'completed' && <th className="px-4 text-left border-r border-white/10">项目名称</th>}
-                                            <th className="px-4 text-center">{activeTab === 'completed' ? '图像状态' : '检查状态'}</th>
+                                            {(['serial','patientId','name','gender','age'] as SortKey[]).map((key, i) => {
+                                                const labels: Record<string, string> = { serial: '序号', patientId: '患者ID', name: '姓名', gender: '性别', age: '年龄' };
+                                                const active = sortKey === key;
+                                                const Icon = active ? (sortDir === 'asc' ? ChevronUp : ChevronDown) : ChevronDown;
+                                                return (
+                                                    <th key={key} onClick={() => handleSort(key)} className={`px-4 text-left border-r border-white/10 cursor-pointer select-none hover:bg-white/10 ${i === 0 ? 'w-[80px]' : ''}`}>
+                                                        <span className="inline-flex items-center gap-1">
+                                                            {labels[key]}
+                                                            <Icon size={14} className={active ? 'opacity-100' : 'opacity-30'} />
+                                                        </span>
+                                                    </th>
+                                                );
+                                            })}
+                                            {activeTab === 'completed' && (() => {
+                                                const active = sortKey === 'projectName';
+                                                const Icon = active ? (sortDir === 'asc' ? ChevronUp : ChevronDown) : ChevronDown;
+                                                return (
+                                                    <th onClick={() => handleSort('projectName')} className="px-4 text-left border-r border-white/10 cursor-pointer select-none hover:bg-white/10">
+                                                        <span className="inline-flex items-center gap-1">
+                                                            项目名称
+                                                            <Icon size={14} className={active ? 'opacity-100' : 'opacity-30'} />
+                                                        </span>
+                                                    </th>
+                                                );
+                                            })()}
+                                            {activeTab === 'completed' && (() => {
+                                                const active = sortKey === 'examTime';
+                                                const Icon = active ? (sortDir === 'asc' ? ChevronUp : ChevronDown) : ChevronDown;
+                                                return (
+                                                    <th onClick={() => handleSort('examTime')} className="px-4 text-left border-r border-white/10 cursor-pointer select-none hover:bg-white/10">
+                                                        <span className="inline-flex items-center gap-1">
+                                                            检查时间
+                                                            <Icon size={14} className={active ? 'opacity-100' : 'opacity-30'} />
+                                                        </span>
+                                                    </th>
+                                                );
+                                            })()}
+                                            {(() => {
+                                                const active = sortKey === 'checkStatus';
+                                                const Icon = active ? (sortDir === 'asc' ? ChevronUp : ChevronDown) : ChevronDown;
+                                                return (
+                                                    <th onClick={() => handleSort('checkStatus')} className="px-4 text-center cursor-pointer select-none hover:bg-white/10">
+                                                        <span className="inline-flex items-center justify-center gap-1">
+                                                            {activeTab === 'completed' ? '图像状态' : '检查状态'}
+                                                            <Icon size={14} className={active ? 'opacity-100' : 'opacity-30'} />
+                                                        </span>
+                                                    </th>
+                                                );
+                                            })()}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100 bg-white">
-                                        {filteredPatients.map((patient) => (
+                                        {sortedPatients.map((patient) => (
                                             <tr
                                                 key={patient.id}
                                                 onClick={() => toggleSelectRow(patient.id)}
@@ -316,6 +388,7 @@ const PatientListScreen = () => {
                                                 <td className="px-4">{patient.gender}</td>
                                                 <td className="px-4">{patient.age}</td>
                                                 {activeTab === 'completed' && <td className="px-4 text-[#37474F]">{patient.projectName ?? '—'}</td>}
+                                                {activeTab === 'completed' && <td className="px-4 text-[#546E7A] text-[12px]">{patient.examTime ?? '—'}</td>}
                                                 <td className="text-center">
                                                     {activeTab === 'completed' && patient.checkStatus === '已完成' ? (
                                                         <button

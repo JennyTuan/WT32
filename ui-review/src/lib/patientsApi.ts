@@ -17,6 +17,7 @@ export type ApiPatient = {
     latest_scan_acquisition_type: "regular" | "gating" | "four_d" | null;
     latest_scan_mode: "plain" | "contrast" | "4d" | null;
     latest_scan_name: string | null;
+    latest_scan_completed_at: string | null;
 };
 
 export type CreatePatientPayload = {
