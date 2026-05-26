@@ -109,6 +109,29 @@ def _check_unique_user_fields(db: Session, *, username: str | None, employee_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="employee_id already exists")
 
 
+def _generate_user_code(db: Session) -> str:
+    prefix = f"U{datetime.now().strftime('%Y%m%d')}"
+    used_codes: set[str] = set()
+    for (value,) in db.query(models.UserAccount.username).filter(models.UserAccount.username.like(f"{prefix}%")).all():
+        if value:
+            used_codes.add(value)
+    for (value,) in db.query(models.UserAccount.employee_id).filter(models.UserAccount.employee_id.like(f"{prefix}%")).all():
+        if value:
+            used_codes.add(value)
+
+    max_suffix = 0
+    for value in used_codes:
+        suffix = value.removeprefix(prefix)
+        if len(suffix) == 3 and suffix.isdigit():
+            max_suffix = max(max_suffix, int(suffix))
+
+    for next_suffix in range(max_suffix + 1, 1000):
+        code = f"{prefix}{next_suffix:03d}"
+        if code not in used_codes:
+            return code
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="user code sequence exhausted for today")
+
+
 def _active_admin_count(db: Session, exclude_id: int | None = None) -> int:
     query = db.query(models.UserAccount).filter(
         models.UserAccount.role_code == "system_admin",
@@ -176,12 +199,19 @@ def get_user_management_snapshot(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/next-user-code", response_model=schemas.GeneratedUserCode)
+def get_next_user_code(db: Session = Depends(get_db)):
+    return {"code": _generate_user_code(db)}
+
+
 @router.post("/users", response_model=schemas.UserAccount, status_code=status.HTTP_201_CREATED)
 def create_user(payload: schemas.UserAccountCreate, db: Session = Depends(get_db)):
     data = payload.model_dump()
-    data["username"] = _required_text(data["username"])
+    account_code = _optional_text(data.get("username")) or _optional_text(data.get("employee_id")) or _generate_user_code(db)
+    data["username"] = _required_text(account_code)
+    data["employee_id"] = data["username"]
     data["display_name"] = _required_text(data["display_name"])
-    for field in ("employee_id", "department", "title", "phone", "email"):
+    for field in ("department", "title", "phone", "email"):
         data[field] = _optional_text(data.get(field))
 
     _get_role_or_404(db, data["role_code"])
@@ -207,6 +237,15 @@ def update_user(user_id: int, payload: schemas.UserAccountUpdate, db: Session = 
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
         return _serialize_user(user)
+
+    if "username" in updates or "employee_id" in updates:
+        account_code = (
+            _optional_text(updates.get("username"))
+            or _optional_text(updates.get("employee_id"))
+            or user.username
+        )
+        updates["username"] = _required_text(account_code)
+        updates["employee_id"] = updates["username"]
 
     if "role_code" in updates:
         _get_role_or_404(db, updates["role_code"])

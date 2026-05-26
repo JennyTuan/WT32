@@ -13,14 +13,17 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
+  UserPlus,
   Users,
   X,
 } from "lucide-react";
 
 import ServiceModeShell from "../shared/ServiceModeShell";
 import {
+  createUser,
   deleteUser,
   getUserManagementSnapshot,
+  getNextUserCode,
   resetUserPassword,
   updateRole,
   updateUser,
@@ -32,7 +35,9 @@ import {
 } from "../../../lib/userManagementApi";
 
 type TabKey = "users" | "roles";
-type ModalState = { mode: "edit"; user: UserAccount };
+type ModalState =
+  | { mode: "create"; initialValue: UserAccountPayload }
+  | { mode: "edit"; user: UserAccount };
 
 const ALL = "all";
 
@@ -77,6 +82,30 @@ const formFromUser = (user: UserAccount): UserAccountPayload => ({
   login_allowed: user.login_allowed,
   password_reset_required: user.password_reset_required,
   failed_attempts: user.failed_attempts,
+});
+
+const generateFallbackUserCode = (): string => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const rand = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
+  return `U${y}${m}${d}${rand}`;
+};
+
+const blankUserForm = (roles: UserRole[], accountCode: string): UserAccountPayload => ({
+  username: accountCode,
+  display_name: "",
+  employee_id: accountCode,
+  department: "",
+  title: "",
+  role_code: roles.find((role) => role.code === "technologist")?.code ?? roles[0]?.code ?? "",
+  status: "active",
+  phone: "",
+  email: "",
+  login_allowed: true,
+  password_reset_required: true,
+  failed_attempts: 0,
 });
 
 const formatDateTime = (value: string | null): string => {
@@ -174,12 +203,26 @@ export default function UserManagementPage() {
   const handleUserSubmit = async (payload: UserAccountPayload) => {
     setSaving(true);
     try {
-      if (modal?.mode !== "edit") return;
-      const saved = await updateUser(modal.user.id, payload);
-      replaceUser(saved);
-      setModal(null);
-      showToast("用户信息已保存");
-      await loadSnapshot();
+      if (modal?.mode === "create") {
+        const saved = await createUser(payload);
+        setSnapshot((current) => current ? { ...current, users: [...current.users, saved] } : current);
+        setSearchText("");
+        setRoleFilter(ALL);
+        setStatusFilter(ALL);
+        setSelectedUserId(saved.id);
+        setModal(null);
+        showToast("用户已新增");
+        await loadSnapshot();
+        setSelectedUserId(saved.id);
+        return;
+      }
+      if (modal?.mode === "edit") {
+        const saved = await updateUser(modal.user.id, payload);
+        replaceUser(saved);
+        setModal(null);
+        showToast("用户信息已保存");
+        await loadSnapshot();
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "保存失败", "error");
     } finally {
@@ -236,6 +279,17 @@ export default function UserManagementPage() {
     }
   };
 
+  const openCreateUser = async () => {
+    let accountCode = generateFallbackUserCode();
+    try {
+      const generated = await getNextUserCode();
+      accountCode = generated.code;
+    } catch {
+      // Keep the modal usable if the preview endpoint is temporarily unavailable.
+    }
+    setModal({ mode: "create", initialValue: blankUserForm(roles, accountCode) });
+  };
+
   const togglePermission = (code: string) => {
     setRoleDraft((current) => {
       const next = new Set(current);
@@ -285,13 +339,26 @@ export default function UserManagementPage() {
   return (
     <ServiceModeShell currentRoute="/service/settings/user-management" footerStatus={{ label: "IDLE", tone: "idle" }}>
       <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F6F9FC]">
-        <div className="flex shrink-0 items-center justify-between border-b border-[#E2EBF5] bg-[#F8FBFF] px-4 py-2">
-          <div className="flex items-center gap-2 rounded-md border border-[#D6E2EF] bg-white p-1">
-            <TabButton active={activeTab === "users"} icon={Users} label="用户账号" onClick={() => setActiveTab("users")} />
-            <TabButton active={activeTab === "roles"} icon={ShieldCheck} label="角色权限" onClick={() => setActiveTab("roles")} />
+        <div className="shrink-0 border-b border-[#E2EBF5] bg-[#F8FBFF] px-4 py-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 rounded-md border border-[#D6E2EF] bg-white p-1">
+              <TabButton active={activeTab === "users"} icon={Users} label="用户账号" onClick={() => setActiveTab("users")} />
+              <TabButton active={activeTab === "roles"} icon={ShieldCheck} label="角色权限" onClick={() => setActiveTab("roles")} />
+            </div>
+            {activeTab === "users" && (
+              <button
+                type="button"
+                onClick={() => void openCreateUser()}
+                disabled={!roles.length || saving}
+                className="flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-[#1E88E5] px-3 text-[13px] font-bold text-white shadow-sm transition-all hover:bg-[#1565C0] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <UserPlus size={14} />
+                新增用户
+              </button>
+            )}
           </div>
           {activeTab === "users" && (
-            <div className="flex items-center gap-2">
+            <div className="mt-2 flex items-center gap-2">
               <SelectBox value={roleFilter} onChange={setRoleFilter}>
                 <option value={ALL}>全部角色</option>
                 {roles.map((role) => (
@@ -304,7 +371,7 @@ export default function UserManagementPage() {
                 <option value="locked">锁定</option>
                 <option value="disabled">停用</option>
               </SelectBox>
-              <div className="relative w-[230px]">
+              <div className="relative min-w-[180px] flex-1">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                 <input
                   value={searchText}
@@ -362,7 +429,7 @@ export default function UserManagementPage() {
       {modal && (
         <UserFormModal
           mode={modal.mode}
-          initialValue={formFromUser(modal.user)}
+          initialValue={modal.mode === "create" ? modal.initialValue : formFromUser(modal.user)}
           roles={roles}
           saving={saving}
           onClose={() => setModal(null)}
@@ -802,17 +869,30 @@ function UserFormModal({
     setLocalError(null);
   };
 
+  const patchAccount = (value: string) => {
+    setForm((current) => ({ ...current, username: value, employee_id: value }));
+    setLocalError(null);
+  };
+
   const submit = async () => {
     if (!form.username.trim() || !form.display_name.trim()) {
       setLocalError("账号和姓名不能为空");
       return;
     }
+    if (!form.role_code) {
+      setLocalError("请选择角色");
+      return;
+    }
     await onSubmit({
       ...form,
       username: form.username.trim(),
+      employee_id: form.username.trim(),
       display_name: form.display_name.trim(),
     });
   };
+
+  const accountInputClass = `${FORM_INPUT_CLASS} ${mode === "create" ? "bg-[#F8FBFF] text-[#607D8B]" : ""}`;
+  const mirroredInputClass = `${FORM_INPUT_CLASS} bg-[#F8FBFF] text-[#607D8B]`;
 
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#0F172A]/40 backdrop-blur-[2px]">
@@ -829,13 +909,18 @@ function UserFormModal({
 
         <div className="grid grid-cols-2 gap-4 px-5 py-5">
           <Field label="账号">
-            <input value={form.username} onChange={(event) => patch("username", event.target.value)} className={FORM_INPUT_CLASS} />
+            <input
+              value={form.username}
+              onChange={(event) => patchAccount(event.target.value)}
+              readOnly={mode === "create"}
+              className={accountInputClass}
+            />
           </Field>
           <Field label="姓名">
             <input value={form.display_name} onChange={(event) => patch("display_name", event.target.value)} className={FORM_INPUT_CLASS} />
           </Field>
           <Field label="工号">
-            <input value={form.employee_id ?? ""} onChange={(event) => patch("employee_id", event.target.value)} className={FORM_INPUT_CLASS} />
+            <input value={form.username} readOnly className={mirroredInputClass} />
           </Field>
           <Field label="科室">
             <input value={form.department ?? ""} onChange={(event) => patch("department", event.target.value)} className={FORM_INPUT_CLASS} />

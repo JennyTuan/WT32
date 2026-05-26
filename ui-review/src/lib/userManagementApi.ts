@@ -41,6 +41,10 @@ export type UserManagementSnapshot = {
   roles: UserRole[];
 };
 
+export type GeneratedUserCode = {
+  code: string;
+};
+
 export type UserAccountPayload = {
   username: string;
   display_name: string;
@@ -74,6 +78,12 @@ async function parseError(response: Response, fallback: string): Promise<Error> 
 export async function getUserManagementSnapshot(): Promise<UserManagementSnapshot> {
   const response = await fetch(buildApiUrl("/api/user-management/"));
   if (!response.ok) throw await parseError(response, `Failed to load users (${response.status})`);
+  return response.json();
+}
+
+export async function getNextUserCode(): Promise<GeneratedUserCode> {
+  const response = await fetch(buildApiUrl("/api/user-management/next-user-code"));
+  if (!response.ok) throw await parseError(response, `Failed to generate user code (${response.status})`);
   return response.json();
 }
 

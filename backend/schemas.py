@@ -860,7 +860,17 @@ class UserAccountBase(BaseModel):
     login_allowed: bool = True
 
 
-class UserAccountCreate(UserAccountBase):
+class UserAccountCreate(BaseModel):
+    username: Optional[str] = Field(default=None, max_length=50)
+    display_name: str = Field(min_length=1, max_length=100)
+    employee_id: Optional[str] = Field(default=None, max_length=50)
+    department: Optional[str] = Field(default=None, max_length=80)
+    title: Optional[str] = Field(default=None, max_length=80)
+    role_code: str = Field(min_length=1, max_length=40)
+    status: UserStatus = "active"
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=120)
+    login_allowed: bool = True
     password_reset_required: bool = True
 
 
@@ -895,6 +905,10 @@ class UserAccount(UserAccountBase):
 class UserManagementSnapshot(BaseModel):
     users: List[UserAccount]
     roles: List[UserRole]
+
+
+class GeneratedUserCode(BaseModel):
+    code: str
 
 
 # ---------------- System Log ----------------

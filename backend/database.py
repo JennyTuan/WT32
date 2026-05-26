@@ -1503,7 +1503,7 @@ def _seed_user_management_defaults(db) -> None:
     now = datetime.utcnow()
     user_seeds = [
         {
-            "username": "admin",
+            "username": "U0001",
             "display_name": "系统管理员",
             "employee_id": "U0001",
             "department": "系统管理",
@@ -1515,7 +1515,7 @@ def _seed_user_management_defaults(db) -> None:
             "password_updated_at": now,
         },
         {
-            "username": "tech01",
+            "username": "T1001",
             "display_name": "值班技师",
             "employee_id": "T1001",
             "department": "放射科",
@@ -1528,7 +1528,7 @@ def _seed_user_management_defaults(db) -> None:
             "password_updated_at": now,
         },
         {
-            "username": "tech02",
+            "username": "T1002",
             "display_name": "扫描技师",
             "employee_id": "T1002",
             "department": "放射科",
@@ -1540,7 +1540,7 @@ def _seed_user_management_defaults(db) -> None:
             "password_updated_at": now,
         },
         {
-            "username": "tech03",
+            "username": "T1003",
             "display_name": "质控技师",
             "employee_id": "T1003",
             "department": "放射科",
@@ -1552,7 +1552,7 @@ def _seed_user_management_defaults(db) -> None:
             "password_updated_at": now,
         },
         {
-            "username": "tech04",
+            "username": "T1004",
             "display_name": "夜班技师",
             "employee_id": "T1004",
             "department": "放射科",
@@ -1564,7 +1564,7 @@ def _seed_user_management_defaults(db) -> None:
             "password_updated_at": now,
         },
         {
-            "username": "service01",
+            "username": "S2001",
             "display_name": "服务工程师",
             "employee_id": "S2001",
             "department": "设备服务",
@@ -1576,6 +1576,29 @@ def _seed_user_management_defaults(db) -> None:
             "password_updated_at": now,
         },
     ]
+
+    for user in db.query(models.UserAccount).all():
+        target = (user.employee_id or user.username or "").strip()
+        if not target:
+            continue
+        if user.username == target and user.employee_id == target:
+            continue
+        username_conflict = (
+            db.query(models.UserAccount)
+            .filter(models.UserAccount.id != user.id, models.UserAccount.username == target)
+            .first()
+        )
+        employee_conflict = (
+            db.query(models.UserAccount)
+            .filter(models.UserAccount.id != user.id, models.UserAccount.employee_id == target)
+            .first()
+        )
+        if username_conflict or employee_conflict:
+            continue
+        user.username = target
+        user.employee_id = target
+        changed = True
+
     existing_usernames = {
         username for (username,) in db.query(models.UserAccount.username).all()
     }
