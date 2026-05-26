@@ -541,6 +541,46 @@ class CornerConfig(Base):
     updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
 
 
+class UserRole(Base):
+    __tablename__ = "user_roles"
+
+    code = Column(String(40), primary_key=True, index=True)
+    name = Column(String(80), nullable=False)
+    description = Column(Text, nullable=True)
+    permissions = Column(Text, nullable=False, default="[]")
+    is_system = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    users = relationship("UserAccount", back_populates="role")
+
+
+class UserAccount(Base):
+    __tablename__ = "user_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), nullable=False, unique=True, index=True)
+    display_name = Column(String(100), nullable=False)
+    employee_id = Column(String(50), nullable=True, unique=True, index=True)
+    department = Column(String(80), nullable=True)
+    title = Column(String(80), nullable=True)
+    role_code = Column(String(40), ForeignKey("user_roles.code", ondelete="RESTRICT"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="active", index=True)
+    phone = Column(String(50), nullable=True)
+    email = Column(String(120), nullable=True)
+    login_allowed = Column(Boolean, nullable=False, default=True)
+    password_reset_required = Column(Boolean, nullable=False, default=False)
+    credential_version = Column(Integer, nullable=False, default=1)
+    failed_attempts = Column(Integer, nullable=False, default=0)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+    password_updated_at = Column(DateTime(timezone=True), nullable=True)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+    role = relationship("UserRole", back_populates="users")
+
+
 class SystemLog(Base):
     __tablename__ = "system_logs"
 

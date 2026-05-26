@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import date
+from datetime import date, datetime
 import json
 from pathlib import Path
 
@@ -1178,6 +1178,15 @@ def _migrate_protocol_columns() -> None:
             except Exception:
                 # Column already exists – safe to ignore
                 pass
+        # User management: MFA was removed from the product scope. Existing
+        # local SQLite databases may still have the legacy NOT NULL column, so
+        # drop it before inserting seeded users.
+        try:
+            conn.execute(text("ALTER TABLE user_accounts DROP COLUMN mfa_required"))
+            conn.commit()
+        except Exception:
+            pass
+
         # Fix: reset user-created protocols that were wrongly marked as factory
         # Seeded protocols are created with is_factory=True in init_db,
         # so we only need to fix protocols that have updated_at set (user-edited)
@@ -1416,6 +1425,176 @@ def _seed_dose_defaults(db) -> None:
         print(f"Seeded DRL entries: {added} added, {updated} updated")
 
 
+def _seed_user_management_defaults(db) -> None:
+    from . import models
+
+    permission_sets = {
+        "system_admin": [
+            "scan.view",
+            "scan.execute",
+            "patient.manage",
+            "protocol.manage",
+            "dose.manage",
+            "service.hardware",
+            "user.manage",
+            "reports.view",
+            "audit.view",
+            "system.settings",
+        ],
+        "technologist": [
+            "scan.view",
+            "scan.execute",
+            "patient.manage",
+            "protocol.view",
+            "reports.view",
+        ],
+        "service_engineer": [
+            "service.hardware",
+            "system.settings",
+            "reports.view",
+            "audit.view",
+        ],
+    }
+
+    role_seeds = [
+        {
+            "code": "system_admin",
+            "name": "系统管理员",
+            "description": "维护账号、角色、系统参数和审计配置。",
+            "permissions": permission_sets["system_admin"],
+        },
+        {
+            "code": "technologist",
+            "name": "技师",
+            "description": "执行患者登记、检查流程和常规报告查看。",
+            "permissions": permission_sets["technologist"],
+        },
+        {
+            "code": "service_engineer",
+            "name": "服务工程师",
+            "description": "维护服务模式下的硬件、日志和系统配置。",
+            "permissions": permission_sets["service_engineer"],
+        },
+    ]
+
+    changed = False
+    existing_roles = {role.code: role for role in db.query(models.UserRole).all()}
+    legacy_physicist = existing_roles.get("physicist")
+    if legacy_physicist is not None:
+        db.query(models.UserAccount).filter(models.UserAccount.role_code == "physicist").update(
+            {"role_code": "technologist"}
+        )
+        db.delete(legacy_physicist)
+        changed = True
+
+    for seed in role_seeds:
+        if seed["code"] not in existing_roles:
+            db.add(
+                models.UserRole(
+                    code=seed["code"],
+                    name=seed["name"],
+                    description=seed["description"],
+                    permissions=json.dumps(seed["permissions"], ensure_ascii=False),
+                    is_system=True,
+                )
+            )
+            changed = True
+
+    now = datetime.utcnow()
+    user_seeds = [
+        {
+            "username": "admin",
+            "display_name": "系统管理员",
+            "employee_id": "U0001",
+            "department": "系统管理",
+            "title": "管理员",
+            "role_code": "system_admin",
+            "status": "active",
+            "login_allowed": True,
+            "password_reset_required": True,
+            "password_updated_at": now,
+        },
+        {
+            "username": "tech01",
+            "display_name": "值班技师",
+            "employee_id": "T1001",
+            "department": "放射科",
+            "title": "CT 技师",
+            "role_code": "technologist",
+            "status": "active",
+            "login_allowed": True,
+            "password_reset_required": False,
+            "last_login_at": now,
+            "password_updated_at": now,
+        },
+        {
+            "username": "tech02",
+            "display_name": "扫描技师",
+            "employee_id": "T1002",
+            "department": "放射科",
+            "title": "CT 技师",
+            "role_code": "technologist",
+            "status": "active",
+            "login_allowed": True,
+            "password_reset_required": True,
+            "password_updated_at": now,
+        },
+        {
+            "username": "tech03",
+            "display_name": "质控技师",
+            "employee_id": "T1003",
+            "department": "放射科",
+            "title": "CT 技师",
+            "role_code": "technologist",
+            "status": "active",
+            "login_allowed": True,
+            "password_reset_required": True,
+            "password_updated_at": now,
+        },
+        {
+            "username": "tech04",
+            "display_name": "夜班技师",
+            "employee_id": "T1004",
+            "department": "放射科",
+            "title": "CT 技师",
+            "role_code": "technologist",
+            "status": "active",
+            "login_allowed": True,
+            "password_reset_required": True,
+            "password_updated_at": now,
+        },
+        {
+            "username": "service01",
+            "display_name": "服务工程师",
+            "employee_id": "S2001",
+            "department": "设备服务",
+            "title": "服务工程师",
+            "role_code": "service_engineer",
+            "status": "disabled",
+            "login_allowed": False,
+            "password_reset_required": False,
+            "password_updated_at": now,
+        },
+    ]
+    existing_usernames = {
+        username for (username,) in db.query(models.UserAccount.username).all()
+    }
+    existing_employee_ids = {
+        employee_id
+        for (employee_id,) in db.query(models.UserAccount.employee_id).all()
+        if employee_id
+    }
+    for seed in user_seeds:
+        if seed["username"] in existing_usernames or seed["employee_id"] in existing_employee_ids:
+            continue
+        db.add(models.UserAccount(**seed))
+        changed = True
+
+    if changed:
+        db.commit()
+        print("Seeded user management defaults")
+
+
 def init_db() -> None:
     from . import models
 
@@ -1426,6 +1605,7 @@ def init_db() -> None:
     db = SessionLocal()
     try:
         _seed_dose_defaults(db)
+        _seed_user_management_defaults(db)
         if db.query(models.Protocol).first():
             seed_uses_company_csv = any(
                 str(protocol_seed.get("description", "")).startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)

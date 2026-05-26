@@ -3,8 +3,50 @@ import { ChevronDown, Download, FileText, Printer, RefreshCw, Search, ChevronLef
 
 import ServiceModeShell from "../shared/ServiceModeShell";
 import { listDoseLogs, type ApiDoseLog } from "../../../lib/logsApi";
+import { listDrlEntries, type ApiDrlEntry } from "../../../lib/doseSettingsApi";
+import { evaluateThreshold } from "../../../lib/doseThreshold";
+import { estimateDose } from "../../../lib/doseEstimate";
+import { buildApiUrl } from "../../../lib/apiClient";
 import { buildCsv, downloadCsv, timestampSuffix } from "../../../lib/csvExport";
 import { printDoseLogReport } from "./printDoseLogReport";
+
+type ProtocolSeedSeries = {
+  series_type: string;
+  helical_param?: SeedParam | null;
+  axial_param?: SeedParam | null;
+  topogram_param?: SeedParam | null;
+};
+
+type SeedParam = {
+  ma?: number | null;
+  kv?: number | null;
+  rotation_time?: number | null;
+  pitch?: number | null;
+  scan_length?: number | null;
+  ctdi_vol?: number | null;
+  dlp?: number | null;
+};
+
+type ProtocolListItem = {
+  name: string;
+  series: ProtocolSeedSeries[];
+};
+
+// Build a lookup: protocol_name + series_type → seed dose parameters.
+// We use this to re-estimate CTDIvol/DLP for dose log rows whose stored values
+// were never updated to reflect parameter edits (older records, or backend
+// without on-execute recompute).
+const buildSeedMap = (protocols: ProtocolListItem[]): Map<string, SeedParam> => {
+  const map = new Map<string, SeedParam>();
+  for (const proto of protocols) {
+    for (const series of proto.series ?? []) {
+      const seed = series.helical_param ?? series.axial_param ?? series.topogram_param ?? null;
+      if (!seed) continue;
+      map.set(`${proto.name}::${series.series_type}`, seed);
+    }
+  }
+  return map;
+};
 
 const PAGE_SIZE = 50;
 
@@ -43,6 +85,43 @@ const getDoseScanKind = (log: ApiDoseLog): DoseScanKind => {
   return "regular";
 };
 
+// Dose logs don't carry age_group, so the shared evaluator falls back to the
+// adult DRL entry for the matching body_part (after EN↔ZH normalization).
+// When a protocol seed is available, we recompute CTDIvol/DLP from the log's
+// stored ma/kv/scan_length so historical records whose stored dose was never
+// updated still flag correctly.
+const isOverThreshold = (
+  log: ApiDoseLog,
+  drlEntries: ApiDrlEntry[],
+  seedMap: Map<string, SeedParam>,
+): boolean => {
+  let ctdi = log.ctdi_vol;
+  let dlp = log.dlp;
+
+  if (log.protocol_name_snapshot) {
+    const seed = seedMap.get(`${log.protocol_name_snapshot}::${log.series_type}`);
+    if (seed && (log.ma != null || log.kv != null)) {
+      const estimated = estimateDose({
+        current: {
+          ma: log.ma,
+          kv: log.kv,
+          rotation_time: log.rotation_time,
+          pitch: log.pitch,
+          scan_length: log.scan_length,
+        },
+        reference: seed,
+      });
+      ctdi = estimated.ctdi_vol;
+      dlp = estimated.dlp;
+    }
+  }
+
+  return evaluateThreshold(
+    { body_part: log.body_part, ctdi_vol: ctdi, dlp },
+    drlEntries,
+  ).exceeded;
+};
+
 const formatTimestamp = (iso: string): { date: string; time: string } => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { date: iso, time: "" };
@@ -77,11 +156,14 @@ const toIsoDayEnd = (yyyyMmDd: string): Date | null => {
 
 export default function ServiceDoseLogsPage() {
   const [logs, setLogs] = useState<ApiDoseLog[]>([]);
+  const [drlEntries, setDrlEntries] = useState<ApiDrlEntry[]>([]);
+  const [seedMap, setSeedMap] = useState<Map<string, SeedParam>>(() => new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [seriesTypeFilter, setSeriesTypeFilter] = useState<string>("全部");
   const [bodyPartFilter, setBodyPartFilter] = useState<string>("全部");
+  const [onlyOverThreshold, setOnlyOverThreshold] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -104,8 +186,16 @@ export default function ServiceDoseLogsPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await listDoseLogs({ limit: 2000 });
+      const [data, drl, protos] = await Promise.all([
+        listDoseLogs({ limit: 2000 }),
+        listDrlEntries().catch(() => [] as ApiDrlEntry[]),
+        fetch(buildApiUrl("/api/protocols/"))
+          .then((r) => (r.ok ? r.json() : []) as Promise<ProtocolListItem[]>)
+          .catch(() => [] as ProtocolListItem[]),
+      ]);
       setLogs(data);
+      setDrlEntries(drl);
+      setSeedMap(buildSeedMap(protos));
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
@@ -123,14 +213,20 @@ export default function ServiceDoseLogsPage() {
     [logs],
   );
 
+  const logsWithFlag = useMemo(
+    () => logs.map((l) => ({ log: l, overThreshold: isOverThreshold(l, drlEntries, seedMap) })),
+    [logs, drlEntries, seedMap],
+  );
+
   const filtered = useMemo(() => {
     const from = toIsoDayStart(dateFrom);
     const to = toIsoDayEnd(dateTo);
     const q = searchText.trim().toLowerCase();
 
-    return logs.filter((l) => {
+    return logsWithFlag.filter(({ log: l, overThreshold }) => {
       if (seriesTypeFilter !== "全部" && l.series_type !== seriesTypeFilter) return false;
       if (bodyPartFilter !== "全部" && l.body_part !== bodyPartFilter) return false;
+      if (onlyOverThreshold && !overThreshold) return false;
       if (from || to) {
         const t = new Date(l.scanned_at).getTime();
         if (from && t < from.getTime()) return false;
@@ -143,10 +239,15 @@ export default function ServiceDoseLogsPage() {
       }
       return true;
     });
-  }, [logs, seriesTypeFilter, bodyPartFilter, dateFrom, dateTo, searchText]);
+  }, [logsWithFlag, seriesTypeFilter, bodyPartFilter, onlyOverThreshold, dateFrom, dateTo, searchText]);
+
+  const exceededCount = useMemo(
+    () => filtered.filter((r) => r.overThreshold).length,
+    [filtered],
+  );
 
   const totalDlp = useMemo(
-    () => filtered.reduce((sum, l) => sum + (l.dlp ?? 0), 0),
+    () => filtered.reduce((sum, r) => sum + (r.log.dlp ?? 0), 0),
     [filtered],
   );
 
@@ -156,26 +257,27 @@ export default function ServiceDoseLogsPage() {
 
   useEffect(() => {
     setPage(0);
-  }, [seriesTypeFilter, bodyPartFilter, dateFrom, dateTo, searchText]);
+  }, [seriesTypeFilter, bodyPartFilter, onlyOverThreshold, dateFrom, dateTo, searchText]);
 
   const handleExport = useCallback(() => {
     const csv = buildCsv(filtered, [
-      { header: "扫描时间", value: (l) => l.scanned_at },
-      { header: "患者姓名", value: (l) => l.patient_name_snapshot ?? "" },
-      { header: "患者ID", value: (l) => l.patient_id_snapshot ?? "" },
-      { header: "协议", value: (l) => l.protocol_name_snapshot ?? "" },
-      { header: "扫描模式", value: (l) => SCAN_KIND_LABELS[getDoseScanKind(l)] },
-      { header: "序列", value: (l) => SERIES_TYPE_LABEL[l.series_type] ?? l.series_type },
-      { header: "部位", value: (l) => l.body_part ?? "" },
-      { header: "kV", value: (l) => l.kv ?? "" },
-      { header: "mA", value: (l) => l.ma ?? "" },
-      { header: "CTDIvol (mGy)", value: (l) => l.ctdi_vol ?? "" },
-      { header: "DLP (mGy·cm)", value: (l) => l.dlp ?? "" },
-      { header: "扫描长度 (mm)", value: (l) => l.scan_length ?? "" },
-      { header: "旋转时间 (s)", value: (l) => l.rotation_time ?? "" },
-      { header: "Pitch", value: (l) => l.pitch ?? "" },
-      { header: "准直", value: (l) => l.collimator ?? "" },
-      { header: "操作者", value: (l) => l.operator ?? "" },
+      { header: "扫描时间", value: ({ log: l }) => l.scanned_at },
+      { header: "患者姓名", value: ({ log: l }) => l.patient_name_snapshot ?? "" },
+      { header: "患者ID", value: ({ log: l }) => l.patient_id_snapshot ?? "" },
+      { header: "协议", value: ({ log: l }) => l.protocol_name_snapshot ?? "" },
+      { header: "扫描模式", value: ({ log: l }) => SCAN_KIND_LABELS[getDoseScanKind(l)] },
+      { header: "序列", value: ({ log: l }) => SERIES_TYPE_LABEL[l.series_type] ?? l.series_type },
+      { header: "部位", value: ({ log: l }) => l.body_part ?? "" },
+      { header: "超阈值", value: ({ overThreshold }) => (overThreshold ? "是" : "") },
+      { header: "kV", value: ({ log: l }) => l.kv ?? "" },
+      { header: "mA", value: ({ log: l }) => l.ma ?? "" },
+      { header: "CTDIvol (mGy)", value: ({ log: l }) => l.ctdi_vol ?? "" },
+      { header: "DLP (mGy·cm)", value: ({ log: l }) => l.dlp ?? "" },
+      { header: "扫描长度 (mm)", value: ({ log: l }) => l.scan_length ?? "" },
+      { header: "旋转时间 (s)", value: ({ log: l }) => l.rotation_time ?? "" },
+      { header: "Pitch", value: ({ log: l }) => l.pitch ?? "" },
+      { header: "准直", value: ({ log: l }) => l.collimator ?? "" },
+      { header: "操作者", value: ({ log: l }) => l.operator ?? "" },
     ]);
     downloadCsv(`dose-log-${timestampSuffix()}.csv`, csv);
     setExportMenuOpen(false);
@@ -187,17 +289,19 @@ export default function ServiceDoseLogsPage() {
       filterParts.push(`序列：${SERIES_TYPE_LABEL[seriesTypeFilter] ?? seriesTypeFilter}`);
     }
     if (bodyPartFilter !== "全部") filterParts.push(`部位：${bodyPartFilter}`);
+    if (onlyOverThreshold) filterParts.push("仅超阈值");
     if (searchText.trim()) filterParts.push(`关键字：${searchText.trim()}`);
 
     printDoseLogReport({
-      rows: filtered,
+      rows: filtered.map((r) => ({ ...r.log, over_threshold: r.overThreshold })),
       totalDlp,
+      exceededCount,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
       filtersDescription: filterParts.length > 0 ? filterParts.join(" / ") : "全部",
     });
     setExportMenuOpen(false);
-  }, [filtered, totalDlp, dateFrom, dateTo, seriesTypeFilter, bodyPartFilter, searchText]);
+  }, [filtered, totalDlp, exceededCount, dateFrom, dateTo, seriesTypeFilter, bodyPartFilter, onlyOverThreshold, searchText]);
 
   return (
     <ServiceModeShell currentRoute="/service/dose/logs" footerStatus={{ label: "IDLE", tone: "idle" }}>
@@ -312,6 +416,16 @@ export default function ServiceDoseLogsPage() {
                 <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#90A4AE] pointer-events-none" />
               </div>
             </div>
+
+            <label className="flex items-center gap-2 cursor-pointer select-none h-9 px-3 border border-[#D6E2EF] rounded-lg text-[13px] text-[#37474F] hover:bg-[#F5F8FC]">
+              <input
+                type="checkbox"
+                checked={onlyOverThreshold}
+                onChange={(e) => setOnlyOverThreshold(e.target.checked)}
+                className="accent-[#C62828]"
+              />
+              <span className="font-bold">仅显示超阈值</span>
+            </label>
           </div>
         </div>
 
@@ -327,6 +441,7 @@ export default function ServiceDoseLogsPage() {
                   <th className="text-left px-3 py-3 w-[68px]">扫描模式</th>
                   <th className="text-left px-3 py-3 w-[72px]">序列</th>
                   <th className="text-left px-3 py-3 w-[80px]">部位</th>
+                  <th className="text-left px-3 py-3 w-[78px]">标记</th>
                   <th className="text-right px-3 py-3 w-[90px]">kV / mA</th>
                   <th className="text-right px-3 py-3 w-[88px]">
                     CTDIvol<span className="block text-[10px] text-[#90A4AE] font-normal">mGy</span>
@@ -342,19 +457,22 @@ export default function ServiceDoseLogsPage() {
               <tbody>
                 {error ? (
                   <tr>
-                    <td colSpan={10} className="text-center py-16 text-[#D32F2F] text-[14px]">
+                    <td colSpan={11} className="text-center py-16 text-[#D32F2F] text-[14px]">
                       {error}
                     </td>
                   </tr>
                 ) : pageRows.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="text-center py-16 text-[#90A4AE] text-[14px]">
+                    <td colSpan={11} className="text-center py-16 text-[#90A4AE] text-[14px]">
                       {loading ? "加载中..." : "没有找到剂量记录"}
                     </td>
                   </tr>
                 ) : (
-                  pageRows.map((l) => (
-                    <tr key={l.id} className="border-t border-[#E2EBF5] hover:bg-[#F9FBFC]">
+                  pageRows.map(({ log: l, overThreshold }) => (
+                    <tr
+                      key={l.id}
+                      className={`border-t border-[#E2EBF5] hover:bg-[#F9FBFC] ${overThreshold ? "bg-[#FFF5F5]" : ""}`}
+                    >
                       <td className="px-3 py-3 whitespace-nowrap">
                         {(() => {
                           const t = formatTimestamp(l.scanned_at);
@@ -399,6 +517,18 @@ export default function ServiceDoseLogsPage() {
                         </span>
                       </td>
                       <td className="px-3 py-3 text-[#37474F] whitespace-nowrap">{l.body_part ?? "—"}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {overThreshold ? (
+                          <span
+                            className="inline-flex items-center justify-center h-[22px] px-2 rounded-md text-[11px] font-bold bg-[#FFEBEE] text-[#C62828] border border-[#FFCDD2]"
+                            title="本次扫描剂量达到或超过报告剂量阈值"
+                          >
+                            超阈值
+                          </span>
+                        ) : (
+                          <span className="text-[#CFD8DC]">—</span>
+                        )}
+                      </td>
                       <td className="px-3 py-3 text-right font-mono text-[#37474F] whitespace-nowrap">
                         {fmtInt(l.kv)}<span className="text-[#90A4AE] mx-1">/</span>{fmt(l.ma, 0)}
                       </td>
@@ -426,6 +556,15 @@ export default function ServiceDoseLogsPage() {
                 合计 DLP <span className="font-bold text-[#1E88E5] font-mono">{totalDlp.toFixed(2)}</span>
                 <span className="text-[10px] text-[#90A4AE] ml-1">mGy·cm</span>
               </span>
+              {exceededCount > 0 && (
+                <>
+                  <span className="text-[#90A4AE]">·</span>
+                  <span>
+                    超阈值 <span className="font-bold text-[#C62828] font-mono">{exceededCount}</span>
+                    <span className="text-[10px] text-[#90A4AE] ml-1">条</span>
+                  </span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <span>

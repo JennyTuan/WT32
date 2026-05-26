@@ -21,9 +21,23 @@ import type { ApiScanSessionDetail, ApiScanSessionHelicalParam } from "../lib/sc
 
 import { loadSelectedPatient } from "../lib/patientSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
+import { estimateDose } from "../lib/doseEstimate";
+import { buildApiUrl } from "../lib/apiClient";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
+import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import { TomographicScoutViewport, type TomographicScoutSeriesOverride } from "./SequenceScanConfirmScreen";
+
+type ProtocolSeedHelicalParam = {
+    ma?: number | null;
+    kv?: number | null;
+    rotation_time?: number | null;
+    pitch?: number | null;
+    scan_length?: number | null;
+    ctdi_vol?: number | null;
+    dlp?: number | null;
+};
 
 // Demo dataset for the "脑部螺旋" (brain helical, non-gating) protocol — JPEG Lossless
 // DICOM served from backend/data/dicom_out/HeadStrokeDemo/. Other protocols and the
@@ -1285,10 +1299,14 @@ const HelicalScanConfirmScreen = () => {
 
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [helicalParam, setHelicalParam] = useState<ApiScanSessionHelicalParam | null>(null);
+    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const [protocolHelicalSeed, setProtocolHelicalSeed] = useState<ProtocolSeedHelicalParam | null>(null);
     const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("medium");
     const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
     const helicalParamId = helicalParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
+    const thresholdGuard = useDoseThresholdGuard();
+    const navigate = useNavigate();
 
     useEffect(() => {
         if (isGatingWorkflow) return;
@@ -1297,8 +1315,28 @@ const HelicalScanConfirmScreen = () => {
         const loadSessionDefaults = async () => {
             try {
                 const scanSession = await fetchSelectedScanSession();
+                if (cancelled) return;
+                if (scanSession) {
+                    setScanSession(scanSession);
+
+                    // Fetch the source protocol so we can use its seed dose
+                    // values as a stable reference for the threshold estimator.
+                    // Without this, the session's CTDIvol/DLP would stay frozen
+                    // at protocol defaults and never reflect parameter edits.
+                    try {
+                        const protoRes = await fetch(buildApiUrl(`/api/protocols/${scanSession.protocol_id}`));
+                        if (protoRes.ok && !cancelled) {
+                            const proto = await protoRes.json() as { series?: Array<{ series_type: string; helical_param?: ProtocolSeedHelicalParam | null }> };
+                            const seedHelical = proto.series?.find((s) => s.series_type === "helical")?.helical_param ?? null;
+                            if (seedHelical) setProtocolHelicalSeed(seedHelical);
+                        }
+                    } catch (error) {
+                        console.error("Failed to load protocol seed values for dose estimation.", error);
+                    }
+                }
+
                 const loaded = scanSession?.series.find((series) => series.series_type === "helical")?.helical_param as ApiScanSessionHelicalParam | null | undefined;
-                if (!loaded || cancelled) return;
+                if (!loaded) return;
 
                 setHelicalParam(loaded);
                 setMeasurements({
@@ -1323,10 +1361,28 @@ const HelicalScanConfirmScreen = () => {
         if (updateTimerRef.current !== null) window.clearTimeout(updateTimerRef.current);
 
         updateTimerRef.current = window.setTimeout(() => {
-            void updateSelectedScanSessionHelicalParam(helicalParamId, {
+            const patch: Record<string, number> = {
                 scan_length: Number(scanLength.toFixed(1)),
                 fov: Number(scoutFov.toFixed(1)),
-            }).catch((error) => {
+            };
+            // Keep CTDIvol/DLP in sync with the new scan length so the
+            // dose_log entry produced on scan completion reflects the user's
+            // crop, not the protocol seed value.
+            if (helicalParam && protocolHelicalSeed) {
+                const estimated = estimateDose({
+                    current: {
+                        ma: helicalParam.ma,
+                        kv: helicalParam.kv,
+                        rotation_time: helicalParam.rotation_time,
+                        pitch: helicalParam.pitch,
+                        scan_length: Number(scanLength.toFixed(1)),
+                    },
+                    reference: protocolHelicalSeed,
+                });
+                patch.ctdi_vol = estimated.ctdi_vol;
+                patch.dlp = estimated.dlp;
+            }
+            void updateSelectedScanSessionHelicalParam(helicalParamId, patch).catch((error) => {
                 console.error("Failed to persist helical crop measurements.", error);
             });
         }, 180);
@@ -1362,7 +1418,37 @@ const HelicalScanConfirmScreen = () => {
     const scanLengthForCurve = Number.isFinite(scanLengthNum) ? scanLengthNum : (helicalParam?.scan_length ?? 0);
     const showAutoMaPanel = helicalParam?.auto_ma ?? false;
 
+    const handleExecuteScan = useCallback(() => {
+        // Re-estimate CTDIvol/DLP from the current parameters so the guard sees
+        // a value that actually tracks user edits (the session's stored
+        // ctdi_vol stays at the protocol seed until backend recompute lands).
+        const liveScanLength = Number(measurements.scanLength);
+        const estimated = helicalParam && protocolHelicalSeed
+            ? estimateDose({
+                current: {
+                    ma: helicalParam.ma,
+                    kv: helicalParam.kv,
+                    rotation_time: helicalParam.rotation_time,
+                    pitch: helicalParam.pitch,
+                    scan_length: Number.isFinite(liveScanLength) ? liveScanLength : helicalParam.scan_length,
+                },
+                reference: protocolHelicalSeed,
+            })
+            : null;
+
+        thresholdGuard.guard(
+            {
+                body_part: scanSession?.body_part ?? null,
+                age_group: scanSession?.age_group ?? null,
+                ctdi_vol: estimated?.ctdi_vol ?? helicalParam?.ctdi_vol ?? null,
+                dlp: estimated?.dlp ?? helicalParam?.dlp ?? null,
+            },
+            () => navigate("/helical-execute"),
+        );
+    }, [thresholdGuard, scanSession, helicalParam, protocolHelicalSeed, measurements.scanLength, navigate]);
+
     return (
+        <>
         <ScanConfirmScreen
             activeSequenceId="s2"
             activeSequenceStepIndex={0}
@@ -1370,6 +1456,7 @@ const HelicalScanConfirmScreen = () => {
             helicalParamOverrides={measurements}
             autoMaEnabled={showAutoMaPanel}
             onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
+            onExecuteScan={handleExecuteScan}
             rightViewportContent={
                 <>
                     <TomographicScoutViewport
@@ -1400,6 +1487,12 @@ const HelicalScanConfirmScreen = () => {
             nextRoute="/helical-execute"
             allowBackNavigation={false}
         />
+        <ThresholdGuardModal
+            {...thresholdGuard.modalProps}
+            onContinue={thresholdGuard.confirm}
+            onCancel={thresholdGuard.cancel}
+        />
+        </>
     );
 };
 

@@ -55,9 +55,12 @@ const escapeHtml = (raw: string | number | null | undefined): string => {
     .replace(/"/g, "&quot;");
 };
 
+export type DoseReportRow = ApiDoseLog & { over_threshold?: boolean };
+
 export type DoseReportContext = {
-  rows: ApiDoseLog[];
+  rows: DoseReportRow[];
   totalDlp: number;
+  exceededCount?: number;
   dateFrom?: string;
   dateTo?: string;
   filtersDescription?: string;
@@ -91,8 +94,11 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
       const t = formatDateTime(l.scanned_at);
       const scanKind = SCAN_KIND_LABELS[getDoseScanKind(l)];
       const seriesLabel = SERIES_TYPE_LABEL[l.series_type] ?? l.series_type;
+      const flagCell = l.over_threshold
+        ? `<span class="flag-over">超阈值</span>`
+        : "";
       return `
-        <tr>
+        <tr class="${l.over_threshold ? "row-over" : ""}">
           <td class="mono">${escapeHtml(t)}</td>
           <td>
             <div class="cell-primary">${escapeHtml(l.patient_name_snapshot ?? "—")}</div>
@@ -102,6 +108,7 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
           <td class="center">${escapeHtml(scanKind)}</td>
           <td class="center">${escapeHtml(seriesLabel)}</td>
           <td class="center">${escapeHtml(l.body_part ?? "—")}</td>
+          <td class="center">${flagCell}</td>
           <td class="num mono">${escapeHtml(fmtInt(l.kv))} / ${escapeHtml(fmt(l.ma, 0))}</td>
           <td class="num mono">${escapeHtml(fmt(l.ctdi_vol))}</td>
           <td class="num mono">${escapeHtml(fmt(l.dlp))}</td>
@@ -111,8 +118,10 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
     .join("");
 
   const emptyState = ctx.rows.length === 0
-    ? `<tr><td colspan="10" class="empty">没有符合条件的剂量记录</td></tr>`
+    ? `<tr><td colspan="11" class="empty">没有符合条件的剂量记录</td></tr>`
     : "";
+
+  const exceededCount = ctx.exceededCount ?? ctx.rows.filter((r) => r.over_threshold).length;
 
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -201,6 +210,17 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
   .cell-primary { font-weight: 600; color: #263238; }
   .cell-sub { color: #90a4ae; font-size: 9.5px; margin-top: 1px; }
   td.empty { text-align: center; color: #90a4ae; padding: 32px; font-style: italic; }
+  tr.row-over td { background: #fff5f5; }
+  .flag-over {
+    display: inline-block;
+    padding: 1px 6px;
+    border: 1px solid #ffcdd2;
+    background: #ffebee;
+    color: #c62828;
+    font-weight: 700;
+    font-size: 9.5px;
+    border-radius: 3px;
+  }
 
   .summary-row {
     display: flex;
@@ -311,6 +331,7 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
           <th class="center" style="width: 42px;">模式</th>
           <th class="center" style="width: 42px;">序列</th>
           <th class="center" style="width: 50px;">部位</th>
+          <th class="center" style="width: 46px;">标记</th>
           <th class="num" style="width: 60px;">kV / mA</th>
           <th class="num" style="width: 50px;">CTDIvol<span class="unit">mGy</span></th>
           <th class="num" style="width: 56px;">DLP<span class="unit">mGy·cm</span></th>
@@ -324,6 +345,7 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
 
     <div class="summary-row">
       <div class="stat"><span class="label">记录总数：</span><span class="value">${ctx.rows.length}</span></div>
+      <div class="stat"><span class="label">超阈值：</span><span class="value" style="color:#c62828">${exceededCount}</span></div>
       <div class="stat highlight"><span class="label">合计 DLP：</span><span class="value">${ctx.totalDlp.toFixed(2)} mGy·cm</span></div>
     </div>
 

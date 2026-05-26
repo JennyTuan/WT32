@@ -4,7 +4,9 @@ import { Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
 import DicomViewer from "../components/DicomViewer";
+import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
 const HOLD_DURATION_MS = 3000;
@@ -506,6 +508,7 @@ export default function ScoutExecuteScanScreen() {
     );
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(() => loadCachedBrainHelicalSession());
     const [gatingBreathingMode, setGatingBreathingMode] = useState<string | null>(null);
+    const thresholdGuard = useDoseThresholdGuard();
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
@@ -630,7 +633,7 @@ export default function ScoutExecuteScanScreen() {
         rafRef.current = requestAnimationFrame(tick);
     };
 
-    const triggerScanSequence = () => {
+    const performTriggerScan = () => {
         const sessionId = loadSelectedScanSessionId();
         if (sessionId) void startScanSession(sessionId);
         clearHoldRaf();
@@ -647,6 +650,30 @@ export default function ScoutExecuteScanScreen() {
             setRenderProgress(0);
             runRenderAnimation();
         }, EXPOSURE_DURATION_MS);
+    };
+
+    // Build threshold input from the current scout (topogram) series of the
+    // active scan session. Demo: scan session carries body_part + age_group;
+    // the topogram series may carry ctdi_vol/dlp from the protocol seed.
+    const buildThresholdInput = () => {
+        const topo = scanSession?.series.find((s) => s.series_type === "topogram");
+        const param = topo?.topogram_param ?? null;
+        return {
+            body_part: scanSession?.body_part ?? null,
+            age_group: scanSession?.age_group ?? null,
+            ctdi_vol: param?.ctdi_vol ?? null,
+            dlp: param?.dlp ?? null,
+        };
+    };
+
+    const triggerScanSequence = () => {
+        // Reset hold UI immediately so we don't leave the green ring stuck at
+        // 100% while the warning modal is up.
+        clearHoldRaf();
+        holdStartRef.current = null;
+        setHoldProgress(0);
+        setStage("idle");
+        thresholdGuard.guard(buildThresholdInput(), performTriggerScan);
     };
 
     const handleExecuteScanClick = () => {
@@ -726,6 +753,12 @@ export default function ScoutExecuteScanScreen() {
                 readOnlyMode
                 onExecuteScan={handleExecuteScanClick}
                 executeButtonLabel={stage === "completed" ? postScoutAction.label : "执行扫描"}
+            />
+
+            <ThresholdGuardModal
+                {...thresholdGuard.modalProps}
+                onContinue={thresholdGuard.confirm}
+                onCancel={thresholdGuard.cancel}
             />
 
             <div className="pointer-events-none absolute bottom-[80px] left-[246px] right-0 top-[82px] z-20 overflow-hidden rounded-lg">

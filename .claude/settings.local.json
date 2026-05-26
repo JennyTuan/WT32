@@ -147,7 +147,19 @@
       "PowerShell(Start-Sleep -Seconds 3; try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:8000/api/scan-sessions/\" -UseBasicParsing -TimeoutSec 5; Write-Output \"Backend OK: $\\($r.StatusCode\\)\" } catch { Write-Output \"Not ready: $_\" })",
       "Bash(python -c \"from backend.database import GATING_CUSTOM_PROTOCOLS, _seed_gating_protocols; print\\([p['name'] for p in GATING_CUSTOM_PROTOCOLS]\\)\")",
       "Bash(python -c \"import sys; sys.path.insert\\(0, '.'\\); from backend.database import GATING_CUSTOM_PROTOCOLS; print\\([p['name'] for p in GATING_CUSTOM_PROTOCOLS]\\)\")",
-      "PowerShell(& \"C:\\\\STN\\\\projects\\\\WT32\\\\.venv\\\\Scripts\\\\python.exe\" -c \"from backend.database import GATING_CUSTOM_PROTOCOLS; print\\([p['name'] for p in GATING_CUSTOM_PROTOCOLS]\\)\")"
+      "PowerShell(& \"C:\\\\STN\\\\projects\\\\WT32\\\\.venv\\\\Scripts\\\\python.exe\" -c \"from backend.database import GATING_CUSTOM_PROTOCOLS; print\\([p['name'] for p in GATING_CUSTOM_PROTOCOLS]\\)\")",
+      "PowerShell(Set-Location C:\\\\STN\\\\projects\\\\WT32\\\\ui-review; npx tsc --noEmit 2>&1; \"EXIT: $LASTEXITCODE\")",
+      "Bash(curl -s 'http://localhost:8000/api/logs/dose?limit=5')",
+      "Bash(curl -s 'http://localhost:8000/api/dose-settings/drl')",
+      "Bash(curl -s 'http://localhost:8000/api/patients/?limit=5')",
+      "Bash(curl -s 'http://localhost:8000/api/scan-sessions/')",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); latest=data[-3:] if isinstance\\(data,list\\) else data; print\\(json.dumps\\(latest, ensure_ascii=False, indent=2\\)\\)\")",
+      "Bash(curl -s 'http://localhost:8000/api/scan-sessions/?limit=200')",
+      "Bash(curl -s 'http://localhost:8000/api/scan-sessions/131')",
+      "Bash(curl -s 'http://localhost:8000/api/protocols/1')",
+      "Bash(curl -s 'http://localhost:8000/api/protocols/')",
+      "Bash(curl -s 'http://localhost:8000/api/protocols/136')",
+      "Bash(curl -s 'http://localhost:8000/api/logs/dose?limit=3')"
     ]
   }
 }

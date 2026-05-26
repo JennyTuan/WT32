@@ -822,6 +822,81 @@ class CornerConfig(CornerConfigBase, ORMModel):
     updated_at: Optional[datetime] = None
 
 
+# ---------------- User Management ----------------
+
+UserStatus = Literal["active", "locked", "disabled"]
+
+
+class UserRoleBase(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: Optional[str] = None
+    permissions: List[str] = Field(default_factory=list)
+
+
+class UserRoleUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    description: Optional[str] = None
+    permissions: Optional[List[str]] = None
+
+
+class UserRole(UserRoleBase):
+    code: str
+    is_system: bool = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    user_count: int = 0
+
+
+class UserAccountBase(BaseModel):
+    username: str = Field(min_length=2, max_length=50)
+    display_name: str = Field(min_length=1, max_length=100)
+    employee_id: Optional[str] = Field(default=None, max_length=50)
+    department: Optional[str] = Field(default=None, max_length=80)
+    title: Optional[str] = Field(default=None, max_length=80)
+    role_code: str = Field(min_length=1, max_length=40)
+    status: UserStatus = "active"
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=120)
+    login_allowed: bool = True
+
+
+class UserAccountCreate(UserAccountBase):
+    password_reset_required: bool = True
+
+
+class UserAccountUpdate(BaseModel):
+    username: Optional[str] = Field(default=None, min_length=2, max_length=50)
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    employee_id: Optional[str] = Field(default=None, max_length=50)
+    department: Optional[str] = Field(default=None, max_length=80)
+    title: Optional[str] = Field(default=None, max_length=80)
+    role_code: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    status: Optional[UserStatus] = None
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=120)
+    login_allowed: Optional[bool] = None
+    password_reset_required: Optional[bool] = None
+    failed_attempts: Optional[int] = Field(default=None, ge=0)
+
+
+class UserAccount(UserAccountBase):
+    id: int
+    role_name: Optional[str] = None
+    password_reset_required: bool = False
+    credential_version: int = 1
+    failed_attempts: int = 0
+    last_login_at: Optional[datetime] = None
+    password_updated_at: Optional[datetime] = None
+    locked_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class UserManagementSnapshot(BaseModel):
+    users: List[UserAccount]
+    roles: List[UserRole]
+
+
 # ---------------- System Log ----------------
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]

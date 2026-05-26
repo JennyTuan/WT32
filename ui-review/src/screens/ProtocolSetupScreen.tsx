@@ -21,6 +21,7 @@ import {
 import { loadSelectedPatient } from "../lib/patientSession";
 import AppHeader from "../components/AppHeader";
 import { saveSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
+import { estimateDose } from "../lib/doseEstimate";
 import {
     clearSelectedScanSessionId,
     createScanSessionForSelectedPatient,
@@ -902,7 +903,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const [positionGroupIndex, setPositionGroupIndex] = useState<0 | 1>(0);
     const [planListOpen, setPlanListOpen] = useState(true);
     const [collapsedPlanIds, setCollapsedPlanIds] = useState<string[]>([]);
-    const [patientType, setPatientType] = useState<"adult" | "child">("adult");
+    // Default the protocol library to match the patient's age. Anyone under 18
+    // gets the pediatric library; missing or non-positive age falls back to
+    // adult. The user can still override via the 成人/儿童 toggle.
+    const [patientType, setPatientType] = useState<"adult" | "child">(() => {
+        const patient = loadSelectedPatient();
+        if (!patient || !Number.isFinite(patient.age) || patient.age <= 0) return "adult";
+        return patient.age < 18 ? "child" : "adult";
+    });
     const [selectedPlanId, setSelectedPlanId] = useState(() => loadStoredSelectedPlanId());
 
     // 选中序列 ID 和重建方案索引
@@ -1610,8 +1618,8 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     };
 
     const handleScanParamChange = async (label: string, rawValue: string) => {
-        if (!activeSessionSeries || !activeScanSession) return;
-
+        // Always update local UI immediately so the dropdown reflects the
+        // user's choice, even if no scan session exists yet.
         setScanPlans((plans) =>
             plans.map((plan) => ({
                 ...plan,
@@ -1628,52 +1636,133 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             }))
         );
 
+        // Lazily create the scan session on first edit. This keeps the
+        // protocol-toggle interaction lightweight while still letting the
+        // user's first param tweak persist to the backend.
+        let session: ApiScanSessionDetail | null = activeScanSession ?? null;
+        if (!session && activeProtocolId && activeProtocolSummary) {
+            try {
+                session = await createScanSessionForSelectedPatient(
+                    activeProtocolId,
+                    activeProtocolSummary.name,
+                );
+                applySessionToScreen(session);
+            } catch (error) {
+                console.error("Failed to create scan session for param edit.", error);
+                return;
+            }
+        }
+        if (!session) return;
+
+        // Locate the matching session series. The protocol's series ID and the
+        // session's series ID differ when the session was just created, so we
+        // fall back to matching by ordering within the current plan.
+        let sessionSeries =
+            session.series.find((series) => series.id === activeSeq.sourceSeriesId) ?? null;
+        if (!sessionSeries) {
+            const planForActive = scanPlans.find((plan) =>
+                plan.sequences.some((s) => s.id === activeSeq.id),
+            );
+            const seqIndex =
+                planForActive?.sequences.findIndex((s) => s.id === activeSeq.id) ?? -1;
+            if (seqIndex >= 0) {
+                sessionSeries =
+                    session.series.find((s) => s.series_order === seqIndex + 1) ??
+                    session.series[seqIndex] ??
+                    null;
+            }
+        }
+        if (!sessionSeries) return;
+
+        // Resolve the protocol seed for this series so we can recompute
+        // CTDIvol/DLP whenever a dose-affecting parameter changes. Without
+        // this, dose_log records (and the threshold badge there) would stay
+        // pinned to the protocol's default values regardless of edits.
+        const protoDetail = protocolDetailsById[session.protocol_id];
+        const seedSeries = protoDetail?.series.find((s) => s.series_type === sessionSeries.series_type) ?? null;
+
         try {
-            if (activeSessionSeries.topogram_param) {
+            if (sessionSeries.topogram_param) {
+                const topo = sessionSeries.topogram_param;
                 const patch: Record<string, string | number> = {};
-                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.ma;
-                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.kv;
-                if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.scan_length;
-                if (label === "ANG") patch.tube_angle = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.tube_angle;
-                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? activeSessionSeries.topogram_param.fov;
+                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? topo.ma;
+                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? topo.kv;
+                if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? topo.scan_length;
+                if (label === "ANG") patch.tube_angle = parseEditableNumber(rawValue) ?? topo.tube_angle;
+                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? topo.fov;
                 if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
                 if (Object.keys(patch).length > 0) {
-                    await updateSelectedScanSessionTopogramParam(activeSessionSeries.topogram_param.id, patch);
-                    await refreshCurrentSession(activeScanSession.id);
+                    await updateSelectedScanSessionTopogramParam(topo.id, patch);
+                    await refreshCurrentSession(session.id);
                 }
                 return;
             }
 
-            if (activeSessionSeries.helical_param) {
+            if (sessionSeries.helical_param) {
+                const helical = sessionSeries.helical_param;
                 const patch: Record<string, string | number> = {};
-                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.ma;
-                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.kv;
-                if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.scan_length;
-                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? activeSessionSeries.helical_param.fov;
+                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? helical.ma;
+                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? helical.kv;
+                if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? helical.scan_length;
+                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? helical.fov;
                 if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
                 if (Object.keys(patch).length > 0) {
-                    await updateSelectedScanSessionHelicalParam(activeSessionSeries.helical_param.id, patch);
-                    await refreshCurrentSession(activeScanSession.id);
+                    // Recompute CTDIvol/DLP so the session (and the dose_log
+                    // entry produced on scan completion) reflects the user's
+                    // edits instead of the protocol default.
+                    const seedHelical = seedSeries?.helical_param ?? null;
+                    if (seedHelical) {
+                        const estimated = estimateDose({
+                            current: {
+                                ma: (patch.ma as number | undefined) ?? helical.ma,
+                                kv: (patch.kv as number | undefined) ?? helical.kv,
+                                rotation_time: helical.rotation_time,
+                                pitch: helical.pitch,
+                                scan_length: (patch.scan_length as number | undefined) ?? helical.scan_length,
+                            },
+                            reference: seedHelical,
+                        });
+                        patch.ctdi_vol = estimated.ctdi_vol;
+                        patch.dlp = estimated.dlp;
+                    }
+                    await updateSelectedScanSessionHelicalParam(helical.id, patch);
+                    await refreshCurrentSession(session.id);
                 }
                 return;
             }
 
-            if (activeSessionSeries.axial_param) {
+            if (sessionSeries.axial_param) {
+                const axial = sessionSeries.axial_param;
                 const patch: Record<string, string | number> = {};
-                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.ma;
-                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.kv;
-                if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.scan_length;
-                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? activeSessionSeries.axial_param.fov;
+                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? axial.ma;
+                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? axial.kv;
+                if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? axial.scan_length;
+                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? axial.fov;
                 if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
                 if (Object.keys(patch).length > 0) {
-                    await updateSelectedScanSessionAxialParam(activeSessionSeries.axial_param.id, patch);
-                    await refreshCurrentSession(activeScanSession.id);
+                    const seedAxial = seedSeries?.axial_param ?? null;
+                    if (seedAxial) {
+                        const estimated = estimateDose({
+                            current: {
+                                ma: (patch.ma as number | undefined) ?? axial.ma,
+                                kv: (patch.kv as number | undefined) ?? axial.kv,
+                                rotation_time: axial.rotation_time,
+                                pitch: 1,
+                                scan_length: (patch.scan_length as number | undefined) ?? axial.scan_length,
+                            },
+                            reference: { ...seedAxial, pitch: 1 },
+                        });
+                        patch.ctdi_vol = estimated.ctdi_vol;
+                        patch.dlp = estimated.dlp;
+                    }
+                    await updateSelectedScanSessionAxialParam(axial.id, patch);
+                    await refreshCurrentSession(session.id);
                 }
                 return;
             }
 
             if (label === "DIR") {
-                const updatedSession = await updateScanSessionById(activeScanSession.id, { table_direction: rawValue.toLowerCase() });
+                const updatedSession = await updateScanSessionById(session.id, { table_direction: rawValue.toLowerCase() });
                 applySessionToScreen(updatedSession);
             }
         } catch (error) {
