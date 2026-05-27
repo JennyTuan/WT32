@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
 from .. import models, schemas
+from ..auth_utils import hash_password
 from ..database import get_db
 from .logs import write_system_log
 
@@ -279,11 +280,20 @@ def reset_user_password(user_id: int, db: Session = Depends(get_db)):
     user = db.query(models.UserAccount).filter(models.UserAccount.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+    # Reset the stored hash to the account code (matches the seed convention) so
+    # the user can log in with their username, and force a password change at
+    # next login. Also clear any failed-attempt lockout side-effects so the
+    # newly-issued credential is actually usable.
+    user.password_hash = hash_password(user.username)
     user.password_reset_required = True
     user.credential_version = (user.credential_version or 1) + 1
     user.password_updated_at = datetime.utcnow()
+    user.failed_attempts = 0
+    if user.status == "locked":
+        user.status = "active"
+        user.locked_at = None
     user.updated_at = func.now()
-    _audit(db, "user_password_reset", "User credential reset requested", {"user_id": user.id, "username": user.username})
+    _audit(db, "user_password_reset", "User credential reset to account code", {"user_id": user.id, "username": user.username})
     db.commit()
     db.refresh(user)
     return _serialize_user(user)

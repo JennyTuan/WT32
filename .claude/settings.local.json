@@ -171,7 +171,15 @@
       "Bash(python -c \"import sqlite3; c=sqlite3.connect\\('backend/app.db'\\); [print\\(r\\) for r in c.execute\\('SELECT user_code, role_id, full_name FROM user_accounts LIMIT 5'\\)]\")",
       "Bash(python -c \"import sqlite3; c=sqlite3.connect\\('backend/app.db'\\); print\\(list\\(c.execute\\('PRAGMA table_info\\(user_accounts\\)'\\)\\)\\); print\\('---'\\); [print\\(r\\) for r in c.execute\\('SELECT * FROM user_accounts LIMIT 5'\\)]\")",
       "Bash(ls .venv/Scripts/python*)",
-      "Bash(ls .venv)"
+      "Bash(ls .venv)",
+      "Bash(python -c \"import pydicom, numpy, scipy, PIL; print\\(pydicom.__version__, numpy.__version__, scipy.__version__, PIL.__version__\\)\")",
+      "Bash(python -c \"import numpy, scipy, PIL; print\\(numpy.__version__, scipy.__version__, PIL.__version__\\)\")",
+      "Bash(where python *)",
+      "Bash(pip list *)",
+      "Bash(C:/STN/projects/WT32/.venv/Scripts/python.exe --version)",
+      "Bash(C:/STN/projects/WT32/.venv/Scripts/python.exe -c \"import sqlalchemy, fastapi, pydicom, numpy, scipy, PIL; print\\('all ok'\\)\")",
+      "Bash(C:/STN/projects/WT32/.venv/Scripts/pip.exe install *)",
+      "Bash(C:/STN/projects/WT32/.venv/Scripts/python.exe -c ' *)"
     ]
   }
 }

@@ -1,138 +1,452 @@
-import { useState } from "react";
-import { ImageIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ImageIcon, Loader2 } from "lucide-react";
 
 import ServiceModeShell from "../shared/ServiceModeShell";
+import { API_BASE_URL, apiFetch } from "../../../lib/apiClient";
+
+type TabKey = "MTF" | "FWHM_H" | "FWHM_V";
+
+type DatasetSummary = { id: string; name: string; slice_count: number };
+type DatasetInfo = {
+  dataset_id: string;
+  slice_count: number;
+  rows: number;
+  columns: number;
+  default_window_center: number;
+  default_window_width: number;
+  pixel_spacing_mm: [number, number];
+  slices: { index: number; instance_number: number; thickness: number }[];
+};
+
+type Point = { x: number; y: number };
+
+type AnalyzeResponse = {
+  dataset_id: string;
+  pixel_spacing_mm: [number, number];
+  edge_slice_index: number;
+  peak_slice_index: number;
+  peak_row: number;
+  peak_col: number;
+  mtf: {
+    title: string;
+    subtitle: string;
+    unit: string;
+    y_label: string;
+    points: Point[];
+    mtf50: number | null;
+    mtf10: number | null;
+    roi_x: number;
+    roi_y: number;
+    roi_size: number;
+  };
+  fwhm_h: {
+    title: string;
+    subtitle: string;
+    unit: string;
+    y_label: string;
+    points: Point[];
+    fwhm_pixels: number;
+    fwhm_mm: number;
+    peak_center: number;
+  };
+  fwhm_v: {
+    title: string;
+    subtitle: string;
+    unit: string;
+    y_label: string;
+    points: Point[];
+    fwhm_pixels: number;
+    fwhm_mm: number;
+    peak_center: number;
+  };
+};
+
+const DEMO_PROFILES = {
+  MTF: {
+    title: "空间分辨率 (MTF)",
+    subtitle: "调制传递函数曲线，用于观察空间频率与响应衰减关系。",
+    unit: "lp/cm",
+    yLabel: "MTF",
+    points: [
+      { x: 0, y: 1 },
+      { x: 1, y: 0.67 },
+      { x: 2.5, y: 0.28 },
+      { x: 4, y: 0.25 },
+      { x: 6, y: 0.14 },
+      { x: 7.5, y: 0.18 },
+      { x: 10, y: 0.12 },
+      { x: 11, y: 0.08 },
+      { x: 15, y: 0.02 },
+      { x: 20, y: 0.01 },
+      { x: 25, y: 0.005 },
+    ] as Point[],
+    markers: { mtf50: 1.5, mtf10: 10.5 },
+  },
+  FWHM_H: {
+    title: "水平半高宽 (FWHM_H)",
+    subtitle: "水平方向扩散响应曲线，观察边缘锐度与成像扩展宽度。",
+    unit: "Pixel",
+    yLabel: "HU",
+    points: Array.from({ length: 50 }, (_, i) => {
+      const sigma = 1.5;
+      return { x: i, y: 3000 * Math.exp(-Math.pow(i - 22, 2) / (2 * sigma * sigma)) };
+    }) as Point[],
+    fwhmPx: 2.4,
+    peakCenter: 22,
+  },
+  FWHM_V: {
+    title: "垂直半高宽 (FWHM_V)",
+    subtitle: "垂直方向扩散响应曲线，用于检查扫描方向上的模糊控制。",
+    unit: "Pixel",
+    yLabel: "HU",
+    points: Array.from({ length: 50 }, (_, i) => {
+      const sigma = 1.8;
+      return { x: i, y: 2950 * Math.exp(-Math.pow(i - 21, 2) / (2 * sigma * sigma)) };
+    }) as Point[],
+    fwhmPx: 3.0,
+    peakCenter: 21,
+  },
+};
+
+const tabMeta: Record<TabKey, { label: string; accent: string }> = {
+  MTF: { label: "空间分辨率", accent: "text-[#1D4ED8]" },
+  FWHM_H: { label: "水平响应", accent: "text-[#0F766E]" },
+  FWHM_V: { label: "垂直响应", accent: "text-[#7C3AED]" },
+};
 
 export default function PerformanceEvaluationScreen() {
-  const [activeTab, setActiveTab] = useState("MTF");
+  const [activeTab, setActiveTab] = useState<TabKey>("MTF");
   const [showBaseline, setShowBaseline] = useState(true);
+  const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
+  const [info, setInfo] = useState<DatasetInfo | null>(null);
+  const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
+  const [sliceIndex, setSliceIndex] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [mtfRoi, setMtfRoi] = useState<{ slice: number; x: number; y: number; size: number } | null>(null);
+  const [fwhmPeak, setFwhmPeak] = useState<{ slice: number; x: number; y: number } | null>(null);
+  const [dragMode, setDragMode] = useState<null | "move" | "resize">(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const reanalyzeTimer = useRef<number | null>(null);
 
-  const tabs = ["MTF", "FWHM_H", "FWHM_V"];
-  const tabMeta = {
-    MTF: { label: "空间分辨率", accent: "text-[#1D4ED8]" },
-    FWHM_H: { label: "水平响应", accent: "text-[#0F766E]" },
-    FWHM_V: { label: "垂直响应", accent: "text-[#7C3AED]" },
-  } as const;
+  // When tab changes, jump to the slice where the relevant marker lives.
+  useEffect(() => {
+    if (!analysis) return;
+    const target = activeTab === "MTF" ? mtfRoi?.slice : fwhmPeak?.slice;
+    if (target != null) setSliceIndex(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
-  const chartProfiles = {
-    MTF: {
-      title: "空间分辨率 (MTF)",
-      subtitle: "调制传递函数曲线，用于观察空间频率与响应衰减关系。",
-      unit: "lp/cm",
-      yLabel: "MTF",
-      points: [
-        { x: 0, y: 1 },
-        { x: 1, y: 0.67 },
-        { x: 2.5, y: 0.28 },
-        { x: 4, y: 0.25 },
-        { x: 6, y: 0.14 },
-        { x: 7.5, y: 0.18 },
-        { x: 10, y: 0.12 },
-        { x: 11, y: 0.08 },
-        { x: 15, y: 0.02 },
-        { x: 20, y: 0.01 },
-        { x: 25, y: 0.005 },
-      ],
-      markers: [
-        { type: "mtf50", label: "MTF50", y: 0.5, x: 1.5, color: "#EF4444" },
-        { type: "mtf10", label: "MTF10", y: 0.1, x: 10.5, color: "#3B82F6" },
-      ],
-      baseline: [
-        { x: 0, y: 1 },
-        { x: 5, y: 0.4 },
-        { x: 10, y: 0.15 },
-        { x: 15, y: 0.05 },
-        { x: 20, y: 0.02 },
-        { x: 25, y: 0.01 },
-      ],
-    },
-    FWHM_H: {
-      title: "水平半高宽 (FWHM_H)",
-      subtitle: "水平方向扩散响应曲线，观察边缘锐度与成像扩展宽度。",
-      unit: "Pixel",
-      yLabel: "Normalized Intensity",
-      points: Array.from({ length: 50 }, (_, index) => {
-        const x = index;
-        const peak = 22;
-        const sigma = 1.5;
-        const y =
-          3000 * Math.exp(-Math.pow(x - peak, 2) / (2 * Math.pow(sigma, 2))) +
-          (Math.sqrt(index) * 10 - 50);
-        return { x, y: Math.max(y, -200) };
-      }),
-      markers: [
-        { type: "half-max", label: "Half Max", y: 1500, color: "#EF4444" },
-        { type: "fwhm-range", label: "FWHM", x1: 20.8, x2: 23.2, color: "#10B981" },
-      ],
-      baseline: Array.from({ length: 50 }, (_, index) => ({
-        x: index,
-        y: 2800 * Math.exp(-Math.pow(index - 22, 2) / 10),
-      })),
-    },
-    FWHM_V: {
-      title: "垂直半高宽 (FWHM_V)",
-      subtitle: "垂直方向扩散响应曲线，用于检查扫描方向上的模糊控制。",
-      unit: "Pixel",
-      yLabel: "Normalized Intensity",
-      points: Array.from({ length: 50 }, (_, index) => {
-        const x = index;
-        const peak = 21;
-        const sigma = 1.8;
-        const y =
-          2950 * Math.exp(-Math.pow(x - peak, 2) / (2 * Math.pow(sigma, 2))) +
-          (Math.sqrt(index) * 8 - 40);
-        return { x, y: Math.max(y, -150) };
-      }),
-      markers: [
-        { type: "half-max", label: "Half Max", y: 1475, color: "#EF4444" },
-        { type: "fwhm-range", label: "FWHM", x1: 19.5, x2: 22.5, color: "#10B981" },
-      ],
-      baseline: Array.from({ length: 50 }, (_, index) => ({
-        x: index,
-        y: 2700 * Math.exp(-Math.pow(index - 21, 2) / 12),
-      })),
-    },
-  } as const;
+  useEffect(() => {
+    apiFetch("/api/performance/datasets")
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
+      .then((data) => setDatasets(data.datasets ?? []))
+      .catch((e) => console.warn("加载数据集失败", e));
+  }, []);
 
-  const activeProfile = chartProfiles[activeTab as keyof typeof chartProfiles];
+  const activeDataset = datasets[0] ?? null;
+
+  const previewUrl = useMemo(() => {
+    if (!info || !activeDataset) return "";
+    const base = API_BASE_URL;
+    const wc = info.default_window_center;
+    const ww = info.default_window_width;
+    return `${base}/api/performance/dataset/${activeDataset.id}/slice/${sliceIndex}/preview.png?wc=${wc}&ww=${ww}`;
+  }, [info, activeDataset, sliceIndex]);
+
+  const applyAnalysis = (aData: AnalyzeResponse) => {
+    setAnalysis(aData);
+    setMtfRoi({
+      slice: aData.edge_slice_index,
+      x: aData.mtf.roi_x,
+      y: aData.mtf.roi_y,
+      size: aData.mtf.roi_size,
+    });
+    setFwhmPeak({
+      slice: aData.peak_slice_index,
+      x: aData.peak_col,
+      y: aData.peak_row,
+    });
+  };
+
+  const handleImport = async () => {
+    if (!activeDataset) {
+      setError("未找到模体数据集 (backend/data/<id>/DICOM)");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const infoRes = await apiFetch(`/api/performance/dataset/${activeDataset.id}/slices`);
+      if (!infoRes.ok) throw new Error("获取切片信息失败");
+      const infoData: DatasetInfo = await infoRes.json();
+      setInfo(infoData);
+      const analyzeRes = await apiFetch(`/api/performance/dataset/${activeDataset.id}/analyze`, {
+        method: "POST",
+      });
+      if (!analyzeRes.ok) throw new Error("分析失败");
+      const aData: AnalyzeResponse = await analyzeRes.json();
+      applyAnalysis(aData);
+      // Jump to the slice relevant to the active tab so the ROI/peak is visible.
+      const targetSlice = activeTab === "MTF" ? aData.edge_slice_index : aData.peak_slice_index;
+      setSliceIndex(targetSlice ?? 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "导入失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reanalyze = async (
+    nextMtf: { slice: number; x: number; y: number; size: number } | null,
+    nextPeak: { slice: number; x: number; y: number } | null,
+  ) => {
+    if (!activeDataset) return;
+    const params = new URLSearchParams();
+    if (nextMtf) {
+      params.set("mtf_slice", String(nextMtf.slice));
+      params.set("mtf_x", String(Math.round(nextMtf.x)));
+      params.set("mtf_y", String(Math.round(nextMtf.y)));
+      params.set("mtf_size", String(nextMtf.size));
+    }
+    if (nextPeak) {
+      params.set("fwhm_slice", String(nextPeak.slice));
+      params.set("fwhm_x", String(Math.round(nextPeak.x)));
+      params.set("fwhm_y", String(Math.round(nextPeak.y)));
+    }
+    try {
+      setLoading(true);
+      const res = await apiFetch(`/api/performance/dataset/${activeDataset.id}/analyze?${params}`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("重算失败");
+      const aData: AnalyzeResponse = await res.json();
+      // Preserve user-edited overlay positions; just refresh curves.
+      setAnalysis(aData);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "重算失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const scheduleReanalyze = (
+    nextMtf: { slice: number; x: number; y: number; size: number } | null,
+    nextPeak: { slice: number; x: number; y: number } | null,
+  ) => {
+    if (reanalyzeTimer.current !== null) window.clearTimeout(reanalyzeTimer.current);
+    reanalyzeTimer.current = window.setTimeout(() => {
+      reanalyzeTimer.current = null;
+      void reanalyze(nextMtf, nextPeak);
+    }, 200);
+  };
+
+  // Convert a pointer event to image-pixel coords using the rendered <img> rect.
+  const pointerToImagePx = (e: React.PointerEvent | PointerEvent): { x: number; y: number } | null => {
+    if (!imgRef.current || !info) return null;
+    const rect = imgRef.current.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    const fx = (e.clientX - rect.left) / rect.width;
+    const fy = (e.clientY - rect.top) / rect.height;
+    return {
+      x: Math.max(0, Math.min(fx * info.columns, info.columns - 1)),
+      y: Math.max(0, Math.min(fy * info.rows, info.rows - 1)),
+    };
+  };
+
+  // Image-pixel -> displayed percentage relative to the <img> element.
+  const imageRectStyle = (cx: number, cy: number, sizePx: number) => {
+    if (!info || !imgRef.current || !overlayRef.current) return undefined;
+    const imgRect = imgRef.current.getBoundingClientRect();
+    const parentRect = overlayRef.current.getBoundingClientRect();
+    const scaleX = imgRect.width / info.columns;
+    const scaleY = imgRect.height / info.rows;
+    const left = imgRect.left - parentRect.left + (cx - sizePx / 2) * scaleX;
+    const top = imgRect.top - parentRect.top + (cy - sizePx / 2) * scaleY;
+    return {
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${sizePx * scaleX}px`,
+      height: `${sizePx * scaleY}px`,
+    };
+  };
+
+  const imagePointStyle = (cx: number, cy: number) => {
+    if (!info || !imgRef.current || !overlayRef.current) return undefined;
+    const imgRect = imgRef.current.getBoundingClientRect();
+    const parentRect = overlayRef.current.getBoundingClientRect();
+    const scaleX = imgRect.width / info.columns;
+    const scaleY = imgRect.height / info.rows;
+    return {
+      left: `${imgRect.left - parentRect.left + cx * scaleX}px`,
+      top: `${imgRect.top - parentRect.top + cy * scaleY}px`,
+    };
+  };
+
+  const handleOverlayPointerDown = (e: React.PointerEvent, mode: "move" | "resize") => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    setDragMode(mode);
+  };
+
+  const handleOverlayPointerMove = (e: React.PointerEvent) => {
+    if (!dragMode || !info) return;
+    const pt = pointerToImagePx(e);
+    if (!pt) return;
+    if (activeTab === "MTF") {
+      setMtfRoi((prev) => {
+        const base = prev ?? { slice: sliceIndex, x: pt.x, y: pt.y, size: 48 };
+        if (dragMode === "move") {
+          return { ...base, slice: sliceIndex, x: pt.x, y: pt.y };
+        }
+        // resize: distance from current center * 2 (clamped)
+        const dx = pt.x - base.x;
+        const dy = pt.y - base.y;
+        const newSize = Math.max(24, Math.min(192, Math.round(2 * Math.max(Math.abs(dx), Math.abs(dy)))));
+        return { ...base, size: newSize };
+      });
+    } else {
+      setFwhmPeak({ slice: sliceIndex, x: pt.x, y: pt.y });
+    }
+  };
+
+  const handleOverlayPointerUp = () => {
+    if (!dragMode) return;
+    setDragMode(null);
+    scheduleReanalyze(mtfRoi, fwhmPeak);
+  };
+
+  // Click anywhere on the image (when not over the box) to place ROI/peak there.
+  const handleImagePointerDown = (e: React.PointerEvent) => {
+    if (dragMode || !info) return;
+    const pt = pointerToImagePx(e);
+    if (!pt) return;
+    if (activeTab === "MTF") {
+      const next = { slice: sliceIndex, x: pt.x, y: pt.y, size: mtfRoi?.size ?? 48 };
+      setMtfRoi(next);
+      scheduleReanalyze(next, fwhmPeak);
+    } else {
+      const next = { slice: sliceIndex, x: pt.x, y: pt.y };
+      setFwhmPeak(next);
+      scheduleReanalyze(mtfRoi, next);
+    }
+  };
+
+  // Derive chart inputs from analysis or fall back to demo
+  const profile = useMemo(() => {
+    if (analysis) {
+      if (activeTab === "MTF") {
+        return {
+          title: analysis.mtf.title,
+          subtitle: analysis.mtf.subtitle,
+          unit: analysis.mtf.unit,
+          yLabel: analysis.mtf.y_label,
+          points: analysis.mtf.points,
+        };
+      }
+      const src = activeTab === "FWHM_H" ? analysis.fwhm_h : analysis.fwhm_v;
+      return {
+        title: src.title,
+        subtitle: src.subtitle,
+        unit: src.unit,
+        yLabel: src.y_label,
+        points: src.points,
+      };
+    }
+    const demo = DEMO_PROFILES[activeTab];
+    return { title: demo.title, subtitle: demo.subtitle, unit: demo.unit, yLabel: demo.yLabel, points: demo.points };
+  }, [analysis, activeTab]);
+
   const chartWidth = 244;
   const chartHeight = 184;
-  const chartPadding = { left: 32, right: 10, top: 12, bottom: 20 };
+  const padding = { left: 32, right: 10, top: 12, bottom: 20 };
 
-  const minX = 0;
-  const maxX = activeTab === "MTF" ? 25 : 50;
-  const minY = activeTab === "MTF" ? 0 : -500;
-  const maxY = activeTab === "MTF" ? 1.0 : 3000;
+  const { minX, maxX, minY, maxY, xTicks, yTicks } = useMemo(() => {
+    const xs = profile.points.map((p) => p.x);
+    const ys = profile.points.map((p) => p.y);
+    if (activeTab === "MTF") {
+      const mx = Math.max(...xs, 1);
+      return {
+        minX: 0,
+        maxX: Math.min(Math.max(25, Math.ceil(mx)), 30),
+        minY: 0,
+        maxY: 1,
+        xTicks: [0, 5, 10, 15, 20, 25],
+        yTicks: [0, 0.2, 0.4, 0.6, 0.8, 1.0],
+      };
+    }
+    const yMax = Math.max(...ys, 1);
+    const yMin = Math.min(...ys, 0);
+    const span = yMax - yMin || 1;
+    const padY = span * 0.05;
+    const minXv = Math.min(...xs, 0);
+    const maxXv = Math.max(...xs, 1);
+    const range = maxXv - minXv;
+    const step = Math.max(Math.round(range / 5), 1);
+    return {
+      minX: minXv,
+      maxX: maxXv,
+      minY: yMin - padY,
+      maxY: yMax + padY,
+      xTicks: Array.from({ length: 6 }, (_, i) => Math.round(minXv + i * step)).filter((v) => v <= maxXv),
+      yTicks: Array.from({ length: 5 }, (_, i) => yMin + (i * span) / 4),
+    };
+  }, [profile, activeTab]);
 
-  const xTicks = activeTab === "MTF" ? [0, 5, 10, 15, 20, 25] : [0, 10, 20, 30, 40, 50];
-  const yTicks = activeTab === "MTF" ? [0, 0.2, 0.4, 0.6, 0.8, 1.0] : [0, 1000, 2000, 3000];
+  const toX = (v: number) =>
+    padding.left + ((v - minX) / Math.max(maxX - minX, 1e-6)) * (chartWidth - padding.left - padding.right);
+  const toY = (v: number) =>
+    chartHeight - padding.bottom -
+    ((v - minY) / Math.max(maxY - minY, 1e-6)) * (chartHeight - padding.top - padding.bottom);
 
-  const toChartX = (value: number) =>
-    chartPadding.left +
-    ((value - minX) / Math.max(maxX - minX, 1)) *
-      (chartWidth - chartPadding.left - chartPadding.right);
-  const toChartY = (value: number) =>
-    chartHeight -
-    chartPadding.bottom -
-    ((value - minY) / Math.max(maxY - minY, 0.001)) *
-      (chartHeight - chartPadding.top - chartPadding.bottom);
+  const buildPath = (pts: Point[]) =>
+    pts.map((p, i) => `${i === 0 ? "M" : "L"} ${toX(p.x)} ${toY(p.y)}`).join(" ");
 
-  const buildPath = (points: readonly { x: number; y: number }[]) =>
-    points
-      .map((point, index) => `${index === 0 ? "M" : "L"} ${toChartX(point.x)} ${toChartY(point.y)}`)
-      .join(" ");
+  const currentPath = buildPath(profile.points);
 
-  const currentPath = buildPath(activeProfile.points);
-  const baselinePath = activeProfile.baseline ? buildPath(activeProfile.baseline) : "";
+  // FWHM markers
+  const fwhmInfo = useMemo(() => {
+    if (activeTab === "MTF") return null;
+    if (analysis) {
+      const src = activeTab === "FWHM_H" ? analysis.fwhm_h : analysis.fwhm_v;
+      const ys = src.points.map((p) => p.y);
+      const peakY = Math.max(...ys);
+      const baseY = Math.min(...ys);
+      const halfMax = baseY + (peakY - baseY) / 2;
+      const peakIdx = ys.indexOf(peakY);
+      return {
+        halfMax,
+        x1: src.peak_center - src.fwhm_pixels / 2,
+        x2: src.peak_center + src.fwhm_pixels / 2,
+        peakCenter: src.peak_center,
+        peakIdx,
+        fwhmPx: src.fwhm_pixels,
+        fwhmMm: src.fwhm_mm,
+      };
+    }
+    const demo = DEMO_PROFILES[activeTab];
+    const ys = demo.points.map((p) => p.y);
+    const peakY = Math.max(...ys);
+    return {
+      halfMax: peakY / 2,
+      x1: demo.peakCenter - demo.fwhmPx / 2,
+      x2: demo.peakCenter + demo.fwhmPx / 2,
+      peakCenter: demo.peakCenter,
+      peakIdx: ys.indexOf(peakY),
+      fwhmPx: demo.fwhmPx,
+      fwhmMm: 0,
+    };
+  }, [activeTab, analysis]);
 
   return (
     <ServiceModeShell currentRoute="/service/performance">
       <section className="flex-1 bg-white border border-[#B0C4DE] rounded-md shadow-sm p-3 flex flex-col relative overflow-hidden h-full">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-1 rounded-2xl border border-[#D6E2F2] bg-[linear-gradient(180deg,#F8FBFF_0%,#EDF3FA_100%)] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_4px_14px_rgba(148,163,184,0.12)]">
-            {tabs.map((tab) => {
+            {(Object.keys(tabMeta) as TabKey[]).map((tab) => {
               const active = activeTab === tab;
-              const meta = tabMeta[tab as keyof typeof tabMeta];
+              const meta = tabMeta[tab];
               return (
                 <button
                   key={tab}
@@ -142,9 +456,7 @@ export default function PerformanceEvaluationScreen() {
                   <span className={`text-[12px] font-black tracking-[0.06em] ${active ? meta.accent : "text-[#64748B]"}`}>
                     {tab}
                   </span>
-                  <span
-                    className={`mt-0.5 text-[10px] font-bold ${active ? "text-[#475569]" : "text-[#A3B2C2] group-hover:text-[#64748B]"}`}
-                  >
+                  <span className={`mt-0.5 text-[10px] font-bold ${active ? "text-[#475569]" : "text-[#A3B2C2] group-hover:text-[#64748B]"}`}>
                     {meta.label}
                   </span>
                   {active && (
@@ -165,22 +477,111 @@ export default function PerformanceEvaluationScreen() {
                 <div className={`w-4 h-4 bg-white rounded-full transition-all ${showBaseline ? "translate-x-6" : "translate-x-0"}`} />
               </div>
             </div>
-            <button className="px-6 h-10 bg-[#2F54EB] text-white font-bold rounded-full hover:bg-blue-600 transition-all active:scale-95 shadow-md text-[13px]">
-              导入图像
+            <button
+              onClick={handleImport}
+              disabled={loading || !activeDataset}
+              className="px-6 h-10 bg-[#2F54EB] text-white font-bold rounded-full hover:bg-blue-600 transition-all active:scale-95 shadow-md text-[13px] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : null}
+              {loading ? "分析中…" : "导入图像"}
             </button>
           </div>
         </div>
 
         <div className="flex-1 flex gap-3 overflow-hidden">
           <div className="flex-1 bg-[#050A19] rounded-3xl relative flex items-center justify-center overflow-hidden border border-[#1A2642] shadow-2xl">
-            <div className="flex flex-col items-center gap-4 opacity-40">
-              <div className="w-16 h-16 rounded-full border-2 border-dashed border-[#4D94FF] flex items-center justify-center text-[#4D94FF]">
-                <ImageIcon size={32} />
+            {info && previewUrl ? (
+              <>
+                <div
+                  ref={overlayRef}
+                  className="absolute inset-0 flex items-center justify-center"
+                  onPointerDown={handleImagePointerDown}
+                  onPointerMove={handleOverlayPointerMove}
+                  onPointerUp={handleOverlayPointerUp}
+                  onPointerCancel={handleOverlayPointerUp}
+                >
+                  <img
+                    ref={imgRef}
+                    src={previewUrl}
+                    alt={`Slice ${sliceIndex + 1}`}
+                    className="max-w-full max-h-full object-contain select-none"
+                    draggable={false}
+                  />
+                  {/* MTF ROI box */}
+                  {activeTab === "MTF" && mtfRoi && mtfRoi.slice === sliceIndex && (
+                    <div
+                      className="absolute border-2 border-[#FBBF24] shadow-[0_0_18px_rgba(251,191,36,0.5)] cursor-move group"
+                      style={imageRectStyle(mtfRoi.x, mtfRoi.y, mtfRoi.size)}
+                      onPointerDown={(e) => handleOverlayPointerDown(e, "move")}
+                    >
+                      <div className="absolute -top-5 left-0 text-[10px] font-black text-[#FBBF24] bg-black/60 px-1.5 py-0.5 rounded">
+                        ROI {mtfRoi.size}px
+                      </div>
+                      {/* corner resize handle */}
+                      <div
+                        className="absolute -right-1 -bottom-1 w-3 h-3 bg-[#FBBF24] border border-black/40 rounded-sm cursor-nwse-resize"
+                        onPointerDown={(e) => handleOverlayPointerDown(e, "resize")}
+                      />
+                      {/* center marker */}
+                      <div className="absolute top-1/2 left-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#FBBF24]" />
+                    </div>
+                  )}
+                  {activeTab === "MTF" && mtfRoi && mtfRoi.slice !== sliceIndex && (
+                    <div className="absolute top-12 left-3 bg-black/60 text-[#FBBF24] text-[10px] font-bold px-2 py-1 rounded-md">
+                      ROI 在切片 {mtfRoi.slice + 1} (点击图像放置于本切片)
+                    </div>
+                  )}
+                  {/* FWHM peak marker on its slice */}
+                  {activeTab !== "MTF" && fwhmPeak && fwhmPeak.slice === sliceIndex && (
+                    <div
+                      className="absolute -translate-x-1/2 -translate-y-1/2 cursor-move"
+                      style={imagePointStyle(fwhmPeak.x, fwhmPeak.y)}
+                      onPointerDown={(e) => handleOverlayPointerDown(e, "move")}
+                    >
+                      <div className="w-7 h-7 rounded-full border-2 border-[#22D3EE] shadow-[0_0_12px_rgba(34,211,238,0.8)]" />
+                      {activeTab === "FWHM_H" && <div className="absolute left-1/2 top-1/2 -translate-y-1/2 -translate-x-1/2 w-24 h-[1px] bg-[#22D3EE]/70" />}
+                      {activeTab === "FWHM_V" && <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1px] h-24 bg-[#22D3EE]/70" />}
+                    </div>
+                  )}
+                  {activeTab !== "MTF" && fwhmPeak && fwhmPeak.slice !== sliceIndex && (
+                    <div className="absolute top-12 left-3 bg-black/60 text-[#22D3EE] text-[10px] font-bold px-2 py-1 rounded-md">
+                      采样点在切片 {fwhmPeak.slice + 1} (点击图像放置于本切片)
+                    </div>
+                  )}
+                </div>
+                <div className="absolute top-3 left-3 bg-black/60 text-[#7DD3FC] text-[10px] font-bold px-2.5 py-1 rounded-md tracking-wider">
+                  SLICE {sliceIndex + 1}/{info.slice_count}
+                </div>
+                <div className="absolute top-3 right-3 bg-black/60 text-[#94A3B8] text-[10px] font-bold px-2.5 py-1 rounded-md tracking-wider">
+                  {info.rows}×{info.columns} · {info.pixel_spacing_mm[0].toFixed(3)} mm/px
+                </div>
+                {/* Slice slider */}
+                <div className="absolute bottom-3 left-3 right-3 flex items-center gap-2 bg-black/50 backdrop-blur px-3 py-2 rounded-xl">
+                  <span className="text-[10px] font-bold text-[#7DD3FC] tracking-widest">1</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(info.slice_count - 1, 0)}
+                    value={sliceIndex}
+                    onChange={(e) => setSliceIndex(Number(e.target.value))}
+                    className="flex-1 accent-[#4D94FF]"
+                  />
+                  <span className="text-[10px] font-bold text-[#7DD3FC] tracking-widest">{info.slice_count}</span>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-4 opacity-40">
+                <div className="w-16 h-16 rounded-full border-2 border-dashed border-[#4D94FF] flex items-center justify-center text-[#4D94FF]">
+                  <ImageIcon size={32} />
+                </div>
+                <span className="text-[#4D94FF] text-[14px] font-bold tracking-widest uppercase">
+                  Target Phantom View
+                </span>
+                {error && (
+                  <span className="text-[#F87171] text-[11px] font-bold mt-2 max-w-[280px] text-center">{error}</span>
+                )}
               </div>
-              <span className="text-[#4D94FF] text-[14px] font-bold tracking-widest uppercase">
-                Target Phantom View
-              </span>
-            </div>
+            )}
 
             <div className="absolute inset-0 pointer-events-none">
               <div className="absolute top-0 left-0 w-24 h-24 border-t border-l border-[#4D94FF]/20 rounded-tl-3xl m-6" />
@@ -194,9 +595,9 @@ export default function PerformanceEvaluationScreen() {
             <div className="flex flex-col flex-1 bg-[#F8FAFC] border border-[#B0C4DE]/50 rounded-3xl p-3 shadow-sm overflow-hidden">
               <div className="flex items-start justify-between gap-3 mb-2 shrink-0">
                 <div>
-                  <div className="font-black text-[#263238] text-[15px]">{activeProfile.title}</div>
+                  <div className="font-black text-[#263238] text-[15px]">{profile.title}</div>
                   <div className="text-[10px] text-[#90A4AE] font-medium leading-[1.2] mt-0.5">
-                    {activeProfile.subtitle}
+                    {profile.subtitle}
                   </div>
                 </div>
                 <div className="shrink-0 rounded-full bg-[#E3F2FD] px-2.5 py-1 text-[10px] font-black text-[#1E88E5]">
@@ -214,179 +615,136 @@ export default function PerformanceEvaluationScreen() {
                       </linearGradient>
                     </defs>
 
-                    {yTicks.map((value) => (
+                    {yTicks.map((value, i) => (
                       <line
-                        key={`y-grid-${value}`}
-                        x1={chartPadding.left}
-                        y1={toChartY(value)}
-                        x2={chartWidth - chartPadding.right}
-                        y2={toChartY(value)}
+                        key={`yg-${i}`}
+                        x1={padding.left}
+                        y1={toY(value)}
+                        x2={chartWidth - padding.right}
+                        y2={toY(value)}
                         stroke="#E2E8F0"
                         strokeWidth="0.5"
                         strokeDasharray="3 4"
                       />
                     ))}
 
-                    <path
-                      d={`${currentPath} L ${toChartX(activeProfile.points[activeProfile.points.length - 1].x)} ${toChartY(0)} L ${toChartX(activeProfile.points[0].x)} ${toChartY(0)} Z`}
-                      fill="url(#curveFill)"
-                    />
+                    {profile.points.length > 0 && (
+                      <path
+                        d={`${currentPath} L ${toX(profile.points[profile.points.length - 1].x)} ${toY(minY)} L ${toX(profile.points[0].x)} ${toY(minY)} Z`}
+                        fill="url(#curveFill)"
+                      />
+                    )}
 
-                    {activeProfile.markers.map((marker, index: number) => {
-                      if (marker.type === "mtf50" || marker.type === "mtf10") {
-                        const item = marker as { label: string; y: number; x: number; color: string };
-                        return (
-                          <g key={index}>
+                    {activeTab === "MTF" && analysis && (
+                      <>
+                        {analysis.mtf.mtf50 !== null && (
+                          <g>
                             <line
-                              x1={chartPadding.left}
-                              y1={toChartY(item.y)}
-                              x2={toChartX(item.x)}
-                              y2={toChartY(item.y)}
+                              x1={padding.left}
+                              y1={toY(0.5)}
+                              x2={toX(analysis.mtf.mtf50)}
+                              y2={toY(0.5)}
                               stroke="#94A3B8"
                               strokeDasharray="2 2"
                               strokeWidth="1"
                             />
                             <line
-                              x1={toChartX(item.x)}
-                              y1={chartPadding.top}
-                              x2={toChartX(item.x)}
-                              y2={toChartY(0)}
-                              stroke={item.color}
+                              x1={toX(analysis.mtf.mtf50)}
+                              y1={padding.top}
+                              x2={toX(analysis.mtf.mtf50)}
+                              y2={toY(0)}
+                              stroke="#EF4444"
                               strokeDasharray="4 2"
                               strokeWidth="1.5"
                             />
-                            <circle
-                              cx={toChartX(item.x)}
-                              cy={toChartY(item.y)}
-                              r="3.5"
-                              fill={item.color}
-                              stroke="white"
-                              strokeWidth="1.5"
-                            />
-                            <text
-                              x={toChartX(item.x) + 4}
-                              y={toChartY(item.y) - 6}
-                              fontSize="8"
-                              fontWeight="bold"
-                              fill={item.color}
-                            >
-                              {item.label}
+                            <circle cx={toX(analysis.mtf.mtf50)} cy={toY(0.5)} r="3.5" fill="#EF4444" stroke="white" strokeWidth="1.5" />
+                            <text x={toX(analysis.mtf.mtf50) + 4} y={toY(0.5) - 6} fontSize="8" fontWeight="bold" fill="#EF4444">
+                              MTF50
                             </text>
                           </g>
-                        );
-                      }
-                      if (marker.type === "half-max") {
-                        const item = marker as { y: number; color: string };
-                        return (
-                          <line
-                            key={index}
-                            x1={chartPadding.left}
-                            y1={toChartY(item.y)}
-                            x2={chartWidth - chartPadding.right}
-                            y2={toChartY(item.y)}
-                            stroke={item.color}
-                            strokeDasharray="4 2"
-                            strokeWidth="1.5"
-                          />
-                        );
-                      }
-                      if (marker.type === "fwhm-range") {
-                        const item = marker as { x1: number; x2: number; color: string };
-                        return (
-                          <g key={index}>
+                        )}
+                        {analysis.mtf.mtf10 !== null && (
+                          <g>
                             <line
-                              x1={toChartX(item.x1)}
-                              y1={chartPadding.top}
-                              x2={toChartX(item.x1)}
-                              y2={toChartY(0)}
-                              stroke={item.color}
+                              x1={padding.left}
+                              y1={toY(0.1)}
+                              x2={toX(analysis.mtf.mtf10)}
+                              y2={toY(0.1)}
+                              stroke="#94A3B8"
+                              strokeDasharray="2 2"
+                              strokeWidth="1"
+                            />
+                            <line
+                              x1={toX(analysis.mtf.mtf10)}
+                              y1={padding.top}
+                              x2={toX(analysis.mtf.mtf10)}
+                              y2={toY(0)}
+                              stroke="#3B82F6"
                               strokeDasharray="4 2"
                               strokeWidth="1.5"
                             />
-                            <line
-                              x1={toChartX(item.x2)}
-                              y1={chartPadding.top}
-                              x2={toChartX(item.x2)}
-                              y2={toChartY(0)}
-                              stroke={item.color}
-                              strokeDasharray="4 2"
-                              strokeWidth="1.5"
-                            />
+                            <circle cx={toX(analysis.mtf.mtf10)} cy={toY(0.1)} r="3.5" fill="#3B82F6" stroke="white" strokeWidth="1.5" />
+                            <text x={toX(analysis.mtf.mtf10) + 4} y={toY(0.1) - 6} fontSize="8" fontWeight="bold" fill="#3B82F6">
+                              MTF10
+                            </text>
                           </g>
-                        );
-                      }
-                      return null;
-                    })}
-
-                    {showBaseline && (
-                      <path
-                        d={baselinePath}
-                        fill="none"
-                        stroke="#94A3B8"
-                        strokeWidth="1.2"
-                        strokeDasharray="4 4"
-                        opacity="0.6"
-                      />
+                        )}
+                      </>
+                    )}
+                    {activeTab === "MTF" && !analysis && (
+                      <>
+                        <g>
+                          <line x1={padding.left} y1={toY(0.5)} x2={toX(1.5)} y2={toY(0.5)} stroke="#94A3B8" strokeDasharray="2 2" strokeWidth="1" />
+                          <line x1={toX(1.5)} y1={padding.top} x2={toX(1.5)} y2={toY(0)} stroke="#EF4444" strokeDasharray="4 2" strokeWidth="1.5" />
+                          <circle cx={toX(1.5)} cy={toY(0.5)} r="3.5" fill="#EF4444" stroke="white" strokeWidth="1.5" />
+                          <text x={toX(1.5) + 4} y={toY(0.5) - 6} fontSize="8" fontWeight="bold" fill="#EF4444">MTF50</text>
+                        </g>
+                        <g>
+                          <line x1={padding.left} y1={toY(0.1)} x2={toX(10.5)} y2={toY(0.1)} stroke="#94A3B8" strokeDasharray="2 2" strokeWidth="1" />
+                          <line x1={toX(10.5)} y1={padding.top} x2={toX(10.5)} y2={toY(0)} stroke="#3B82F6" strokeDasharray="4 2" strokeWidth="1.5" />
+                          <circle cx={toX(10.5)} cy={toY(0.1)} r="3.5" fill="#3B82F6" stroke="white" strokeWidth="1.5" />
+                          <text x={toX(10.5) + 4} y={toY(0.1) - 6} fontSize="8" fontWeight="bold" fill="#3B82F6">MTF10</text>
+                        </g>
+                      </>
                     )}
 
-                    <path
-                      d={currentPath}
-                      fill="none"
-                      stroke="#3B82F6"
-                      strokeWidth="2"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                    />
+                    {activeTab !== "MTF" && fwhmInfo && (
+                      <>
+                        <line
+                          x1={padding.left}
+                          y1={toY(fwhmInfo.halfMax)}
+                          x2={chartWidth - padding.right}
+                          y2={toY(fwhmInfo.halfMax)}
+                          stroke="#EF4444"
+                          strokeDasharray="4 2"
+                          strokeWidth="1.2"
+                        />
+                        <line x1={toX(fwhmInfo.x1)} y1={padding.top} x2={toX(fwhmInfo.x1)} y2={toY(minY)} stroke="#10B981" strokeDasharray="4 2" strokeWidth="1.5" />
+                        <line x1={toX(fwhmInfo.x2)} y1={padding.top} x2={toX(fwhmInfo.x2)} y2={toY(minY)} stroke="#10B981" strokeDasharray="4 2" strokeWidth="1.5" />
+                      </>
+                    )}
 
-                    <line
-                      x1={chartPadding.left}
-                      y1={toChartY(0)}
-                      x2={chartWidth - chartPadding.right}
-                      y2={toChartY(0)}
-                      stroke="#475569"
-                      strokeWidth="1"
-                    />
-                    <line
-                      x1={chartPadding.left}
-                      y1={chartPadding.top}
-                      x2={chartPadding.left}
-                      y2={chartHeight - chartPadding.bottom}
-                      stroke="#475569"
-                      strokeWidth="1"
-                    />
+                    <path d={currentPath} fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
 
-                    {yTicks.map((value) => (
-                      <text
-                        key={`y-${value}`}
-                        x={chartPadding.left - 6}
-                        y={toChartY(value) + 3}
-                        textAnchor="end"
-                        fontSize="8"
-                        fontWeight="500"
-                        fill="#64748B"
-                      >
-                        {value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value.toFixed(value < 1 ? 1 : 0)}
+                    <line x1={padding.left} y1={toY(minY)} x2={chartWidth - padding.right} y2={toY(minY)} stroke="#475569" strokeWidth="1" />
+                    <line x1={padding.left} y1={padding.top} x2={padding.left} y2={chartHeight - padding.bottom} stroke="#475569" strokeWidth="1" />
+
+                    {yTicks.map((value, i) => (
+                      <text key={`y-${i}`} x={padding.left - 6} y={toY(value) + 3} textAnchor="end" fontSize="8" fontWeight="500" fill="#64748B">
+                        {Math.abs(value) >= 1000 ? `${(value / 1000).toFixed(1)}k` : value.toFixed(value < 1 && value > -1 ? 2 : 0)}
                       </text>
                     ))}
-                    {xTicks.map((value) => (
-                      <text
-                        key={`x-${value}`}
-                        x={toChartX(value)}
-                        y={chartHeight - 8}
-                        textAnchor="middle"
-                        fontSize="8"
-                        fontWeight="500"
-                        fill="#64748B"
-                      >
-                        {value.toFixed(value < 1 ? 1 : 0)}
+                    {xTicks.map((value, i) => (
+                      <text key={`x-${i}`} x={toX(value)} y={chartHeight - 8} textAnchor="middle" fontSize="8" fontWeight="500" fill="#64748B">
+                        {value.toFixed(value < 1 && value > -1 ? 1 : 0)}
                       </text>
                     ))}
                   </svg>
                 </div>
 
                 <div className="mt-1 flex items-center justify-between text-[8px] font-bold text-[#94A3B8] border-t border-[#F1F5F9] pt-1">
-                  <span>Unit: {activeProfile.unit}</span>
-                  <span>Axis: {activeProfile.yLabel}</span>
+                  <span>Unit: {profile.unit}</span>
+                  <span>Axis: {profile.yLabel}</span>
                 </div>
               </div>
             </div>
@@ -401,11 +759,15 @@ export default function PerformanceEvaluationScreen() {
                   <>
                     <div className="flex justify-between items-center">
                       <span className="text-[11px] text-[#64748B] font-semibold">MTF50 频率</span>
-                      <span className="text-[12px] text-[#2563EB] font-black">1.5 lp/cm</span>
+                      <span className="text-[12px] text-[#2563EB] font-black">
+                        {analysis?.mtf.mtf50 != null ? `${analysis.mtf.mtf50.toFixed(2)} lp/cm` : "1.5 lp/cm"}
+                      </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-[11px] text-[#64748B] font-semibold">MTF10 频率</span>
-                      <span className="text-[12px] text-[#2563EB] font-black">10.5 lp/cm</span>
+                      <span className="text-[12px] text-[#2563EB] font-black">
+                        {analysis?.mtf.mtf10 != null ? `${analysis.mtf.mtf10.toFixed(2)} lp/cm` : "10.5 lp/cm"}
+                      </span>
                     </div>
                   </>
                 ) : (
@@ -413,22 +775,37 @@ export default function PerformanceEvaluationScreen() {
                     <div className="flex justify-between items-center">
                       <span className="text-[11px] text-[#64748B] font-semibold">FWHM 估值</span>
                       <span className="text-[12px] text-[#059669] font-black">
-                        {activeTab === "FWHM_H" ? "2.40" : "3.00"} Pixels
+                        {fwhmInfo ? `${fwhmInfo.fwhmPx.toFixed(2)} px` : "—"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[11px] text-[#64748B] font-semibold">FWHM (mm)</span>
+                      <span className="text-[12px] text-[#059669] font-black">
+                        {analysis && fwhmInfo ? `${fwhmInfo.fwhmMm.toFixed(2)} mm` : "—"}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-[11px] text-[#64748B] font-semibold">峰值中心</span>
                       <span className="text-[12px] text-[#059669] font-black">
-                        {activeTab === "FWHM_H" ? "22.0" : "21.0"}
+                        {fwhmInfo ? fwhmInfo.peakCenter.toFixed(1) : "—"}
                       </span>
                     </div>
                   </>
                 )}
                 <div className="pt-2 border-t border-[#F1F5F9] flex justify-between items-center">
-                  <span className="text-[11px] text-[#64748B] font-semibold">基线偏差</span>
+                  <span className="text-[11px] text-[#64748B] font-semibold">数据状态</span>
                   <div className="flex items-center gap-1">
-                    <span className="text-[12px] text-[#DC2626] font-black">+0.2%</span>
-                    <div className="w-1.5 h-1.5 rounded-full bg-[#DC2626] animate-pulse" />
+                    {analysis ? (
+                      <>
+                        <span className="text-[12px] text-[#059669] font-black">已加载</span>
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#059669]" />
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-[12px] text-[#DC2626] font-black">演示数据</span>
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#DC2626] animate-pulse" />
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

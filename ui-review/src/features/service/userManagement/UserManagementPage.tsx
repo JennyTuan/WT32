@@ -277,7 +277,7 @@ export default function UserManagementPage() {
     try {
       const saved = await resetUserPassword(user.id);
       replaceUser(saved);
-      showToast("凭证已重置");
+      showToast(`凭证已重置：密码恢复为账号本身（${saved.username}），下次登录将要求修改`);
       await loadSnapshot();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "重置失败", "error");

@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from .database import SessionLocal, init_db
-from .routers import auth, contrast_configs, corners, dicom_settings, disk_manager, dose_settings, logs, organization_info, patients, protocols, recon_params, scan_params, scan_sessions, system_settings, user_management
+from .routers import auth, contrast_configs, corners, dicom_settings, disk_manager, dose_settings, logs, organization_info, patients, performance, protocols, recon_params, scan_params, scan_sessions, system_settings, user_management
 from .websocket.scan_ws import router as scan_ws_router
 
 app = FastAPI(title="CT Prototype Backend", version="1.0.0")
@@ -94,6 +94,7 @@ app.include_router(dose_settings.router, prefix="/api")
 app.include_router(user_management.router, prefix="/api")
 app.include_router(system_settings.router, prefix="/api")
 app.include_router(organization_info.router, prefix="/api")
+app.include_router(performance.router, prefix="/api")
 app.include_router(scan_ws_router)
 DICOM_OUT_DIR = DATA_DIR / "dicom_out"
 DICOM_OUT_DIR.mkdir(parents=True, exist_ok=True)
