@@ -4,6 +4,9 @@ import { Ambulance, Sun } from "lucide-react";
 import PatientHeaderCard from "./PatientHeaderCard";
 import NetworkStatusButton from "./NetworkStatusButton";
 import SystemMenuButton from "./SystemMenuButton";
+import iconTable from "../assets/icon-table.svg";
+import iconGantry from "../assets/icon-gantry.svg";
+import iconTube from "../assets/icon-tube.svg";
 
 type AppHeaderProps = {
   /** Patient name; null/undefined → 显示 "未选择患者" */
@@ -77,15 +80,15 @@ export default function AppHeader({
         <PatientHeaderCard name={patientName ?? null} patientId={patientId ?? null} />
         <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
           <div className="flex items-center gap-1 text-[11px] font-bold">
-            <img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" />
+            <img src={iconTable} alt="机床" className="w-3.5 h-3.5" />
             <span>{tableLabel}</span>
           </div>
           <div className="flex items-center gap-1 text-[11px] font-bold">
-            <img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" />
+            <img src={iconGantry} alt="机架角度" className="w-3.5 h-3.5" />
             <span>{gantryLabel}</span>
           </div>
           <div className="flex items-center gap-1 text-[11px] font-bold">
-            <img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" />
+            <img src={iconTube} alt="球管" className="w-3.5 h-3.5" />
             <span>{heatLabel}</span>
           </div>
         </div>

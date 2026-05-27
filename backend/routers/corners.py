@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import json
 
-from ..database import get_db
+from ..database import get_db, DEFAULT_CORNER_CONFIG
 from .. import models, schemas
 
 router = APIRouter(
@@ -47,33 +47,17 @@ def get_corner_templates(db: Session = Depends(get_db)):
 def reset_to_default(db: Session = Depends(get_db)):
     default_config = db.query(models.CornerConfig).filter(models.CornerConfig.template_name == "Default").first()
     if not default_config:
-        # Create it if it somehow missing
-        default_structure = {
-            "corners": {
-                "topLeft": [
-                    {"key": "patient_name", "label": "姓名", "visible": True},
-                    {"key": "patient_id", "label": "ID", "visible": True}
-                ],
-                "topRight": [
-                    {"key": "scan_time", "label": "时间", "visible": True},
-                    {"key": "protocol_name", "label": "协议", "visible": True}
-                ],
-                "bottomLeft": [
-                    {"key": "kv", "label": "kV", "visible": True},
-                    {"key": "ma", "label": "mA", "visible": True}
-                ],
-                "bottomRight": [
-                    {"key": "series_number", "label": "序列号", "visible": True},
-                    {"key": "image_number", "label": "图像号", "visible": True}
-                ]
-            }
-        }
         default_config = models.CornerConfig(
             template_name="Default",
             is_active=False,
-            config_json=json.dumps(default_structure)
+            config_json=json.dumps(DEFAULT_CORNER_CONFIG, ensure_ascii=False)
         )
         db.add(default_config)
+        db.commit()
+        db.refresh(default_config)
+    else:
+        # Always re-seed the Default template to the canonical layout on reset.
+        default_config.config_json = json.dumps(DEFAULT_CORNER_CONFIG, ensure_ascii=False)
         db.commit()
         db.refresh(default_config)
 

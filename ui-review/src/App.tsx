@@ -40,7 +40,12 @@ import ServiceDoseLogsPage from "./features/service/dose/ServiceDoseLogsPage";
 import ServiceDoseSettingsPage from "./features/service/dose/ServiceDoseSettingsPage";
 import ProtocolManagementScreen from "./screens/ProtocolManagementScreen";
 import CornerInfoPage from "./features/service/cornerInfo/CornerInfoPage";
+import DicomSettingsPage from "./features/service/dicom/DicomSettingsPage";
 import UserManagementPage from "./features/service/userManagement/UserManagementPage";
+import LoginScreen from "./screens/LoginScreen";
+import ChangePasswordScreen from "./screens/ChangePasswordScreen";
+import RequireAuth from "./components/RequireAuth";
+import { AuthProvider } from "./lib/authContext";
 
 const HomeRoute = HomeScreen ?? (() => <Navigate to="/patients" replace />);
 const TABLET_WIDTH = 1024;
@@ -80,6 +85,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <AuthProvider>
       <div className="min-h-screen w-full overflow-hidden bg-[radial-gradient(ellipse_at_top,#e0f2fe_0%,#cbd5e1_40%,#94a3b8_100%)] flex items-center justify-center p-6">
         <div
           className="relative rounded-[36px] bg-gradient-to-b from-[#1e293b] to-[#0a1120] shadow-[0_60px_140px_rgba(0,0,0,0.55),0_20px_40px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.5)]"
@@ -108,6 +114,9 @@ export default function App() {
             }}
           >
             <Routes>
+              <Route path="/login" element={<LoginScreen />} />
+              <Route element={<RequireAuth />}>
+              <Route path="/change-password" element={<ChangePasswordScreen />} />
               <Route path="/" element={<HomeRoute />} />
 
               <Route path="/patients" element={<PatientListScreen />} />
@@ -145,7 +154,7 @@ export default function App() {
               <Route path="/service/performance" element={<PerformanceEvaluationScreen />} />
               <Route path="/service/settings/protocol-management" element={<ProtocolManagementScreen />} />
               <Route path="/service/settings/corner-info" element={<CornerInfoPage />} />
-              <Route path="/service/settings/dicom" element={<ServicePlaceholderScreen currentRoute="/service/settings/dicom" title="DICOM" description="用于配置 DICOM 节点、传输、发送接收策略和连接参数。" />} />
+              <Route path="/service/settings/dicom" element={<DicomSettingsPage />} />
               <Route path="/service/settings/user-management" element={<UserManagementPage />} />
               <Route path="/service/settings/system-settings" element={<ServicePlaceholderScreen currentRoute="/service/settings/system-settings" title="系统设置" description="用于设置系统级参数、时间网络、设备偏好和基础配置。" />} />
               <Route path="/service/settings/organization-info" element={<ServicePlaceholderScreen currentRoute="/service/settings/organization-info" title="机构信息设置" description="用于配置机构名称、标识、科室信息和对外显示内容。" />} />
@@ -157,10 +166,12 @@ export default function App() {
               <Route path="/service/dose/logs" element={<ServiceDoseLogsPage />} />
 
               <Route path="*" element={<Navigate to="/patients" replace />} />
+              </Route>
             </Routes>
           </div>
         </div>
       </div>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

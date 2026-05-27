@@ -159,7 +159,12 @@
       "Bash(curl -s 'http://localhost:8000/api/protocols/1')",
       "Bash(curl -s 'http://localhost:8000/api/protocols/')",
       "Bash(curl -s 'http://localhost:8000/api/protocols/136')",
-      "Bash(curl -s 'http://localhost:8000/api/logs/dose?limit=3')"
+      "Bash(curl -s 'http://localhost:8000/api/logs/dose?limit=3')",
+      "Bash(.venv/Scripts/python.exe -m pip install \"passlib[bcrypt]==1.7.4\" \"itsdangerous==2.2.0\")",
+      "Bash(.venv/Scripts/python.exe -c \"from backend.main import app; print\\('OK', [r.path for r in app.routes if '/auth' in r.path]\\)\")",
+      "Bash(.venv/Scripts/python.exe -m pip install \"bcrypt==4.2.1\")",
+      "Bash(.venv/Scripts/python.exe -m pip install httpx)",
+      "Bash(curl -s http://localhost:8000/api/users/)"
     ]
   }
 }

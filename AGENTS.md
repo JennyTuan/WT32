@@ -40,6 +40,15 @@ npm.cmd run dev
 
 Use `npm.cmd` on Windows if PowerShell blocks `npm.ps1`.
 
+## Local Prototype Login
+
+For future AI assistants working with the local WT32 prototype UI, use this test account when login is required:
+
+- Username: `U0001`
+- Password: `stn123456`
+
+Use this only for local development and UI verification.
+
 ## Code Navigation
 
 Backend reading order:

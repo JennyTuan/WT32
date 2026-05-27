@@ -20,6 +20,9 @@ import { loadSelectedPatient } from "../lib/patientSession";
 import NetworkStatusButton from "../components/NetworkStatusButton";
 import SystemMenuButton from "../components/SystemMenuButton";
 import type { FourDPostScanState, RescanChoices } from "../lib/fourDTypes";
+import iconTable from "../assets/icon-table.svg";
+import iconGantry from "../assets/icon-gantry.svg";
+import iconTube from "../assets/icon-tube.svg";
 
 const BED_TRAVEL_MM = 19.2;
 const FIRST_ACQUISITION_EXPOSURE = "2s";
@@ -1105,9 +1108,9 @@ export default function FourDRescanSelectScreen() {
           </div>
 
           <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/球管.svg" alt="球管" className="w-3.5 h-3.5" /><span>0%</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTable} alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconGantry} alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTube} alt="球管" className="w-3.5 h-3.5" /><span>0%</span></div>
           </div>
         </div>
 

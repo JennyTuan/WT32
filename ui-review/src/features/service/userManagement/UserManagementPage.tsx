@@ -53,18 +53,46 @@ const STATUS_STYLES: Record<UserStatus, string> = {
   disabled: "bg-[#ECEFF1] text-[#546E7A] border-[#CFD8DC]",
 };
 
-const PERMISSIONS = [
-  { code: "scan.view", label: "检查查看", group: "扫描流程" },
-  { code: "scan.execute", label: "执行扫描", group: "扫描流程" },
-  { code: "patient.manage", label: "患者维护", group: "扫描流程" },
+type Permission = {
+  code: string;
+  label: string;
+  description?: string;
+  group: string;
+};
+
+const PERMISSIONS: Permission[] = [
+  // 扫描业务
+  { code: "scan.view", label: "检查查看", group: "扫描业务" },
+  { code: "scan.execute", label: "执行扫描", group: "扫描业务" },
+  { code: "patient.manage", label: "患者登记与编辑", description: "新建和修改患者基本信息（不含删除）", group: "扫描业务" },
+  { code: "patient.delete", label: "删除患者", description: "不可逆操作，建议仅授予管理员", group: "扫描业务" },
+
+  // 协议与剂量
   { code: "protocol.view", label: "协议查看", group: "协议与剂量" },
-  { code: "protocol.manage", label: "协议维护", group: "协议与剂量" },
-  { code: "dose.manage", label: "剂量设置", group: "协议与剂量" },
-  { code: "service.hardware", label: "硬件服务", group: "服务模式" },
-  { code: "system.settings", label: "系统设置", group: "服务模式" },
+  { code: "protocol.manage", label: "协议维护", description: "新建、编辑、删除模板协议；不影响扫描会话内的临时协议调整", group: "协议与剂量" },
+  { code: "dose.view", label: "剂量记录查看", group: "协议与剂量" },
+  { code: "dose.manage", label: "剂量参数维护", group: "协议与剂量" },
+
+  // 服务模式
+  { code: "service.enter", label: "进入服务模式", description: "服务模式准入，控制是否能切换到服务模式", group: "服务模式" },
+  { code: "hardware.calibration", label: "校准与 QA", description: "球管预热 / 空气校正 / 日常 QA", group: "服务模式" },
+  { code: "hardware.diagnostics", label: "硬件诊断", description: "硬件测试 / 性能评估", group: "服务模式" },
+  { code: "hardware.storage", label: "存储与电源", description: "电池管理 / 磁盘管理", group: "服务模式" },
+  { code: "hardware.manual_scan", label: "手动扫描", description: "服务模式下的手动出束", group: "服务模式" },
+
+  // 数据与接口
+  { code: "dicom.manage", label: "DICOM 配置", group: "数据与接口" },
+  { code: "cornerinfo.manage", label: "四角信息", group: "数据与接口" },
+  { code: "organization.manage", label: "机构信息", group: "数据与接口" },
+
+  // 系统与日志
+  { code: "system.settings", label: "系统设置", group: "系统与日志" },
+  { code: "log.view", label: "系统日志查看", group: "系统与日志" },
+  { code: "reports.view", label: "质控/运行报告", group: "系统与日志" },
+
+  // 安全审计
   { code: "user.manage", label: "用户管理", group: "安全审计" },
-  { code: "reports.view", label: "报告查看", group: "安全审计" },
-  { code: "audit.view", label: "审计查看", group: "安全审计" },
+  { code: "audit.view", label: "审计日志", group: "安全审计" },
 ];
 
 const PERMISSION_GROUPS = Array.from(new Set(PERMISSIONS.map((permission) => permission.group)));
@@ -756,10 +784,13 @@ function RolesPanel({
                 <div className="border-b border-[#E2EBF5] px-4 py-3 text-[12px] font-black text-[#37474F]">{group}</div>
                 <div className="divide-y divide-[#E2EBF5]">
                   {PERMISSIONS.filter((permission) => permission.group === group).map((permission) => (
-                    <label key={permission.code} className="flex h-11 cursor-pointer items-center justify-between px-4 hover:bg-white">
-                      <span>
+                    <label key={permission.code} className="flex min-h-[44px] cursor-pointer items-center justify-between gap-3 px-4 py-2 hover:bg-white">
+                      <span className="min-w-0 flex-1">
                         <span className="block text-[13px] font-bold text-[#263238]">{permission.label}</span>
                         <span className="block font-mono text-[10px] text-[#90A4AE]">{permission.code}</span>
+                        {permission.description && (
+                          <span className="mt-0.5 block text-[11px] leading-tight text-[#78909C]">{permission.description}</span>
+                        )}
                       </span>
                       <Toggle checked={roleDraft.has(permission.code)} onChange={() => onTogglePermission(permission.code)} />
                     </label>

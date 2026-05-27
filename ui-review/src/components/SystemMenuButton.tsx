@@ -3,6 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 
+import { useAuth } from "../lib/authContext";
+
 type SystemMenuButtonProps = {
     iconSize?: number;
     badgeCount?: number;
@@ -21,6 +23,9 @@ export default function SystemMenuButton({
     const triggerRef = useRef<HTMLDivElement | null>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
     const navigate = useNavigate();
+    const { user, logout } = useAuth();
+    const displayName = user?.display_name ?? "未登录";
+    const subLabel = user?.username ?? "—";
 
     useLayoutEffect(() => {
         if (!open || !triggerRef.current) return;
@@ -119,15 +124,19 @@ export default function SystemMenuButton({
                             <div className="flex items-center gap-2 px-2.5 py-2 border-b border-[#EEF2F9]">
                                 <UserIcon size={20} className="text-[#90A4AE]" strokeWidth={1.6} />
                                 <div className="flex-1 leading-tight">
-                                    <div className="text-[13px] font-bold text-[#37474F]">root</div>
-                                    <div className="text-[10px] text-[#90A4AE] font-semibold tracking-wider">ROOT</div>
+                                    <div className="text-[13px] font-bold text-[#37474F]">{displayName}</div>
+                                    <div className="text-[10px] text-[#90A4AE] font-semibold tracking-wider">{subLabel}</div>
                                 </div>
                                 <Check size={16} className="text-[#37474F]" strokeWidth={2.4} />
                             </div>
                             <button
                                 type="button"
                                 className="flex w-full items-center justify-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold tracking-wider text-[#546E7A] hover:bg-[#F4F6FA]"
-                                onClick={close}
+                                onClick={async () => {
+                                    close();
+                                    await logout();
+                                    navigate("/login", { replace: true });
+                                }}
                             >
                                 <LogOut size={14} />
                                 <span>LOGOUT</span>

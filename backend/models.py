@@ -569,6 +569,7 @@ class UserAccount(Base):
     phone = Column(String(50), nullable=True)
     email = Column(String(120), nullable=True)
     login_allowed = Column(Boolean, nullable=False, default=True)
+    password_hash = Column(String(255), nullable=True)
     password_reset_required = Column(Boolean, nullable=False, default=False)
     credential_version = Column(Integer, nullable=False, default=1)
     failed_attempts = Column(Integer, nullable=False, default=0)

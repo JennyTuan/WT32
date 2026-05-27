@@ -20,6 +20,8 @@ import {
     Radio
 } from "lucide-react";
 import SystemMenuButton from "../components/SystemMenuButton";
+import iconTable from "../assets/icon-table.svg";
+import iconGantry from "../assets/icon-gantry.svg";
 
 interface Sequence {
     id: string;
@@ -102,8 +104,8 @@ const MockScanScreen = () => {
                                 <span className="text-[12px] text-[#546E7A] font-medium leading-none mt-0.5">ID: 67890</span>
                             </div>
                             <div className="ml-auto flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-                                <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机床.svg" alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
-                                <div className="flex items-center gap-1 text-[11px] font-bold"><img src="/机架角度.svg" alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
+                                <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTable} alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
+                                <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconGantry} alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
                             </div>
                         </div>
                     </div>

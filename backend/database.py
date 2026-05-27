@@ -1169,6 +1169,8 @@ def _migrate_protocol_columns() -> None:
         # Dose Settings: replaced aec_noise_index (Float) with aec_noise_level (String)
         # Existing rows are backfilled with default 'medium' via the column default.
         "ALTER TABLE dose_settings ADD COLUMN aec_noise_level VARCHAR(10) NOT NULL DEFAULT 'medium'",
+        # Auth: password storage for user accounts
+        "ALTER TABLE user_accounts ADD COLUMN password_hash VARCHAR(255)",
     ]
     with engine.connect() as conn:
         for sql in migrations:
@@ -1430,29 +1432,83 @@ def _seed_user_management_defaults(db) -> None:
 
     permission_sets = {
         "system_admin": [
-            "scan.view",
-            "scan.execute",
-            "patient.manage",
-            "protocol.manage",
-            "dose.manage",
-            "service.hardware",
-            "user.manage",
-            "reports.view",
-            "audit.view",
-            "system.settings",
+            # 扫描业务
+            "scan.view", "scan.execute", "patient.manage", "patient.delete",
+            # 协议与剂量
+            "protocol.view", "protocol.manage",
+            "dose.view", "dose.manage",
+            # 服务模式
+            "service.enter",
+            "hardware.calibration", "hardware.diagnostics", "hardware.storage", "hardware.manual_scan",
+            # 数据与接口
+            "dicom.manage", "cornerinfo.manage", "organization.manage",
+            # 系统与日志
+            "system.settings", "log.view", "reports.view",
+            # 安全审计
+            "user.manage", "audit.view",
         ],
         "technologist": [
-            "scan.view",
-            "scan.execute",
-            "patient.manage",
-            "protocol.view",
+            "scan.view", "scan.execute", "patient.manage",
+            "protocol.view", "dose.view",
             "reports.view",
         ],
         "service_engineer": [
-            "service.hardware",
-            "system.settings",
-            "reports.view",
+            "service.enter",
+            "hardware.calibration", "hardware.diagnostics", "hardware.storage", "hardware.manual_scan",
+            "dicom.manage", "cornerinfo.manage", "organization.manage",
+            "system.settings", "log.view", "reports.view",
             "audit.view",
+        ],
+    }
+
+    # Historic permission sets. Each entry represents a known default snapshot from
+    # a past schema. On startup, if a system role's current permissions match any
+    # one of these snapshots exactly, we refresh it to the new default. This way
+    # subsequent capability refactors stay automatic without overwriting roles
+    # an admin has actually customized.
+    legacy_permission_sets = {
+        "system_admin": [
+            # Original (pre-2026-05).
+            {
+                "scan.view", "scan.execute", "patient.manage",
+                "protocol.manage", "dose.manage",
+                "service.hardware", "user.manage", "reports.view",
+                "audit.view", "system.settings",
+            },
+            # 2026-05 refactor: business-domain groups, before patient/protocol
+            # delete were split out.
+            {
+                "scan.view", "scan.execute", "patient.manage",
+                "protocol.view", "protocol.manage", "dose.view", "dose.manage",
+                "service.enter",
+                "hardware.calibration", "hardware.diagnostics", "hardware.storage", "hardware.manual_scan",
+                "dicom.manage", "cornerinfo.manage", "organization.manage",
+                "system.settings", "log.view", "reports.view",
+                "user.manage", "audit.view",
+            },
+        ],
+        "technologist": [
+            {
+                "scan.view", "scan.execute", "patient.manage",
+                "protocol.view", "reports.view",
+            },
+            # 2026-05 refactor — unchanged from the current default, kept for
+            # clarity should it diverge later.
+            {
+                "scan.view", "scan.execute", "patient.manage",
+                "protocol.view", "dose.view", "reports.view",
+            },
+        ],
+        "service_engineer": [
+            {
+                "service.hardware", "system.settings", "reports.view", "audit.view",
+            },
+            {
+                "service.enter",
+                "hardware.calibration", "hardware.diagnostics", "hardware.storage", "hardware.manual_scan",
+                "dicom.manage", "cornerinfo.manage", "organization.manage",
+                "system.settings", "log.view", "reports.view", "audit.view",
+            },
         ],
     }
 
@@ -1488,7 +1544,8 @@ def _seed_user_management_defaults(db) -> None:
         changed = True
 
     for seed in role_seeds:
-        if seed["code"] not in existing_roles:
+        existing = existing_roles.get(seed["code"])
+        if existing is None:
             db.add(
                 models.UserRole(
                     code=seed["code"],
@@ -1498,6 +1555,21 @@ def _seed_user_management_defaults(db) -> None:
                     is_system=True,
                 )
             )
+            changed = True
+            continue
+
+        # Refresh permissions only if the current set matches one of the known
+        # historic defaults. If the admin has manually changed permissions, the
+        # set won't match any snapshot and we leave it alone.
+        legacy_snapshots = legacy_permission_sets.get(seed["code"], [])
+        if not existing.is_system or not legacy_snapshots:
+            continue
+        try:
+            current = set(json.loads(existing.permissions or "[]"))
+        except json.JSONDecodeError:
+            current = set()
+        if any(current == snapshot for snapshot in legacy_snapshots):
+            existing.permissions = json.dumps(seed["permissions"], ensure_ascii=False)
             changed = True
 
     now = datetime.utcnow()
@@ -1607,15 +1679,147 @@ def _seed_user_management_defaults(db) -> None:
         for (employee_id,) in db.query(models.UserAccount.employee_id).all()
         if employee_id
     }
+    from .auth_utils import hash_password
+
     for seed in user_seeds:
         if seed["username"] in existing_usernames or seed["employee_id"] in existing_employee_ids:
             continue
-        db.add(models.UserAccount(**seed))
+        # Initial password = username (e.g. U0001), forced reset on first login.
+        seed_with_hash = {**seed, "password_hash": hash_password(seed["username"])}
+        db.add(models.UserAccount(**seed_with_hash))
+        changed = True
+
+    # Backfill password_hash for users that exist without one (e.g. legacy databases
+    # seeded before the auth column was added). Default password = username.
+    for user in db.query(models.UserAccount).filter(models.UserAccount.password_hash.is_(None)).all():
+        user.password_hash = hash_password(user.username)
+        user.password_reset_required = True
         changed = True
 
     if changed:
         db.commit()
         print("Seeded user management defaults")
+
+
+# Cornerstone.js / OHIF mainstream CT viewer overlay convention.
+# Field set + order per corner is fixed (UI invariant); user only toggles
+# per-field visibility. Keep in sync with ui-review/src/lib/cornerConfig.ts
+# CORNER_FIELD_CATALOG.
+DEFAULT_CORNER_CONFIG: dict = {
+    "corners": {
+        "topLeft": [
+            {"key": "patient_name",    "label": "姓名",     "visible": True},
+            {"key": "patient_id",      "label": "ID",       "visible": True},
+            {"key": "patient_gender",  "label": "性别",     "visible": True},
+            {"key": "patient_dob",     "label": "出生日期", "visible": True},
+        ],
+        "topRight": [
+            {"key": "institution_name",  "label": "机构",     "visible": True},
+            {"key": "study_description", "label": "检查描述", "visible": True},
+            {"key": "study_datetime",    "label": "检查时间", "visible": True},
+            {"key": "accession_number",  "label": "登记号",   "visible": True},
+        ],
+        "bottomLeft": [
+            {"key": "series_description", "label": "序列描述", "visible": True},
+            {"key": "slice_thickness",    "label": "层厚",     "visible": True},
+            {"key": "slice_location",     "label": "层位置",   "visible": True},
+            {"key": "kvp",                "label": "kVp",      "visible": True},
+            {"key": "mas",                "label": "mAs",      "visible": True},
+        ],
+        "bottomRight": [
+            {"key": "image_index", "label": "图像",      "visible": True},
+            {"key": "zoom",        "label": "缩放",      "visible": True},
+            {"key": "window",      "label": "窗宽/窗位", "visible": True},
+        ],
+    }
+}
+
+
+def _corner_config_key_signature(config_json: str) -> tuple[tuple[str, ...], ...] | None:
+    """Return a stable tuple of (corner -> tuple of field keys) used to detect
+    whether a config still matches a known historic default. Returns None on
+    parse errors."""
+    try:
+        parsed = json.loads(config_json or "{}")
+    except json.JSONDecodeError:
+        return None
+    corners = parsed.get("corners")
+    if not isinstance(corners, dict):
+        return None
+    return tuple(
+        tuple(item.get("key", "") for item in corners.get(quadrant, []) if isinstance(item, dict))
+        for quadrant in ("topLeft", "topRight", "bottomLeft", "bottomRight")
+    )
+
+
+# Historic factory defaults — used to detect "untouched" corner configs that
+# should be auto-migrated to the new Cornerstone-aligned layout. If an existing
+# DB has been hand-edited, the signature won't match any entry here and we
+# leave it alone.
+LEGACY_CORNER_SIGNATURES: list[tuple[tuple[str, ...], ...]] = [
+    # Original seed (pre-2026-05): TR mixed scan_time + protocol_name.
+    (
+        ("patient_name", "patient_id"),
+        ("scan_time", "protocol_name"),
+        ("kv", "ma"),
+        ("series_number", "image_number"),
+    ),
+    # Pre-OHIF-alignment seed (2026-05): 2 fields per corner, ad-hoc kv/ma/Se/Im.
+    (
+        ("patient_name", "patient_id"),
+        ("institution_name", "scan_time"),
+        ("kv", "ma"),
+        ("series_number", "image_number"),
+    ),
+]
+
+
+def _seed_corner_defaults(db) -> None:
+    """Ensure a Default corner template exists and migrate untouched configs."""
+    from . import models
+
+    changed = False
+    default_json = json.dumps(DEFAULT_CORNER_CONFIG, ensure_ascii=False)
+    new_signature = _corner_config_key_signature(default_json)
+
+    default_template = (
+        db.query(models.CornerConfig)
+        .filter(models.CornerConfig.template_name == "Default")
+        .first()
+    )
+    if default_template is None:
+        # No Default template yet — create one. If nothing else is active, mark
+        # it active; otherwise leave the user's active template alone.
+        any_active = db.query(models.CornerConfig).filter(models.CornerConfig.is_active == True).first()
+        db.add(
+            models.CornerConfig(
+                template_name="Default",
+                is_active=any_active is None,
+                config_json=default_json,
+            )
+        )
+        changed = True
+    else:
+        # Refresh the Default template if it still matches a historic default
+        # (or is already on the new layout — idempotent).
+        existing_sig = _corner_config_key_signature(default_template.config_json)
+        if existing_sig != new_signature and existing_sig in LEGACY_CORNER_SIGNATURES:
+            default_template.config_json = default_json
+            changed = True
+
+    # Auto-migrate any other template still on a historic default. Don't touch
+    # templates that have been customized.
+    for template in db.query(models.CornerConfig).all():
+        if template.template_name == "Default":
+            continue
+        sig = _corner_config_key_signature(template.config_json)
+        if sig in LEGACY_CORNER_SIGNATURES and sig != new_signature:
+            template.config_json = default_json
+            changed = True
+
+    if changed:
+        db.commit()
+        print("Seeded / migrated corner defaults")
 
 
 def init_db() -> None:
@@ -1629,6 +1833,7 @@ def init_db() -> None:
     try:
         _seed_dose_defaults(db)
         _seed_user_management_defaults(db)
+        _seed_corner_defaults(db)
         if db.query(models.Protocol).first():
             seed_uses_company_csv = any(
                 str(protocol_seed.get("description", "")).startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)
@@ -1720,31 +1925,12 @@ def init_db() -> None:
 
         _seed_gating_protocols(db, models)
 
-        # Seed default corner config
-        default_corners = {
-            "corners": {
-                "topLeft": [
-                    {"key": "patient_name", "label": "姓名", "visible": True},
-                    {"key": "patient_id", "label": "ID", "visible": True}
-                ],
-                "topRight": [
-                    {"key": "scan_time", "label": "时间", "visible": True},
-                    {"key": "protocol_name", "label": "协议", "visible": True}
-                ],
-                "bottomLeft": [
-                    {"key": "kv", "label": "kV", "visible": True},
-                    {"key": "ma", "label": "mA", "visible": True}
-                ],
-                "bottomRight": [
-                    {"key": "series_number", "label": "序列号", "visible": True},
-                    {"key": "image_number", "label": "图像号", "visible": True}
-                ]
-            }
-        }
+        # Seed default corner config (Cornerstone.js / OHIF CT viewer layout).
+        # Field set + order per corner is fixed; users only toggle visibility.
         db.add(models.CornerConfig(
             template_name="Default",
             is_active=True,
-            config_json=json.dumps(default_corners)
+            config_json=json.dumps(DEFAULT_CORNER_CONFIG, ensure_ascii=False)
         ))
 
         db.commit()

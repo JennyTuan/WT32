@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:all": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"cd .. && uvicorn backend.main:app --reload --port 8000\" \"vite\"",
+    "dev:all": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"cd .. && .\\.venv\\Scripts\\python.exe -m uvicorn backend.main:app --reload --port 8000\" \"vite\"",
     "build": "tsc -b && cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build",
     "lint": "eslint .",
     "preview": "vite preview"
