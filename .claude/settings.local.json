@@ -164,7 +164,14 @@
       "Bash(.venv/Scripts/python.exe -c \"from backend.main import app; print\\('OK', [r.path for r in app.routes if '/auth' in r.path]\\)\")",
       "Bash(.venv/Scripts/python.exe -m pip install \"bcrypt==4.2.1\")",
       "Bash(.venv/Scripts/python.exe -m pip install httpx)",
-      "Bash(curl -s http://localhost:8000/api/users/)"
+      "Bash(curl -s http://localhost:8000/api/users/)",
+      "Bash(python query_db.py users)",
+      "Bash(python -c \"import sqlite3; c=sqlite3.connect\\('backend/app.db'\\); print\\([r for r in c.execute\\('SELECT user_code, role FROM users LIMIT 10'\\)]\\)\")",
+      "Bash(python -c \"import sqlite3; c=sqlite3.connect\\('backend/app.db'\\); print\\([r[0] for r in c.execute\\(\\\\\"SELECT name FROM sqlite_master WHERE type='table'\\\\\"\\)]\\)\")",
+      "Bash(python -c \"import sqlite3; c=sqlite3.connect\\('backend/app.db'\\); [print\\(r\\) for r in c.execute\\('SELECT user_code, role_id, full_name FROM user_accounts LIMIT 5'\\)]\")",
+      "Bash(python -c \"import sqlite3; c=sqlite3.connect\\('backend/app.db'\\); print\\(list\\(c.execute\\('PRAGMA table_info\\(user_accounts\\)'\\)\\)\\); print\\('---'\\); [print\\(r\\) for r in c.execute\\('SELECT * FROM user_accounts LIMIT 5'\\)]\")",
+      "Bash(ls .venv/Scripts/python*)",
+      "Bash(ls .venv)"
     ]
   }
 }

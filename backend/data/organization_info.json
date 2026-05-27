@@ -1,0 +1,38 @@
+{
+  "updated_at": "2026-05-27T06:27:06.033231+00:00",
+  "institution": {
+    "name": "第一人民医院",
+    "short_name": "一院",
+    "code": "HOSP-0001",
+    "type": "hospital",
+    "license_number": "",
+    "website": "",
+    "logo_url": "",
+    "stamp_url": ""
+  },
+  "contact": {
+    "address": "",
+    "city": "",
+    "postal_code": "",
+    "phone": "",
+    "fax": "",
+    "email": "",
+    "emergency_phone": ""
+  },
+  "department": {
+    "name": "放射科",
+    "code": "RAD",
+    "head": "",
+    "head_title": "主任",
+    "phone": "",
+    "room": ""
+  },
+  "report": {
+    "header_text": "",
+    "footer_text": "",
+    "show_logo": true,
+    "show_stamp": false,
+    "show_qr_code": false,
+    "confidential_label": "仅供医疗使用"
+  }
+}

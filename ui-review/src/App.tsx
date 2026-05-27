@@ -42,6 +42,8 @@ import ProtocolManagementScreen from "./screens/ProtocolManagementScreen";
 import CornerInfoPage from "./features/service/cornerInfo/CornerInfoPage";
 import DicomSettingsPage from "./features/service/dicom/DicomSettingsPage";
 import UserManagementPage from "./features/service/userManagement/UserManagementPage";
+import SystemSettingsPage from "./features/service/systemSettings/SystemSettingsPage";
+import OrganizationInfoPage from "./features/service/organizationInfo/OrganizationInfoPage";
 import LoginScreen from "./screens/LoginScreen";
 import ChangePasswordScreen from "./screens/ChangePasswordScreen";
 import RequireAuth from "./components/RequireAuth";
@@ -156,8 +158,8 @@ export default function App() {
               <Route path="/service/settings/corner-info" element={<CornerInfoPage />} />
               <Route path="/service/settings/dicom" element={<DicomSettingsPage />} />
               <Route path="/service/settings/user-management" element={<UserManagementPage />} />
-              <Route path="/service/settings/system-settings" element={<ServicePlaceholderScreen currentRoute="/service/settings/system-settings" title="系统设置" description="用于设置系统级参数、时间网络、设备偏好和基础配置。" />} />
-              <Route path="/service/settings/organization-info" element={<ServicePlaceholderScreen currentRoute="/service/settings/organization-info" title="机构信息设置" description="用于配置机构名称、标识、科室信息和对外显示内容。" />} />
+              <Route path="/service/settings/system-settings" element={<SystemSettingsPage />} />
+              <Route path="/service/settings/organization-info" element={<OrganizationInfoPage />} />
               <Route path="/service/reports/qa-report" element={<QAReportPage />} />
               <Route path="/service/reports/system-log" element={<ServiceSystemLogPage />} />
               <Route path="/service/reports/runtime-stats" element={<ServicePlaceholderScreen currentRoute="/service/reports/runtime-stats" title="运行统计" description="用于查看设备运行时长、使用频率和关键运行指标统计。" />} />
