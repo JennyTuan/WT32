@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
+import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
 import DicomViewer from "../components/DicomViewer";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import ScanConfirmScreen from "./ScanConfirmScreen";
@@ -33,7 +34,6 @@ const FOUR_D_SCOUT_SERIES = {
     fallbackWindowWidth: 500,
     fallbackWindowLevel: 50,
 };
-const BRAIN_HELICAL_PROTOCOL_TITLE = "脑部螺旋";
 const BRAIN_HELICAL_SCOUT_EXECUTE_SERIES = {
     basePath: "/dicom-head-stroke-plain/Series%20001%20%5BTopogram%5D",
     count: 1,
@@ -117,17 +117,6 @@ const resolvePostScoutScanTypeFromWorkflowPlans = (): PostScoutScanType | null =
 
 const SCAN_SESSION_DETAIL_CACHE_KEY = "selectedScanSessionDetail";
 
-const isBrainHelicalName = (value: string | null | undefined) =>
-    typeof value === "string" && value.includes(BRAIN_HELICAL_PROTOCOL_TITLE);
-
-const isBrainHelicalScanSession = (session: ApiScanSessionDetail | null) => {
-    if (!session) return false;
-    return (
-        session.acquisition_type === "regular" &&
-        session.body_part.toLowerCase() === "head" &&
-        (session.protocol_id === 1 || isBrainHelicalName(session.name) || isBrainHelicalName(session.session_name))
-    );
-};
 
 const loadCachedBrainHelicalSession = () => {
     try {
@@ -140,8 +129,7 @@ const loadCachedBrainHelicalSession = () => {
     }
 };
 
-const isBrainHelicalWorkflow = () =>
-    loadSelectedScanWorkflowPlans().some((plan) => isBrainHelicalName(plan.title));
+const hasBrainHelicalWorkflow = () => isBrainHelicalWorkflow(loadSelectedScanWorkflowPlans());
 
 function clamp01(value: number) {
     return Math.min(1, Math.max(0, value));
@@ -564,7 +552,7 @@ export default function ScoutExecuteScanScreen() {
 
     const postScoutAction = POST_SCOUT_SCAN_CONFIG[postScoutScanType];
     const isFourDScoutWorkflow = postScoutScanType === "4d";
-    const isBrainHelicalScoutWorkflow = isBrainHelicalWorkflow() || isBrainHelicalScanSession(scanSession);
+    const isBrainHelicalScoutWorkflow = hasBrainHelicalWorkflow() || isBrainHelicalScanSession(scanSession);
     const scoutResultSeries = isFourDScoutWorkflow
         ? FOUR_D_SCOUT_SERIES
         : isBrainHelicalScoutWorkflow

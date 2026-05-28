@@ -511,9 +511,11 @@ export function TomographicScoutViewport({
         ctx.fillStyle = "#05080d";
         ctx.fillRect(0, 0, viewW, viewH);
 
-        const fitScale = Math.min(viewW / meta.width, viewH / meta.height) * 0.92;
-        const drawW = meta.width * fitScale * zoom;
-        const drawH = meta.height * fitScale * zoom;
+        const physW = meta.width * meta.pixelSpacingX;
+        const physH = meta.height * meta.sliceThickness;
+        const fitScale = Math.min(viewW / physW, viewH / physH) * 0.92;
+        const drawW = physW * fitScale * zoom;
+        const drawH = physH * fitScale * zoom;
         const drawX = (viewW - drawW) / 2 + offset.x;
         const drawY = (viewH - drawH) / 2 + offset.y;
         ctx.imageSmoothingEnabled = false;

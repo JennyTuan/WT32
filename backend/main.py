@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .database import SessionLocal, init_db
@@ -14,6 +14,7 @@ from .websocket.scan_ws import router as scan_ws_router
 
 app = FastAPI(title="CT Prototype Backend", version="1.0.0")
 DATA_DIR = Path(__file__).resolve().parent / "data"
+DICOM_PUBLIC_DIR = Path(__file__).resolve().parent.parent / "ui-review" / "public" / "dicom"
 
 # Cookies must be permitted by CORS for the SPA → API session flow. With
 # allow_credentials=True the wildcard origin is not allowed; explicit origins
@@ -96,13 +97,88 @@ app.include_router(system_settings.router, prefix="/api")
 app.include_router(organization_info.router, prefix="/api")
 app.include_router(performance.router, prefix="/api")
 app.include_router(scan_ws_router)
+
+
+def _resolve_static_file(root: Path, file_path: str) -> Path:
+    root = root.resolve()
+    target = (root / file_path).resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return target
+
+
+def _readable_file_size(path: Path) -> int:
+    with path.open("rb") as file:
+        file.seek(0, os.SEEK_END)
+        return file.tell()
+
+
+def _iter_file(path: Path, start: int, end: int):
+    with path.open("rb") as file:
+        file.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            chunk = file.read(min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+
+
+def _dicom_file_response(request: Request, path: Path) -> StreamingResponse:
+    size = _readable_file_size(path)
+    start = 0
+    end = max(size - 1, 0)
+    status_code = 200
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Type": "application/dicom",
+    }
+
+    range_header = request.headers.get("range")
+    if range_header and range_header.startswith("bytes="):
+        raw_start, _, raw_end = range_header.removeprefix("bytes=").partition("-")
+        try:
+            if raw_start:
+                start = int(raw_start)
+                end = int(raw_end) if raw_end else size - 1
+            elif raw_end:
+                suffix_length = int(raw_end)
+                start = max(size - suffix_length, 0)
+                end = size - 1
+        except ValueError as exc:
+            raise HTTPException(status_code=416, detail="Invalid range") from exc
+
+        if start < 0 or start >= size or end < start:
+            raise HTTPException(status_code=416, detail="Range not satisfiable")
+
+        end = min(end, size - 1)
+        status_code = 206
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+
+    headers["Content-Length"] = str(end - start + 1 if size > 0 else 0)
+    return StreamingResponse(_iter_file(path, start, end), status_code=status_code, headers=headers)
+
+
+@app.get("/dicom/{file_path:path}")
+def serve_public_dicom(file_path: str, request: Request):
+    return _dicom_file_response(request, _resolve_static_file(DICOM_PUBLIC_DIR, file_path))
+
+
+@app.get("/dicom-out/{file_path:path}")
+def serve_dicom_out(file_path: str, request: Request):
+    return _dicom_file_response(request, _resolve_static_file(DICOM_OUT_DIR, file_path))
+
+
+@app.get("/dicom-head-stroke-plain/{file_path:path}")
+def serve_head_stroke_plain(file_path: str, request: Request):
+    if not HEAD_STROKE_DEMO_PLAIN_DIR.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return _dicom_file_response(request, _resolve_static_file(HEAD_STROKE_DEMO_PLAIN_DIR, file_path))
+
+
 DICOM_OUT_DIR = DATA_DIR / "dicom_out"
 DICOM_OUT_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/dicom-out", StaticFiles(directory=DICOM_OUT_DIR), name="dicom_out")
 HEAD_STROKE_DEMO_PLAIN_DIR = DATA_DIR / "Head Stroke Demo [Plain]"
-if HEAD_STROKE_DEMO_PLAIN_DIR.exists():
-    app.mount(
-        "/dicom-head-stroke-plain",
-        StaticFiles(directory=HEAD_STROKE_DEMO_PLAIN_DIR),
-        name="dicom_head_stroke_plain",
-    )

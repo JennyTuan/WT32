@@ -24,6 +24,7 @@ import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib
 import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
 import { estimateDose } from "../lib/doseEstimate";
 import { buildApiUrl } from "../lib/apiClient";
+import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
@@ -40,12 +41,12 @@ type ProtocolSeedHelicalParam = {
 };
 
 // Demo dataset for the "脑部螺旋" (brain helical, non-gating) protocol — JPEG Lossless
-// DICOM served from backend/data/dicom_out/HeadStrokeDemo/. Other protocols and the
-// gating/4D path do NOT use this override and keep their legacy loader unchanged.
-const BRAIN_HELICAL_PROTOCOL_TITLE = "脑部螺旋";
+// DICOM served from backend/data/Head Stroke Demo [Plain]/Series 001 [Topogram]/.
+// Other protocols and the gating/4D path do NOT use this override and keep their
+// legacy loader unchanged.
 const BRAIN_HELICAL_SCOUT_OVERRIDE: TomographicScoutSeriesOverride = {
     kind: "topogram",
-    url: "/dicom-out/HeadStrokeDemo/Topogram/image-001.dcm",
+    url: "/dicom-head-stroke-plain/Series%20001%20%5BTopogram%5D/1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.6.0.dcm",
     fallbackWindowWidth: 130,
     fallbackWindowLevel: 130,
 };
@@ -1291,15 +1292,11 @@ const GatingHelicalConfirmScreen = () => {
 const HelicalScanConfirmScreen = () => {
     const isGatingWorkflow = false;
 
-    const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(() => {
-        const plans = loadSelectedScanWorkflowPlans();
-        const isBrainHelical = plans.some((plan) => plan.title === BRAIN_HELICAL_PROTOCOL_TITLE);
-        return isBrainHelical ? BRAIN_HELICAL_SCOUT_OVERRIDE : undefined;
-    }, []);
-
+    const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [helicalParam, setHelicalParam] = useState<ApiScanSessionHelicalParam | null>(null);
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const [sessionResolved, setSessionResolved] = useState(false);
     const [protocolHelicalSeed, setProtocolHelicalSeed] = useState<ProtocolSeedHelicalParam | null>(null);
     const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("medium");
     const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
@@ -1307,6 +1304,12 @@ const HelicalScanConfirmScreen = () => {
     const updateTimerRef = useRef<number | null>(null);
     const thresholdGuard = useDoseThresholdGuard();
     const navigate = useNavigate();
+
+    const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(() => {
+        const shouldUseBrainScout =
+            isBrainHelicalWorkflow(workflowPlans) || isBrainHelicalScanSession(scanSession);
+        return shouldUseBrainScout ? BRAIN_HELICAL_SCOUT_OVERRIDE : undefined;
+    }, [scanSession, workflowPlans]);
 
     useEffect(() => {
         if (isGatingWorkflow) return;
@@ -1345,6 +1348,8 @@ const HelicalScanConfirmScreen = () => {
                 });
             } catch (error) {
                 console.error("Failed to load helical scan session defaults.", error);
+            } finally {
+                if (!cancelled) setSessionResolved(true);
             }
         };
 
@@ -1459,13 +1464,19 @@ const HelicalScanConfirmScreen = () => {
             onExecuteScan={handleExecuteScan}
             rightViewportContent={
                 <>
-                    <TomographicScoutViewport
-                        onMeasurementChange={setMeasurements}
-                        initialMeasurements={measurements}
-                        scanPositionRatio={scanPositionRatio}
-                        onScanPositionRatioChange={setScanPositionRatio}
-                        seriesOverride={scoutSeriesOverride}
-                    />
+                    {sessionResolved ? (
+                        <TomographicScoutViewport
+                            onMeasurementChange={setMeasurements}
+                            initialMeasurements={measurements}
+                            scanPositionRatio={scanPositionRatio}
+                            onScanPositionRatioChange={setScanPositionRatio}
+                            seriesOverride={scoutSeriesOverride}
+                        />
+                    ) : (
+                        <div className="flex flex-1 items-center justify-center rounded-lg bg-[#05080d] text-[14px] font-bold text-white/70">
+                            正在加载定位像...
+                        </div>
+                    )}
                     {helicalParam && showAutoMaPanel && (
                         <AutoMaPanel
                             mode="helical"

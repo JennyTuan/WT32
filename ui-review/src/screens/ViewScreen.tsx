@@ -21,6 +21,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import type { FourDPostScanState } from "../lib/fourDTypes";
 import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
+import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import AppHeader from "../components/AppHeader";
 import CornerstoneMPRViewport, {
@@ -275,8 +276,7 @@ const REALISTIC_SCOUT_SERIES = {
 
 // Brain-helical demo dataset (脑部螺旋). Mirrors the REAL_LUNG_SERIES / REALISTIC_SCOUT_SERIES
 // shape but points at the JPEG Lossless head data under /dicom-out/HeadStrokeDemo/.
-// Selected only when an active workflow plan has title "脑部螺旋" — see useIsBrainHelicalDemo.
-const BRAIN_HELICAL_PROTOCOL_TITLE = "脑部螺旋";
+// Selected only when the active protocol ID matches the brain-helical demo.
 const BRAIN_HELICAL_VIEW_SERIES = {
     studyName: "Head Stroke Demo",
     studyId: "study-head-stroke-demo",
@@ -374,17 +374,6 @@ const parseDicomNumber = (value: string | undefined, fallback: number) => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const isBrainHelicalName = (value: string | null | undefined) =>
-    typeof value === "string" && value.includes(BRAIN_HELICAL_PROTOCOL_TITLE);
-
-const isBrainHelicalScanSession = (session: ApiScanSessionDetail | null) => {
-    if (!session) return false;
-    return (
-        session.acquisition_type === "regular" &&
-        session.body_part.toLowerCase() === "head" &&
-        (session.protocol_id === 1 || isBrainHelicalName(session.name) || isBrainHelicalName(session.session_name))
-    );
-};
 
 function WindowLevelIcon({ size = 20 }: { size?: number }) {
     return (
@@ -416,15 +405,15 @@ const ViewScreen = () => {
     const isFourDEntry = !!fourDState?.scanResult;
 
     // ─── 脑部螺旋 demo 数据切换 ───────────────────────────────────────────────
-    // Active only when the workflow plan title matches AND this is NOT a 4D entry,
+    // Active only when the workflow protocol ID matches AND this is NOT a 4D entry,
     // so 4D 浏览路径完全不受影响。
-    const isBrainHelicalWorkflow = useMemo(() => {
+    const isBrainHelicalWorkflowActive = useMemo(() => {
         if (isFourDEntry) return false;
-        return loadSelectedScanWorkflowPlans().some((plan) => isBrainHelicalName(plan.title));
+        return isBrainHelicalWorkflow(loadSelectedScanWorkflowPlans());
     }, [isFourDEntry]);
     // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
-    const isBrainHelicalDemo = isBrainHelicalWorkflow || (!isFourDEntry && isBrainHelicalScanSession(scanSession));
+    const isBrainHelicalDemo = isBrainHelicalWorkflowActive || (!isFourDEntry && isBrainHelicalScanSession(scanSession));
     const effectiveLungSeries = isBrainHelicalDemo ? BRAIN_HELICAL_VIEW_SERIES : REAL_LUNG_SERIES;
     /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
     const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";

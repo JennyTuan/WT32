@@ -237,6 +237,7 @@ type UiSequence = {
 
 type UiPlan = {
     id: string;
+    sourceProtocolId?: number;
     title: string;
     patientPosition: string;
     sourceSessionId?: number;
@@ -782,6 +783,7 @@ const formatValue = (key: string, value: string | number | boolean | undefined):
 
 const toUiPlan = (entry: RawProtocolCase, options?: { sourceSessionId?: number; planId?: string }): UiPlan => ({
     id: options?.planId ?? entry.protocol.id,
+    sourceProtocolId: Number.isFinite(Number(entry.protocol.id)) ? Number(entry.protocol.id) : undefined,
     title: entry.protocol.name,
     patientPosition: entry.protocol.supportedPositions[0] ?? "HFS",
     sourceSessionId: options?.sourceSessionId,
@@ -1874,10 +1876,12 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         saveSelectedScanWorkflowPlans(
             scanPlans.map((plan) => ({
                 id: plan.id,
+                protocolId: plan.sourceProtocolId,
                 title: plan.title,
                 sourceSessionId: plan.sourceSessionId,
                 sequences: plan.sequences.map((sequence) => ({
                     id: sequence.id,
+                    sourceSeriesId: sequence.sourceSeriesId,
                     name: sequence.name,
                     type:
                         sequence.seriesType === "localizer"
@@ -1887,8 +1891,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 : sequence.mode === "Axial"
                                     ? "axial"
                                     : sequence.mode === "4D"
-                                        ? "4d"
-                                        : "other",
+                                    ? "4d"
+                                    : "other",
+                    sourceReconIds: sequence.reconPlans
+                        .map((recon) => recon.sourceReconId)
+                        .filter((id): id is number => typeof id === "number" && Number.isFinite(id)),
                 })),
             }))
         );

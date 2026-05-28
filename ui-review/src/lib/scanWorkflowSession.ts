@@ -2,12 +2,15 @@ export type WorkflowSequenceType = "scout" | "helical" | "axial" | "4d" | "other
 
 export type WorkflowSequence = {
     id: string;
+    sourceSeriesId?: number;
     name: string;
     type: WorkflowSequenceType;
+    sourceReconIds?: number[];
 };
 
 export type WorkflowPlan = {
     id: string;
+    protocolId?: number;
     title: string;
     sourceSessionId?: number;
     sequences: WorkflowSequence[];

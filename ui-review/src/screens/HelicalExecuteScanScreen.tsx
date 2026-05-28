@@ -8,13 +8,13 @@ import DibhStatusRow from "../components/DibhStatusRow";
 import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/BreathHoldGuide";
 import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
+import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 
 // Demo dataset for the "脑部螺旋" (brain helical, non-gating) protocol — JPEG Lossless
 // Thin Brain reconstruction (219 slices). Used only when executeMode === "helical"
-// AND the active workflow plan title matches; gated_helical / gated_axial paths are
+// AND the active protocol ID matches; gated_helical / gated_axial paths are
 // untouched and keep using HELICAL_RESULT_SERIES.
-const BRAIN_HELICAL_PROTOCOL_TITLE = "脑部螺旋";
 const BRAIN_HELICAL_RESULT_SERIES = {
     basePath: "/dicom-out/HeadStrokeDemo/ThinBrain",
     count: 219,
@@ -30,18 +30,6 @@ type HelicalResultSeriesConfig = {
 };
 
 const SCAN_SESSION_DETAIL_CACHE_KEY = "selectedScanSessionDetail";
-
-const isBrainHelicalName = (value: string | null | undefined) =>
-    typeof value === "string" && value.includes(BRAIN_HELICAL_PROTOCOL_TITLE);
-
-const isBrainHelicalScanSession = (session: ApiScanSessionDetail | null) => {
-    if (!session) return false;
-    return (
-        session.acquisition_type === "regular" &&
-        session.body_part.toLowerCase() === "head" &&
-        (session.protocol_id === 1 || isBrainHelicalName(session.name) || isBrainHelicalName(session.session_name))
-    );
-};
 
 const loadCachedBrainHelicalSession = () => {
     try {
@@ -311,13 +299,13 @@ export default function HelicalExecuteScanScreen() {
             .catch(() => { /* live viewport falls back to workflow-plan detection */ });
     }, []);
 
-    // Brain-helical demo override: only when running NON-gated helical for the "脑部螺旋"
-    // protocol. Gated paths intentionally fall through to the legacy HELICAL_RESULT_SERIES.
+    // Brain-helical demo override: only when running non-gated helical for the
+    // matching protocol ID. Gated paths intentionally keep the legacy result series.
     const helicalResultOverride = useMemo<HelicalResultSeriesConfig | undefined>(() => {
         if (executeMode !== "helical") return undefined;
         const plans = loadSelectedScanWorkflowPlans();
         const isBrainHelical =
-            plans.some((plan) => isBrainHelicalName(plan.title)) ||
+            isBrainHelicalWorkflow(plans) ||
             isBrainHelicalScanSession(scanSession);
         return isBrainHelical ? BRAIN_HELICAL_RESULT_SERIES : undefined;
     }, [executeMode, scanSession]);
