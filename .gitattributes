@@ -1,0 +1,21 @@
+# Force binary handling for media/DICOM files so Git never applies line-ending
+# conversion to them. Without this, Windows clients with autocrlf=true silently
+# corrupt files on checkout (extra 0x0D bytes get injected).
+*.webp binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.svg  binary
+*.dcm  binary
+*.mha  binary
+*.7z   binary
+*.zip  binary
+*.gz   binary
+*.db   binary
+*.pdf  binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary

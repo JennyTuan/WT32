@@ -20,6 +20,7 @@ import {
 } from '@cornerstonejs/tools';
 import dicomImageLoader from '@cornerstonejs/dicom-image-loader';
 import { initMhaImageLoader } from './mhaImageLoader';
+import { buildApiUrl } from '../apiClient';
 
 let initPromise: Promise<void> | null = null;
 let toolsRegistered = false;
@@ -70,7 +71,10 @@ export async function initCornerstone() {
 }
 
 export function buildWadoImageId(url: string) {
-  return `wadouri:${new URL(url, window.location.origin).href}`;
+  const resolved = /^https?:\/\//i.test(url)
+    ? url
+    : new URL(buildApiUrl(url), window.location.origin).href;
+  return `wadouri:${resolved}`;
 }
 
 export function getOrCreateToolGroup(toolGroupId: string) {

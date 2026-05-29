@@ -68,6 +68,47 @@ function getVoiLutFunction(mode: VoiLutMode) {
   return Enums.VOILUTFunctionType.LINEAR;
 }
 
+type DicomErrorCode =
+  | 'DICOM_INVALID'
+  | 'DICOM_NOT_FOUND'
+  | 'DICOM_PERMISSION_DENIED'
+  | 'DICOM_READ_ERROR'
+  | 'NETWORK_ERROR'
+  | 'UNKNOWN';
+
+const DICOM_ERROR_MESSAGES: Record<DicomErrorCode, string> = {
+  DICOM_INVALID: '影像文件格式错误，无法解析（可能被加密软件锁定或文件已损坏）',
+  DICOM_NOT_FOUND: '影像文件不存在或路径错误',
+  DICOM_PERMISSION_DENIED: '影像文件无法读取，系统权限被拒绝（可能被安全软件锁定）',
+  DICOM_READ_ERROR: '影像文件读取异常，请稍后重试',
+  NETWORK_ERROR: '无法连接到影像服务，请检查网络',
+  UNKNOWN: '影像加载失败',
+};
+
+async function probeDicomUrl(url: string): Promise<{ ok: true } | { ok: false; code: DicomErrorCode; detail?: string }> {
+  try {
+    const resp = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-131' } });
+    if (resp.ok) return { ok: true };
+    if (resp.status === 404) return { ok: false, code: 'DICOM_NOT_FOUND' };
+    const contentType = resp.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      try {
+        const body = (await resp.json()) as { code?: string; message?: string; file?: string };
+        const code = body.code as DicomErrorCode | undefined;
+        if (code && code in DICOM_ERROR_MESSAGES) {
+          return { ok: false, code, detail: body.file };
+        }
+        return { ok: false, code: 'UNKNOWN', detail: body.message };
+      } catch {
+        // fall through
+      }
+    }
+    return { ok: false, code: 'UNKNOWN', detail: `HTTP ${resp.status}` };
+  } catch {
+    return { ok: false, code: 'NETWORK_ERROR' };
+  }
+}
+
 function isSupportedActiveTool(value: string | undefined): value is ActiveTool {
   return (
     value === 'pan' ||
@@ -178,6 +219,15 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         try {
           setStatus('loading');
           setErrorMsg('');
+
+          const probe = await probeDicomUrl(urls[0]);
+          if (disposed) return;
+          if (!probe.ok) {
+            const msg = DICOM_ERROR_MESSAGES[probe.code] + (probe.detail ? `（${probe.detail}）` : '');
+            setStatus('error');
+            setErrorMsg(msg);
+            return;
+          }
 
           await initCornerstone();
           if (disposed || !elementRef.current) {
@@ -521,8 +571,10 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         )}
 
         {status === 'error' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-red-400/70">
-            <span className="text-[12px] font-mono font-bold">Error: {errorMsg}</span>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/80">
+            <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
+            <span className="text-[14px] font-semibold text-red-400">影像加载失败</span>
+            <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{errorMsg}</span>
           </div>
         )}
       </div>

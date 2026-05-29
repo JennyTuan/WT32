@@ -20,9 +20,26 @@ from fastapi.responses import StreamingResponse
 from PIL import Image
 from scipy import ndimage
 
+from ..database import SessionLocal
+from . import logs as logs_router
+
 router = APIRouter(prefix="/performance", tags=["performance"])
 
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
+
+
+def _classify_dicom_failure(path: Path, exc: Exception) -> tuple[str, str]:
+    """Return (code, friendly_zh_message) for a DICOM read failure."""
+    try:
+        with path.open("rb") as f:
+            head = f.read(132)
+        if len(head) < 132 or head[128:132] != b"DICM":
+            return "DICOM_INVALID", "影像文件格式错误，无法解析（可能被加密软件锁定或文件已损坏）"
+    except PermissionError:
+        return "DICOM_PERMISSION_DENIED", "影像文件无法读取，系统权限被拒绝（可能被安全软件锁定）"
+    except OSError:
+        pass
+    return "DICOM_READ_ERROR", f"影像解析失败：{exc}"
 
 
 # ---------- Dataset discovery ----------
@@ -65,13 +82,44 @@ def _load_series(dataset_id: str) -> tuple[list[pydicom.Dataset], np.ndarray, tu
     d = _dataset_dir(dataset_id)
     files = sorted(d.iterdir())
     datasets: list[pydicom.Dataset] = []
+    failures: list[tuple[Path, str, str]] = []  # (path, code, message)
     for f in files:
         try:
             datasets.append(pydicom.dcmread(str(f)))
-        except Exception:
+        except Exception as exc:
+            code, msg = _classify_dicom_failure(f, exc)
+            failures.append((f, code, msg))
             continue
+
+    if failures:
+        first_path, first_code, first_msg = failures[0]
+        db = SessionLocal()
+        try:
+            logs_router.write_system_log(
+                db,
+                level="ERROR" if not datasets else "WARNING",
+                source="performance",
+                event="performance_dicom_load_failed",
+                message=f"性能评估加载 DICOM 失败：{first_path.name} - {first_msg}",
+                details=f"dataset={dataset_id}, failed_count={len(failures)}, first_code={first_code}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
     if not datasets:
-        raise HTTPException(status_code=404, detail="No readable DICOM files")
+        first_path, first_code, first_msg = failures[0] if failures else (None, "DICOM_NOT_FOUND", "未找到可读的影像文件")
+        raise HTTPException(
+            status_code=422 if first_code == "DICOM_INVALID" else 404,
+            detail={
+                "code": first_code,
+                "message": first_msg,
+                "file": first_path.name if first_path else None,
+                "failed_count": len(failures),
+            },
+        )
     datasets.sort(key=lambda ds: int(getattr(ds, "InstanceNumber", 0) or 0))
 
     slope = float(getattr(datasets[0], "RescaleSlope", 1) or 1)

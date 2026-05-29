@@ -35,6 +35,16 @@ const SCOUT_SERIES = {
     fallbackWindowLevel: 45,
 };
 
+// Head Stroke Demo topogram (backend/data/Head Stroke Demo [Plain]/Series 001
+// [Topogram]). Used as the scout / 定位像 source for all regular (non-gating)
+// protocols so the demo shows a single consistent dataset.
+const HEAD_STROKE_DEMO_SCOUT_OVERRIDE: TomographicScoutSeriesOverride = {
+    kind: "topogram",
+    url: "/dicom-head-stroke-plain/Series%20001%20%5BTopogram%5D/1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.6.0.dcm",
+    fallbackWindowWidth: 130,
+    fallbackWindowLevel: 130,
+};
+
 type LoadedSlice = {
     instanceNumber: number;
     positionZ: number;
@@ -924,6 +934,7 @@ const SequenceScanConfirmScreen = () => {
                         initialMeasurements={measurements}
                         scanPositionRatio={scanPositionRatio}
                         onScanPositionRatioChange={setAxialScanPositionRatio}
+                        seriesOverride={HEAD_STROKE_DEMO_SCOUT_OVERRIDE}
                     />
                     {axialParam && showAutoMaPanel && (
                         <AutoMaPanel

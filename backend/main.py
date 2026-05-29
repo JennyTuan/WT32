@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .database import SessionLocal, init_db
@@ -99,6 +99,33 @@ app.include_router(performance.router, prefix="/api")
 app.include_router(scan_ws_router)
 
 
+# Per-process dedup set so a corrupt/encrypted file doesn't flood SystemLog
+# when the viewer requests it hundreds of times (thumbnails + viewer + MPR).
+_DICOM_LOGGED: set[tuple[str, str]] = set()
+
+
+def _log_dicom_issue(level: str, event: str, message: str, *, file_rel: str, details: str | None = None) -> None:
+    key = (file_rel, event)
+    if key in _DICOM_LOGGED:
+        return
+    _DICOM_LOGGED.add(key)
+    db = SessionLocal()
+    try:
+        logs.write_system_log(db, level=level, source="dicom_serve", event=event, message=message, details=details)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _dicom_error_response(status_code: int, code: str, message: str, file_rel: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"code": code, "message": message, "file": file_rel},
+    )
+
+
 def _resolve_static_file(root: Path, file_path: str) -> Path:
     root = root.resolve()
     target = (root / file_path).resolve()
@@ -125,6 +152,17 @@ def _iter_file(path: Path, start: int, end: int):
                 break
             remaining -= len(chunk)
             yield chunk
+
+
+def _validate_dicom_magic(path: Path) -> bool:
+    """A real DICOM file has 'DICM' at byte offset 128. Files locked by an
+    endpoint-encryption agent typically return scrambled bytes here."""
+    try:
+        with path.open("rb") as f:
+            head = f.read(132)
+    except OSError:
+        raise
+    return len(head) >= 132 and head[128:132] == b"DICM"
 
 
 def _dicom_file_response(request: Request, path: Path) -> StreamingResponse:
@@ -162,21 +200,69 @@ def _dicom_file_response(request: Request, path: Path) -> StreamingResponse:
     return StreamingResponse(_iter_file(path, start, end), status_code=status_code, headers=headers)
 
 
+def _serve_validated_dicom(root: Path, file_path: str, request: Request):
+    try:
+        target = _resolve_static_file(root, file_path)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return _dicom_error_response(404, "DICOM_NOT_FOUND", "影像文件不存在或路径错误", file_path)
+        raise
+
+    try:
+        ok = _validate_dicom_magic(target)
+    except PermissionError:
+        _log_dicom_issue(
+            "ERROR",
+            "dicom_permission_denied",
+            f"DICOM 文件无法读取（权限被拒）: {file_path}",
+            file_rel=file_path,
+            details=f"path={target}",
+        )
+        return _dicom_error_response(403, "DICOM_PERMISSION_DENIED", "影像文件无法读取，系统权限被拒绝（可能被安全软件锁定）", file_path)
+    except OSError as exc:
+        _log_dicom_issue(
+            "ERROR",
+            "dicom_read_error",
+            f"DICOM 文件读取异常: {file_path}",
+            file_rel=file_path,
+            details=f"path={target}, errno={exc.errno}, msg={exc}",
+        )
+        return _dicom_error_response(500, "DICOM_READ_ERROR", "影像文件读取异常，请稍后重试", file_path)
+
+    if not ok:
+        size = target.stat().st_size if target.exists() else 0
+        _log_dicom_issue(
+            "WARNING",
+            "dicom_invalid",
+            f"DICOM 文件无效或被加密锁定: {file_path}",
+            file_rel=file_path,
+            details=f"reason=missing_DICM_magic, size={size}",
+        )
+        return _dicom_error_response(
+            422,
+            "DICOM_INVALID",
+            "影像文件格式错误，无法解析（可能被加密软件锁定或文件已损坏）",
+            file_path,
+        )
+
+    return _dicom_file_response(request, target)
+
+
 @app.get("/dicom/{file_path:path}")
 def serve_public_dicom(file_path: str, request: Request):
-    return _dicom_file_response(request, _resolve_static_file(DICOM_PUBLIC_DIR, file_path))
+    return _serve_validated_dicom(DICOM_PUBLIC_DIR, file_path, request)
 
 
 @app.get("/dicom-out/{file_path:path}")
 def serve_dicom_out(file_path: str, request: Request):
-    return _dicom_file_response(request, _resolve_static_file(DICOM_OUT_DIR, file_path))
+    return _serve_validated_dicom(DICOM_OUT_DIR, file_path, request)
 
 
 @app.get("/dicom-head-stroke-plain/{file_path:path}")
 def serve_head_stroke_plain(file_path: str, request: Request):
     if not HEAD_STROKE_DEMO_PLAIN_DIR.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return _dicom_file_response(request, _resolve_static_file(HEAD_STROKE_DEMO_PLAIN_DIR, file_path))
+        return _dicom_error_response(404, "DICOM_NOT_FOUND", "影像目录不存在", file_path)
+    return _serve_validated_dicom(HEAD_STROKE_DEMO_PLAIN_DIR, file_path, request)
 
 
 DICOM_OUT_DIR = DATA_DIR / "dicom_out"

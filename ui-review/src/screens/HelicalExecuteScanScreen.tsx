@@ -6,9 +6,7 @@ import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import DibhStatusRow from "../components/DibhStatusRow";
 import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/BreathHoldGuide";
-import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
-import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
-import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
+import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession } from "../lib/scanSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 
 // Demo dataset for the "脑部螺旋" (brain helical, non-gating) protocol — JPEG Lossless
@@ -27,19 +25,6 @@ type HelicalResultSeriesConfig = {
     count: number;
     fallbackWindowWidth: number;
     fallbackWindowLevel: number;
-};
-
-const SCAN_SESSION_DETAIL_CACHE_KEY = "selectedScanSessionDetail";
-
-const loadCachedBrainHelicalSession = () => {
-    try {
-        const raw = localStorage.getItem(SCAN_SESSION_DETAIL_CACHE_KEY);
-        if (!raw) return null;
-        const session = JSON.parse(raw) as ApiScanSessionDetail;
-        return isBrainHelicalScanSession(session) ? session : null;
-    } catch {
-        return null;
-    }
 };
 
 import ScanConfirmScreen from "./ScanConfirmScreen";
@@ -289,26 +274,14 @@ export default function HelicalExecuteScanScreen() {
     const isGated = executeMode === "gated_helical" || executeMode === "gated_axial";
     const isGatedAxial = executeMode === "gated_axial";
     const isHelicalDIBH = executeMode === "gated_helical";
-    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(() => loadCachedBrainHelicalSession());
 
-    useEffect(() => {
-        fetchSelectedScanSession({ preferCache: true })
-            .then((session) => {
-                if (session) setScanSession(session);
-            })
-            .catch(() => { /* live viewport falls back to workflow-plan detection */ });
-    }, []);
-
-    // Brain-helical demo override: only when running non-gated helical for the
-    // matching protocol ID. Gated paths intentionally keep the legacy result series.
+    // Regular (non-gated) helical execution always plays back the Head Stroke Demo
+    // thin-brain series as the live scan image, for every protocol. Gated paths
+    // (gated_helical / gated_axial) intentionally keep their own result series.
     const helicalResultOverride = useMemo<HelicalResultSeriesConfig | undefined>(() => {
         if (executeMode !== "helical") return undefined;
-        const plans = loadSelectedScanWorkflowPlans();
-        const isBrainHelical =
-            isBrainHelicalWorkflow(plans) ||
-            isBrainHelicalScanSession(scanSession);
-        return isBrainHelical ? BRAIN_HELICAL_RESULT_SERIES : undefined;
-    }, [executeMode, scanSession]);
+        return BRAIN_HELICAL_RESULT_SERIES;
+    }, [executeMode]);
     const [stage, setStage] = useState<ScanStage>("idle");
     const [holdProgress, setHoldProgress] = useState(0);
     const [guideVisible, setGuideVisible] = useState(true);

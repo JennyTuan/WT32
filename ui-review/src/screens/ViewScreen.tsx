@@ -2212,28 +2212,30 @@ const ViewScreen = () => {
                                 );
                             })}
 
-                            <div className="mt-auto flex flex-col items-center gap-[2px]">
-                                <button
-                                    type="button"
-                                    title="上一张"
-                                    aria-label="上一张"
-                                    disabled={isMprViewActive ? false : !canPageBackward}
-                                    onClick={() => handleSliceStep(-1)}
-                                    className="flex h-6 w-7 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
-                                >
-                                    <ChevronUp size={13} strokeWidth={1.8} />
-                                </button>
-                                <button
-                                    type="button"
-                                    title="下一张"
-                                    aria-label="下一张"
-                                    disabled={isMprViewActive ? false : !canPageForward}
-                                    onClick={() => handleSliceStep(1)}
-                                    className="flex h-6 w-7 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
-                                >
-                                    <ChevronDown size={13} strokeWidth={1.8} />
-                                </button>
-                            </div>
+                            {!isFourDLungReconSeries && (
+                                <div className="mt-auto flex flex-col items-center gap-[2px]">
+                                    <button
+                                        type="button"
+                                        title="上一张"
+                                        aria-label="上一张"
+                                        disabled={isMprViewActive ? false : !canPageBackward}
+                                        onClick={() => handleSliceStep(-1)}
+                                        className="flex h-6 w-7 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
+                                    >
+                                        <ChevronUp size={13} strokeWidth={1.8} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="下一张"
+                                        aria-label="下一张"
+                                        disabled={isMprViewActive ? false : !canPageForward}
+                                        onClick={() => handleSliceStep(1)}
+                                        className="flex h-6 w-7 items-center justify-center rounded-md bg-white/5 text-[#94A3B8] ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[#475569] disabled:ring-white/5"
+                                    >
+                                        <ChevronDown size={13} strokeWidth={1.8} />
+                                    </button>
+                                </div>
+                            )}
 
                             <div style={{ height: "1px", background: "rgba(255,255,255,0.07)", margin: "4px 4px" }} />
 

@@ -1,6 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
+import { classifyDicomFetchFailure, type DicomLoadFailure } from "../lib/dicomFetchError";
 import {
     ChevronDown,
     ChevronLeft,
@@ -24,7 +25,6 @@ import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib
 import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
 import { estimateDose } from "../lib/doseEstimate";
 import { buildApiUrl } from "../lib/apiClient";
-import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
@@ -152,6 +152,7 @@ export function FourDScoutViewport({
     const metaRef = useRef<{ ww: number; wl: number; kvp: string; mas: string; thickness: string } | null>(null);
 
     const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const [loadError, setLoadError] = useState<DicomLoadFailure | null>(null);
     const [meta, setMeta] = useState<{ width: number; height: number; ww: number; wl: number; kvp: string; mas: string; thickness: string } | null>(null);
     const [windowWidth, setWindowWidth] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowWidth);
     const [windowLevel, setWindowLevel] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowLevel);
@@ -181,11 +182,28 @@ export function FourDScoutViewport({
                     const loadedBatch = await Promise.all(
                         batch.map(async (sliceNumber) => {
                             const fileName = `image-${String(sliceNumber).padStart(6, "0")}.dcm`;
-                            const response = await fetch(`${FOUR_D_SCOUT_SERIES.basePath}/${fileName}`);
-                            if (!response.ok) throw new Error(`Failed to fetch ${fileName}`);
-                            const arrayBuffer = await response.arrayBuffer();
+                            let response: Response;
+                            try {
+                                response = await fetch(`${FOUR_D_SCOUT_SERIES.basePath}/${fileName}`);
+                            } catch (netErr) {
+                                throw Object.assign(new Error("network"), { __dicomRes: null, __dicomNetErr: netErr });
+                            }
+                            if (!response.ok) {
+                                throw Object.assign(new Error(`Failed to fetch ${fileName}`), { __dicomRes: response });
+                            }
+                            let arrayBuffer: ArrayBuffer;
+                            try {
+                                arrayBuffer = await response.arrayBuffer();
+                            } catch (streamErr) {
+                                throw Object.assign(new Error("truncated"), { __dicomRes: null, __dicomNetErr: streamErr });
+                            }
                             const byteArray = new Uint8Array(arrayBuffer);
-                            const dataSet = dicomParser.parseDicom(byteArray);
+                            let dataSet;
+                            try {
+                                dataSet = dicomParser.parseDicom(byteArray);
+                            } catch (parseErr) {
+                                throw Object.assign(new Error("DICM parse failed"), { __dicomRes: null, __dicomNetErr: parseErr });
+                            }
                             const rows = dataSet.uint16("x00280010") ?? 0;
                             const cols = dataSet.uint16("x00280011") ?? 0;
                             const bitsAllocated = dataSet.uint16("x00280100") ?? 16;
@@ -247,7 +265,14 @@ export function FourDScoutViewport({
                 setWindowWidth(metaRef.current?.ww ?? FOUR_D_SCOUT_SERIES.fallbackWindowWidth);
                 setWindowLevel(metaRef.current?.wl ?? FOUR_D_SCOUT_SERIES.fallbackWindowLevel);
                 setLoadState("ready");
-            } catch (err) { console.error(err); if (!cancelled) setLoadState("error"); }
+            } catch (err) {
+                console.error(err);
+                if (cancelled) return;
+                const tagged = err as { __dicomRes?: Response | null; __dicomNetErr?: unknown };
+                const failure = await classifyDicomFetchFailure(tagged.__dicomRes ?? null, tagged.__dicomNetErr ?? err);
+                setLoadError(failure);
+                setLoadState("error");
+            }
         };
         void loadSlices();
         return () => { cancelled = true; };
@@ -373,6 +398,13 @@ export function FourDScoutViewport({
         >
             <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
             {loadState === "loading" && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#9FB2C5]">载入 DICOM 影像...</div>}
+            {loadState === "error" && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/85">
+                    <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
+                    <span className="text-[14px] font-semibold text-red-400">影像加载失败</span>
+                    <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError?.message ?? "未知错误"}</span>
+                </div>
+            )}
             {enableImageTools && (
                 <div className="absolute right-0 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-lg border border-r-0 border-[#334155] bg-[#0F172A]/92 px-1.5 py-2 shadow-md backdrop-blur-sm">
                     <button
@@ -482,6 +514,7 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
     const slicesRef = useRef<FourDLoadedSlice[]>([]);
     const coronalProjectionRef = useRef<HTMLCanvasElement | null>(null);
     const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const [loadError, setLoadError] = useState<DicomLoadFailure | null>(null);
     const [windowWidth] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowWidth);
     const [windowLevel] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowLevel);
     const [forceRender, setForceRender] = useState(0);
@@ -501,11 +534,26 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
                     const batch = sliceNumbers.slice(start, start + concurrency);
                     const batchResults = await Promise.all(batch.map(async (n) => {
                         const fileName = `image-${String(n).padStart(6, "0")}.dcm`;
-                        const res = await fetch(`${FOUR_D_SCOUT_SERIES.basePath}/${fileName}`);
-                        if (!res.ok) throw new Error("Fetch failed");
-                        const ab = await res.arrayBuffer();
+                        let res: Response;
+                        try {
+                            res = await fetch(`${FOUR_D_SCOUT_SERIES.basePath}/${fileName}`);
+                        } catch (netErr) {
+                            throw Object.assign(new Error("network"), { __dicomRes: null, __dicomNetErr: netErr });
+                        }
+                        if (!res.ok) throw Object.assign(new Error("Fetch failed"), { __dicomRes: res });
+                        let ab: ArrayBuffer;
+                        try {
+                            ab = await res.arrayBuffer();
+                        } catch (streamErr) {
+                            throw Object.assign(new Error("truncated"), { __dicomRes: null, __dicomNetErr: streamErr });
+                        }
                         const ba = new Uint8Array(ab);
-                        const ds = dicomParser.parseDicom(ba);
+                        let ds;
+                        try {
+                            ds = dicomParser.parseDicom(ba);
+                        } catch (parseErr) {
+                            throw Object.assign(new Error("DICM parse failed"), { __dicomRes: null, __dicomNetErr: parseErr });
+                        }
                         const rows = ds.uint16("x00280010") ?? 0;
                         const cols = ds.uint16("x00280011") ?? 0;
                         const intercept = Number(ds.string("x00281052") ?? "0");
@@ -530,7 +578,14 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
                 loadedSlices.sort((a, b) => b.positionZ - a.positionZ);
                 slicesRef.current = loadedSlices;
                 setLoadState("ready");
-            } catch (err) { console.error(err); if (!cancelled) setLoadState("error"); }
+            } catch (err) {
+                console.error(err);
+                if (cancelled) return;
+                const tagged = err as { __dicomRes?: Response | null; __dicomNetErr?: unknown };
+                const failure = await classifyDicomFetchFailure(tagged.__dicomRes ?? null, tagged.__dicomNetErr ?? err);
+                setLoadError(failure);
+                setLoadState("error");
+            }
         };
         load();
         return () => { cancelled = true; };
@@ -633,6 +688,13 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
                     </div>
 
                     {loadState === "loading" && <div className="text-[11px] text-white/40 animate-pulse">Initializing Recon Buffer...</div>}
+                    {loadState === "error" && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/85">
+                            <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
+                            <span className="text-[14px] font-semibold text-red-400">影像加载失败</span>
+                            <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError?.message ?? "未知错误"}</span>
+                        </div>
+                    )}
 
                     {loadState === "ready" && (
                         <>
@@ -1292,7 +1354,6 @@ const GatingHelicalConfirmScreen = () => {
 const HelicalScanConfirmScreen = () => {
     const isGatingWorkflow = false;
 
-    const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [helicalParam, setHelicalParam] = useState<ApiScanSessionHelicalParam | null>(null);
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
@@ -1305,11 +1366,13 @@ const HelicalScanConfirmScreen = () => {
     const thresholdGuard = useDoseThresholdGuard();
     const navigate = useNavigate();
 
-    const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(() => {
-        const shouldUseBrainScout =
-            isBrainHelicalWorkflow(workflowPlans) || isBrainHelicalScanSession(scanSession);
-        return shouldUseBrainScout ? BRAIN_HELICAL_SCOUT_OVERRIDE : undefined;
-    }, [scanSession, workflowPlans]);
+    // All regular (non-gating) protocols use the Head Stroke Demo topogram as the
+    // scout / 定位像 source. Gating protocols render GatingHelicalConfirmScreen above
+    // and are unaffected by this override.
+    const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(
+        () => BRAIN_HELICAL_SCOUT_OVERRIDE,
+        [],
+    );
 
     useEffect(() => {
         if (isGatingWorkflow) return;

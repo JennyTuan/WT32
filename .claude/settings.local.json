@@ -180,7 +180,9 @@
       "Bash(C:/STN/projects/WT32/.venv/Scripts/python.exe -c \"import sqlalchemy, fastapi, pydicom, numpy, scipy, PIL; print\\('all ok'\\)\")",
       "Bash(C:/STN/projects/WT32/.venv/Scripts/pip.exe install *)",
       "Bash(C:/STN/projects/WT32/.venv/Scripts/python.exe -c ' *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Bash(git stash *)",
+      "Bash(git reset *)"
     ]
   }
 }

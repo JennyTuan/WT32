@@ -8,11 +8,10 @@ import {
   Database,
   LoaderCircle,
 } from "lucide-react";
-import * as dicomParser from "dicom-parser";
 import {
   FOUR_D_DICOM_MP_IDS,
   FOUR_D_DICOM_SLICES_PER_PHASE,
-  getFourDDicomSeriesUrls,
+  getFourDPreviewUrls,
   type FourDDicomMpId,
 } from "../lib/fourDDicomSource";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
@@ -41,109 +40,6 @@ interface FullscreenImageState {
   imageUrl: string;
 }
 
-function parseFirstNumber(value?: string | null) {
-  if (!value) return undefined;
-  const first = value.split("\\")[0]?.trim();
-  if (!first) return undefined;
-  const parsed = Number(first);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function clamp01(value: number) {
-  if (value <= 0) return 0;
-  if (value >= 1) return 1;
-  return value;
-}
-
-function decodeDicomPreview(buffer: ArrayBuffer) {
-  const byteArray = new Uint8Array(buffer);
-  const dataSet = dicomParser.parseDicom(byteArray);
-
-  const rows = dataSet.uint16("x00280010");
-  const cols = dataSet.uint16("x00280011");
-  const bitsAllocated = dataSet.uint16("x00280100") ?? 16;
-  const pixelRepresentation = dataSet.uint16("x00280103") ?? 0;
-  const photometricInterpretation = dataSet.string("x00280004") ?? "MONOCHROME2";
-  const slope = parseFirstNumber(dataSet.string("x00281053")) ?? 1;
-  const intercept = parseFirstNumber(dataSet.string("x00281052")) ?? 0;
-  const windowCenter = parseFirstNumber(dataSet.string("x00281050"));
-  const windowWidth = parseFirstNumber(dataSet.string("x00281051"));
-  const pixelElement = dataSet.elements.x7fe00010;
-
-  if (!rows || !cols || !pixelElement) {
-    throw new Error("Missing DICOM pixel data");
-  }
-
-  const pixelCount = rows * cols;
-  const pixelDataOffset = byteArray.byteOffset + pixelElement.dataOffset;
-  const pixelDataLength = pixelElement.length;
-  const view = new DataView(byteArray.buffer, pixelDataOffset, pixelDataLength);
-  const values = new Float32Array(pixelCount);
-
-  let minValue = Number.POSITIVE_INFINITY;
-  let maxValue = Number.NEGATIVE_INFINITY;
-
-  for (let index = 0; index < pixelCount; index += 1) {
-    let raw = 0;
-    if (bitsAllocated === 16) {
-      raw = pixelRepresentation === 1 ? view.getInt16(index * 2, true) : view.getUint16(index * 2, true);
-    } else {
-      raw = view.getUint8(index);
-    }
-    const value = raw * slope + intercept;
-    values[index] = value;
-    if (value < minValue) minValue = value;
-    if (value > maxValue) maxValue = value;
-  }
-
-  const lower =
-    windowCenter !== undefined && windowWidth !== undefined && windowWidth > 1
-      ? windowCenter - windowWidth / 2
-      : minValue;
-  const upper =
-    windowCenter !== undefined && windowWidth !== undefined && windowWidth > 1
-      ? windowCenter + windowWidth / 2
-      : maxValue;
-  const range = Math.max(upper - lower, 1);
-  const invert = photometricInterpretation.toUpperCase() === "MONOCHROME1";
-
-  const maxPreviewEdge = 224;
-  const scale = Math.min(1, maxPreviewEdge / Math.max(rows, cols));
-  const previewWidth = Math.max(1, Math.round(cols * scale));
-  const previewHeight = Math.max(1, Math.round(rows * scale));
-
-  const canvas = document.createElement("canvas");
-  canvas.width = previewWidth;
-  canvas.height = previewHeight;
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    throw new Error("Canvas context unavailable");
-  }
-
-  const imageData = context.createImageData(previewWidth, previewHeight);
-
-  for (let y = 0; y < previewHeight; y += 1) {
-    const sourceY = Math.min(rows - 1, Math.floor((y / previewHeight) * rows));
-    for (let x = 0; x < previewWidth; x += 1) {
-      const sourceX = Math.min(cols - 1, Math.floor((x / previewWidth) * cols));
-      const sourceIndex = sourceY * cols + sourceX;
-      let normalized = (values[sourceIndex] - lower) / range;
-      normalized = clamp01(normalized);
-      if (invert) normalized = 1 - normalized;
-      const gray = Math.round(normalized * 255);
-      const targetIndex = (y * previewWidth + x) * 4;
-      imageData.data[targetIndex] = gray;
-      imageData.data[targetIndex + 1] = gray;
-      imageData.data[targetIndex + 2] = gray;
-      imageData.data[targetIndex + 3] = 255;
-    }
-  }
-
-  context.putImageData(imageData, 0, 0);
-  return canvas.toDataURL("image/png");
-}
-
 async function fetchArrayBuffer(url: string, signal: AbortSignal) {
   const response = await fetch(url, { signal });
   if (!response.ok) {
@@ -158,7 +54,7 @@ async function loadBedPhaseSeries(
   signal: AbortSignal,
   onProgress: (loadedFileCount: number) => void,
 ) {
-  const urls = getFourDDicomSeriesUrls(phaseIndex, mpId);
+  const urls = getFourDPreviewUrls(phaseIndex, mpId);
   let loadedFileCount = 0;
   let nextIndex = 0;
   let previewUrl: string | null = null;
@@ -167,9 +63,9 @@ async function loadBedPhaseSeries(
     while (nextIndex < urls.length) {
       const currentIndex = nextIndex;
       nextIndex += 1;
-      const buffer = await fetchArrayBuffer(urls[currentIndex], signal);
+      await fetchArrayBuffer(urls[currentIndex], signal);
       if (currentIndex === PREVIEW_SLICE_INDEX) {
-        previewUrl = decodeDicomPreview(buffer);
+        previewUrl = urls[currentIndex];
       }
       loadedFileCount += 1;
       if (loadedFileCount === 1 || loadedFileCount === urls.length || loadedFileCount % 5 === 0) {
