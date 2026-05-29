@@ -5,9 +5,10 @@ import { Hand, Move, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { fetchSelectedScanSession, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
 import type { ApiScanSessionAxialParam } from "../lib/scanSession";
 import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
-import AutoMaPanel, { type NoiseLevel } from "../components/AutoMaPanel";
+import AutoMaPanel, { NOISE_SLIDER_DEFAULT, type NoiseLevel } from "../components/AutoMaPanel";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 import { buildWadoImageId, initCornerstone } from "../lib/cornerstone/initCornerstone";
+import { computeDoseModulation, type ScoutHuData } from "../lib/doseModulation";
 
 // Optional cornerstone-backed loading source. When provided, TomographicScoutViewport
 // loads via cornerstone (so JPEG Lossless / other compressed transfer syntaxes work).
@@ -147,6 +148,8 @@ export function TomographicScoutViewport({
     onScanPositionRatioChange,
     hideTools = false,
     seriesOverride,
+    onScoutHuChange,
+    onCropBoxChange,
 }: {
     onMeasurementChange: (values: { scanLength: string; scoutFov: string }) => void;
     initialMeasurements?: { scanLength?: string; scoutFov?: string };
@@ -154,11 +157,18 @@ export function TomographicScoutViewport({
     onScanPositionRatioChange?: (ratio: number) => void;
     hideTools?: boolean;
     seriesOverride?: TomographicScoutSeriesOverride;
+    onScoutHuChange?: (data: ScoutHuData | null) => void;
+    onCropBoxChange?: (cropBox: { x: number; y: number; width: number; height: number }) => void;
 }) {
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const projectionRef = useRef<Uint8ClampedArray | null>(null);
     const metaRef = useRef<ProjectionMeta | null>(null);
+    const huRef = useRef<ScoutHuData | null>(null);
+    const onScoutHuChangeRef = useRef(onScoutHuChange);
+    const onCropBoxChangeRef = useRef(onCropBoxChange);
+    useEffect(() => { onScoutHuChangeRef.current = onScoutHuChange; }, [onScoutHuChange]);
+    useEffect(() => { onCropBoxChangeRef.current = onCropBoxChange; }, [onCropBoxChange]);
     const initializedCropRef = useRef(false);
     const initialMeasurementsRef = useRef(initialMeasurements);
     const dragStateRef = useRef<{
@@ -206,6 +216,8 @@ export function TomographicScoutViewport({
         initializedCropRef.current = false;
         projectionRef.current = null;
         metaRef.current = null;
+        huRef.current = null;
+        onScoutHuChangeRef.current?.(null);
         setLoadState("loading");
 
         const loadAxialStackViaCornerstone = async (
@@ -340,7 +352,7 @@ export function TomographicScoutViewport({
 
         const loadTopogramViaCornerstone = async (
             override: Extract<TomographicScoutSeriesOverride, { kind: "topogram" }>,
-        ): Promise<{ output: Uint8ClampedArray; meta: ProjectionMeta }> => {
+        ): Promise<{ output: Uint8ClampedArray; meta: ProjectionMeta; hu: ScoutHuData }> => {
             await initCornerstone();
             const fallbackWw = override.fallbackWindowWidth ?? SCOUT_SERIES.fallbackWindowWidth;
             const fallbackWl = override.fallbackWindowLevel ?? SCOUT_SERIES.fallbackWindowLevel;
@@ -375,8 +387,10 @@ export function TomographicScoutViewport({
             const maxVal = wl + ww / 2;
             const range = Math.max(maxVal - minVal, 1);
             const output = new Uint8ClampedArray(cols * rows);
+            const huFloat = new Float32Array(pixelData.length);
             for (let i = 0; i < pixelData.length; i += 1) {
                 const value = pixelData[i] * slope + intercept;
+                huFloat[i] = value;
                 const normalized = clamp01((value - minVal) / range);
                 const gray = Math.round(normalized * 255);
                 output[i] = invert ? 255 - gray : gray;
@@ -391,13 +405,20 @@ export function TomographicScoutViewport({
                     // crop box maps onto — feed pixelSpacingY in place of sliceThickness.
                     sliceThickness: pixelSpacingY,
                 },
+                hu: {
+                    hu: huFloat,
+                    rows,
+                    cols,
+                    pixelSpacingX,
+                    pixelSpacingY,
+                },
             };
         };
 
         const loadProjection = async () => {
             try {
                 if (seriesOverride?.kind === "topogram") {
-                    const { output, meta } = await withTimeout(
+                    const { output, meta, hu } = await withTimeout(
                         loadTopogramViaCornerstone(seriesOverride),
                         SCOUT_LOAD_TIMEOUT_MS,
                         "Topogram loading",
@@ -405,6 +426,8 @@ export function TomographicScoutViewport({
                     if (cancelled) return;
                     projectionRef.current = output;
                     metaRef.current = meta;
+                    huRef.current = hu;
+                    onScoutHuChangeRef.current?.(hu);
                     setLoadState("ready");
                     return;
                 }
@@ -541,6 +564,7 @@ export function TomographicScoutViewport({
             scanLength: scanLengthMm.toFixed(1),
             scoutFov: fovMm.toFixed(1),
         });
+        onCropBoxChangeRef.current?.(cropBox);
     }, [cropBox, onMeasurementChange]);
 
     useEffect(() => {
@@ -839,8 +863,10 @@ export function TomographicScoutViewport({
 const SequenceScanConfirmScreen = () => {
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [axialParam, setAxialParam] = useState<ApiScanSessionAxialParam | null>(null);
-    const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("medium");
+    const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>(NOISE_SLIDER_DEFAULT);
     const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
+    const [scoutHu, setScoutHu] = useState<ScoutHuData | null>(null);
+    const [scoutCropBox, setScoutCropBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const axialParamId = axialParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
 
@@ -871,7 +897,7 @@ const SequenceScanConfirmScreen = () => {
 
     const handleAutoMaChange = (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number; noise_level?: NoiseLevel }) => {
         const { noise_level, ...rest } = patch;
-        if (noise_level) setNoiseLevel(noise_level);
+        if (noise_level !== undefined) setNoiseLevel(noise_level);
         if (!axialParam || Object.keys(rest).length === 0) return;
         setAxialParam((prev) => (prev ? { ...prev, ...rest } : prev));
         void updateSelectedScanSessionAxialParam(axialParam.id, rest).catch((error) => {
@@ -919,6 +945,28 @@ const SequenceScanConfirmScreen = () => {
 
     const showAutoMaPanel = axialParam?.auto_ma ?? false;
 
+    const realMaCurve = useMemo(() => {
+        if (!showAutoMaPanel || !scoutHu || !scoutCropBox || !axialParam) return null;
+        const maRef = axialParam.ma ?? 200;
+        const maMin = axialParam.ma_min ?? Math.max(40, Math.round(maRef * 0.5));
+        const maMax = axialParam.ma_max ?? Math.round(maRef * 1.2);
+        try {
+            const result = computeDoseModulation({
+                scoutData: scoutHu,
+                cropBox: scoutCropBox,
+                kv: axialParam.kv ?? 120,
+                maRef,
+                maMin,
+                maMax,
+                steps: axialBedCount,
+            });
+            return result.maCurve;
+        } catch (error) {
+            console.error("Failed to compute axial dose modulation curve.", error);
+            return null;
+        }
+    }, [showAutoMaPanel, scoutHu, scoutCropBox, axialParam, axialBedCount]);
+
     return (
         <ScanConfirmScreen
             activeSequenceId="s2"
@@ -935,6 +983,8 @@ const SequenceScanConfirmScreen = () => {
                         scanPositionRatio={scanPositionRatio}
                         onScanPositionRatioChange={setAxialScanPositionRatio}
                         seriesOverride={HEAD_STROKE_DEMO_SCOUT_OVERRIDE}
+                        onScoutHuChange={setScoutHu}
+                        onCropBoxChange={setScoutCropBox}
                     />
                     {axialParam && showAutoMaPanel && (
                         <AutoMaPanel
@@ -950,6 +1000,7 @@ const SequenceScanConfirmScreen = () => {
                             scanPositionRatio={scanPositionRatio}
                             onScanPositionRatioChange={setAxialScanPositionRatio}
                             onChange={handleAutoMaChange}
+                            realMaCurve={realMaCurve}
                         />
                     )}
                 </>

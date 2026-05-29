@@ -182,7 +182,8 @@
       "Bash(C:/STN/projects/WT32/.venv/Scripts/python.exe -c ' *)",
       "Bash(git fetch *)",
       "Bash(git stash *)",
-      "Bash(git reset *)"
+      "Bash(git reset *)",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }

@@ -1,6 +1,26 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 
-export type NoiseLevel = "low" | "medium" | "high";
+// Opaque "noise level" used by the auto-mA slider. Concrete physical meaning
+// (target image noise σ, vendor-specific noise index, etc.) is still pending
+// from R&D — the slider just transports a number for now.
+export type NoiseLevel = number;
+
+// === Noise-level slider tunables ============================================
+// These four constants define the noise slider's range, granularity and
+// default. They are intentionally kept here at module scope so they can be
+// swapped to real product values without touching anything else in the panel
+// or its callers.
+export const NOISE_SLIDER_MIN = 1;
+export const NOISE_SLIDER_MAX = 10;
+export const NOISE_SLIDER_STEP = 1;
+export const NOISE_SLIDER_DEFAULT = 5;
+
+// PLACEHOLDER noise → mA scale-factor mapping. Higher slider value ⇒ more
+// noise tolerated ⇒ less mA. Replace the formula once we have real units.
+const computeNoiseFactor = (value: number) => {
+    const v = Math.min(NOISE_SLIDER_MAX, Math.max(NOISE_SLIDER_MIN, value));
+    return NOISE_SLIDER_DEFAULT / v;
+};
 
 export type AutoMaPanelProps = {
     mode?: "axial" | "helical";
@@ -17,18 +37,10 @@ export type AutoMaPanelProps = {
     onScanPositionRatioChange?: (ratio: number) => void;
     onChange: (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number; noise_level?: NoiseLevel }) => void;
     noiseLevel?: NoiseLevel;
-};
-
-const NOISE_OPTIONS: { value: NoiseLevel; label: string; desc: string }[] = [
-    { value: "low", label: "低", desc: "低噪声容忍，剂量较高、图像最清晰" },
-    { value: "medium", label: "中", desc: "平衡剂量与图像质量（推荐）" },
-    { value: "high", label: "高", desc: "高噪声容忍，剂量最低、噪声较多" },
-];
-
-const NOISE_FACTOR: Record<NoiseLevel, number> = {
-    low: 1.2,
-    medium: 1,
-    high: 0.7,
+    // Real physics-derived mA(z) curve from the scout topogram (length need
+    // not match `effectiveSteps`; it is resampled by linear interpolation).
+    // When omitted, the panel falls back to a synthetic sinusoidal curve.
+    realMaCurve?: number[] | null;
 };
 
 const HARD_MIN = 20;
@@ -39,14 +51,38 @@ const AXIAL_SAMPLES_PER_BED = 48;
 const HELICAL_BEAM_WIDTH_MM = 40;
 const VIEW_W = 100;
 const VIEW_H = 100;
+// One detector bed coverage. The waveform view window snaps to integer
+// multiples of this in z (both axial bed steps and helical pan/zoom).
+const BED_MM = 19.2;
+const ZOOM_FACTOR = 1.4;
+const PAN_DRAG_THRESHOLD_PX = 4;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
+const snapBed = (mm: number) => Math.max(0, Math.round(mm / BED_MM) * BED_MM);
+const snapBedUp = (mm: number) => Math.max(BED_MM, Math.ceil(mm / BED_MM) * BED_MM);
 
 const computeStepCount = (scanLength: number, sliceInterval: number, fallback?: number | null) => {
     if (fallback && fallback > 0) return fallback;
     if (!Number.isFinite(scanLength) || !Number.isFinite(sliceInterval) || sliceInterval <= 0) return 1;
     return Math.max(1, Math.round(scanLength / sliceInterval));
+};
+
+const resampleCurve = (input: number[], outLen: number): number[] => {
+    if (outLen <= 0) return [];
+    if (input.length === 0) return Array.from({ length: outLen }, () => 0);
+    if (input.length === outLen) return input.slice();
+    if (input.length === 1) return Array.from({ length: outLen }, () => input[0]);
+    const out = new Array<number>(outLen);
+    const lastIn = input.length - 1;
+    for (let i = 0; i < outLen; i += 1) {
+        const f = outLen === 1 ? 0 : (i / (outLen - 1)) * lastIn;
+        const lo = Math.floor(f);
+        const hi = Math.min(lastIn, lo + 1);
+        const t = f - lo;
+        out[i] = input[lo] * (1 - t) + input[hi] * t;
+    }
+    return out;
 };
 
 const generatePositionMaCurve = (sampleCount: number, maMin: number, maMax: number): number[] => {
@@ -146,13 +182,23 @@ export default function AutoMaPanel({
     scanPositionRatio,
     onScanPositionRatioChange,
     onChange,
-    noiseLevel = "medium",
+    noiseLevel = NOISE_SLIDER_DEFAULT,
+    realMaCurve,
 }: AutoMaPanelProps) {
     const [draftMin, setDraftMin] = useState(maMin);
     const [draftMax, setDraftMax] = useState(maMax);
     const [internalPositionRatio, setInternalPositionRatio] = useState(0.5);
+    const [viewStartMm, setViewStartMm] = useState(0);
+    // 0 means "auto: full scan range". Any positive value is a user-chosen
+    // window width (already snapped to BED_MM).
+    const [viewWidthMm, setViewWidthMm] = useState(0);
     const debounceRef = useRef<number | null>(null);
-    const scrubbingRef = useRef(false);
+    const pointerStateRef = useRef<{
+        pointerId: number;
+        startClientX: number;
+        startViewStartMm: number;
+        mode: "idle" | "pan";
+    } | null>(null);
 
     useEffect(() => setDraftMin(maMin), [maMin]);
     useEffect(() => setDraftMax(maMax), [maMax]);
@@ -160,15 +206,22 @@ export default function AutoMaPanel({
     const isHelical = mode === "helical";
     const effectiveSliceInterval = sliceInterval ?? 0;
     const effectiveSteps = isHelical ? HELICAL_SAMPLE_COUNT : computeStepCount(scanLength, effectiveSliceInterval, stepCount);
-    const noiseFactor = NOISE_FACTOR[noiseLevel];
+    const noiseFactor = computeNoiseFactor(noiseLevel);
     const activePositionRatio = clamp01(scanPositionRatio ?? internalPositionRatio);
 
     const curve = useMemo(() => {
-        const base = autoMa
-            ? generatePositionMaCurve(effectiveSteps, draftMin, draftMax)
-            : Array.from({ length: effectiveSteps }, () => fallbackMa);
+        let base: number[];
+        if (autoMa && realMaCurve && realMaCurve.length > 0) {
+            // Resample the physics curve to `effectiveSteps` by linear
+            // interpolation so axial bed count / helical sample count both work.
+            base = resampleCurve(realMaCurve, effectiveSteps);
+        } else if (autoMa) {
+            base = generatePositionMaCurve(effectiveSteps, draftMin, draftMax);
+        } else {
+            base = Array.from({ length: effectiveSteps }, () => fallbackMa);
+        }
         return base.map((value) => Math.round(clamp(value * noiseFactor, HARD_MIN, HARD_MAX)));
-    }, [autoMa, draftMax, draftMin, effectiveSteps, fallbackMa, noiseFactor]);
+    }, [autoMa, draftMax, draftMin, effectiveSteps, fallbackMa, noiseFactor, realMaCurve]);
 
     const envelope = useMemo(
         () => (autoMa ? generateEnvelope(curve, draftMin, draftMax) : { lat: curve, ap: curve }),
@@ -185,11 +238,37 @@ export default function AutoMaPanel({
 
     const timeWaveform = useMemo<TimeSample[]>(() => {
         if (!isHelical || !helicalTiming || !autoMa) return [];
+        if (realMaCurve && realMaCurve.length > 0) {
+            // Drive the time-domain helical waveform's slow-varying centre with
+            // the physics-derived mA(z) curve, keep the θ (tube-angle) ripple
+            // from the synthetic generator.
+            const totalTime = helicalTiming.totalTime;
+            const span = Math.max(1, draftMax - draftMin);
+            const lastIdx = realMaCurve.length - 1;
+            return Array.from({ length: 480 }, (_, i) => {
+                const u = i / 479;
+                const t = u * totalTime;
+                const f = u * lastIdx;
+                const lo = Math.floor(f);
+                const hi = Math.min(lastIdx, lo + 1);
+                const center = realMaCurve[lo] * (1 - (f - lo)) + realMaCurve[hi] * (f - lo);
+                const theta = (t / rotationTime) * Math.PI * 2;
+                const radiusFactor = 0.5 + 0.4 * Math.cos(u * Math.PI * 2 - Math.PI) + 0.1 * Math.sin(u * Math.PI * 5);
+                const amp = (span / 2) * 0.55 * clamp(radiusFactor, 0.15, 1);
+                const ma = clamp((center + amp * -Math.cos(2 * theta)) * noiseFactor, HARD_MIN, HARD_MAX);
+                return {
+                    t,
+                    ma,
+                    z: u * scanLength,
+                    theta: ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI),
+                };
+            });
+        }
         return generateHelicalTimeWaveform(helicalTiming.totalTime, rotationTime, scanLength, draftMin, draftMax).map((sample) => ({
             ...sample,
             ma: clamp(sample.ma * noiseFactor, HARD_MIN, HARD_MAX),
         }));
-    }, [autoMa, draftMax, draftMin, helicalTiming, isHelical, noiseFactor, rotationTime, scanLength]);
+    }, [autoMa, draftMax, draftMin, helicalTiming, isHelical, noiseFactor, rotationTime, scanLength, realMaCurve]);
 
     const axialTimeWaveform = useMemo<AxialTimeSample[]>(() => {
         if (isHelical || !autoMa) return [];
@@ -206,17 +285,30 @@ export default function AutoMaPanel({
     const yLineMin = yOf(draftMin);
     const yLineMax = yOf(draftMax);
 
+    // Z-axis viewport (in mm). totalSnapped rounds the scan length up to the
+    // next bed boundary so the rightmost gridline always lands on a bed edge.
+    const totalSnapped = scanLength > 0 ? snapBedUp(scanLength) : BED_MM;
+    const requestedWidth = viewWidthMm > 0 ? snapBed(viewWidthMm) : totalSnapped;
+    const effViewWidthMm = clamp(requestedWidth, BED_MM, totalSnapped);
+    const maxStart = Math.max(0, totalSnapped - effViewWidthMm);
+    const effViewStartMm = clamp(snapBed(viewStartMm), 0, maxStart);
+    const effViewEndMm = effViewStartMm + effViewWidthMm;
+    const visibleBedCount = Math.max(1, Math.round(effViewWidthMm / BED_MM));
+    const totalBedCount = Math.max(1, Math.round(totalSnapped / BED_MM));
+    const zToX = (zMm: number) => ((zMm - effViewStartMm) / effViewWidthMm) * VIEW_W;
+    const isZoomedOrPanned = effViewWidthMm < totalSnapped - 1e-6 || effViewStartMm > 1e-6;
+
     const timeWavePath = useMemo(() => {
         if (!timeWaveform.length) return "";
-        const total = timeWaveform[timeWaveform.length - 1].t || 1;
         return timeWaveform
             .map((sample, i) => {
-                const x = (sample.t / total) * VIEW_W;
+                const x = zToX(sample.z);
                 return `${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${yOf(sample.ma).toFixed(2)}`;
             })
             .join(" ");
-    }, [timeWaveform, yViewMin, yViewSpan]);
+    }, [timeWaveform, yViewMin, yViewSpan, effViewStartMm, effViewWidthMm]);
 
+    const axialBedWidthMm = effectiveSteps > 0 && scanLength > 0 ? scanLength / effectiveSteps : BED_MM;
     const axialTimePaths = useMemo(() => {
         const bedCount = Math.max(1, effectiveSteps);
         if (!axialTimeWaveform.length || bedCount <= 0) return [];
@@ -225,12 +317,13 @@ export default function AutoMaPanel({
             return samples
                 .map((sample, index) => {
                     const localRatio = rotationTime > 0 ? (sample.t - bedIndex * rotationTime) / rotationTime : 0;
-                    const x = ((bedIndex + localRatio) / bedCount) * VIEW_W;
+                    const zMm = (bedIndex + localRatio) * axialBedWidthMm;
+                    const x = zToX(zMm);
                     return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${yOf(sample.ma).toFixed(2)}`;
                 })
                 .join(" ");
         });
-    }, [axialTimeWaveform, effectiveSteps, rotationTime, yViewMin, yViewSpan]);
+    }, [axialTimeWaveform, effectiveSteps, rotationTime, yViewMin, yViewSpan, effViewStartMm, effViewWidthMm, axialBedWidthMm]);
 
     const cursorIdx = isHelical
         ? timeWaveform.length > 0
@@ -252,26 +345,80 @@ export default function AutoMaPanel({
         onScanPositionRatioChange?.(nextRatio);
     };
 
-    const updateCursor = (clientX: number, target: SVGSVGElement) => {
+    const scrubAtClientX = (clientX: number, target: SVGSVGElement) => {
         if (isHelical && !timeWaveform.length) return;
         if (!isHelical && !curve.length) return;
+        if (!(scanLength > 0)) return;
         const rect = target.getBoundingClientRect();
-        updatePositionRatio((clientX - rect.left) / Math.max(1, rect.width));
+        const localRatio = clamp01((clientX - rect.left) / Math.max(1, rect.width));
+        const zMm = effViewStartMm + localRatio * effViewWidthMm;
+        updatePositionRatio(clamp01(zMm / scanLength));
     };
 
     const handleSvgPointerDown = (event: PointerEvent<SVGSVGElement>) => {
-        scrubbingRef.current = true;
         event.currentTarget.setPointerCapture?.(event.pointerId);
-        updateCursor(event.clientX, event.currentTarget);
+        pointerStateRef.current = {
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startViewStartMm: effViewStartMm,
+            mode: "idle",
+        };
     };
 
     const handleSvgPointerMove = (event: PointerEvent<SVGSVGElement>) => {
-        if (!scrubbingRef.current) return;
-        updateCursor(event.clientX, event.currentTarget);
+        const state = pointerStateRef.current;
+        if (!state || state.pointerId !== event.pointerId) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const dx = event.clientX - state.startClientX;
+        if (state.mode === "idle" && Math.abs(dx) > PAN_DRAG_THRESHOLD_PX) {
+            state.mode = "pan";
+        }
+        if (state.mode === "pan") {
+            const dmm = -(dx / Math.max(1, rect.width)) * effViewWidthMm;
+            const next = clamp(snapBed(state.startViewStartMm + dmm), 0, maxStart);
+            setViewStartMm(next);
+        }
     };
 
-    const handleSvgPointerUp = () => {
-        scrubbingRef.current = false;
+    const handleSvgPointerUp = (event: PointerEvent<SVGSVGElement>) => {
+        const state = pointerStateRef.current;
+        if (state && state.pointerId === event.pointerId && state.mode === "idle") {
+            scrubAtClientX(event.clientX, event.currentTarget);
+        }
+        pointerStateRef.current = null;
+    };
+
+    const handleSvgWheel = (event: WheelEvent<SVGSVGElement>) => {
+        event.preventDefault();
+        const rect = event.currentTarget.getBoundingClientRect();
+        const localRatio = clamp01((event.clientX - rect.left) / Math.max(1, rect.width));
+        const focusMm = effViewStartMm + localRatio * effViewWidthMm;
+        const factor = event.deltaY < 0 ? 1 / ZOOM_FACTOR : ZOOM_FACTOR;
+        const nextWidth = clamp(snapBed(effViewWidthMm * factor), BED_MM, totalSnapped);
+        const nextMaxStart = Math.max(0, totalSnapped - nextWidth);
+        const nextStart = clamp(snapBed(focusMm - localRatio * nextWidth), 0, nextMaxStart);
+        setViewWidthMm(nextWidth >= totalSnapped - 1e-6 ? 0 : nextWidth);
+        setViewStartMm(nextStart);
+    };
+
+    const handleSvgDoubleClick = () => {
+        setViewWidthMm(0);
+        setViewStartMm(0);
+    };
+
+    const zoomAroundCenter = (factor: number) => {
+        const nextWidth = clamp(snapBed(effViewWidthMm * factor), BED_MM, totalSnapped);
+        const center = effViewStartMm + effViewWidthMm / 2;
+        const nextMaxStart = Math.max(0, totalSnapped - nextWidth);
+        const nextStart = clamp(snapBed(center - nextWidth / 2), 0, nextMaxStart);
+        setViewWidthMm(nextWidth >= totalSnapped - 1e-6 ? 0 : nextWidth);
+        setViewStartMm(nextStart);
+    };
+    const handleZoomIn = () => zoomAroundCenter(1 / ZOOM_FACTOR);
+    const handleZoomOut = () => zoomAroundCenter(ZOOM_FACTOR);
+    const handleZoomReset = () => {
+        setViewWidthMm(0);
+        setViewStartMm(0);
     };
 
     const flush = (patch: { ma_min?: number; ma_max?: number }) => {
@@ -308,7 +455,6 @@ export default function AutoMaPanel({
                                 <Metric label="Z" value={cursorSample.z.toFixed(1)} unit="mm" />
                                 <Metric label="theta" value={((cursorSample.theta * 180) / Math.PI).toFixed(0)} unit="deg" />
                                 <Metric label="mA" value={`${Math.round(cursorSample.ma)}`} accent />
-                                <span className="ml-auto text-[9px] text-[#64748B]">拖动曲线或定位像查看扫描位置</span>
                             </>
                         ) : !isHelical && axialCursorMa !== null && autoMa ? (
                             <>
@@ -318,7 +464,7 @@ export default function AutoMaPanel({
                                 <Metric label="mA" value={`${Math.round(axialCursorMa)}`} accent />
                             </>
                         ) : (
-                            <span className="text-[9px] text-[#64748B]">启用 DOM 后，点击/拖动曲线查看对应位置</span>
+                            <span className="text-[9px] text-[#64748B]">滚轮/按钮缩放 · 拖拽平移 · 单击定位 · 双击重置</span>
                         )}
                     </div>
 
@@ -326,11 +472,13 @@ export default function AutoMaPanel({
                         <svg
                             viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
                             preserveAspectRatio="none"
-                            className="absolute inset-0 h-full w-full cursor-ew-resize touch-none"
+                            className={`absolute inset-0 h-full w-full touch-none ${isZoomedOrPanned ? "cursor-grab" : "cursor-crosshair"}`}
                             onPointerDown={handleSvgPointerDown}
                             onPointerMove={handleSvgPointerMove}
                             onPointerUp={handleSvgPointerUp}
                             onPointerCancel={handleSvgPointerUp}
+                            onWheel={handleSvgWheel}
+                            onDoubleClick={handleSvgDoubleClick}
                         >
                             <line x1={0} x2={0} y1={0} y2={VIEW_H} stroke="#94A3B8" strokeWidth={1} vectorEffect="non-scaling-stroke" />
                             <line x1={0} x2={VIEW_W} y1={VIEW_H} y2={VIEW_H} stroke="#94A3B8" strokeWidth={1} vectorEffect="non-scaling-stroke" />
@@ -340,16 +488,20 @@ export default function AutoMaPanel({
                             {[0.25, 0.5, 0.75].map((ratio) => (
                                 <line key={`y-${ratio}`} x1={0} x2={2} y1={VIEW_H * ratio} y2={VIEW_H * ratio} stroke="#94A3B8" strokeWidth={1} vectorEffect="non-scaling-stroke" />
                             ))}
-                            {!isHelical && axialBedCount > 1 && Array.from({ length: axialBedCount - 1 }, (_, index) => {
-                                const x = ((index + 1) / axialBedCount) * VIEW_W;
+                            {Array.from({ length: totalBedCount + 1 }, (_, index) => {
+                                const zMm = index * BED_MM;
+                                if (zMm < effViewStartMm - 1e-6 || zMm > effViewEndMm + 1e-6) return null;
+                                const x = zToX(zMm);
+                                // Major tick on every 5th bed when fully zoomed out so it stays readable.
+                                const isMajor = totalBedCount > 12 ? index % 5 === 0 : true;
                                 return (
                                     <line
                                         key={`bed-${index}`}
                                         x1={x}
                                         x2={x}
-                                        y1={VIEW_H - 4}
+                                        y1={VIEW_H - (isMajor ? 4 : 2)}
                                         y2={VIEW_H}
-                                        stroke="#475569"
+                                        stroke={isMajor ? "#475569" : "#334155"}
                                         strokeWidth={0.5}
                                         vectorEffect="non-scaling-stroke"
                                     />
@@ -361,25 +513,34 @@ export default function AutoMaPanel({
                             {isHelical ? (
                                 <>
                                     {timeWavePath && <path d={timeWavePath} fill="none" stroke={autoMa ? "#60A5FA" : "#475569"} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />}
-                                    {cursorSample && timeWaveform.length > 0 && (
-                                        <>
-                                            <line x1={activePositionRatio * VIEW_W} x2={activePositionRatio * VIEW_W} y1={0} y2={VIEW_H} stroke="#FBBF24" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                                            <circle cx={activePositionRatio * VIEW_W} cy={yOf(cursorSample.ma)} r={1.5} fill="#FBBF24" vectorEffect="non-scaling-stroke" />
-                                        </>
-                                    )}
+                                    {cursorSample && timeWaveform.length > 0 && (() => {
+                                        const cx = zToX(activePositionRatio * scanLength);
+                                        if (cx < -0.5 || cx > VIEW_W + 0.5) return null;
+                                        return (
+                                            <>
+                                                <line x1={cx} x2={cx} y1={0} y2={VIEW_H} stroke="#FBBF24" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                                                <circle cx={cx} cy={yOf(cursorSample.ma)} r={1.5} fill="#FBBF24" vectorEffect="non-scaling-stroke" />
+                                            </>
+                                        );
+                                    })()}
                                 </>
                             ) : (
                                 <>
-                                    {cursorIdx !== null && axialBedCount > 0 && (
-                                        <rect
-                                            x={(cursorIdx / axialBedCount) * VIEW_W}
-                                            y={0}
-                                            width={VIEW_W / axialBedCount}
-                                            height={VIEW_H}
-                                            fill="#FBBF24"
-                                            opacity={0.08}
-                                        />
-                                    )}
+                                    {cursorIdx !== null && axialBedCount > 0 && (() => {
+                                        const xLeft = zToX(cursorIdx * axialBedWidthMm);
+                                        const xRight = zToX((cursorIdx + 1) * axialBedWidthMm);
+                                        if (xRight < 0 || xLeft > VIEW_W) return null;
+                                        return (
+                                            <rect
+                                                x={Math.max(0, xLeft)}
+                                                y={0}
+                                                width={Math.max(0, Math.min(VIEW_W, xRight) - Math.max(0, xLeft))}
+                                                height={VIEW_H}
+                                                fill="#FBBF24"
+                                                opacity={0.08}
+                                            />
+                                        );
+                                    })()}
                                     {axialTimePaths.map((path, index) => (
                                         <path
                                             key={`axial-time-${index}`}
@@ -390,26 +551,18 @@ export default function AutoMaPanel({
                                             vectorEffect="non-scaling-stroke"
                                         />
                                     ))}
-                                    {axialCursorMa !== null && (
-                                        <>
-                                            <line
-                                                x1={cursorIdx !== null && axialBedCount > 0 ? ((cursorIdx + 0.5) / axialBedCount) * VIEW_W : activePositionRatio * VIEW_W}
-                                                x2={cursorIdx !== null && axialBedCount > 0 ? ((cursorIdx + 0.5) / axialBedCount) * VIEW_W : activePositionRatio * VIEW_W}
-                                                y1={0}
-                                                y2={VIEW_H}
-                                                stroke="#FBBF24"
-                                                strokeWidth={1}
-                                                vectorEffect="non-scaling-stroke"
-                                            />
-                                            <circle
-                                                cx={cursorIdx !== null && axialBedCount > 0 ? ((cursorIdx + 0.5) / axialBedCount) * VIEW_W : activePositionRatio * VIEW_W}
-                                                cy={yOf(axialCursorMa)}
-                                                r={1.5}
-                                                fill="#FBBF24"
-                                                vectorEffect="non-scaling-stroke"
-                                            />
-                                        </>
-                                    )}
+                                    {axialCursorMa !== null && (() => {
+                                        const cx = cursorIdx !== null && axialBedCount > 0
+                                            ? zToX((cursorIdx + 0.5) * axialBedWidthMm)
+                                            : zToX(activePositionRatio * scanLength);
+                                        if (cx < -0.5 || cx > VIEW_W + 0.5) return null;
+                                        return (
+                                            <>
+                                                <line x1={cx} x2={cx} y1={0} y2={VIEW_H} stroke="#FBBF24" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                                                <circle cx={cx} cy={yOf(axialCursorMa)} r={1.5} fill="#FBBF24" vectorEffect="non-scaling-stroke" />
+                                            </>
+                                        );
+                                    })()}
                                 </>
                             )}
                         </svg>
@@ -432,27 +585,20 @@ export default function AutoMaPanel({
                     <RangeControl label="mA 上限 (MAX)" value={draftMax} min={HARD_MIN} max={HARD_MAX} disabled={!autoMa} onChange={handleMaxChange} />
                     <RangeControl label="mA 下限 (MIN)" value={draftMin} min={HARD_MIN} max={HARD_MAX} disabled={!autoMa} onChange={handleMinChange} />
 
-                    <div>
-                        <div className="text-[9px] font-black uppercase tracking-tighter text-[#94A3B8]">噪声等级</div>
-                        <div className="mt-1.5 grid grid-cols-3 gap-1">
-                            {NOISE_OPTIONS.map((option) => (
-                                <button
-                                    key={option.value}
-                                    type="button"
-                                    title={option.desc}
-                                    disabled={!autoMa}
-                                    onClick={() => onChange({ noise_level: option.value })}
-                                    className={`h-[26px] rounded text-[10px] font-bold transition-colors disabled:opacity-40 ${
-                                        option.value === noiseLevel
-                                            ? "bg-[#2563EB] text-white"
-                                            : "bg-[#1E293B] text-[#CBD5E1] hover:bg-[#334155]"
-                                    }`}
-                                >
-                                    {option.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                    <RangeControl
+                        label="噪声等级"
+                        value={noiseLevel}
+                        min={NOISE_SLIDER_MIN}
+                        max={NOISE_SLIDER_MAX}
+                        step={NOISE_SLIDER_STEP}
+                        unit=""
+                        disabled={!autoMa}
+                        onChange={(raw) => {
+                            const v = Number(raw);
+                            if (!Number.isFinite(v)) return;
+                            onChange({ noise_level: Math.min(NOISE_SLIDER_MAX, Math.max(NOISE_SLIDER_MIN, v)) });
+                        }}
+                    />
                 </div>
             </div>
         </div>
@@ -476,6 +622,8 @@ function RangeControl({
     max,
     disabled,
     onChange,
+    unit = "mA",
+    step = 1,
 }: {
     label: string;
     value: number;
@@ -483,21 +631,26 @@ function RangeControl({
     max: number;
     disabled: boolean;
     onChange: (value: string) => void;
+    unit?: string;
+    step?: number;
 }) {
+    const display = step >= 1 ? String(Math.round(value)) : value.toFixed(1);
+    const sliderValue = step >= 1 ? Math.round(value) : value;
     return (
         <div>
             <div className="flex items-center justify-between text-[9px] font-black uppercase tracking-tighter text-[#94A3B8]">
                 <span>{label}</span>
                 <span className="font-mono text-[12px] font-bold text-[#E2E8F0]">
-                    {Math.round(value)} <span className="text-[9px] font-normal text-[#64748B]">mA</span>
+                    {display}
+                    {unit && <span className="ml-1 text-[9px] font-normal text-[#64748B]">{unit}</span>}
                 </span>
             </div>
             <input
                 type="range"
                 min={min}
                 max={max}
-                step={1}
-                value={Math.round(value)}
+                step={step}
+                value={sliderValue}
                 onChange={(event) => onChange(event.target.value)}
                 disabled={disabled}
                 className="auto-ma-slider mt-1.5 w-full disabled:opacity-40"

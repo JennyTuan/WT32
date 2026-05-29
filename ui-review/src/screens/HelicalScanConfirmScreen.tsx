@@ -50,7 +50,10 @@ const BRAIN_HELICAL_SCOUT_OVERRIDE: TomographicScoutSeriesOverride = {
     fallbackWindowWidth: 130,
     fallbackWindowLevel: 130,
 };
-import AutoMaPanel, { type NoiseLevel } from "../components/AutoMaPanel";
+import AutoMaPanel, { NOISE_SLIDER_DEFAULT, type NoiseLevel } from "../components/AutoMaPanel";
+import { computeDoseModulation, type ScoutHuData } from "../lib/doseModulation";
+
+const HELICAL_DOSE_CURVE_STEPS = 80; // matches HELICAL_SAMPLE_COUNT in AutoMaPanel
 
 // ---------------------------------------------------------------------------
 // Constants for gating waveform / bed positions / DICOM
@@ -1359,8 +1362,10 @@ const HelicalScanConfirmScreen = () => {
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const [sessionResolved, setSessionResolved] = useState(false);
     const [protocolHelicalSeed, setProtocolHelicalSeed] = useState<ProtocolSeedHelicalParam | null>(null);
-    const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>("medium");
+    const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>(NOISE_SLIDER_DEFAULT);
     const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
+    const [scoutHu, setScoutHu] = useState<ScoutHuData | null>(null);
+    const [scoutCropBox, setScoutCropBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const helicalParamId = helicalParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
     const thresholdGuard = useDoseThresholdGuard();
@@ -1474,7 +1479,7 @@ const HelicalScanConfirmScreen = () => {
 
     const handleAutoMaChange = (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number; noise_level?: NoiseLevel }) => {
         const { noise_level, ...rest } = patch;
-        if (noise_level) setNoiseLevel(noise_level);
+        if (noise_level !== undefined) setNoiseLevel(noise_level);
         if (!helicalParam || Object.keys(rest).length === 0) return;
         setHelicalParam((prev) => (prev ? { ...prev, ...rest } : prev));
         void updateSelectedScanSessionHelicalParam(helicalParam.id, rest).catch((error) => {
@@ -1485,6 +1490,28 @@ const HelicalScanConfirmScreen = () => {
     const scanLengthNum = Number(measurements.scanLength);
     const scanLengthForCurve = Number.isFinite(scanLengthNum) ? scanLengthNum : (helicalParam?.scan_length ?? 0);
     const showAutoMaPanel = helicalParam?.auto_ma ?? false;
+
+    const realMaCurve = useMemo(() => {
+        if (!showAutoMaPanel || !scoutHu || !scoutCropBox || !helicalParam) return null;
+        const maRef = helicalParam.ma ?? 200;
+        const maMin = helicalParam.ma_min ?? Math.max(40, Math.round(maRef * 0.5));
+        const maMax = helicalParam.ma_max ?? Math.round(maRef * 1.2);
+        try {
+            const result = computeDoseModulation({
+                scoutData: scoutHu,
+                cropBox: scoutCropBox,
+                kv: helicalParam.kv ?? 120,
+                maRef,
+                maMin,
+                maMax,
+                steps: HELICAL_DOSE_CURVE_STEPS,
+            });
+            return result.maCurve;
+        } catch (error) {
+            console.error("Failed to compute helical dose modulation curve.", error);
+            return null;
+        }
+    }, [showAutoMaPanel, scoutHu, scoutCropBox, helicalParam]);
 
     const handleExecuteScan = useCallback(() => {
         // Re-estimate CTDIvol/DLP from the current parameters so the guard sees
@@ -1534,6 +1561,8 @@ const HelicalScanConfirmScreen = () => {
                             scanPositionRatio={scanPositionRatio}
                             onScanPositionRatioChange={setScanPositionRatio}
                             seriesOverride={scoutSeriesOverride}
+                            onScoutHuChange={setScoutHu}
+                            onCropBoxChange={setScoutCropBox}
                         />
                     ) : (
                         <div className="flex flex-1 items-center justify-center rounded-lg bg-[#05080d] text-[14px] font-bold text-white/70">
@@ -1554,6 +1583,7 @@ const HelicalScanConfirmScreen = () => {
                             scanPositionRatio={scanPositionRatio}
                             onScanPositionRatioChange={setScanPositionRatio}
                             onChange={handleAutoMaChange}
+                            realMaCurve={realMaCurve}
                         />
                     )}
                 </>

@@ -416,7 +416,6 @@ const PatientListScreen = () => {
                                                             className="inline-flex h-[24px] px-2 rounded-full items-center justify-center gap-1 text-[11px] font-bold bg-[#E3F2FD] text-[#1E88E5] border border-[#BBDEFB]"
                                                         >
                                                             <ImageIcon size={12} />
-                                                            {patient.latestAcquisitionType === 'four_d' ? '查看 4D 图像' : '可查看图像'}
                                                         </button>
                                                     ) : (
                                                         <span className={`inline-flex min-w-[62px] h-[24px] px-2 rounded-full items-center justify-center text-[11px] font-bold ${checkStatusClass[patient.checkStatus]}`}>
