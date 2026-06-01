@@ -22,6 +22,13 @@ import * as dicomParser from "dicom-parser";
 import type { FourDPostScanState } from "../lib/fourDTypes";
 import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
+import {
+    isLimbsHelicalScanSession,
+    isLimbsHelicalWorkflow,
+    loadLimbsDicomDemoManifest,
+    type LimbsDicomDemoManifest,
+    type LimbsDicomDemoSeries,
+} from "../lib/limbsDicomDemo";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import AppHeader from "../components/AppHeader";
 import CornerstoneMPRViewport, {
@@ -66,6 +73,7 @@ type Series = {
     defaultWl?: number;
     dicomBasePath?: string;
     dicomFilePrefix?: "image" | "lung";
+    dicomUrls?: string[];
 };
 /** A scan acquisition group (topogram/helical/axial) — may contain multiple recon series */
 type ScanGroup = {
@@ -334,8 +342,11 @@ const getSeriesDicomUrl = (
     sliceIndex: number,
     seriesType?: SeriesType,
     brainHelical?: boolean,
-    series?: Pick<Series, "dicomBasePath" | "dicomFilePrefix">,
+    series?: Pick<Series, "dicomBasePath" | "dicomFilePrefix" | "dicomUrls">,
 ) => {
+    if (series?.dicomUrls?.length) {
+        return series.dicomUrls[Math.min(sliceIndex, series.dicomUrls.length - 1)];
+    }
     if (series?.dicomBasePath) {
         const prefix = series.dicomFilePrefix === "lung" ? "1-" : "image-";
         return `${series.dicomBasePath}/${prefix}${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
@@ -411,9 +422,14 @@ const ViewScreen = () => {
         if (isFourDEntry) return false;
         return isBrainHelicalWorkflow(loadSelectedScanWorkflowPlans());
     }, [isFourDEntry]);
+    const isLimbsHelicalWorkflowActive = useMemo(() => {
+        if (isFourDEntry) return false;
+        return isLimbsHelicalWorkflow(loadSelectedScanWorkflowPlans());
+    }, [isFourDEntry]);
     // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const isBrainHelicalDemo = isBrainHelicalWorkflowActive || (!isFourDEntry && isBrainHelicalScanSession(scanSession));
+    const isLimbsDicomDemo = isLimbsHelicalWorkflowActive || (!isFourDEntry && isLimbsHelicalScanSession(scanSession));
     const effectiveLungSeries = isBrainHelicalDemo ? BRAIN_HELICAL_VIEW_SERIES : REAL_LUNG_SERIES;
     /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
     const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";
@@ -456,6 +472,8 @@ const ViewScreen = () => {
     // ─── 4D manifest (pre-rendered WebP dataset) ───────────────────────────
     const [fourDManifest, setFourDManifest] = useState<FourDManifest | null>(null);
     const [fourDManifestError, setFourDManifestError] = useState<string | null>(null);
+    const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
+    const [limbsDicomManifestError, setLimbsDicomManifestError] = useState<string | null>(null);
 
     // ─── Live clock ───────────────────────────────────────────────────────────
     const buildClock = () => {
@@ -600,6 +618,57 @@ const ViewScreen = () => {
             }));
 
         // ── Static fallback (no scan session in localStorage) ────────────────────
+        const makeLimbsDicomSeries = (series: LimbsDicomDemoSeries, seriesType: SeriesType): Series => {
+            const windowWidth = series.windowWidth ?? limbsDicomManifest?.defaultWindowWidth;
+            const windowLevel = series.windowCenter ?? limbsDicomManifest?.defaultWindowLevel;
+            const thickness = series.sliceThickness && series.sliceThickness !== "N/A"
+                ? `${series.sliceThickness} mm`
+                : "N/A";
+            return {
+                id: `limbs-${series.key}`,
+                name: `${series.seriesDescription}${series.kernel && series.kernel !== "N/A" ? ` ${series.kernel}` : ""}`,
+                count: series.count,
+                kernel: series.kernel || "N/A",
+                thickness,
+                kV: series.kv,
+                mAs: series.mAs,
+                fov: series.fov,
+                matrix: series.matrix,
+                seriesType,
+                images: makeImages(series.count, `limbs-${series.key}`),
+                defaultWw: windowWidth ?? undefined,
+                defaultWl: windowLevel ?? undefined,
+                dicomUrls: series.urls,
+            };
+        };
+
+        if (isLimbsDicomDemo && limbsDicomManifest) {
+            const topogram = limbsDicomManifest.series.find((series) => series.key === "topogram");
+            const helicalSeries = (["thin-soft", "thin-bone"] as const)
+                .map((key) => limbsDicomManifest.series.find((series) => series.key === key))
+                .filter((series): series is LimbsDicomDemoSeries => !!series)
+                .map((series) => makeLimbsDicomSeries(series, "helical"));
+
+            return [{
+                id: limbsDicomManifest.studyId,
+                name: limbsDicomManifest.studyName,
+                scanGroups: [
+                    {
+                        id: "limbs-helical-group",
+                        label: "Lower Extremity Helical",
+                        type: "helical" as SeriesType,
+                        series: helicalSeries,
+                    },
+                    ...(topogram ? [{
+                        id: "limbs-topogram-group",
+                        label: "Scout",
+                        type: "topogram" as SeriesType,
+                        series: [makeLimbsDicomSeries(topogram, "topogram")],
+                    }] : []),
+                ],
+            }];
+        }
+
         if (!scanSession) {
             if (isFourDEntry) {
                 return [{
@@ -776,7 +845,7 @@ const ViewScreen = () => {
             name: scanSession.name || "扫描序列",
             scanGroups,
         }];
-    }, [scanSession, isFourDEntry, isBrainHelicalDemo, effectiveLungSeries]);
+    }, [scanSession, isFourDEntry, isBrainHelicalDemo, effectiveLungSeries, isLimbsDicomDemo, limbsDicomManifest]);
 
     const seriesList = studyTree.flatMap((study) => study.scanGroups.flatMap((g) => g.series));
     // Guard: if seriesList is somehow still empty, always fall back to the static series
@@ -916,6 +985,21 @@ const ViewScreen = () => {
     }, [isFourDLungReconSeries]);
 
     useEffect(() => {
+        if (!isLimbsDicomDemo || !limbsDicomManifest) return;
+        setImageMode("3D");
+        setSelectedVolumePreset(limbsDicomManifest.defaultVolumePreset as VolumePreset);
+        setVolumeQuality("fine");
+        setWw(limbsDicomManifest.defaultWindowWidth);
+        setWl(limbsDicomManifest.defaultWindowLevel);
+        setDisplayWw(limbsDicomManifest.defaultWindowWidth);
+        setDisplayWl(limbsDicomManifest.defaultWindowLevel);
+        defaultWindowRef.current = {
+            ww: limbsDicomManifest.defaultWindowWidth,
+            wl: limbsDicomManifest.defaultWindowLevel,
+        };
+    }, [isLimbsDicomDemo, limbsDicomManifest]);
+
+    useEffect(() => {
         if (isToolSupportedInCurrentView(toolMode)) return;
         setToolMode("wl");
     }, [toolMode, isMprViewActive, isFourDMprViewActive]);
@@ -943,6 +1027,23 @@ const ViewScreen = () => {
             cancelled = true;
         };
     }, [isFourDLungReconSeries, fourDManifest, fourDManifestError]);
+
+    useEffect(() => {
+        if (!isLimbsDicomDemo) return;
+        if (limbsDicomManifest || limbsDicomManifestError) return;
+        let cancelled = false;
+        loadLimbsDicomDemoManifest()
+            .then((manifest) => {
+                if (cancelled) return;
+                setLimbsDicomManifest(manifest);
+            })
+            .catch((err: Error) => {
+                if (!cancelled) setLimbsDicomManifestError(err.message);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isLimbsDicomDemo, limbsDicomManifest, limbsDicomManifestError]);
 
     // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
     // (clinical convention: cine cycles phases at a locked anatomical slice).
@@ -1011,7 +1112,7 @@ const ViewScreen = () => {
             defaultWindowRef.current = { ww: target.defaultWw, wl: target.defaultWl };
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [scanSession, isFourDEntry, isBrainHelicalDemo, preferredSeriesForFourDEntry]);
+    }, [scanSession, isFourDEntry, isBrainHelicalDemo, preferredSeriesForFourDEntry, isLimbsDicomDemo, limbsDicomManifest]);
 
     const seriesImageUrls = useMemo(
         () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index, selectedSeries.seriesType, isBrainHelicalDemo, selectedSeries)),

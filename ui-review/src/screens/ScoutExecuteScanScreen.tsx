@@ -6,6 +6,13 @@ import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, 
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
 import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
+import {
+    getLimbsDicomSeries,
+    isLimbsHelicalScanSession,
+    isLimbsHelicalWorkflow,
+    loadLimbsDicomDemoManifest,
+    type LimbsDicomDemoManifest,
+} from "../lib/limbsDicomDemo";
 import DicomViewer from "../components/DicomViewer";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import ScanConfirmScreen from "./ScanConfirmScreen";
@@ -130,6 +137,28 @@ const loadCachedBrainHelicalSession = () => {
 };
 
 const hasBrainHelicalWorkflow = () => isBrainHelicalWorkflow(loadSelectedScanWorkflowPlans());
+const hasLimbsHelicalWorkflow = () => isLimbsHelicalWorkflow(loadSelectedScanWorkflowPlans());
+
+const buildLimbsScoutExecuteSeries = (manifest: LimbsDicomDemoManifest): ScoutDicomSeries | null => {
+    const topogram = getLimbsDicomSeries(manifest, "topogram");
+    const url = topogram?.urls[0];
+    if (!url) return null;
+    const lastSlash = url.lastIndexOf("/");
+    const basePath = lastSlash >= 0 ? url.slice(0, lastSlash) : url;
+    const fileName = lastSlash >= 0 ? url.slice(lastSlash + 1) : url;
+    return {
+        basePath,
+        count: 1,
+        firstImageNumber: 1,
+        fileNamePrefix: "",
+        fileNamePadding: 0,
+        fileNames: [fileName],
+        directImage: true,
+        useCornerstoneViewer: true,
+        fallbackWindowWidth: topogram?.windowWidth ?? manifest.defaultWindowWidth,
+        fallbackWindowLevel: topogram?.windowCenter ?? manifest.defaultWindowLevel,
+    };
+};
 
 function clamp01(value: number) {
     return Math.min(1, Math.max(0, value));
@@ -496,6 +525,7 @@ export default function ScoutExecuteScanScreen() {
     );
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(() => loadCachedBrainHelicalSession());
     const [gatingBreathingMode, setGatingBreathingMode] = useState<string | null>(null);
+    const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const thresholdGuard = useDoseThresholdGuard();
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
@@ -553,11 +583,31 @@ export default function ScoutExecuteScanScreen() {
     const postScoutAction = POST_SCOUT_SCAN_CONFIG[postScoutScanType];
     const isFourDScoutWorkflow = postScoutScanType === "4d";
     const isBrainHelicalScoutWorkflow = hasBrainHelicalWorkflow() || isBrainHelicalScanSession(scanSession);
+    const isLimbsHelicalScoutWorkflow = hasLimbsHelicalWorkflow() || isLimbsHelicalScanSession(scanSession);
+    const limbsScoutExecuteSeries = useMemo<ScoutDicomSeries | null>(
+        () => (limbsDicomManifest ? buildLimbsScoutExecuteSeries(limbsDicomManifest) : null),
+        [limbsDicomManifest],
+    );
     const scoutResultSeries = isFourDScoutWorkflow
         ? FOUR_D_SCOUT_SERIES
         : isBrainHelicalScoutWorkflow
             ? BRAIN_HELICAL_SCOUT_EXECUTE_SERIES
-            : SCOUT_SERIES;
+            : (isLimbsHelicalScoutWorkflow && limbsScoutExecuteSeries)
+                ? limbsScoutExecuteSeries
+                : SCOUT_SERIES;
+
+    useEffect(() => {
+        if (!isLimbsHelicalScoutWorkflow) return;
+        let cancelled = false;
+        loadLimbsDicomDemoManifest()
+            .then((manifest) => {
+                if (!cancelled) setLimbsDicomManifest(manifest);
+            })
+            .catch((error) => {
+                console.error("Failed to load limbs DICOM demo manifest for scout execute.", error);
+            });
+        return () => { cancelled = true; };
+    }, [isLimbsHelicalScoutWorkflow]);
 
     const postScoutRoute = useMemo(() => {
         if ((postScoutScanType === "gated_helical" || postScoutScanType === "gated_axial") && gatingBreathingMode) {

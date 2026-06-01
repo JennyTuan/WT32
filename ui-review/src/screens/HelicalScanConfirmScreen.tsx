@@ -29,6 +29,13 @@ import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen
 import AppHeader from "../components/AppHeader";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import { TomographicScoutViewport, type TomographicScoutSeriesOverride } from "./SequenceScanConfirmScreen";
+import {
+    getLimbsDicomSeries,
+    isLimbsHelicalScanSession,
+    isLimbsHelicalWorkflow,
+    loadLimbsDicomDemoManifest,
+    type LimbsDicomDemoManifest,
+} from "../lib/limbsDicomDemo";
 
 type ProtocolSeedHelicalParam = {
     ma?: number | null;
@@ -1366,18 +1373,53 @@ const HelicalScanConfirmScreen = () => {
     const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
     const [scoutHu, setScoutHu] = useState<ScoutHuData | null>(null);
     const [scoutCropBox, setScoutCropBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+    const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
+    const isLimbsHelicalSession =
+        isLimbsHelicalScanSession(scanSession) ||
+        isLimbsHelicalWorkflow(loadSelectedScanWorkflowPlans());
     const helicalParamId = helicalParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
     const thresholdGuard = useDoseThresholdGuard();
     const navigate = useNavigate();
 
-    // All regular (non-gating) protocols use the Head Stroke Demo topogram as the
-    // scout / 定位像 source. Gating protocols render GatingHelicalConfirmScreen above
-    // and are unaffected by this override.
+    // Regular (non-gating) protocols use the Head Stroke Demo topogram as the
+    // scout / 定位像 source. Limbs helical uses the lower-extremity topogram so
+    // the scout matches the body part being scanned. Gating protocols render
+    // GatingHelicalConfirmScreen above and are unaffected by this override.
     const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(
-        () => BRAIN_HELICAL_SCOUT_OVERRIDE,
-        [],
+        () => {
+            if (isLimbsHelicalSession && limbsDicomManifest) {
+                const topogram = getLimbsDicomSeries(limbsDicomManifest, "topogram");
+                const url = topogram?.urls[0];
+                if (url) {
+                    // Pass the topogram's own WW/WL if the manifest has them;
+                    // otherwise the topogram loader falls back to the DICOM
+                    // header and ultimately to a data-centred auto window.
+                    return {
+                        kind: "topogram",
+                        url,
+                        fallbackWindowWidth: topogram.windowWidth ?? undefined,
+                        fallbackWindowLevel: topogram.windowCenter ?? undefined,
+                    };
+                }
+            }
+            return BRAIN_HELICAL_SCOUT_OVERRIDE;
+        },
+        [isLimbsHelicalSession, limbsDicomManifest],
     );
+
+    useEffect(() => {
+        if (!isLimbsHelicalSession) return;
+        let cancelled = false;
+        loadLimbsDicomDemoManifest()
+            .then((manifest) => {
+                if (!cancelled) setLimbsDicomManifest(manifest);
+            })
+            .catch((error) => {
+                console.error("Failed to load limbs DICOM demo manifest for scout override.", error);
+            });
+        return () => { cancelled = true; };
+    }, [isLimbsHelicalSession]);
 
     useEffect(() => {
         if (isGatingWorkflow) return;

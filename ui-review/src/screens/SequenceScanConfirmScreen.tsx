@@ -353,48 +353,89 @@ export function TomographicScoutViewport({
         const loadTopogramViaCornerstone = async (
             override: Extract<TomographicScoutSeriesOverride, { kind: "topogram" }>,
         ): Promise<{ output: Uint8ClampedArray; meta: ProjectionMeta; hu: ScoutHuData }> => {
-            await initCornerstone();
-            const fallbackWw = override.fallbackWindowWidth ?? SCOUT_SERIES.fallbackWindowWidth;
-            const fallbackWl = override.fallbackWindowLevel ?? SCOUT_SERIES.fallbackWindowLevel;
-            const imageId = buildWadoImageId(override.url);
-            const image = await imageLoader.loadAndCacheImage(imageId);
-            const rows = image.rows;
-            const cols = image.columns;
-            const slope = (image as { slope?: number }).slope ?? 1;
-            const intercept = (image as { intercept?: number }).intercept ?? 0;
-            const plane = (metaData.get("imagePlaneModule", imageId) ?? {}) as {
-                columnPixelSpacing?: number;
-                rowPixelSpacing?: number;
-                pixelSpacing?: number[];
-            };
-            const voi = (metaData.get("voiLutModule", imageId) ?? {}) as {
-                windowCenter?: number | number[];
-                windowWidth?: number | number[];
-            };
-            const general = (metaData.get("imagePixelModule", imageId) ?? {}) as {
-                photometricInterpretation?: string;
-            };
-            const wwRaw = Array.isArray(voi.windowWidth) ? voi.windowWidth[0] : voi.windowWidth;
-            const wlRaw = Array.isArray(voi.windowCenter) ? voi.windowCenter[0] : voi.windowCenter;
-            const ww = Number.isFinite(wwRaw) && (wwRaw ?? 0) > 1 ? (wwRaw as number) : fallbackWw;
-            const wl = Number.isFinite(wlRaw) ? (wlRaw as number) : fallbackWl;
-            const pixelSpacingX = plane.columnPixelSpacing ?? plane.pixelSpacing?.[1] ?? 1;
-            const pixelSpacingY = plane.rowPixelSpacing ?? plane.pixelSpacing?.[0] ?? 1;
-            const invert = (general.photometricInterpretation ?? "").toUpperCase() === "MONOCHROME1";
+            // We deliberately bypass cornerstone here and parse the DICOM
+            // ourselves. The cornerstone path was finicky about whether
+            // RescaleSlope/Intercept were exposed on the image object versus
+            // the modalityLutModule (varies by loader version), which made
+            // datasets like the LIHVR limbs topogram (RescaleIntercept=-1024)
+            // render solid black under a HU-domain WW/WL. Reading the header
+            // directly is unambiguous and matches how loadAxialStackViaCornerstone
+            // handles its slices.
+            const response = await fetch(override.url);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch topogram (${response.status})`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            const byteArray = new Uint8Array(arrayBuffer);
+            const dataSet = dicomParser.parseDicom(byteArray);
 
-            const pixelData = image.getPixelData() as Int16Array | Uint16Array;
-            const minVal = wl - ww / 2;
-            const maxVal = wl + ww / 2;
-            const range = Math.max(maxVal - minVal, 1);
-            const output = new Uint8ClampedArray(cols * rows);
-            const huFloat = new Float32Array(pixelData.length);
+            const rows = dataSet.uint16("x00280010") ?? 0;
+            const cols = dataSet.uint16("x00280011") ?? 0;
+            const bitsAllocated = dataSet.uint16("x00280100") ?? 16;
+            const pixelRepresentation = dataSet.uint16("x00280103") ?? 0;
+            const intercept = Number(dataSet.string("x00281052") ?? "0");
+            const slope = Number(dataSet.string("x00281053") ?? "1");
+            const pixelSpacingPair = (dataSet.string("x00280030") ?? "1\\1").split("\\").map(Number);
+            const pixelSpacingY = Number.isFinite(pixelSpacingPair[0]) && pixelSpacingPair[0] > 0 ? pixelSpacingPair[0] : 1;
+            const pixelSpacingX = Number.isFinite(pixelSpacingPair[1]) && pixelSpacingPair[1] > 0 ? pixelSpacingPair[1] : pixelSpacingY;
+            const photometric = (dataSet.string("x00280004") ?? "").toUpperCase();
+            const invert = photometric === "MONOCHROME1";
+            const dicomWw = Number(dataSet.string("x00281051") ?? NaN);
+            const dicomWl = Number(dataSet.string("x00281050") ?? NaN);
+            const pixelDataElement = dataSet.elements.x7fe00010;
+            if (!pixelDataElement || rows === 0 || cols === 0) {
+                throw new Error("Topogram DICOM is missing pixel data");
+            }
+            const pixelBuffer = byteArray.buffer.slice(
+                pixelDataElement.dataOffset,
+                pixelDataElement.dataOffset + pixelDataElement.length,
+            );
+            const pixelData =
+                bitsAllocated === 16
+                    ? pixelRepresentation === 1
+                        ? new Int16Array(pixelBuffer)
+                        : new Uint16Array(pixelBuffer)
+                    : new Uint8Array(pixelBuffer);
+
+            // Apply rescale to get HU, then choose a window. Override wins; if
+            // none provided, prefer the DICOM-embedded window over the lung-CT
+            // fallback so each dataset displays with its own intent.
+            const huFloat = new Float32Array(rows * cols);
+            let huMin = Number.POSITIVE_INFINITY;
+            let huMax = Number.NEGATIVE_INFINITY;
             for (let i = 0; i < pixelData.length; i += 1) {
-                const value = pixelData[i] * slope + intercept;
-                huFloat[i] = value;
-                const normalized = clamp01((value - minVal) / range);
+                const hu = pixelData[i] * slope + intercept;
+                huFloat[i] = hu;
+                if (hu < huMin) huMin = hu;
+                if (hu > huMax) huMax = hu;
+            }
+
+            let ww = override.fallbackWindowWidth ?? (Number.isFinite(dicomWw) && dicomWw > 1 ? dicomWw : NaN);
+            let wl = override.fallbackWindowLevel ?? (Number.isFinite(dicomWl) ? dicomWl : NaN);
+            if (!Number.isFinite(ww) || !Number.isFinite(wl)) {
+                ww = SCOUT_SERIES.fallbackWindowWidth;
+                wl = SCOUT_SERIES.fallbackWindowLevel;
+            }
+            // If the configured window misses the actual HU range entirely
+            // (everything clamps to 0 or to 1), fall back to a window centred
+            // on the data so the topogram is at least visible.
+            const minVal0 = wl - ww / 2;
+            const maxVal0 = wl + ww / 2;
+            if (Number.isFinite(huMin) && Number.isFinite(huMax) && (huMax < minVal0 || huMin > maxVal0)) {
+                const span = Math.max(huMax - huMin, 1);
+                wl = (huMin + huMax) / 2;
+                ww = span * 1.1;
+            }
+
+            const minVal = wl - ww / 2;
+            const range = Math.max(ww, 1);
+            const output = new Uint8ClampedArray(rows * cols);
+            for (let i = 0; i < huFloat.length; i += 1) {
+                const normalized = clamp01((huFloat[i] - minVal) / range);
                 const gray = Math.round(normalized * 255);
                 output[i] = invert ? 255 - gray : gray;
             }
+
             return {
                 output,
                 meta: {

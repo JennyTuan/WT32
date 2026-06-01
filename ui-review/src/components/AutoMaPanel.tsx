@@ -293,7 +293,6 @@ export default function AutoMaPanel({
     const maxStart = Math.max(0, totalSnapped - effViewWidthMm);
     const effViewStartMm = clamp(snapBed(viewStartMm), 0, maxStart);
     const effViewEndMm = effViewStartMm + effViewWidthMm;
-    const visibleBedCount = Math.max(1, Math.round(effViewWidthMm / BED_MM));
     const totalBedCount = Math.max(1, Math.round(totalSnapped / BED_MM));
     const zToX = (zMm: number) => ((zMm - effViewStartMm) / effViewWidthMm) * VIEW_W;
     const isZoomedOrPanned = effViewWidthMm < totalSnapped - 1e-6 || effViewStartMm > 1e-6;
@@ -402,21 +401,6 @@ export default function AutoMaPanel({
     };
 
     const handleSvgDoubleClick = () => {
-        setViewWidthMm(0);
-        setViewStartMm(0);
-    };
-
-    const zoomAroundCenter = (factor: number) => {
-        const nextWidth = clamp(snapBed(effViewWidthMm * factor), BED_MM, totalSnapped);
-        const center = effViewStartMm + effViewWidthMm / 2;
-        const nextMaxStart = Math.max(0, totalSnapped - nextWidth);
-        const nextStart = clamp(snapBed(center - nextWidth / 2), 0, nextMaxStart);
-        setViewWidthMm(nextWidth >= totalSnapped - 1e-6 ? 0 : nextWidth);
-        setViewStartMm(nextStart);
-    };
-    const handleZoomIn = () => zoomAroundCenter(1 / ZOOM_FACTOR);
-    const handleZoomOut = () => zoomAroundCenter(ZOOM_FACTOR);
-    const handleZoomReset = () => {
         setViewWidthMm(0);
         setViewStartMm(0);
     };

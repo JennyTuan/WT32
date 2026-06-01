@@ -8,23 +8,25 @@ import DibhStatusRow from "../components/DibhStatusRow";
 import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/BreathHoldGuide";
 import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession } from "../lib/scanSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
+import { getLimbsDicomSeries, isLimbsHelicalScanSession, loadLimbsDicomDemoManifest } from "../lib/limbsDicomDemo";
+
+type HelicalResultSeriesConfig = {
+    basePath?: string;
+    count: number;
+    fallbackWindowWidth: number;
+    fallbackWindowLevel: number;
+    urls?: string[];
+};
 
 // Demo dataset for the "脑部螺旋" (brain helical, non-gating) protocol — JPEG Lossless
 // Thin Brain reconstruction (219 slices). Used only when executeMode === "helical"
 // AND the active protocol ID matches; gated_helical / gated_axial paths are
 // untouched and keep using HELICAL_RESULT_SERIES.
-const BRAIN_HELICAL_RESULT_SERIES = {
+const BRAIN_HELICAL_RESULT_SERIES: HelicalResultSeriesConfig = {
     basePath: "/dicom-out/HeadStrokeDemo/ThinBrain",
     count: 219,
     fallbackWindowWidth: 100,
     fallbackWindowLevel: 35,
-};
-
-type HelicalResultSeriesConfig = {
-    basePath: string;
-    count: number;
-    fallbackWindowWidth: number;
-    fallbackWindowLevel: number;
 };
 
 import ScanConfirmScreen from "./ScanConfirmScreen";
@@ -64,7 +66,7 @@ const DIBH_SUCCESS_TIMEOUT_S = 25;
 // pick 4.5 s so the demo doesn't drag.
 const DIBH_EXPOSURE_DURATION_MS = 4500;
 const DIBH_MID_SCAN_PAUSE_PROGRESS = 0.52;
-const HELICAL_RESULT_SERIES = {
+const HELICAL_RESULT_SERIES: HelicalResultSeriesConfig = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
     count: 118,
     fallbackWindowWidth: 350,
@@ -96,14 +98,19 @@ function HelicalLiveViewport({
     const series = seriesOverride ?? HELICAL_RESULT_SERIES;
     const useOverride = !!seriesOverride;
     const imageUrls = useMemo(
-        () =>
+        () => {
+            if (series.urls?.length) return series.urls;
+            if (!series.basePath) return [];
+            return (
             Array.from({ length: series.count }, (_, index) => {
                 const name = useOverride
                     ? `image-${String(index + 1).padStart(3, "0")}.dcm`
                     : `1-${String(index + 1).padStart(3, "0")}.dcm`;
                 return `${series.basePath}/${name}`;
-            }),
-        [series.basePath, series.count, useOverride],
+            })
+            );
+        },
+        [series.basePath, series.count, series.urls, useOverride],
     );
     const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
@@ -275,13 +282,15 @@ export default function HelicalExecuteScanScreen() {
     const isGatedAxial = executeMode === "gated_axial";
     const isHelicalDIBH = executeMode === "gated_helical";
 
-    // Regular (non-gated) helical execution always plays back the Head Stroke Demo
-    // thin-brain series as the live scan image, for every protocol. Gated paths
-    // (gated_helical / gated_axial) intentionally keep their own result series.
+    const [limbsHelicalResultSeries, setLimbsHelicalResultSeries] = useState<HelicalResultSeriesConfig | null>(null);
+
+    // Regular (non-gated) helical execution plays protocol-specific demo data
+    // when available. Gated paths intentionally keep their own result series.
     const helicalResultOverride = useMemo<HelicalResultSeriesConfig | undefined>(() => {
         if (executeMode !== "helical") return undefined;
+        if (limbsHelicalResultSeries) return limbsHelicalResultSeries;
         return BRAIN_HELICAL_RESULT_SERIES;
-    }, [executeMode]);
+    }, [executeMode, limbsHelicalResultSeries]);
     const [stage, setStage] = useState<ScanStage>("idle");
     const [holdProgress, setHoldProgress] = useState(0);
     const [guideVisible, setGuideVisible] = useState(true);
@@ -352,6 +361,19 @@ export default function HelicalExecuteScanScreen() {
         const loadSessionMeasurements = async () => {
             try {
                 const scanSession = await fetchSelectedScanSession();
+                if (executeMode === "helical" && isLimbsHelicalScanSession(scanSession)) {
+                    const manifest = await loadLimbsDicomDemoManifest();
+                    const liveSeries = getLimbsDicomSeries(manifest, "thin-soft");
+                    if (!cancelled && liveSeries) {
+                        setLimbsHelicalResultSeries({
+                            count: liveSeries.count,
+                            urls: liveSeries.urls,
+                            fallbackWindowWidth: liveSeries.windowWidth ?? manifest.defaultWindowWidth,
+                            fallbackWindowLevel: liveSeries.windowCenter ?? manifest.defaultWindowLevel,
+                        });
+                    }
+                }
+
                 if (isGatedAxial) {
                     const axialParam = scanSession?.series.find((series) => series.series_type === "axial")?.axial_param;
                     if (!axialParam || cancelled) return;
@@ -380,7 +402,7 @@ export default function HelicalExecuteScanScreen() {
         return () => {
             cancelled = true;
         };
-    }, [isGatedAxial, params]);
+    }, [executeMode, isGatedAxial, params]);
 
     // DIBH exposure progress: starts at 0 when exposure begins, climbs to 1
     // over DIBH_EXPOSURE_DURATION_MS, then stays at 1 through rendering /

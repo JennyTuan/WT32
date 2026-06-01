@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +17,13 @@ from .websocket.scan_ws import router as scan_ws_router
 app = FastAPI(title="CT Prototype Backend", version="1.0.0")
 DATA_DIR = Path(__file__).resolve().parent / "data"
 DICOM_PUBLIC_DIR = Path(__file__).resolve().parent.parent / "ui-review" / "public" / "dicom"
+LIHVR_LOWER_EXTREMITY_DEMO_DIR = DATA_DIR / "lihVr" / "1.2.194.0.108707908.20260528141323.1236.10000.4191216"
+LIHVR_LOWER_EXTREMITY_SERIES = {
+    "topogram": "1.2.156.112605.189250948009764.260528061813.3.4424.38678",
+    "thin-soft": "1.2.156.112605.189250948009764.260528061813.3.4424.106136",
+    "thin-bone": "1.2.156.112605.189250948009764.260528061813.3.4424.96136",
+    "vr-reference": "1.2.156.112605.66988332599980.260528062340.3.3292.13135.2",
+}
 
 # Cookies must be permitted by CORS for the SPA → API session flow. With
 # allow_credentials=True the wildcard origin is not allowed; explicit origins
@@ -246,6 +255,124 @@ def _serve_validated_dicom(root: Path, file_path: str, request: Request):
         )
 
     return _dicom_file_response(request, target)
+
+
+def _read_demo_dicom_header(path: Path):
+    import pydicom
+
+    return pydicom.dcmread(str(path), stop_before_pixels=True, force=True)
+
+
+def _demo_dicom_sort_key(path: Path):
+    try:
+        ds = _read_demo_dicom_header(path)
+    except Exception:
+        return (1, path.name)
+
+    instance = getattr(ds, "InstanceNumber", None)
+    try:
+        return (0, int(instance))
+    except (TypeError, ValueError):
+        pass
+
+    image_position = getattr(ds, "ImagePositionPatient", None)
+    if image_position is not None and len(image_position) >= 3:
+        try:
+            return (0, float(image_position[2]))
+        except (TypeError, ValueError):
+            pass
+
+    return (1, path.name)
+
+
+def _demo_dicom_text(value, fallback: str = "N/A") -> str:
+    if value is None:
+        return fallback
+    return str(value) or fallback
+
+
+def _build_lihvr_demo_series(key: str, uid: str):
+    series_dir = LIHVR_LOWER_EXTREMITY_DEMO_DIR / uid
+    if not series_dir.is_dir():
+        raise FileNotFoundError(f"Missing DICOM series directory: {series_dir}")
+
+    files = sorted((path for path in series_dir.iterdir() if path.is_file()), key=_demo_dicom_sort_key)
+    if not files:
+        raise FileNotFoundError(f"No DICOM files found in: {series_dir}")
+
+    first = _read_demo_dicom_header(files[0])
+    first_rel = files[0].relative_to(LIHVR_LOWER_EXTREMITY_DEMO_DIR).as_posix()
+    urls = [
+        f"/dicom-lihvr/{quote(path.relative_to(LIHVR_LOWER_EXTREMITY_DEMO_DIR).as_posix(), safe='/')}"
+        for path in files
+    ]
+
+    window_center = getattr(first, "WindowCenter", None)
+    window_width = getattr(first, "WindowWidth", None)
+    if isinstance(window_center, (list, tuple)):
+        window_center = window_center[0] if window_center else None
+    if isinstance(window_width, (list, tuple)):
+        window_width = window_width[0] if window_width else None
+
+    return {
+        "key": key,
+        "seriesInstanceUid": uid,
+        "seriesDescription": _demo_dicom_text(getattr(first, "SeriesDescription", None), key),
+        "protocolName": _demo_dicom_text(getattr(first, "ProtocolName", None), "Lower Extremity"),
+        "bodyPart": _demo_dicom_text(getattr(first, "BodyPartExamined", None), "EXTREMITY"),
+        "imageType": [str(item) for item in getattr(first, "ImageType", [])],
+        "count": len(files),
+        "rows": int(getattr(first, "Rows", 0) or 0),
+        "cols": int(getattr(first, "Columns", 0) or 0),
+        "sliceThickness": _demo_dicom_text(getattr(first, "SliceThickness", None)),
+        "pixelSpacing": [_demo_dicom_text(item) for item in getattr(first, "PixelSpacing", [])],
+        "kv": _demo_dicom_text(getattr(first, "KVP", None)),
+        "mAs": _demo_dicom_text(getattr(first, "XRayTubeCurrent", None)),
+        "fov": "215 mm",
+        "matrix": _demo_dicom_text(getattr(first, "Columns", None), "512"),
+        "kernel": _demo_dicom_text(getattr(first, "ConvolutionKernel", None)),
+        "windowCenter": float(window_center) if window_center is not None else None,
+        "windowWidth": float(window_width) if window_width is not None else None,
+        "firstFile": first_rel,
+        "urls": urls,
+    }
+
+
+@lru_cache(maxsize=1)
+def _build_lihvr_lower_extremity_manifest():
+    if not LIHVR_LOWER_EXTREMITY_DEMO_DIR.is_dir():
+        raise FileNotFoundError(f"Missing DICOM study directory: {LIHVR_LOWER_EXTREMITY_DEMO_DIR}")
+
+    series = [
+        _build_lihvr_demo_series(key, uid)
+        for key, uid in LIHVR_LOWER_EXTREMITY_SERIES.items()
+    ]
+    by_key = {item["key"]: item for item in series}
+    return {
+        "studyId": "study-lihvr-lower-extremity",
+        "studyName": "Lower Extremity",
+        "sourcePath": str(LIHVR_LOWER_EXTREMITY_DEMO_DIR),
+        "defaultSeriesKey": "thin-soft",
+        "defaultVolumePreset": "CT-Bone",
+        "defaultWindowWidth": by_key["thin-soft"].get("windowWidth") or 1800,
+        "defaultWindowLevel": by_key["thin-soft"].get("windowCenter") or 350,
+        "series": series,
+    }
+
+
+@app.get("/api/demo-dicom/limbs-helical")
+def get_limbs_helical_demo_manifest():
+    try:
+        return _build_lihvr_lower_extremity_manifest()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/dicom-lihvr/{file_path:path}")
+def serve_lihvr_demo_dicom(file_path: str, request: Request):
+    if not LIHVR_LOWER_EXTREMITY_DEMO_DIR.exists():
+        return _dicom_error_response(404, "DICOM_NOT_FOUND", "影像目录不存在", file_path)
+    return _serve_validated_dicom(LIHVR_LOWER_EXTREMITY_DEMO_DIR, file_path, request)
 
 
 @app.get("/dicom/{file_path:path}")

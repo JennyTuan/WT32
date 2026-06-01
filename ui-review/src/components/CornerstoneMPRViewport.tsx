@@ -2,6 +2,7 @@ import {
   cache,
   cornerstoneStreamingImageVolumeLoader,
   Enums,
+  imageLoader,
   RenderingEngine,
   setVolumesForViewports,
   type Types,
@@ -891,6 +892,18 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
                   ? await buildStitchedMhaImageIds(imageUrls)
                   : imageUrls.map(buildWadoImageId);
             if (cancelled) return;
+            // Force the first image through the loader so its DICOM header is
+            // parsed and registered with the wadouri metadata provider. The
+            // streaming volume loader reads imagePixelModule (pixelRepresentation,
+            // bitsAllocated, …) synchronously during createAndCacheVolume; without
+            // this prefetch, brand-new series (e.g. the LIHVR limbs demo) crash
+            // with "Cannot destructure property 'pixelRepresentation' of
+            // 'getMetaData(...)' as it is undefined".
+            if (imageIds.length && !imageIds[0].startsWith('mha:')) {
+              try { await imageLoader.loadAndCacheImage(imageIds[0]); }
+              catch (prefetchErr) { console.warn('MPR metadata prefetch failed; volume load may still recover.', prefetchErr); }
+              if (cancelled) return;
+            }
             vol = await volumeLoader.createAndCacheVolume(volId, { imageIds });
             if (cancelled) return;
             loadedVolumeIdsRef.current.add(volId);
@@ -1026,6 +1039,11 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
                     ? await buildStitchedMhaImageIds(urls)
                     : urls.map(buildWadoImageId);
               if (cancelled) return;
+              if (imageIds.length && !imageIds[0].startsWith('mha:')) {
+                try { await imageLoader.loadAndCacheImage(imageIds[0]); }
+                catch (prefetchErr) { console.warn('MPR prewarm metadata prefetch failed.', prefetchErr); }
+                if (cancelled) return;
+              }
               vol = await volumeLoader.createAndCacheVolume(volId, { imageIds });
               if (cancelled) return;
               loadedVolumeIdsRef.current.add(volId);
@@ -1215,6 +1233,34 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           preset: volumePreset,
           sampleDistanceMultiplier: volumeSampleDistanceMultiplier,
         } as Types.VolumeViewportProperties);
+        // For bone-only presets, clip soft tissue via HU threshold so we get
+        // a clean bone surface like UIH's VR — the stock CT-Bone preset
+        // leaves a translucent red flesh halo because its opacity ramp
+        // starts at ~80 HU. We zero out below 200 HU, keep the preset's
+        // colour map intact, and force a re-render so vtk picks it up.
+        const BONE_PRESETS = new Set(['CT-Bone', 'CT-Bones', 'CT-Cropped-Volume-Bone']);
+        if (BONE_PRESETS.has(volumePreset)) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const actors = (fourthVp as any).getActors?.() ?? [];
+            for (const actorEntry of actors) {
+              const property = actorEntry?.actor?.getProperty?.();
+              const opacityFn = property?.getScalarOpacity?.(0);
+              if (!opacityFn) continue;
+              opacityFn.removeAllPoints();
+              opacityFn.addPoint(-1024, 0);
+              opacityFn.addPoint(180, 0);
+              opacityFn.addPoint(220, 0.05);
+              opacityFn.addPoint(350, 0.6);
+              opacityFn.addPoint(800, 0.85);
+              opacityFn.addPoint(3071, 0.9);
+              opacityFn.modified?.();
+              property.modified?.();
+            }
+          } catch (err) {
+            console.warn('VR bone-threshold override failed:', err);
+          }
+        }
         fourthVp.resetCamera();
       } else {
         fourthVp.setProperties(commonProperties);

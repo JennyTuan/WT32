@@ -183,7 +183,15 @@
       "Bash(git fetch *)",
       "Bash(git stash *)",
       "Bash(git reset *)",
-      "Bash(echo \"EXIT=$?\")"
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(npm.cmd run *)",
+      "Bash(grep -n \"drawImage\\\\|putImageData\\\\|projectionRef\\\\|ImageData\\\\|canvas\\\\\\\\.\\\\\\\\|ctx\\\\\\\\.\\\\\\\\|getContext\" \"C:/STN/projects/WT32/ui-review/src/screens/SequenceScanConfirmScreen.tsx\")",
+      "Bash(curl -s \"http://127.0.0.1:8000/api/scan-sessions/selected\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('name=',d.get\\('name'\\),'body_part=',d.get\\('body_part'\\),'acq=',d.get\\('acquisition_type'\\)\\); print\\('series:',[\\(s.get\\('series_type'\\),s.get\\('protocol_recon_id'\\)\\) for s in d.get\\('series',[]\\)]\\)\")",
+      "Bash(curl -s \"http://127.0.0.1:8000/api/scan-sessions/\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(s.get\\('id'\\),'|',s.get\\('name'\\),'|',s.get\\('body_part'\\),'|',s.get\\('acquisition_type'\\)\\) for s in d[-10:]]\")",
+      "Bash(curl -s \"http://127.0.0.1:8000/api/demo-dicom/limbs-helical\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('defaultWW/WL=',d.get\\('defaultWindowWidth'\\),d.get\\('defaultWindowLevel'\\)\\); [print\\(s['key'],'ww=',s['windowWidth'],'wc=',s['windowCenter'],'url0=',s['urls'][0]\\) for s in d['series']]\")"
     ]
   }
 }
