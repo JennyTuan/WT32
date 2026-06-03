@@ -16,6 +16,8 @@ import {
 
 import ServiceModeShell from "../shared/ServiceModeShell";
 import { buildApiUrl } from "../../../lib/apiClient";
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 
 // ── API types ──────────────────────────────────────────────────────────────
 
@@ -50,10 +52,22 @@ type ApiProtocolSummary = {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 
-const ACQUISITION_TYPE_LABELS: Record<AcquisitionType, string> = { regular: "常规", gating: "门控", four_d: "4D" };
+const ACQUISITION_TYPE_LABEL_KEYS: Record<AcquisitionType, TranslationKey> = {
+  regular: "service.protocol.acquisition.regular",
+  gating: "service.protocol.acquisition.gating",
+  four_d: "service.protocol.acquisition.four_d",
+};
 
-const AGE_GROUP_LABELS: Record<AgeGroup, string> = { adult: "成人", child: "儿童", infant: "婴幼儿" };
-const SCAN_MODE_LABELS: Record<ScanMode, string> = { plain: "平扫", contrast: "增强", "4d": "4D" };
+const AGE_GROUP_LABEL_KEYS: Record<AgeGroup, TranslationKey> = {
+  adult: "service.protocol.age.adult",
+  child: "service.protocol.age.child",
+  infant: "service.protocol.age.infant",
+};
+const SCAN_MODE_LABEL_KEYS: Record<ScanMode, TranslationKey> = {
+  plain: "service.protocol.scanMode.plain",
+  contrast: "service.protocol.scanMode.contrast",
+  "4d": "service.protocol.scanMode.4d",
+};
 
 // Removed EMPTY_FORM
 
@@ -85,9 +99,11 @@ const ACQUISITION_TYPE_STYLE: Record<AcquisitionType, string> = {
 };
 
 function AcquisitionTypeBadge({ type }: { type: AcquisitionType }) {
+  const { t } = useI18n();
+
   return (
     <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-bold tracking-wide ${ACQUISITION_TYPE_STYLE[type]}`}>
-      {ACQUISITION_TYPE_LABELS[type]}
+      {t(ACQUISITION_TYPE_LABEL_KEYS[type])}
     </span>
   );
 }
@@ -99,9 +115,11 @@ const SCAN_MODE_STYLE: Record<ScanMode, string> = {
 };
 
 function ScanModeBadge({ mode }: { mode: ScanMode }) {
+  const { t } = useI18n();
+
   return (
     <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-bold tracking-wide ${SCAN_MODE_STYLE[mode]}`}>
-      {SCAN_MODE_LABELS[mode]}
+      {t(SCAN_MODE_LABEL_KEYS[mode])}
     </span>
   );
 }
@@ -109,11 +127,13 @@ function ScanModeBadge({ mode }: { mode: ScanMode }) {
 // ── Status badge ───────────────────────────────────────────────────────────
 
 function StatusBadge({ enabled }: { enabled: boolean }) {
+  const { t } = useI18n();
+
   return (
     <span className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold ${enabled ? "bg-[#E6F4EA] text-[#1B5E20]" : "bg-[#F1F5F9] text-[#78909C]"
       }`}>
       <span className={`inline-block w-1.5 h-1.5 rounded-full ${enabled ? "bg-[#43A047]" : "bg-[#B0BEC5]"}`} />
-      {enabled ? "启用" : "禁用"}
+      {enabled ? t("service.protocol.enabled") : t("service.protocol.disabled")}
     </span>
   );
 }
@@ -165,6 +185,7 @@ function DeleteConfirm({
   onConfirm: () => Promise<void>;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(false);
 
   return (
@@ -176,9 +197,9 @@ function DeleteConfirm({
               <Trash2 size={16} className="text-[#C62828]" />
             </div>
             <div>
-              <h3 className="text-[14px] font-black text-[#1A2332]">确认删除协议</h3>
+              <h3 className="text-[14px] font-black text-[#1A2332]">{t("service.protocol.deleteDialogTitle")}</h3>
               <p className="mt-1 text-[12px] text-[#546E7A] leading-relaxed">
-                将永久删除「<span className="font-bold text-[#263238]">{protocol.name}</span>」，此操作无法撤销。
+                {t("service.protocol.deleteConfirmBody", { name: protocol.name })}
               </p>
             </div>
           </div>
@@ -186,12 +207,12 @@ function DeleteConfirm({
         <div className="flex items-center justify-end gap-2.5 px-6 py-4 border-t border-[#EEF2F9] bg-[#F8FBFF]">
           <button type="button" onClick={onCancel}
             className="h-9 px-5 rounded-lg border border-[#CFD8DC] text-[13px] font-bold text-[#546E7A] hover:bg-[#EEF2F9] transition-colors active:scale-95">
-            取消
+            {t("service.protocol.cancel")}
           </button>
           <button type="button" disabled={loading}
             onClick={async () => { setLoading(true); await onConfirm(); }}
             className="h-9 px-5 rounded-lg bg-[#EF5350] text-[13px] font-bold text-white hover:bg-[#C62828] disabled:opacity-50 transition-all active:scale-95">
-            {loading ? "删除中…" : "确认删除"}
+            {loading ? t("service.protocol.deleting") : t("service.protocol.confirmDelete")}
           </button>
         </div>
       </div>
@@ -202,6 +223,7 @@ function DeleteConfirm({
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 export default function ProtocolManagementPage() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [protocols, setProtocols] = useState<ApiProtocolSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -234,11 +256,11 @@ export default function ProtocolManagementPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setProtocols(await res.json());
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "加载失败");
+      setError(err instanceof Error ? err.message : t("service.protocol.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { fetchProtocols(); }, [fetchProtocols]);
 
@@ -289,9 +311,9 @@ export default function ProtocolManagementPage() {
 
   const toggleEnabled = async (p: ApiProtocolSummary) => {
     const res = await fetch(buildApiUrl(`/api/protocols/${p.id}/toggle-enabled`), { method: "PATCH" });
-    if (!res.ok) { showToast("操作失败", false); return; }
+    if (!res.ok) { showToast(t("service.protocol.operationFailed"), false); return; }
     await fetchProtocols();
-    showToast(p.is_enabled ? "协议已禁用" : "协议已启用");
+    showToast(p.is_enabled ? t("service.protocol.toggleDisabled") : t("service.protocol.toggleEnabled"));
   };
 
   const deleteProtocol = async (id: number) => {
@@ -299,7 +321,7 @@ export default function ProtocolManagementPage() {
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d as { detail?: string }).detail ?? `HTTP ${res.status}`); }
     await fetchProtocols();
     setModal(null);
-    showToast("协议已删除");
+    showToast(t("service.protocol.deleteSuccess"));
   };
 
   // handleModalSubmit and toForm removed
@@ -334,9 +356,9 @@ export default function ProtocolManagementPage() {
                 onChange={(e) => { setSourceFilter(e.target.value as SourceFilter); setPage(1); }}
                 className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
               >
-                <option value="all">全部协议 ({protocols.length})</option>
-                <option value="custom">自设协议 ({customCount})</option>
-                <option value="factory">出厂协议 ({factoryCount})</option>
+                <option value="all">{t("service.protocol.allProtocols", { count: protocols.length })}</option>
+                <option value="custom">{t("service.protocol.customProtocols", { count: customCount })}</option>
+                <option value="factory">{t("service.protocol.factoryProtocols", { count: factoryCount })}</option>
               </select>
             </div>
 
@@ -346,7 +368,7 @@ export default function ProtocolManagementPage() {
                 onChange={(e) => { setBodyPartFilter(e.target.value); setPage(1); }}
                 className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
               >
-                <option value="all">全部部位</option>
+                <option value="all">{t("service.protocol.allBodyParts")}</option>
                 {bodyPartOptions.map((part) => (
                   <option key={part} value={part}>{part}</option>
                 ))}
@@ -359,10 +381,10 @@ export default function ProtocolManagementPage() {
                 onChange={(e) => { setAgeGroupFilter(e.target.value as AgeGroup | "all"); setPage(1); }}
                 className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
               >
-                <option value="all">全年龄</option>
-                <option value="adult">{AGE_GROUP_LABELS.adult}</option>
-                <option value="child">{AGE_GROUP_LABELS.child}</option>
-                <option value="infant">{AGE_GROUP_LABELS.infant}</option>
+                <option value="all">{t("service.protocol.allAges")}</option>
+                <option value="adult">{t(AGE_GROUP_LABEL_KEYS.adult)}</option>
+                <option value="child">{t(AGE_GROUP_LABEL_KEYS.child)}</option>
+                <option value="infant">{t(AGE_GROUP_LABEL_KEYS.infant)}</option>
               </select>
             </div>
 
@@ -372,10 +394,10 @@ export default function ProtocolManagementPage() {
                 onChange={(e) => { setAcquisitionTypeFilter(e.target.value as AcquisitionType | "all"); setPage(1); }}
                 className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
               >
-                <option value="all">全部分类</option>
-                <option value="regular">{ACQUISITION_TYPE_LABELS.regular}</option>
-                <option value="gating">{ACQUISITION_TYPE_LABELS.gating}</option>
-                <option value="four_d">{ACQUISITION_TYPE_LABELS.four_d}</option>
+                <option value="all">{t("service.protocol.allCategories")}</option>
+                <option value="regular">{t(ACQUISITION_TYPE_LABEL_KEYS.regular)}</option>
+                <option value="gating">{t(ACQUISITION_TYPE_LABEL_KEYS.gating)}</option>
+                <option value="four_d">{t(ACQUISITION_TYPE_LABEL_KEYS.four_d)}</option>
               </select>
             </div>
 
@@ -385,10 +407,10 @@ export default function ProtocolManagementPage() {
                 onChange={(e) => { setScanModeFilter(e.target.value as ScanMode | "all"); setPage(1); }}
                 className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-white px-3 text-[13px] text-[#263238] outline-none transition-all hover:border-[#90A4AE] focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15"
               >
-                <option value="all">全部模式</option>
-                <option value="plain">{SCAN_MODE_LABELS.plain}</option>
-                <option value="contrast">{SCAN_MODE_LABELS.contrast}</option>
-                <option value="4d">{SCAN_MODE_LABELS["4d"]}</option>
+                <option value="all">{t("service.protocol.allModes")}</option>
+                <option value="plain">{t(SCAN_MODE_LABEL_KEYS.plain)}</option>
+                <option value="contrast">{t(SCAN_MODE_LABEL_KEYS.contrast)}</option>
+                <option value="4d">{t(SCAN_MODE_LABEL_KEYS["4d"])}</option>
               </select>
             </div>
 
@@ -398,13 +420,13 @@ export default function ProtocolManagementPage() {
                 type="text"
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                placeholder="搜索协议名称、部位"
+                placeholder={t("service.protocol.searchPlaceholder")}
                 className="h-9 w-full rounded-lg border border-[#CFD8DC] bg-[#F8FBFF] pl-9 pr-3 text-[13px] outline-none transition-all focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/15 placeholder:text-[#B0BEC5]"
               />
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              <button type="button" onClick={fetchProtocols} title="刷新"
+              <button type="button" onClick={fetchProtocols} title={t("service.protocol.refresh")}
                 className={`flex h-9 w-9 items-center justify-center rounded-lg border border-[#CFD8DC] text-[#78909C] hover:bg-[#F5F8FF] hover:text-[#1E88E5] hover:border-[#90CAF9] transition-all active:scale-90 ${loading ? "animate-spin text-[#1E88E5]" : ""}`}>
                 <RefreshCcw size={14} />
               </button>
@@ -413,7 +435,7 @@ export default function ProtocolManagementPage() {
                 <button type="button" onClick={() => navigate("/protocol-detail?mode=new&source=catalog")}
                   className="flex h-9 items-center gap-1.5 rounded-lg bg-[#1E88E5] px-4 text-[13px] font-bold text-white shadow-sm hover:bg-[#1565C0] transition-all active:scale-95">
                   <Plus size={15} strokeWidth={2.5} />
-                  新建协议
+                  {t("service.protocol.create")}
                 </button>
               )}
             </div>
@@ -434,15 +456,15 @@ export default function ProtocolManagementPage() {
             {loading ? (
               <div className="flex flex-col items-center justify-center py-14 gap-3 text-[#B0BEC5]">
                 <RefreshCcw size={22} className="animate-spin" />
-                <span className="text-[13px]">正在加载协议数据…</span>
+                <span className="text-[13px]">{t("service.protocol.loading")}</span>
               </div>
             ) : error ? (
               <div className="py-14 text-center">
-                <p className="text-[13px] font-semibold text-[#EF5350]">加载失败</p>
+                <p className="text-[13px] font-semibold text-[#EF5350]">{t("service.protocol.loadFailed")}</p>
                 <p className="mt-1 text-[12px] text-[#90A4AE]">{error}</p>
                 <button type="button" onClick={fetchProtocols}
                   className="mt-4 h-8 px-4 rounded-lg border border-[#CFD8DC] text-[12px] font-bold text-[#546E7A] hover:bg-[#F5F8FF] transition-colors">
-                  重试
+                  {t("service.protocol.retry")}
                 </button>
               </div>
             ) : filtered.length === 0 ? (
@@ -452,17 +474,17 @@ export default function ProtocolManagementPage() {
                 </div>
                 <p className="text-[13px] font-semibold text-[#546E7A]">
                   {search
-                    ? `未找到包含"${search}"的协议`
+                    ? t("service.protocol.noSearchResults", { query: search })
                     : sourceFilter === "custom"
-                      ? "暂无自设协议"
+                      ? t("service.protocol.noCustomProtocols")
                       : sourceFilter === "factory"
-                        ? "暂无出厂协议"
-                        : "暂无协议"}
+                        ? t("service.protocol.noFactoryProtocols")
+                        : t("service.protocol.noProtocols")}
                 </p>
                 {!search && sourceFilter !== "factory" && (
                   <button type="button" onClick={() => navigate("/protocol-detail?mode=new&source=catalog")}
                     className="mt-1 h-8 px-4 rounded-lg bg-[#1E88E5] text-[12px] font-bold text-white hover:bg-[#1565C0] transition-colors active:scale-95">
-                    + 新建协议
+                    + {t("service.protocol.create")}
                   </button>
                 )}
               </div>
@@ -479,12 +501,12 @@ export default function ProtocolManagementPage() {
                   </colgroup>
                   <thead className="border-b border-[#EEF2F9] bg-[#F8FBFF] sticky top-0 z-10 shadow-sm">
                     <tr>
-                      <th className="px-3 py-3 text-center text-[11px] font-black uppercase tracking-wide text-[#78909C]">序号</th>
-                      <Th col="name">协议名称</Th>
-                      <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wide text-[#78909C]">模式</th>
-                      <Th col="created_at">创建时间</Th>
-                      <Th col="is_enabled">状态</Th>
-                      <th className="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wide text-[#78909C]">操作</th>
+                      <th className="px-3 py-3 text-center text-[11px] font-black uppercase tracking-wide text-[#78909C]">{t("service.protocol.sequence")}</th>
+                      <Th col="name">{t("service.protocol.name")}</Th>
+                      <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wide text-[#78909C]">{t("service.protocol.mode")}</th>
+                      <Th col="created_at">{t("service.protocol.createdAt")}</Th>
+                      <Th col="is_enabled">{t("service.protocol.status")}</Th>
+                      <th className="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wide text-[#78909C]">{t("service.protocol.action")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#F1F5F9]">
@@ -504,7 +526,7 @@ export default function ProtocolManagementPage() {
                               </span>
                               <AcquisitionTypeBadge type={p.acquisition_type} />
                               <span className="text-[11px] text-[#90A4AE]">
-                                {AGE_GROUP_LABELS[p.age_group]} · {p.body_part}
+                                {t(AGE_GROUP_LABEL_KEYS[p.age_group])} · {p.body_part}
                               </span>
                             </div>
                           </td>
@@ -523,23 +545,23 @@ export default function ProtocolManagementPage() {
                             <div className="flex items-center justify-end gap-1">
                               {!p.is_factory ? (
                                 <>
-                                  <IconBtn icon={Pencil} label="编辑" variant="primary"
+                                  <IconBtn icon={Pencil} label={t("service.protocol.edit")} variant="primary"
                                     onClick={() => navigate(`/protocol-detail?mode=edit&id=${p.id}&source=catalog`)} />
-                                  <IconBtn icon={Power} label={p.is_enabled ? "禁用" : "启用"}
+                                  <IconBtn icon={Power} label={p.is_enabled ? t("service.protocol.disable") : t("service.protocol.enable")}
                                     variant={p.is_enabled ? "warning" : "default"}
                                     onClick={() => toggleEnabled(p)} />
-                                  <IconBtn icon={Trash2} label="删除" variant="danger"
+                                  <IconBtn icon={Trash2} label={t("service.protocol.delete")} variant="danger"
                                     onClick={() => setModal({ type: "delete", protocol: p })} />
                                 </>
                               ) : (
                                 <>
-                                  <IconBtn icon={Eye} label="查看详情"
+                                  <IconBtn icon={Eye} label={t("service.protocol.viewDetails")}
                                     onClick={() => navigate(`/protocol-detail?mode=view&id=${p.id}&source=catalog`)} />
                                   <button type="button"
                                     onClick={() => navigate(`/protocol-detail?mode=new&id=${p.id}&source=catalog`)}
                                     className="flex h-8 items-center gap-1 rounded-lg px-2.5 text-[11px] font-bold text-[#1565C0] hover:bg-[#E3F2FD] transition-all active:scale-90 whitespace-nowrap">
                                     <BookCopy size={13} strokeWidth={1.8} />
-                                    另存为
+                                    {t("service.protocol.saveAs")}
                                   </button>
                                 </>
                               )}
@@ -557,12 +579,12 @@ export default function ProtocolManagementPage() {
           {!loading && !error && filtered.length > 0 && (
             <div className="flex items-center justify-between px-4 py-2.5 shrink-0 bg-[#F8FBFF] border-t border-[#EEF2F9]">
               <div className="flex items-center gap-2 text-[12px] text-[#78909C]">
-                每页
+                {t("service.protocol.itemsPerPage")}
                 <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
                   className="h-7 rounded-md border border-[#CFD8DC] px-1.5 text-[12px] font-bold text-[#546E7A] outline-none focus:border-[#1E88E5] bg-white">
                   {PAGE_SIZE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
-                条 &nbsp;·&nbsp; 共 <span className="font-bold text-[#546E7A]">{filtered.length}</span> 条
+                {t("service.protocol.rows")} &nbsp;·&nbsp; {t("service.protocol.pageTotal", { count: filtered.length })}
               </div>
 
               <div className="flex items-center gap-1">

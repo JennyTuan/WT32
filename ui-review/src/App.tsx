@@ -48,6 +48,7 @@ import LoginScreen from "./screens/LoginScreen";
 import ChangePasswordScreen from "./screens/ChangePasswordScreen";
 import RequireAuth from "./components/RequireAuth";
 import { AuthProvider } from "./lib/authContext";
+import { useI18n } from "./lib/i18nContext";
 
 const HomeRoute = HomeScreen ?? (() => <Navigate to="/patients" replace />);
 const TABLET_WIDTH = 1024;
@@ -82,6 +83,7 @@ function useTabletScale() {
 
 export default function App() {
   const scale = useTabletScale();
+  const { t } = useI18n();
   const shellWidth = TABLET_WIDTH * scale + 40;
   const shellHeight = TABLET_HEIGHT * scale + 40;
 
@@ -108,7 +110,7 @@ export default function App() {
           </div>
 
           <div
-            className="absolute left-1/2 top-1/2 origin-center overflow-hidden rounded-[24px] bg-white ring-1 ring-black/20 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+            className="absolute left-1/2 top-1/2 origin-center overflow-hidden rounded-[24px] bg-[#0B1220] ring-1 ring-black/30 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]"
             style={{
               width: TABLET_WIDTH,
               height: TABLET_HEIGHT,
@@ -162,7 +164,7 @@ export default function App() {
               <Route path="/service/settings/organization-info" element={<OrganizationInfoPage />} />
               <Route path="/service/reports/qa-report" element={<QAReportPage />} />
               <Route path="/service/reports/system-log" element={<ServiceSystemLogPage />} />
-              <Route path="/service/reports/runtime-stats" element={<ServicePlaceholderScreen currentRoute="/service/reports/runtime-stats" title="运行统计" description="用于查看设备运行时长、使用频率和关键运行指标统计。" />} />
+              <Route path="/service/reports/runtime-stats" element={<ServicePlaceholderScreen currentRoute="/service/reports/runtime-stats" title={t("service.item.runtimeStats")} description={t("service.placeholder.runtimeStats.description")} />} />
               <Route path="/service/reports/audit-log" element={<ServiceAuditLogPage />} />
               <Route path="/service/dose/settings" element={<ServiceDoseSettingsPage />} />
               <Route path="/service/dose/logs" element={<ServiceDoseLogsPage />} />

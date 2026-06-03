@@ -1,4 +1,5 @@
 import { User } from "lucide-react";
+import { useI18n } from "../lib/i18nContext";
 
 type PatientHeaderCardProps = {
     name?: string | null;
@@ -6,6 +7,7 @@ type PatientHeaderCardProps = {
 };
 
 export default function PatientHeaderCard({ name, patientId }: PatientHeaderCardProps) {
+    const { t } = useI18n();
     const isSelected = Boolean(name);
 
     return (
@@ -29,14 +31,14 @@ export default function PatientHeaderCard({ name, patientId }: PatientHeaderCard
                         isSelected ? "text-[#37474F]" : "text-[#90A4AE]"
                     }`}
                 >
-                    {name ?? "未选择患者"}
+                    {name ?? t("patientHeader.unselected")}
                 </span>
                 <span
                     className={`text-[12px] font-medium mt-0.5 tabular-nums truncate ${
                         isSelected ? "text-[#546E7A]" : "text-[#B0BEC5]"
                     }`}
                 >
-                    {patientId ? `ID: ${patientId}` : "ID: --"}
+                    {patientId ? t("patientHeader.idPrefix", { id: patientId }) : t("patientHeader.idEmpty")}
                 </span>
             </div>
         </div>

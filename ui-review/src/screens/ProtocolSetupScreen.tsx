@@ -38,6 +38,8 @@ import {
     updateSelectedScanSessionTopogramParam,
 } from "../lib/scanSession";
 import type { ApiScanSessionDetail } from "../lib/scanSession";
+import { useI18n } from "../lib/i18nContext";
+import type { TranslationKey } from "../lib/i18n";
 
 const PROTOCOL_SELECT_RESUME_KEY = "protocolSelectResume";
 const PROTOCOL_SELECT_SELECTED_IDS_KEY = "protocolSelectSelectedIds";
@@ -246,6 +248,15 @@ type UiPlan = {
 
 const bodyRegions = ["头部", "颈部", "胸腔", "脊柱", "腹部", "四肢"] as const;
 type BodyRegion = typeof bodyRegions[number];
+
+const bodyRegionLabelKeys: Record<BodyRegion, TranslationKey> = {
+    头部: "protocolSetup.anatomy.head",
+    颈部: "protocolSetup.anatomy.neck",
+    胸腔: "protocolSetup.anatomy.chest",
+    脊柱: "protocolSetup.anatomy.spine",
+    腹部: "protocolSetup.anatomy.abdomen",
+    四肢: "protocolSetup.anatomy.extremity",
+};
 
 const getAcquisitionTypeLabel = (type: ApiProtocolDetail["acquisition_type"] | ApiProtocolSummary["acquisition_type"]) => {
     switch (type) {
@@ -891,6 +902,7 @@ const PositionIcon = ({ pos }: { pos: string }) => (
 
 const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps) => {
     const navigate = useNavigate();
+    const { t } = useI18n();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const [protocolSummaries, setProtocolSummaries] = useState<ApiProtocolSummary[]>([]);
     const [protocolDetailsById, setProtocolDetailsById] = useState<Record<number, ApiProtocolDetail>>({});
@@ -943,7 +955,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             } catch {
                 if (cancelled) return;
                 setProtocolSummaries([]);
-                setProtocolsError("Failed to load protocols. Please check the backend service and try again.");
+                setProtocolsError(t("protocolSetup.library.errorTitle"));
             } finally {
                 if (!cancelled) {
                     setIsLoadingProtocols(false);
@@ -956,7 +968,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [t]);
 
     useEffect(() => {
         let cancelled = false;
@@ -1051,6 +1063,13 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             items,
         }));
     }, [libraryData]);
+
+    const formatBodyRegion = (region: BodyRegion) => t(bodyRegionLabelKeys[region]);
+    const formatLibraryType = (region: string) => {
+        if (region === "常规") return t("protocolSetup.libraryType.regular");
+        if (region === "门控") return t("protocolSetup.libraryType.gating");
+        return region;
+    };
 
     const [shouldResumePreviousSession] = useState(() => {
         if (typeof window === "undefined") return false;
@@ -1309,7 +1328,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             navigate(route);
         } catch (error) {
             console.error(error);
-            setSessionActionError("无法创建本次扫描会话，请检查患者和后端服务");
+            setSessionActionError(t("protocolSetup.createSessionError"));
         } finally {
             setIsCreatingSession(false);
         }
@@ -1324,7 +1343,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 await ensureProtocolDetailLoaded(protocolId);
             } catch (error) {
                 console.error(error);
-                setSessionActionError("协议详情加载失败，请检查后端服务");
+                setSessionActionError(t("protocolSetup.detailLoadError"));
                 return;
             }
         }
@@ -1393,7 +1412,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 edits.copiedPlans.push({
                     ...plan,
                     id: newPlanId,
-                    title: `${plan.title} 副本`,
+                    title: `${plan.title} ${t("protocolSetup.copySuffix")}`,
                     sequences: plan.sequences.map((seq) => ({
                         ...seq,
                         id: `${newPlanId}-${seq.id}`,
@@ -1409,7 +1428,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                     const copy: UiSequence = {
                         ...seq,
                         id: `copy-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                        name: `${seq.name} 副本`,
+                        name: `${seq.name} ${t("protocolSetup.copySuffix")}`,
                         sourceSeriesId: undefined,
                     };
                     edits.copiesBySourceSeqId[seq.id] = [
@@ -2036,7 +2055,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             >
                                 <Activity size={14} className="text-[#4D94FF] shrink-0" />
                                 <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">
-                                    扫描计划
+                                    {t("protocolSetup.scanPlan")}
                                 </span>
                                 {planListOpen
                                     ? <ChevronUp size={14} className="text-[#90A4AE] ml-1" />
@@ -2046,7 +2065,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             <div className="flex items-center gap-1">
                                 {/* 新增序列 */}
                                 <button
-                                    title="新增序列"
+                                    title={t("protocolSetup.newSequence")}
                                     onClick={() => {
                                         if (typeof window !== "undefined") {
                                             sessionStorage.setItem(PROTOCOL_SELECT_RESUME_KEY, "1");
@@ -2059,7 +2078,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 </button>
                                 {/* 复制序列 */}
                                 <button
-                                    title="复制序列"
+                                    title={t("protocolSetup.copySelected")}
                                     onClick={handleCopyClick}
                                     className={`relative w-[44px] h-[44px] flex items-center justify-center rounded-md transition-colors ${checkedSeqIds.length > 0 || checkedPlanIds.length > 0
                                         ? 'text-[#4D94FF] hover:bg-[#E3F2FD] active:bg-[#BBDEFB]'
@@ -2070,7 +2089,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 </button>
                                 {/* 删除序列 */}
                                 <button
-                                    title="删除已选序列"
+                                    title={t("protocolSetup.deleteSelected")}
                                     onClick={handleDeleteClick}
                                     className={`w-[44px] h-[44px] flex items-center justify-center rounded-md transition-colors ${checkedSeqIds.length > 0 || checkedPlanIds.length > 0
                                         ? 'text-[#D32F2F] hover:bg-[#FFEBEE] active:bg-[#FFCDD2]'
@@ -2108,7 +2127,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                                     event.stopPropagation();
                                                     togglePlanCollapse(plan.id);
                                                 }}
-                                                title={collapsedPlanIds.includes(plan.id) ? "展开该协议内扫描序列" : "收起该协议内扫描序列"}
+                                                title={collapsedPlanIds.includes(plan.id) ? t("protocolSetup.expandPlan") : t("protocolSetup.collapsePlan")}
                                                 className="inline-flex w-6 h-6 items-center justify-center rounded-sm hover:bg-[#E3F2FD] transition-colors"
                                             >
                                                 <CircleDot
@@ -2182,7 +2201,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 <div className="flex items-center gap-2">
                                     <div className="w-1.5 h-3 bg-[#4D94FF] rounded-full"></div>
                                     <span className="text-[10px] font-black uppercase tracking-tight text-[#37474F]">
-                                        参数详情 ({activeSeq.mode || activeSeq.type?.toUpperCase() || "-"})
+                                        {t("protocolSetup.parameterDetails", { mode: activeSeq.mode || activeSeq.type?.toUpperCase() || "-" })}
                                     </span>
                                 </div>
                                 <div className="flex bg-white rounded-md border border-[#B0C4DE]/50 p-0.5 h-[28px]">
@@ -2191,14 +2210,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                         className={`px-4 text-[10px] font-bold rounded-md transition-all ${activeTab === "scan" ? "bg-[#4D94FF] text-white shadow-sm" : "text-[#4D94FF]"
                                             }`}
                                     >
-                                        扫描
+                                        {t("protocolSetup.scanTab")}
                                     </button>
                                     <button
                                         onClick={() => setActiveTab("recon")}
                                         className={`px-4 text-[10px] font-bold rounded-md transition-all ${activeTab === "recon" ? "bg-[#4D94FF] text-white shadow-sm" : "text-[#4D94FF]"
                                             }`}
                                     >
-                                        重建
+                                        {t("protocolSetup.reconTab")}
                                     </button>
                                 </div>
                             </div>
@@ -2263,7 +2282,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             disabled={isCreatingSession}
                             className={`shrink-0 mt-3 h-[32px] w-full border rounded-md text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-sm ${isCreatingSession ? "bg-[#F8FAFC] border-[#E2E8F0] text-[#B0BEC5] cursor-not-allowed" : "bg-white border-[#B0C4DE] text-[#4D94FF] hover:bg-blue-50"}`}
                         >
-                            <Info size={14} /> 参数详情
+                            <Info size={14} /> {t("protocolSetup.parameterDetailsButton")}
                         </button>
                     </div>
                 </aside>
@@ -2272,20 +2291,20 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 <section className="flex-1 flex flex-col relative overflow-hidden border-r border-[#E2E8F0]">
                     <div className="h-[44px] bg-[#F8FAFC] border-b border-[#EEF2F9] flex items-center justify-between px-6 shrink-0">
                         <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[#37474F]">
-                            解剖区域确认
+                            {t("protocolSetup.anatomyConfirm")}
                         </span>
                         <div className="flex bg-[#EEF2F9] rounded-md p-1 border border-[#B0C4DE]/30">
                             <button
                                 onClick={() => setPatientType("adult")}
                                 className={`px-4 py-1 text-[10px] font-black rounded-sm transition-all ${patientType === "adult" ? "bg-[#4D94FF] text-white shadow-sm" : "text-[#546E7A] hover:bg-white/50"}`}
                             >
-                                成人
+                                {t("protocolSetup.adult")}
                             </button>
                             <button
                                 onClick={() => setPatientType("child")}
                                 className={`px-4 py-1 text-[10px] font-black rounded-sm transition-all ${patientType === "child" ? "bg-[#4D94FF] text-white shadow-sm" : "text-[#546E7A] hover:bg-white/50"}`}
                             >
-                                儿童
+                                {t("protocolSetup.child")}
                             </button>
                         </div>
                     </div>
@@ -2363,7 +2382,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                     {/* Interactive Labels - Left Side with Tech Connectors */}
                                     <div className="absolute left-[-80px] top-[110px] flex items-center group cursor-pointer" onClick={() => setSelectedBodyRegion("颈部")}>
                                         <div className={`px-2.5 py-1.5 rounded-lg border backdrop-blur-md transition-all shadow-sm ${selectedBodyRegion === '颈部' ? 'bg-[#4D94FF] border-[#4D94FF] text-white' : 'bg-white/80 border-[#CBD5E1] text-[#64748B] hover:border-[#4D94FF] hover:text-[#4D94FF]'}`}>
-                                            <span className="text-[11px] font-black tracking-wider">颈部</span>
+                                            <span className="text-[11px] font-black tracking-wider">{formatBodyRegion("颈部")}</span>
                                         </div>
                                         <svg className="w-[30px] h-[20px] ml-1 overflow-visible">
                                             <path d="M0 10 L20 10" stroke={selectedBodyRegion === '颈部' ? "#4D94FF" : "#CBD5E1"} fill="none" strokeWidth="1.5" />
@@ -2373,7 +2392,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
                                     <div className="absolute left-[-80px] top-[180px] flex items-center group cursor-pointer" onClick={() => setSelectedBodyRegion("胸腔")}>
                                         <div className={`px-2.5 py-1.5 rounded-lg border backdrop-blur-md transition-all shadow-sm ${selectedBodyRegion === '胸腔' ? 'bg-[#4D94FF] border-[#4D94FF] text-white' : 'bg-white/80 border-[#CBD5E1] text-[#64748B] hover:border-[#4D94FF] hover:text-[#4D94FF]'}`}>
-                                            <span className="text-[11px] font-black tracking-wider">胸腔</span>
+                                            <span className="text-[11px] font-black tracking-wider">{formatBodyRegion("胸腔")}</span>
                                         </div>
                                         <svg className="w-[45px] h-[20px] ml-1 overflow-visible">
                                             <path d="M0 10 L35 10" stroke={selectedBodyRegion === '胸腔' ? "#4D94FF" : "#CBD5E1"} fill="none" strokeWidth="1.5" />
@@ -2383,7 +2402,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
                                     <div className="absolute left-[-80px] top-[300px] flex items-center group cursor-pointer" onClick={() => setSelectedBodyRegion("腹部")}>
                                         <div className={`px-2.5 py-1.5 rounded-lg border backdrop-blur-md transition-all shadow-sm ${selectedBodyRegion === '腹部' ? 'bg-[#4D94FF] border-[#4D94FF] text-white' : 'bg-white/80 border-[#CBD5E1] text-[#64748B] hover:border-[#4D94FF] hover:text-[#4D94FF]'}`}>
-                                            <span className="text-[11px] font-black tracking-wider">腹部</span>
+                                            <span className="text-[11px] font-black tracking-wider">{formatBodyRegion("腹部")}</span>
                                         </div>
                                         <svg className="w-[40px] h-[20px] ml-1 overflow-visible">
                                             <path d="M0 10 L30 10" stroke={selectedBodyRegion === '腹部' ? "#4D94FF" : "#CBD5E1"} fill="none" strokeWidth="1.5" />
@@ -2398,7 +2417,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                             <circle cx="15" cy="10" r="2.5" fill={selectedBodyRegion === '头部' ? "#4D94FF" : "#CBD5E1"} />
                                         </svg>
                                         <div className={`px-2.5 py-1.5 rounded-lg border backdrop-blur-md transition-all shadow-sm ${selectedBodyRegion === '头部' ? 'bg-[#4D94FF] border-[#4D94FF] text-white' : 'bg-white/80 border-[#CBD5E1] text-[#64748B] hover:border-[#4D94FF] hover:text-[#4D94FF]'}`}>
-                                            <span className="text-[11px] font-black tracking-wider">头部</span>
+                                            <span className="text-[11px] font-black tracking-wider">{formatBodyRegion("头部")}</span>
                                         </div>
                                     </div>
 
@@ -2408,7 +2427,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                             <circle cx="25" cy="10" r="2.5" fill={selectedBodyRegion === '脊柱' ? "#4D94FF" : "#CBD5E1"} />
                                         </svg>
                                         <div className={`px-2.5 py-1.5 rounded-lg border backdrop-blur-md transition-all shadow-sm ${selectedBodyRegion === '脊柱' ? 'bg-[#4D94FF] border-[#4D94FF] text-white' : 'bg-white/80 border-[#CBD5E1] text-[#64748B] hover:border-[#4D94FF] hover:text-[#4D94FF]'}`}>
-                                            <span className="text-[11px] font-black tracking-wider">脊柱</span>
+                                            <span className="text-[11px] font-black tracking-wider">{formatBodyRegion("脊柱")}</span>
                                         </div>
                                     </div>
 
@@ -2418,7 +2437,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                             <circle cx="20" cy="10" r="2.5" fill={selectedBodyRegion === '四肢' ? "#4D94FF" : "#CBD5E1"} />
                                         </svg>
                                         <div className={`px-2.5 py-1.5 rounded-lg border backdrop-blur-md transition-all shadow-sm ${selectedBodyRegion === '四肢' ? 'bg-[#4D94FF] border-[#4D94FF] text-white' : 'bg-white/80 border-[#CBD5E1] text-[#64748B] hover:border-[#4D94FF] hover:text-[#4D94FF]'}`}>
-                                            <span className="text-[11px] font-black tracking-wider">四肢</span>
+                                            <span className="text-[11px] font-black tracking-wider">{formatBodyRegion("四肢")}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -2439,7 +2458,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                     : "bg-white text-[#4D94FF] hover:bg-gray-50"
                                     }`}
                             >
-                                螺旋协议
+                                {t("protocolSetup.spiralProtocols")}
                             </button>
                             <button
                                 onClick={() => handleLibraryTabChange("axial")}
@@ -2448,7 +2467,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                     : "bg-white text-[#4D94FF] hover:bg-gray-50"
                                     }`}
                             >
-                                断层协议
+                                {t("protocolSetup.axialProtocols")}
                             </button>
                             
                         </div>
@@ -2459,14 +2478,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 <div className="h-full flex items-center justify-center px-8 text-center bg-[#FCFDFE]">
                                     <div className="flex flex-col items-center gap-3">
                                         <RefreshCw size={20} className="text-[#4D94FF] animate-spin" />
-                                        <div className="text-[12px] font-black text-[#546E7A]">Loading protocols...</div>
+                                        <div className="text-[12px] font-black text-[#546E7A]">{t("protocolSetup.library.loading")}</div>
                                     </div>
                                 </div>
                             ) : protocolsError ? (
                                 <div className="h-full flex items-center justify-center px-8 text-center bg-[#FCFDFE]">
                                     <div>
                                         <div className="text-[12px] font-black text-[#D32F2F]">
-                                            Failed to load protocols
+                                            {t("protocolSetup.library.errorTitle")}
                                         </div>
                                         <div className="mt-2 text-[10px] leading-5 text-[#90A4AE]">
                                             {protocolsError}
@@ -2477,10 +2496,10 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 <div className="h-full flex items-center justify-center px-8 text-center bg-[#FCFDFE]">
                                     <div>
                                         <div className="text-[12px] font-black text-[#546E7A]">
-                                            No protocols match the current filters
+                                            {t("protocolSetup.library.emptyTitle")}
                                         </div>
                                         <div className="mt-2 text-[10px] leading-5 text-[#90A4AE]">
-                                            Try switching the patient type, body region, or protocol type.
+                                            {t("protocolSetup.library.emptyBody")}
                                         </div>
                                     </div>
                                 </div>
@@ -2488,16 +2507,16 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 <table className="w-full text-left border-collapse">
                                     <thead className="bg-[#4D94FF] text-white sticky top-0 h-[32px] text-[11px] uppercase font-bold tracking-wider">
                                         <tr>
-                                            <th className="w-[50px] text-center border-r border-white/10">Select</th>
-                                            <th className="px-4 border-r border-white/10">Protocol Name</th>
-                                            <th className="w-[80px] text-center px-2">Type</th>
+                                            <th className="w-[50px] text-center border-r border-white/10">{t("protocolSetup.library.select")}</th>
+                                            <th className="px-4 border-r border-white/10">{t("protocolSetup.library.protocolName")}</th>
+                                            <th className="w-[80px] text-center px-2">{t("protocolSetup.library.type")}</th>
                                         </tr>
                                     </thead>
                                     {groupedLibraryData.map((group) => (
                                         <tbody key={group.region} className="divide-y divide-gray-50">
                                             <tr className="h-[28px] bg-[#F8FAFC]">
                                                 <td colSpan={3} className="px-4 text-[10px] font-black uppercase tracking-wider text-[#546E7A]">
-                                                    {group.region}
+                                                    {formatLibraryType(group.region)}
                                                 </td>
                                             </tr>
                                             {group.items.map((item) => (
@@ -2520,7 +2539,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                                         </div>
                                                     </td>
                                                     <td className="px-4 text-[12px] font-bold text-[#546E7A]">{item.name}</td>
-                                                    <td className="text-[10px] text-center text-[#90A4AE] font-mono">{item.region}</td>
+                                                    <td className="text-[10px] text-center text-[#90A4AE] font-mono">{formatLibraryType(item.region)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -2534,11 +2553,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             <div className="flex items-center gap-2">
                                 <div className="w-1.5 h-3 bg-[#4D94FF] rounded-full"></div>
                                 <span className="text-[10px] font-black uppercase tracking-widest text-[#37474F]">
-                                    摆位关联设置
+                                    {t("protocolSetup.positioning")}
                                 </span>
                                 <button
                                     onClick={() => setPositionGroupIndex((prev) => (prev === 0 ? 1 : 0))}
-                                    title="切换摆位"
+                                    title={t("protocolSetup.switchPosition")}
                                     className="ml-auto w-[24px] h-[24px] rounded border border-[#B0C4DE] bg-white text-[#4D94FF] flex items-center justify-center hover:bg-blue-50 transition-colors"
                                 >
                                     <ArrowLeftRight size={12} />
@@ -2579,7 +2598,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                         onClick={() => navigate(-1)}
                         className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 transition-all uppercase text-[13px] shadow-sm active:scale-95"
                     >
-                        <ChevronLeft size={20} /> 上一步
+                        <ChevronLeft size={20} /> {t("common.previousStep")}
                     </button>
                 </div>
                 <div className="flex-1 flex justify-end">
@@ -2588,7 +2607,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                         disabled={isCreatingSession}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md uppercase text-[13px] transition-all ${isCreatingSession ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
                     >
-                        {isCreatingSession ? "创建中.." : "下一步"} <ChevronRight size={20} />
+                        {isCreatingSession ? t("protocolSetup.creating") : t("common.nextStep")} <ChevronRight size={20} />
                     </button>
                 </div>
             </footer >
@@ -2603,8 +2622,8 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 <AlertTriangle size={18} className="text-[#F57C00]" />
                             </div>
                             <div>
-                                <div className="text-[14px] font-black text-[#37474F]">确认删除序列</div>
-                                <div className="text-[11px] text-[#78909C] mt-0.5">此操作不可恢复</div>
+                                <div className="text-[14px] font-black text-[#37474F]">{t("protocolSetup.deleteDialog.title")}</div>
+                                <div className="text-[11px] text-[#78909C] mt-0.5">{t("protocolSetup.deleteDialog.irreversible")}</div>
                             </div>
                         </div>
                         {/* Dialog Body */}
@@ -2612,7 +2631,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             {checkedPlanIds.length > 0 && (
                                 <>
                                     <p className="text-[13px] text-[#546E7A] leading-relaxed">
-                                        即将移除以下 <span className="font-black text-[#D32F2F]">{checkedPlanIds.length}</span> 个协议：
+                                        {t("protocolSetup.deleteDialog.planLead", { count: checkedPlanIds.length })}
                                     </p>
                                     <ul className="mt-2 flex flex-col gap-1.5">
                                         {scanPlans.filter((p) => checkedPlanIds.includes(p.id)).map((plan) => (
@@ -2628,7 +2647,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                             {checkedSeqIds.length > 0 && (
                                 <>
                                     <p className="text-[13px] text-[#546E7A] leading-relaxed mt-3">
-                                        即将删除以下 <span className="font-black text-[#D32F2F]">{checkedSeqIds.length}</span> 个序列：
+                                        {t("protocolSetup.deleteDialog.seqLead", { count: checkedSeqIds.length })}
                                     </p>
                                     <ul className="mt-2 flex flex-col gap-1.5">
                                         {checkedSeqIds.map(id => {
@@ -2650,13 +2669,13 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                 onClick={() => setShowDeleteConfirm(false)}
                                 className="flex-1 h-[40px] bg-white border-2 border-[#B0C4DE] text-[#546E7A] font-bold rounded-lg text-[13px] hover:bg-gray-50 transition-all active:scale-95"
                             >
-                                取消
+                                {t("common.cancel")}
                             </button>
                             <button
                                 onClick={handleConfirmDelete}
                                 className="flex-1 h-[40px] bg-[#D32F2F] text-white font-bold rounded-lg text-[13px] hover:bg-red-700 shadow-md transition-all active:scale-95"
                             >
-                                确认删除
+                                {t("protocolSetup.deleteDialog.title")}
                             </button>
                         </div>
                     </div>

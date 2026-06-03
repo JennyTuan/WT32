@@ -29,6 +29,8 @@ import {
 } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import AppHeader from "../components/AppHeader";
+import { useI18n } from "../lib/i18nContext";
+import type { TranslationKey } from "../lib/i18n";
 
 interface Sequence {
     id: string;
@@ -165,24 +167,31 @@ const DEFAULT_SCOUT_DOSE_PARAMS: ScoutDoseDisplayParams = {
     notifyDlp: "--",
 };
 
-const buildSequenceSteps = (type: WorkflowSequenceType, isFourDScoutWorkflow = false) => {
+const buildSequenceSteps = (
+    type: WorkflowSequenceType,
+    isFourDScoutWorkflow: boolean,
+    t: (key: TranslationKey) => string,
+) => {
     if (type === "scout") {
         if (isFourDScoutWorkflow) {
-            return ["呼吸采集", "激光灯定位", "参数确认", "执行扫描"];
+            return [
+                t("scanFlow.step.breathingAcquisition"),
+                t("scanFlow.step.laserPosition"),
+                t("scanFlow.step.parameterConfirm"),
+                t("scanFlow.step.executeScan"),
+            ];
         }
-        return ["激光灯定位", "参数确认", "执行扫描"];
+        return [
+            t("scanFlow.step.laserPosition"),
+            t("scanFlow.step.parameterConfirm"),
+            t("scanFlow.step.executeScan"),
+        ];
     }
 
-    return ["参数确认", "执行扫描"];
-
-    if (type === "scout") {
-        if (isFourDScoutWorkflow) {
-            return ["呼吸采集", "激光灯定位", "参数确认", "执行扫描"];
-        }
-        return ["激光灯定位", "参数确认", "执行扫描"];
-    }
-
-    return ["参数确认", "执行扫描"];
+    return [
+        t("scanFlow.step.parameterConfirm"),
+        t("scanFlow.step.executeScan"),
+    ];
 };
 
 const DETAIL_TARGET_STORAGE_KEY = "scanConfirmDetailTarget";
@@ -399,7 +408,7 @@ const ScanConfirmScreen = ({
     parameterPanelMode = "scout",
     tomographicParamOverrides,
     extraParamSection,
-    extraParamSectionTitle = "门控参数",
+    extraParamSectionTitle,
     helicalParamOverrides,
     rightViewportContent,
     rightViewportClassName,
@@ -408,11 +417,12 @@ const ScanConfirmScreen = ({
     readOnlyMode = false,
     onExecuteScan,
     patientConfirmBeforeExecute = false,
-    executeButtonLabel = "执行扫描",
+    executeButtonLabel,
     nextRoute = "/scout-execute",
     allowBackNavigation = true,
 }: ScanConfirmScreenProps) => {
     const navigate = useNavigate();
+    const { t } = useI18n();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
@@ -423,12 +433,12 @@ const ScanConfirmScreen = ({
 
     // Data structure with sequences at the same level
     const [groups, setGroups] = useState<ProtocolGroup[]>([
-        {
-            id: 'g1',
-            name: 'Head_FacialBoneVolume',
-            sequences: [
-                { id: 's1', name: 'Scout', steps: ['打开激光灯获取定位', '确认参数', '执行扫描'] },
-                { id: 's2', name: 'Helical Scan', steps: ['参数确认', '执行扫描'] }
+                {
+                    id: 'g1',
+                    name: 'Head_FacialBoneVolume',
+                    sequences: [
+                { id: 's1', name: 'Scout', steps: [t("scanFlow.step.openLaserForPosition"), t("scanFlow.step.confirmParameters"), t("scanFlow.step.executeScan")] },
+                { id: 's2', name: 'Helical Scan', steps: [t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")] }
             ]
         }
     ]);
@@ -441,6 +451,8 @@ const ScanConfirmScreen = ({
     const [laserActive, setLaserActive] = useState(false);
     const [scoutDoseDisplayParams, setScoutDoseDisplayParams] = useState<ScoutDoseDisplayParams>(DEFAULT_SCOUT_DOSE_PARAMS);
     const isFourDScoutWorkflow = forceFourDScoutWorkflow || scanSession?.acquisition_type === "four_d";
+    const resolvedExtraParamSectionTitle = extraParamSectionTitle ?? t("scanFlow.gatingParams");
+    const resolvedExecuteButtonLabel = executeButtonLabel ?? t("scanFlow.executeScan");
 
     const buildGroupsFromWorkflowPlans = useCallback((): ProtocolGroup[] => {
         if (workflowPlans.length === 0) {
@@ -449,8 +461,8 @@ const ScanConfirmScreen = ({
                     id: "g1",
                     name: "Head_FacialBoneVolume",
                     sequences: [
-                        { id: "s1", name: "Scout", type: "scout", steps: buildSequenceSteps("scout", isFourDScoutWorkflow) },
-                        { id: "s2", name: "Helical Scan", type: "helical", steps: buildSequenceSteps("helical", isFourDScoutWorkflow) },
+                        { id: "s1", name: "Scout", type: "scout", steps: buildSequenceSteps("scout", isFourDScoutWorkflow, t) },
+                        { id: "s2", name: "Helical Scan", type: "helical", steps: buildSequenceSteps("helical", isFourDScoutWorkflow, t) },
                     ],
                 },
             ];
@@ -463,10 +475,10 @@ const ScanConfirmScreen = ({
                 id: `group-${plan.id}-seq-${sequence.id}`,
                 name: sequence.name,
                 type: sequence.type,
-                steps: buildSequenceSteps(sequence.type, isFourDScoutWorkflow),
+                steps: buildSequenceSteps(sequence.type, isFourDScoutWorkflow, t),
             })),
         }));
-    }, [isFourDScoutWorkflow, workflowPlans]);
+    }, [isFourDScoutWorkflow, t, workflowPlans]);
 
     useEffect(() => {
         setGroups(buildGroupsFromWorkflowPlans());
@@ -796,7 +808,7 @@ const ScanConfirmScreen = ({
                         <div className="hidden">
                             <div className="grid grid-cols-2 gap-2">
                                 <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                    <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">进出床</span>
+                                    <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.inOutTable")}</span>
                                     <div className="relative w-full">
                                         <select
                                             value={bedMode}
@@ -804,14 +816,14 @@ const ScanConfirmScreen = ({
                                             disabled={readOnlyMode}
                                             className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                         >
-                                            <option value="in">进床</option>
-                                            <option value="out">出床</option>
+                                            <option value="in">{t("scanFlow.tableIn")}</option>
+                                            <option value="out">{t("scanFlow.tableOut")}</option>
                                         </select>
                                         <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                                     </div>
                                 </label>
                                 <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                    <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">体位</span>
+                                    <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.patientPosition")}</span>
                                     <div className="relative w-full">
                                         <select
                                             value={patientPosition}
@@ -840,13 +852,13 @@ const ScanConfirmScreen = ({
                                     onClick={() => setBedMode("in")}
                                     className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${bedMode === "in" ? 'bg-[#4D94FF] text-white shadow-inner' : 'text-[#90A4AE] hover:bg-gray-50'}`}
                                 >
-                                    进床
+                                    {t("scanFlow.tableIn")}
                                 </button>
                                 <button
                                     onClick={() => setBedMode("out")}
                                     className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${bedMode === "out" ? 'bg-[#4D94FF] text-white shadow-inner' : 'text-[#90A4AE] hover:bg-gray-50'}`}
                                 >
-                                    出床
+                                    {t("scanFlow.tableOut")}
                                 </button>
                             </div>
                         </div>
@@ -863,7 +875,7 @@ const ScanConfirmScreen = ({
                                                 : "text-[#90A4AE] hover:bg-gray-50"
                                         }`}
                                     >
-                                        扫描参数
+                                        {t("scanFlow.scanParameters")}
                                     </button>
                                     <button
                                         type="button"
@@ -874,7 +886,7 @@ const ScanConfirmScreen = ({
                                                 : "text-[#90A4AE] hover:bg-gray-50"
                                         }`}
                                     >
-                                        {extraParamSectionTitle}
+                                        {resolvedExtraParamSectionTitle}
                                     </button>
                                 </div>
                             </div>
@@ -890,7 +902,7 @@ const ScanConfirmScreen = ({
                                                 autoMaEnabled ? "border-[#4D94FF]/60" : "border-[#B0C4DE]/40"
                                             }`}
                                         >
-                                            <span className="text-[10px] font-black text-[#37474F] uppercase tracking-tighter">智能剂量调节</span>
+                                            <span className="text-[10px] font-black text-[#37474F] uppercase tracking-tighter">{t("scanFlow.smartDoseModulation")}</span>
                                             <button
                                                 type="button"
                                                 onClick={() => onAutoMaEnabledChange(!autoMaEnabled)}
@@ -907,22 +919,22 @@ const ScanConfirmScreen = ({
                                         </div>
                                     )}
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">进出床</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.inOutTable")}</span>
                                         <div className="relative w-full">
                                             <select
                                                 value={bedMode}
                                                 onChange={(event) => setBedMode(event.target.value as "in" | "out")}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
-                                                <option value="in">进床</option>
-                                                <option value="out">出床</option>
+                                                <option value="in">{t("scanFlow.tableIn")}</option>
+                                                <option value="out">{t("scanFlow.tableOut")}</option>
                                             </select>
                                             <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                                         </div>
                                     </label>
 
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">体位</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.patientPosition")}</span>
                                         <div className="relative w-full">
                                             <select
                                                 value={patientPosition}
@@ -943,12 +955,12 @@ const ScanConfirmScreen = ({
                                     </label>
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">扫描长度</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.scanLength")}</span>
                                         <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedTomographicScanDisplayParams.scanLength}</span>
                                     </div>
 
                                      <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">旋转时间</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.rotationTime")}</span>
                                         <div className="flex items-center gap-1 mt-[1px]">
                                             <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.rotationTime}</span>
                                             <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
@@ -957,7 +969,7 @@ const ScanConfirmScreen = ({
 
                                     <div
                                         aria-disabled={isTomographicMaLocked}
-                                        title={isTomographicMaLocked ? "智能剂量调节开启时，mA 由系统自动控制" : undefined}
+                                        title={isTomographicMaLocked ? t("scanFlow.lockedMaTitle") : undefined}
                                         className={`p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm group transition-colors ${
                                             isTomographicMaLocked
                                                 ? "border-[#CBD5E1]/60 opacity-60 cursor-not-allowed"
@@ -986,7 +998,7 @@ const ScanConfirmScreen = ({
 
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">循环次数</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.cycleCount")}</span>
                                         <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedTomographicScanDisplayParams.cycleCount}</span>
                                     </div>
                                     <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
@@ -998,7 +1010,7 @@ const ScanConfirmScreen = ({
                                     </div>
 
                                     <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">床倾角</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.tableTilt")}</span>
                                         <div className="flex items-center gap-1 mt-[1px]">
                                             <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.angle}</span>
                                             <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
@@ -1027,7 +1039,7 @@ const ScanConfirmScreen = ({
                                                 autoMaEnabled ? "border-[#4D94FF]/60" : "border-[#B0C4DE]/40"
                                             }`}
                                         >
-                                            <span className="text-[10px] font-black text-[#37474F] uppercase tracking-tighter">智能剂量调节</span>
+                                            <span className="text-[10px] font-black text-[#37474F] uppercase tracking-tighter">{t("scanFlow.smartDoseModulation")}</span>
                                             <button
                                                 type="button"
                                                 onClick={() => onAutoMaEnabledChange(!autoMaEnabled)}
@@ -1044,22 +1056,22 @@ const ScanConfirmScreen = ({
                                         </div>
                                     )}
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">进出床</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.inOutTable")}</span>
                                         <div className="relative w-full">
                                             <select
                                                 value={bedMode}
                                                 onChange={(event) => setBedMode(event.target.value as "in" | "out")}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
-                                                <option value="in">进床</option>
-                                                <option value="out">出床</option>
+                                                <option value="in">{t("scanFlow.tableIn")}</option>
+                                                <option value="out">{t("scanFlow.tableOut")}</option>
                                             </select>
                                             <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                                         </div>
                                     </label>
 
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">体位</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.patientPosition")}</span>
                                         <div className="relative w-full">
                                             <select
                                                 value={patientPosition}
@@ -1080,13 +1092,13 @@ const ScanConfirmScreen = ({
                                     </label>
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">扫描长度</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.scanLength")}</span>
                                         <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedHelicalScanDisplayParams.scanLength}</span>
                                     </div>
 
                                     <div
                                         aria-disabled={isHelicalMaLocked}
-                                        title={isHelicalMaLocked ? "智能剂量调节开启时，mA 由系统自动控制" : undefined}
+                                        title={isHelicalMaLocked ? t("scanFlow.lockedMaTitle") : undefined}
                                         className={`p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm group transition-colors ${
                                             isHelicalMaLocked
                                                 ? "border-[#CBD5E1]/60 opacity-60 cursor-not-allowed"
@@ -1113,7 +1125,7 @@ const ScanConfirmScreen = ({
                                     </div>
 
                                     <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">旋转时间</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.rotationTime")}</span>
                                         <div className="flex items-center gap-1 mt-[1px]">
                                             <span className="text-[13px] font-black text-[#37474F]">{resolvedHelicalScanDisplayParams.rotationTime}</span>
                                             <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
@@ -1134,7 +1146,7 @@ const ScanConfirmScreen = ({
                                     </div>
 
                                     <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">床倾角</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.tableTilt")}</span>
                                         <div className="flex items-center gap-1 mt-[1px]">
                                             <span className="text-[13px] font-black text-[#37474F]">{resolvedHelicalScanDisplayParams.angle}</span>
                                             <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
@@ -1156,22 +1168,22 @@ const ScanConfirmScreen = ({
                             ) : (
                                 <div className="grid grid-cols-2 gap-2">
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">进出床</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.inOutTable")}</span>
                                         <div className="relative w-full">
                                             <select
                                                 value={bedMode}
                                                 onChange={(event) => setBedMode(event.target.value as "in" | "out")}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
-                                                <option value="in">进床</option>
-                                                <option value="out">出床</option>
+                                                <option value="in">{t("scanFlow.tableIn")}</option>
+                                                <option value="out">{t("scanFlow.tableOut")}</option>
                                             </select>
                                             <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                                         </div>
                                     </label>
 
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">体位</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.patientPosition")}</span>
                                         <div className="relative w-full">
                                             <select
                                                 value={patientPosition}
@@ -1192,7 +1204,7 @@ const ScanConfirmScreen = ({
                                     </label>
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">扫描长度</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.scanLength")}</span>
                                         <span className="text-[13px] font-black text-[#B0BEC5] mt-[1px]">{scoutDisplayParams.scanLength}</span>
                                     </div>
 
@@ -1213,7 +1225,7 @@ const ScanConfirmScreen = ({
                                     </div>
 
                                     <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">平扫角度</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.flatScanAngle")}</span>
                                         <div className="flex items-center gap-1 mt-[1px]">
                                             <span className="text-[13px] font-black text-[#37474F]">{scoutDisplayParams.angle}</span>
                                             <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
@@ -1233,7 +1245,7 @@ const ScanConfirmScreen = ({
                                     <div className="hidden">
                                         <div className="flex items-center gap-1.5 mb-0.5">
                                             <StretchHorizontal size={14} className="text-[#4D94FF]" />
-                                            <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">体位 (Position)</span>
+                                            <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.patientPosition")}</span>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <span className="text-[14px] font-black text-[#37474F]">{scoutDisplayParams.position}</span>
@@ -1253,7 +1265,7 @@ const ScanConfirmScreen = ({
                         {/* Details Button */}
                         <div className="p-2 flex justify-center shrink-0">
                             <button onClick={handleOpenDetails} disabled={readOnlyMode} className={`h-[32px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border shadow-sm transition-all ${readOnlyMode ? "bg-[#F1F5F9] border-[#CBD5E1] text-[#94A3B8] cursor-not-allowed" : "bg-white border-[#B0C4DE] text-[#4D94FF] hover:bg-blue-50 active:scale-95"}`}>
-                                <Info size={14} /> 参数详情
+                                <Info size={14} /> {t("scanFlow.parameterDetails")}
                             </button>
                         </div>
                     </div>
@@ -1275,7 +1287,7 @@ const ScanConfirmScreen = ({
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
                 <div className="flex-1">
                     <button onClick={() => navigate(-1)} disabled={readOnlyMode || !allowBackNavigation} className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 shadow-sm transition-all uppercase text-[13px] ${readOnlyMode || !allowBackNavigation ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#4D94FF] border-[#4D94FF] hover:bg-solid active:scale-95"}`}>
-                        <ChevronLeft size={20} /> 上一步
+                        <ChevronLeft size={20} /> {t("common.previousStep")}
                     </button>
                 </div>
                 <div className="flex-1 flex justify-center">
@@ -1283,7 +1295,7 @@ const ScanConfirmScreen = ({
                         onClick={() => setShowAbortConfirm(true)}
                         disabled={readOnlyMode}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 transition-all uppercase text-[13px] shadow-sm ${readOnlyMode ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#F57C00] border-[#F57C00] hover:bg-orange-50 active:scale-95"}`}>
-                        <AlertTriangle size={20} /> 中止检查
+                        <AlertTriangle size={20} /> {t("scanFlow.abortExam")}
                     </button>
                 </div>
                 <div className="flex-1 flex justify-end">
@@ -1302,7 +1314,7 @@ const ScanConfirmScreen = ({
                         disabled={readOnlyMode && !onExecuteScan}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md transition-all uppercase text-[13px] ${readOnlyMode && !onExecuteScan ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
                     >
-                        {executeButtonLabel} <ChevronRight size={20} />
+                        {resolvedExecuteButtonLabel} <ChevronRight size={20} />
                     </button>
                 </div>
             </footer>
@@ -1316,8 +1328,8 @@ const ScanConfirmScreen = ({
                                 <AlertTriangle size={16} className="text-[#F57C00]" />
                             </div>
                             <div>
-                                <div className="text-[14px] font-black text-[#37474F]">确认删除序列</div>
-                                <div className="text-[11px] text-[#78909C] mt-0.5">已选 {checkedSeqIds.length} 项，此操作不可恢复</div>
+                                <div className="text-[14px] font-black text-[#37474F]">{t("scanFlow.confirmDeleteSequence")}</div>
+                                <div className="text-[11px] text-[#78909C] mt-0.5">{t("scanFlow.selectedCannotUndo", { count: checkedSeqIds.length })}</div>
                             </div>
                         </div>
                         <div className="px-5 pt-3 pb-1">
@@ -1338,13 +1350,13 @@ const ScanConfirmScreen = ({
                                 onClick={() => setShowDeleteConfirm(false)}
                                 className="flex-1 h-[40px] bg-white border-2 border-[#B0C4DE] text-[#546E7A] font-bold rounded-lg text-[13px] hover:bg-gray-50 transition-all active:scale-95"
                             >
-                                取消
+                                {t("common.cancel")}
                             </button>
                             <button
                                 onClick={handleConfirmDelete}
                                 className="flex-1 h-[40px] bg-[#D32F2F] text-white font-bold rounded-lg text-[13px] hover:bg-red-700 shadow-md transition-all active:scale-95"
                             >
-                                确认删除
+                                {t("scanFlow.confirmDelete")}
                             </button>
                         </div>
                     </div>
@@ -1360,13 +1372,13 @@ const ScanConfirmScreen = ({
                                 <AlertTriangle size={20} className="text-[#F57C00]" />
                             </div>
                             <div>
-                                <div className="text-[15px] font-black text-[#37474F]">中止检查</div>
-                                <div className="text-[12px] text-[#78909C] mt-0.5">确认中止当前检查流程？</div>
+                                <div className="text-[15px] font-black text-[#37474F]">{t("scanFlow.abortExam")}</div>
+                                <div className="text-[12px] text-[#78909C] mt-0.5">{t("scanFlow.abortQuestion")}</div>
                             </div>
                         </div>
                         <div className="px-5 py-3">
                             <p className="text-[13px] text-[#546E7A] leading-relaxed">
-                                中止后，<span className="font-bold text-[#37474F]">当前扫描参数将清空</span>，需要重新进入流程。
+                                {t("scanFlow.abortBodyStart")}<span className="font-bold text-[#37474F]">{t("scanFlow.abortBodyStrong")}</span>{t("scanFlow.abortBodyEnd")}
                             </p>
                         </div>
                         <div className="flex gap-2 px-5 pb-5">
@@ -1374,7 +1386,7 @@ const ScanConfirmScreen = ({
                                 onClick={() => setShowAbortConfirm(false)}
                                 className="flex-1 h-[40px] bg-white border-2 border-[#B0C4DE] text-[#546E7A] font-bold rounded-lg text-[13px] hover:bg-gray-50 transition-all active:scale-95"
                             >
-                                继续检查
+                                {t("scanFlow.continueExam")}
                             </button>
                             <button
                                 onClick={async () => {
@@ -1392,7 +1404,7 @@ const ScanConfirmScreen = ({
                                 }}
                                 className="flex-1 h-[40px] bg-[#F57C00] text-white font-bold rounded-lg text-[13px] hover:bg-orange-600 shadow-md transition-all active:scale-95"
                             >
-                                确认中止
+                                {t("scanFlow.confirmAbort")}
                             </button>
                         </div>
                     </div>
@@ -1468,15 +1480,17 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
     onClose,
     onConfirm,
     patientData = {
-        name: "张三",
+        name: "--",
         age: 45,
-        gender: "男",
+        gender: "--",
         idNumber: "11010119800101XXXX",
         patientId: "P20260226001",
         checkType: "CT Routine"
     },
-    scanData = { ctdi: "12.45", dlp: "658.2", protocol: "定位像" }
+    scanData = { ctdi: "12.45", dlp: "658.2", protocol: "Scout" }
 }) => {
+    const { t } = useI18n();
+
     if (!isOpen) return null;
 
     return (
@@ -1501,8 +1515,8 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                         <UserCheckIcon size={22} />
                     </div>
                     <div>
-                        <h2 className="text-[22px] font-black text-[#1E293B]">确认患者扫描信息</h2>
-                        <p className="text-[11px] text-[#94A3B8] font-bold uppercase tracking-[0.2em]">Patient Data Confirmation</p>
+                        <h2 className="text-[22px] font-black text-[#1E293B]">{t("scanFlow.patientConfirm.title")}</h2>
+                        <p className="text-[11px] text-[#94A3B8] font-bold uppercase tracking-[0.2em]">{t("scanFlow.patientConfirm.subtitle")}</p>
                     </div>
                 </div>
 
@@ -1510,17 +1524,17 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
 
                     {/* 左侧：精简后的患者档案 (占据 7/12 列) */}
                     <div className="col-span-7 flex flex-col gap-4">
-                        <h3 className="text-[12px] font-bold text-[#94A3B8] tracking-widest px-1">患者档案 (PATIENT INFO)</h3>
+                        <h3 className="text-[12px] font-bold text-[#94A3B8] tracking-widest px-1">{t("scanFlow.patientConfirm.patientInfo")}</h3>
                         <div className="grid grid-cols-2 gap-4">
-                            <InfoItem label="Name / 姓名" value={patientData.name} icon={UserCircle} />
+                            <InfoItem label={t("scanFlow.patientConfirm.name")} value={patientData.name} icon={UserCircle} />
                             <div className="grid grid-cols-2 gap-4">
-                                <InfoItem label="Age / 年龄" value={patientData.age} />
-                                <InfoItem label="Gender / 性别" value={patientData.gender} />
+                                <InfoItem label={t("scanFlow.patientConfirm.age")} value={patientData.age} />
+                                <InfoItem label={t("scanFlow.patientConfirm.gender")} value={patientData.gender} />
                             </div>
-                            <InfoItem label="Check Type / 检查类型" value={patientData.checkType} icon={Stethoscope} />
-                            <InfoItem label="Patient ID / 病历号" value={patientData.patientId} icon={Info} />
+                            <InfoItem label={t("scanFlow.patientConfirm.checkType")} value={patientData.checkType} icon={Stethoscope} />
+                            <InfoItem label={t("scanFlow.patientConfirm.patientId")} value={patientData.patientId} icon={Info} />
                             <div className="col-span-2">
-                                <InfoItem label="ID Number / 证件号" value={patientData.idNumber} icon={Fingerprint} />
+                                <InfoItem label={t("scanFlow.patientConfirm.idNumber")} value={patientData.idNumber} icon={Fingerprint} />
                             </div>
                         </div>
                     </div>
@@ -1528,7 +1542,7 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                     {/* 右侧：剂量与序列 (占据 5/12 列) */}
                     <div className="col-span-5 flex flex-col gap-6">
                         <div className="flex flex-col gap-4">
-                            <h3 className="text-[12px] font-bold text-[#94A3B8] tracking-widest px-1">参数预览 (PARAMETERS)</h3>
+                            <h3 className="text-[12px] font-bold text-[#94A3B8] tracking-widest px-1">{t("scanFlow.patientConfirm.parameters")}</h3>
 
                             {/* 剂量卡片 */}
                             <div className="bg-[#FFFBEB] rounded-[28px] p-5 border border-[#FEF3C7] flex items-center justify-around shadow-sm">
@@ -1545,7 +1559,7 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
 
                             {/* 序列卡片 */}
                             <div className="bg-[#EFF6FF] rounded-[28px] p-5 border border-[#DBEAFE] flex flex-col items-center justify-center min-h-[120px]">
-                                <div className="text-[10px] font-bold text-[#3B82F6] mb-1 uppercase">Current Protocol</div>
+                                <div className="text-[10px] font-bold text-[#3B82F6] mb-1 uppercase">{t("scanFlow.currentProtocol")}</div>
                                 <div className="text-[28px] font-black text-[#2563EB] text-center leading-tight">
                                     {scanData.protocol}
                                 </div>
@@ -1557,7 +1571,7 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                 {/* 底部按钮栏 */}
                 <div className="flex items-center justify-between mt-2 pt-8 border-t border-slate-100 relative z-10">
                     <p className="text-[14px] italic text-[#64748B] font-medium">
-                        请确保以上信息正确，完成后点击“开始扫描”
+                        {t("scanFlow.patientConfirm.hint")}
                     </p>
 
                     <div className="flex items-center gap-5">
@@ -1566,14 +1580,14 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22C55E] opacity-75"></span>
                                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#22C55E]"></span>
                             </div>
-                            <span className="text-[14px] font-bold text-[#166534]">准备就绪</span>
+                            <span className="text-[14px] font-bold text-[#166534]">{t("scanFlow.patientConfirm.ready")}</span>
                         </div>
 
                         <button
                             onClick={onConfirm}
                             className="h-[60px] px-12 bg-[#4D94FF] text-white font-black rounded-2xl shadow-[0_15px_30px_-8px_rgba(77,148,255,0.4)] hover:bg-[#3B82F6] hover:translate-y-[-1px] active:translate-y-[1px] transition-all text-[18px]"
                         >
-                            开始扫描
+                            {t("scanFlow.readyToStart")}
                         </button>
                     </div>
                 </div>

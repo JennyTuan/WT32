@@ -20,6 +20,7 @@ import { loadSelectedPatient } from "../lib/patientSession";
 import NetworkStatusButton from "../components/NetworkStatusButton";
 import SystemMenuButton from "../components/SystemMenuButton";
 import type { FourDPostScanState, RescanChoices } from "../lib/fourDTypes";
+import { useI18n } from "../lib/i18nContext";
 import iconTable from "../assets/icon-table.svg";
 import iconGantry from "../assets/icon-gantry.svg";
 import iconTube from "../assets/icon-tube.svg";
@@ -39,6 +40,7 @@ interface BedTableProps {
 }
 
 export function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
+  const { t } = useI18n();
   const [start, end] = rescanRange;
   const beds = Array.from({ length: end - start + 1 }, (_, index) => start + index);
 
@@ -47,8 +49,8 @@ export function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
       <table className="w-full text-[12px]">
         <thead>
           <tr className="bg-[#F1F5F9]">
-            <th className="px-4 py-2.5 text-left font-bold text-slate-600">床位</th>
-            <th className="px-4 py-2.5 text-left font-bold text-slate-600">起-止位置</th>
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">{t("scanFlow.rescan.bed")}</th>
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">{t("scanFlow.rescan.range")}</th>
           </tr>
         </thead>
         <tbody>
@@ -60,7 +62,7 @@ export function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
             return (
               <Fragment key={bedIdx}>
                 <tr className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1} · 采集 1</td>
+                  <td className="px-4 py-3 font-bold text-slate-700">{t("scanFlow.rescan.bed")} {bedIdx + 1} · {t("scanFlow.rescan.acquisition", { index: 1 })}</td>
                   <td className="px-4 py-3">
                     <label className="inline-flex cursor-pointer items-center gap-2">
                       <input
@@ -71,13 +73,13 @@ export function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
                         className="h-4 w-4 accent-amber-500"
                       />
                       <span className={`font-mono text-[11px] font-semibold ${choice === "first" ? "text-amber-600" : "text-slate-500"}`}>
-                        {posStart} - {posEnd} mm（初扫 · {FIRST_ACQUISITION_EXPOSURE}）
+                        {posStart} - {posEnd} mm ({t("scanFlow.rescan.firstScan")} · {FIRST_ACQUISITION_EXPOSURE})
                       </span>
                     </label>
                   </td>
                 </tr>
                 <tr className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1} · 采集 2</td>
+                  <td className="px-4 py-3 font-bold text-slate-700">{t("scanFlow.rescan.bed")} {bedIdx + 1} · {t("scanFlow.rescan.acquisition", { index: 2 })}</td>
                   <td className="px-4 py-3">
                     <label className="inline-flex cursor-pointer items-center gap-2">
                       <input
@@ -88,7 +90,7 @@ export function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
                         className="h-4 w-4 accent-[#4D94FF]"
                       />
                       <span className={`font-mono text-[11px] font-semibold ${choice === "rescan" ? "text-[#4D94FF]" : "text-slate-500"}`}>
-                        {posStart} - {posEnd} mm（重扫 · {SECOND_ACQUISITION_EXPOSURE}）
+                        {posStart} - {posEnd} mm ({t("scanFlow.rescan.rescan")} · {SECOND_ACQUISITION_EXPOSURE})
                       </span>
                     </label>
                   </td>
@@ -103,6 +105,7 @@ export function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
 }
 
 function RescanBedTable({ rescanRange, choices, onChange }: BedTableProps) {
+  const { t } = useI18n();
   const [start, end] = rescanRange;
   const beds = Array.from({ length: end - start + 1 }, (_, index) => start + index);
 
@@ -111,10 +114,10 @@ function RescanBedTable({ rescanRange, choices, onChange }: BedTableProps) {
       <table className="w-full text-[12px]">
         <thead>
           <tr className="bg-[#F1F5F9]">
-            <th className="px-4 py-2.5 text-left font-bold text-slate-600">床位/采集</th>
-            <th className="px-4 py-2.5 text-left font-bold text-slate-600">起止位置</th>
-            <th className="px-4 py-2.5 text-left font-bold text-slate-600">时间</th>
-            <th className="px-4 py-2.5 text-center font-bold text-slate-600">选择</th>
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">{t("scanFlow.rescan.bedAcquisition")}</th>
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">{t("scanFlow.rescan.range")}</th>
+            <th className="px-4 py-2.5 text-left font-bold text-slate-600">{t("scanFlow.rescan.time")}</th>
+            <th className="px-4 py-2.5 text-center font-bold text-slate-600">{t("scanFlow.rescan.select")}</th>
           </tr>
         </thead>
         <tbody>
@@ -126,7 +129,7 @@ function RescanBedTable({ rescanRange, choices, onChange }: BedTableProps) {
             return (
               <Fragment key={bedIdx}>
                 <tr className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1} · 采集 1</td>
+                  <td className="px-4 py-3 font-bold text-slate-700">{t("scanFlow.rescan.bed")} {bedIdx + 1} · {t("scanFlow.rescan.acquisition", { index: 1 })}</td>
                   <td className={`px-4 py-3 font-mono text-[11px] font-semibold ${choice === "first" ? "text-amber-600" : "text-slate-500"}`}>
                     {posStart} - {posEnd} mm
                   </td>
@@ -144,7 +147,7 @@ function RescanBedTable({ rescanRange, choices, onChange }: BedTableProps) {
                   </td>
                 </tr>
                 <tr className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-bold text-slate-700">床位 {bedIdx + 1} · 采集 2</td>
+                  <td className="px-4 py-3 font-bold text-slate-700">{t("scanFlow.rescan.bed")} {bedIdx + 1} · {t("scanFlow.rescan.acquisition", { index: 2 })}</td>
                   <td className={`px-4 py-3 font-mono text-[11px] font-semibold ${choice === "rescan" ? "text-[#4D94FF]" : "text-slate-500"}`}>
                     {posStart} - {posEnd} mm
                   </td>
@@ -347,6 +350,7 @@ function RespiratoryWaveMonitor({
   onPointDelete,
   onReset,
 }: RespiratoryWaveMonitorProps) {
+  const { t } = useI18n();
   const chartWidth = 960;
   const chartHeight = 360;
   const leftPad = 40;
@@ -520,14 +524,14 @@ function RespiratoryWaveMonitor({
   }, [showPhaseBins, stats.cycles]);
 
   const regularityBadge = (() => {
-    if (stats.cycles.length === 0) return { label: "数据不足", color: "bg-slate-100 text-slate-500" };
+    if (stats.cycles.length === 0) return { label: t("scanFlow.rescan.wave.insufficient"), color: "bg-slate-100 text-slate-500" };
     if (stats.periodCV < 0.1 && stats.amplitudeCV < 0.15) {
-      return { label: "呼吸规律", color: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+      return { label: t("scanFlow.rescan.wave.regular"), color: "bg-emerald-50 text-emerald-700 border-emerald-200" };
     }
     if (stats.periodCV < 0.2 && stats.amplitudeCV < 0.25) {
-      return { label: "轻度不齐", color: "bg-amber-50 text-amber-700 border-amber-200" };
+      return { label: t("scanFlow.rescan.wave.mildlyIrregular"), color: "bg-amber-50 text-amber-700 border-amber-200" };
     }
-    return { label: "不规律·建议重采", color: "bg-rose-50 text-rose-700 border-rose-200" };
+    return { label: t("scanFlow.rescan.wave.irregular"), color: "bg-rose-50 text-rose-700 border-rose-200" };
   })();
 
   const hoverPhase = useMemo(() => {
@@ -543,7 +547,7 @@ function RespiratoryWaveMonitor({
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <div className="text-[12px] font-black text-slate-700">呼吸波形编辑</div>
+            <div className="text-[12px] font-black text-slate-700">{t("scanFlow.rescan.wave.editTitle")}</div>
             <span
               className={`rounded-full border px-2 py-[1px] text-[10px] font-bold ${regularityBadge.color}`}
             >
@@ -551,26 +555,26 @@ function RespiratoryWaveMonitor({
             </span>
             {stats.irregularCount > 0 && (
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-[1px] text-[10px] font-bold text-amber-700">
-                <AlertTriangle size={10} /> {stats.irregularCount} 个不规则周期
+                <AlertTriangle size={10} /> {t("scanFlow.rescan.wave.irregularCount", { count: stats.irregularCount })}
               </span>
             )}
           </div>
           <div className="mt-1 text-[11px] text-slate-400">
-            床位前后各保留一个完整呼吸周期作为缓冲；不规则周期将影响 4D 分箱重建质量
+            {t("scanFlow.rescan.wave.bedBufferHint")}
           </div>
           <div className="mt-1 text-[11px] text-slate-400">
-            拖动波峰/波谷调整；点击选中后可使用 ↑↓←→ 微调（Shift 加速），Delete 删除
+            {t("scanFlow.rescan.wave.dragHint")}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-4 text-[11px] text-slate-500">
             <span className="inline-flex items-center gap-1.5">
               <span className="h-[2px] w-6 rounded bg-slate-400 opacity-80" />
-              原始波形
+              {t("scanFlow.rescan.wave.raw")}
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="h-[3px] w-6 rounded bg-[#2563EB]" />
-              平滑滤波
+              {t("scanFlow.rescan.wave.filtered")}
             </span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -582,9 +586,9 @@ function RespiratoryWaveMonitor({
                   ? "border-[#2563EB] bg-[#2563EB] text-white"
                   : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               }`}
-              title="点击波形区域添加一个波峰"
+              title={t("scanFlow.rescan.wave.addPeakTitle")}
             >
-              <Plus size={10} /> 加波峰
+              <Plus size={10} /> {t("scanFlow.rescan.wave.addPeak")}
             </button>
             <button
               type="button"
@@ -594,9 +598,9 @@ function RespiratoryWaveMonitor({
                   ? "border-[#DC2626] bg-[#DC2626] text-white"
                   : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               }`}
-              title="点击波形区域添加一个波谷"
+              title={t("scanFlow.rescan.wave.addValleyTitle")}
             >
-              <Plus size={10} /> 加波谷
+              <Plus size={10} /> {t("scanFlow.rescan.wave.addValley")}
             </button>
             <button
               type="button"
@@ -606,9 +610,9 @@ function RespiratoryWaveMonitor({
                   ? "border-emerald-500 bg-emerald-500 text-white"
                   : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
               }`}
-              title="显示 10 相位分箱（0%=吸气末，50%≈呼气末）"
+              title={t("scanFlow.rescan.wave.phaseToggleTitle")}
             >
-              10 相位
+              {t("scanFlow.rescan.wave.phaseToggle")}
             </button>
             <button
               type="button"
@@ -618,9 +622,9 @@ function RespiratoryWaveMonitor({
                 setAddMode(null);
               }}
               className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 transition-colors hover:bg-slate-50"
-              title="恢复自动检测的波峰波谷"
+              title={t("scanFlow.rescan.wave.resetTitle")}
             >
-              <RotateCcw size={10} /> 重置
+              <RotateCcw size={10} /> {t("scanFlow.rescan.wave.reset")}
             </button>
           </div>
         </div>
@@ -795,7 +799,7 @@ function RespiratoryWaveMonitor({
                     if (selectedPointId === point.id) setSelectedPointId(null);
                   }}
                 >
-                  <title>{`${label} · t=${(point.t * WAVEFORM_DURATION_SEC).toFixed(2)}s · 幅值=${point.value.toFixed(1)}（双击删除）`}</title>
+                  <title>{`${label} · t=${(point.t * WAVEFORM_DURATION_SEC).toFixed(2)}s · ${t("scanFlow.rescan.wave.amplitude")}=${point.value.toFixed(1)} (${t("scanFlow.rescan.wave.deletePoint")})`}</title>
                 </circle>
                 <text
                   x={x}
@@ -827,10 +831,10 @@ function RespiratoryWaveMonitor({
               <g transform={`translate(${clamp(xFromT(hover.t) + 8, leftPad, chartWidth - 130)}, ${clamp(yFromValue(hover.value) - 34, plotTop, plotBottom - 36)})`}>
                 <rect width="124" height="32" rx="4" fill="#0F172A" opacity="0.88" />
                 <text x="8" y="13" fontSize="10" fill="#E2E8F0" fontWeight="600">
-                  {`t = ${(hover.t * WAVEFORM_DURATION_SEC).toFixed(2)} s · 幅值 ${hover.value.toFixed(1)}`}
+                  {`t = ${(hover.t * WAVEFORM_DURATION_SEC).toFixed(2)} s · ${t("scanFlow.rescan.wave.amplitude")} ${hover.value.toFixed(1)}`}
                 </text>
                 <text x="8" y="26" fontSize="10" fill="#93C5FD" fontWeight="600">
-                  {hoverPhase !== null ? `相位 ≈ ${hoverPhase}%` : "—— 非稳态周期"}
+                  {hoverPhase !== null ? `${t("scanFlow.rescan.wave.phase")} ≈ ${hoverPhase}%` : `-- ${t("scanFlow.rescan.wave.nonStable")}`}
                 </text>
               </g>
             </g>
@@ -901,7 +905,7 @@ function RespiratoryWaveMonitor({
           ))}
 
           <text x={8} y={bedTop + 17} fontSize="10" fontWeight="700" fill="#475569">
-            床位
+            {t("scanFlow.rescan.bed")}
           </text>
         </svg>
       </div>
@@ -909,21 +913,21 @@ function RespiratoryWaveMonitor({
       {/* 临床统计 */}
       <div className="mt-3 grid grid-cols-4 gap-2">
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="text-[10px] text-slate-500">呼吸频率</div>
+          <div className="text-[10px] text-slate-500">{t("scanFlow.rescan.wave.breathingFrequency")}</div>
           <div className="mt-0.5 text-[14px] font-black text-slate-700">
             {stats.rpm > 0 ? stats.rpm.toFixed(1) : "—"}
-            <span className="ml-1 text-[10px] font-semibold text-slate-400">次/分</span>
+            <span className="ml-1 text-[10px] font-semibold text-slate-400">{t("scanFlow.rescan.wave.breathsPerMinute")}</span>
           </div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="text-[10px] text-slate-500">平均周期</div>
+          <div className="text-[10px] text-slate-500">{t("scanFlow.rescan.wave.avgCycle")}</div>
           <div className="mt-0.5 text-[14px] font-black text-slate-700">
             {stats.meanPeriod > 0 ? stats.meanPeriod.toFixed(2) : "—"}
             <span className="ml-1 text-[10px] font-semibold text-slate-400">s</span>
           </div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="text-[10px] text-slate-500">周期变异 CV</div>
+          <div className="text-[10px] text-slate-500">{t("scanFlow.rescan.wave.cycleCv")}</div>
           <div
             className={`mt-0.5 text-[14px] font-black ${
               stats.periodCV > 0.2 ? "text-rose-600" : stats.periodCV > 0.1 ? "text-amber-600" : "text-emerald-600"
@@ -933,7 +937,7 @@ function RespiratoryWaveMonitor({
           </div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="text-[10px] text-slate-500">幅值变异 CV</div>
+          <div className="text-[10px] text-slate-500">{t("scanFlow.rescan.wave.amplitudeCv")}</div>
           <div
             className={`mt-0.5 text-[14px] font-black ${
               stats.amplitudeCV > 0.25 ? "text-rose-600" : stats.amplitudeCV > 0.15 ? "text-amber-600" : "text-emerald-600"
@@ -947,36 +951,36 @@ function RespiratoryWaveMonitor({
       <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded-full bg-[#2563EB]" />
-          波峰（P · 吸气末）
+          {t("scanFlow.rescan.wave.peak")}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded-full bg-[#DC2626]" />
-          波谷（V · 呼气末）
+          {t("scanFlow.rescan.wave.valley")}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded-sm border border-[#F97316] bg-[#FDBA74]" />
-          受辐射区域
+          {t("scanFlow.rescan.wave.exposureRegion")}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded-sm border border-[#F43F5E] bg-[#FB7185] opacity-40" />
-          不规则周期
+          {t("scanFlow.rescan.wave.irregularCycle")}
         </span>
         {showPhaseBins && (
           <span className="inline-flex items-center gap-1.5">
             <span className="h-3 w-[2px] bg-emerald-500" />
-            相位分箱
+            {t("scanFlow.rescan.wave.phaseBinning")}
           </span>
         )}
         <span className="ml-auto inline-flex items-center gap-1 text-slate-400">
-          <Trash2 size={10} /> 双击控制点删除
+          <Trash2 size={10} /> {t("scanFlow.rescan.wave.deletePoint")}
         </span>
       </div>
 
       <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-        当前重扫覆盖床位 {rescanStart + 1}-{rescanEnd + 1}。橙色高亮完整覆盖全部床位区间，床位 1 前和末床位后各额外显示一个完整呼吸周期。
+        {t("scanFlow.rescan.wave.coverageNote", { start: rescanStart + 1, end: rescanEnd + 1 })}
         {stats.irregularCount > 0 && (
           <span className="ml-1 font-bold text-rose-600">
-            检测到 {stats.irregularCount} 个不规则呼吸周期（粉色虚框），如位于辐射区域内建议调整波峰/波谷位置或联合医师评估是否重采集。
+            {t("scanFlow.rescan.wave.irregularNotice", { count: stats.irregularCount })}
           </span>
         )}
       </div>
@@ -1013,6 +1017,7 @@ function buildInitialWavePoints(bedCount: number): WaveformPoint[] {
 }
 
 export default function FourDRescanSelectScreen() {
+  const { locale, t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
   const state = location.state as FourDPostScanState | null;
@@ -1032,6 +1037,14 @@ export default function FourDRescanSelectScreen() {
   });
 
   const [laserActive, setLaserActive] = useState(false);
+  const displayDate = useMemo(
+    () => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", weekday: "short" }).format(new Date()),
+    [locale],
+  );
+  const displayTime = useMemo(
+    () => new Intl.DateTimeFormat(locale, { hour: "2-digit", hour12: false, minute: "2-digit" }).format(new Date()),
+    [locale],
+  );
   const initialWavePoints = useMemo<WaveformPoint[]>(() => buildInitialWavePoints(bedCount), [bedCount]);
   const [wavePoints, setWavePoints] = useState<WaveformPoint[]>(initialWavePoints);
   const nextPointIdRef = useRef<number>(initialWavePoints.length + 1);
@@ -1088,7 +1101,7 @@ export default function FourDRescanSelectScreen() {
   if (!scanResult || !rescanRange) {
     return (
       <div className="flex h-full items-center justify-center bg-[#0F172A] text-[13px] text-white">
-        无效状态，请重新扫描。
+        {t("scanFlow.rescan.invalidState")}
       </div>
     );
   }
@@ -1102,21 +1115,21 @@ export default function FourDRescanSelectScreen() {
               <User size={22} />
             </div>
             <div className="flex flex-col">
-              <span className="text-[14px] font-bold text-[#37474F]">{selectedPatient?.name ?? "未选择患者"}</span>
+              <span className="text-[14px] font-bold text-[#37474F]">{selectedPatient?.name ?? t("patientHeader.unselected")}</span>
               <span className="text-[11px] font-medium text-[#546E7A]">{selectedPatient?.id ?? "-"}</span>
             </div>
           </div>
 
           <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTable} alt="机床" className="w-3.5 h-3.5" /><span>0</span></div>
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconGantry} alt="机架角度" className="w-3.5 h-3.5" /><span>0</span></div>
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTube} alt="球管" className="w-3.5 h-3.5" /><span>0%</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTable} alt={t("appHeader.table")} className="w-3.5 h-3.5" /><span>0</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconGantry} alt={t("appHeader.gantry")} className="w-3.5 h-3.5" /><span>0</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTube} alt={t("appHeader.tube")} className="w-3.5 h-3.5" /><span>0%</span></div>
           </div>
         </div>
 
         <div className="text-center leading-none">
-          <div className="text-[24px] font-bold tracking-tight text-[#37474F]">13:52</div>
-          <div className="mt-1 text-[11px] font-medium uppercase opacity-80 text-[#546E7A]">4月16日 周四</div>
+          <div className="text-[24px] font-bold tracking-tight text-[#37474F]">{displayTime}</div>
+          <div className="mt-1 text-[11px] font-medium uppercase opacity-80 text-[#546E7A]">{displayDate}</div>
         </div>
 
         <div className="flex items-center gap-4 pr-2 text-[#546E7A]">
@@ -1126,7 +1139,7 @@ export default function FourDRescanSelectScreen() {
           <NetworkStatusButton iconSize={20} />
           <button
             type="button"
-            aria-label="激光灯"
+            aria-label={t("appHeader.laser")}
             aria-pressed={laserActive}
             onClick={() => setLaserActive((prev) => !prev)}
             className={`p-1 ${laserActive ? "text-[#F59E0B]" : "hover:opacity-70"}`}
@@ -1140,8 +1153,8 @@ export default function FourDRescanSelectScreen() {
       <div className="flex flex-1 flex-col gap-5 overflow-auto px-6 py-5">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
-            <div className="text-[12px] font-black text-slate-700">重扫床位逐一选择</div>
-            <div className="text-[11px] text-slate-400">共 {rescanCount} 个床位</div>
+            <div className="text-[12px] font-black text-slate-700">{t("scanFlow.rescan.tableTitle")}</div>
+            <div className="text-[11px] text-slate-400">{t("scanFlow.rescan.count", { count: rescanCount })}</div>
           </div>
 
           <RescanBedTable rescanRange={rescanRange} choices={choices} onChange={handleBedChange} />
@@ -1164,11 +1177,11 @@ export default function FourDRescanSelectScreen() {
           onClick={() => navigate(-1)}
           className="flex h-[52px] items-center gap-2 rounded-md border-2 border-[#4D94FF] bg-white px-10 text-[13px] font-bold uppercase text-[#4D94FF] shadow-sm transition-all hover:bg-blue-50 active:scale-95"
         >
-          <ChevronLeft size={20} /> 上一步
+          <ChevronLeft size={20} /> {t("common.previousStep")}
         </button>
 
         <div className="text-center text-[11px] text-slate-400">
-          所有 {rescanCount} 个床位均已完成选择，可进入重建
+          {t("scanFlow.rescan.allSelected", { count: rescanCount })}
         </div>
 
         <button
@@ -1176,7 +1189,7 @@ export default function FourDRescanSelectScreen() {
           onClick={handleConfirm}
           className="flex h-[52px] items-center gap-2 rounded-md bg-[#4D94FF] px-10 text-[13px] font-bold uppercase text-white shadow-lg transition-all hover:bg-blue-600 active:scale-95"
         >
-          图像浏览 <ChevronRight size={20} />
+          {t("scanFlow.rescan.imageBrowser")} <ChevronRight size={20} />
         </button>
       </footer>
     </div>

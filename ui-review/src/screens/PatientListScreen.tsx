@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     Plus,
     Trash2,
@@ -29,6 +29,8 @@ import {
 } from '../lib/patientsApi';
 import { generateMockScanResult } from '../lib/fourDTypes';
 import { saveSelectedScanSessionId } from '../lib/scanSession';
+import { useI18n } from '../lib/i18nContext';
+import type { TranslationKey } from '../lib/i18n';
 
 type CheckStatus = '待进行' | '已完成' | '已终止';
 type SortKey = 'serial' | 'patientId' | 'name' | 'gender' | 'age' | 'projectName' | 'examTime' | 'checkStatus';
@@ -48,7 +50,7 @@ type PatientRecord = {
     examTime: string | null;
 };
 
-const mapApiPatientToRecord = (p: ApiPatient, index: number): PatientRecord => ({
+const mapApiPatientToRecord = (p: ApiPatient, index: number, locale: string): PatientRecord => ({
     id: p.id,
     serial: index + 1,
     patientId: p.patient_id,
@@ -61,11 +63,12 @@ const mapApiPatientToRecord = (p: ApiPatient, index: number): PatientRecord => (
     latestScanMode: p.latest_scan_mode,
     projectName: p.latest_scan_name,
     examTime: p.latest_scan_completed_at
-        ? new Date(p.latest_scan_completed_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+        ? new Date(p.latest_scan_completed_at).toLocaleString(locale, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
         : null,
 });
 
 const PatientListScreen = () => {
+    const { locale, t } = useI18n();
     const location = useLocation();
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'completed'
@@ -87,19 +90,19 @@ const PatientListScreen = () => {
         }
     };
 
-    const refreshPatients = async () => {
+    const refreshPatients = useCallback(async () => {
         try {
             const apiList = await listPatients();
-            setPatients(apiList.map(mapApiPatientToRecord));
+            setPatients(apiList.map((patient, index) => mapApiPatientToRecord(patient, index, locale)));
             setLoadError(null);
         } catch (err) {
-            setLoadError(err instanceof Error ? err.message : '加载患者列表失败');
+            setLoadError(err instanceof Error ? err.message : t("patientList.errorLoad"));
         }
-    };
+    }, [locale, t]);
 
     useEffect(() => {
         void refreshPatients();
-    }, [location.key]);
+    }, [location.key, refreshPatients]);
 
     const checkStatusClass: Record<CheckStatus, string> = {
         待进行: 'bg-[#FFF3E0] text-[#FA8C16] border border-[#FFD591]',
@@ -135,7 +138,7 @@ const PatientListScreen = () => {
         if (typeof aVal === 'number' && typeof bVal === 'number') {
             cmp = aVal - bVal;
         } else {
-            cmp = String(aVal).localeCompare(String(bVal), 'zh-CN');
+            cmp = String(aVal).localeCompare(String(bVal), locale);
         }
         return sortDir === 'asc' ? cmp : -cmp;
     });
@@ -182,6 +185,26 @@ const PatientListScreen = () => {
         && filteredPatients.every((patient) => selectedRows.includes(patient.id));
 
     const visibleSelectedCount = filteredPatients.filter((patient) => selectedRows.includes(patient.id)).length;
+    const formatGender = (gender: string) => {
+        if (gender === "男") return t("patientList.gender.male");
+        if (gender === "女") return t("patientList.gender.female");
+        return gender;
+    };
+    const formatCheckStatus = (status: CheckStatus) => {
+        if (status === "已完成") return t("patientList.status.completed");
+        if (status === "已终止") return t("patientList.status.cancelled");
+        return t("patientList.status.pending");
+    };
+    const tableLabels: Record<SortKey, TranslationKey> = {
+        serial: "patientList.table.serial",
+        patientId: "patientList.table.patientId",
+        name: "patientList.table.name",
+        gender: "patientList.table.gender",
+        age: "patientList.table.age",
+        projectName: "patientList.table.projectName",
+        examTime: "patientList.table.examTime",
+        checkStatus: activeTab === "completed" ? "patientList.imageStatus" : "patientList.examStatus",
+    };
 
     useEffect(() => {
         if (selectedRows.length > 0 && selectedPatients.length === 0) {
@@ -216,13 +239,13 @@ const PatientListScreen = () => {
                                         onClick={() => { setActiveTab('pending'); setSearchQuery(''); setSortKey('serial'); setSortDir('asc'); }}
                                         className={`px-8 h-[32px] text-[13px] font-bold transition-all rounded-md ${activeTab === 'pending' ? 'bg-[#4D94FF] text-white shadow-sm' : 'text-[#4D94FF] hover:bg-white/50'}`}
                                     >
-                                        未完成
+                                        {t("patientList.tabPending")}
                                     </button>
                                     <button
                                         onClick={() => { setActiveTab('completed'); setSearchQuery(''); setSortKey('examTime'); setSortDir('desc'); }}
                                         className={`px-8 h-[32px] text-[13px] font-bold transition-all rounded-md ${activeTab === 'completed' ? 'bg-[#4D94FF] text-white shadow-sm' : 'text-[#4D94FF] hover:bg-white/50'}`}
                                     >
-                                        已完成
+                                        {t("patientList.tabCompleted")}
                                     </button>
                                 </div>
                             </div>
@@ -232,7 +255,7 @@ const PatientListScreen = () => {
                                 <div className="flex items-center gap-4 text-[#90A4AE]">
                                     <button
                                         type="button"
-                                        title="刷新"
+                                        title={t("patientList.refresh")}
                                         onClick={() => void refreshPatients()}
                                         className="text-[#90A4AE] hover:text-blue-500 transition-colors"
                                     >
@@ -240,7 +263,7 @@ const PatientListScreen = () => {
                                     </button>
                                     <button
                                         type="button"
-                                        title={isNameMasked ? '关闭脱敏' : '开启脱敏'}
+                                        title={isNameMasked ? t("patientList.closeMask") : t("patientList.openMask")}
                                         onClick={() => setIsNameMasked((current) => !current)}
                                         className={`transition-colors ${isNameMasked ? 'text-[#4D94FF]' : 'text-[#90A4AE] hover:text-blue-500'}`}
                                     >
@@ -248,7 +271,7 @@ const PatientListScreen = () => {
                                     </button>
                                     <button
                                         type="button"
-                                        title="导入"
+                                        title={t("patientList.import")}
                                         className="text-[#90A4AE] hover:text-blue-500 transition-colors"
                                     >
                                         <Download size={18} />
@@ -259,7 +282,7 @@ const PatientListScreen = () => {
                                 <div className="relative">
                                     <input
                                         type="text"
-                                        placeholder={activeTab === 'completed' ? '搜索患者姓名、ID、项目名称...' : '搜索患者姓名、ID...'}
+                                        placeholder={activeTab === 'completed' ? t("patientList.searchCompleted") : t("patientList.searchPending")}
                                         className="w-[240px] h-[36px] pl-10 pr-4 bg-white border border-[#B0C4DE] rounded-md text-[13px] focus:outline-none focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/20"
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
@@ -270,14 +293,14 @@ const PatientListScreen = () => {
                                 {/* 功能按钮 */}
                                 <div className="flex gap-2">
                                     <button
-                                        title="新增"
+                                        title={t("patientList.add")}
                                         onClick={() => setShowAddModal(true)}
                                         className="w-[36px] h-[36px] bg-[#4D94FF] text-white rounded-md flex items-center justify-center shadow-sm hover:bg-blue-600 active:scale-95 transition-all"
                                     >
                                         <Plus size={18} />
                                     </button>
                                     <button
-                                        title={canExportSelected ? '导出' : '请选择患者后导出'}
+                                        title={canExportSelected ? t("patientList.export") : t("patientList.exportDisabled")}
                                         disabled={!canExportSelected}
                                         className={`w-[36px] h-[36px] rounded-md flex items-center justify-center transition-all ${canExportSelected
                                             ? 'bg-white border border-[#B0C4DE] text-[#546E7A] hover:bg-gray-50 active:scale-95'
@@ -287,7 +310,7 @@ const PatientListScreen = () => {
                                         <Upload size={18} />
                                     </button>
                                     <button
-                                        title={canDeleteSelected ? '删除' : '请选择非已完成患者'}
+                                        title={canDeleteSelected ? t("patientList.delete") : t("patientList.deleteDisabled")}
                                         disabled={!canDeleteSelected}
                                         onClick={handleDeleteSelected}
                                         className={`w-[36px] h-[36px] rounded-md flex items-center justify-center transition-all ${canDeleteSelected
@@ -316,13 +339,12 @@ const PatientListScreen = () => {
                                                 />
                                             </th>
                                             {(['serial','patientId','name','gender','age'] as SortKey[]).map((key, i) => {
-                                                const labels: Record<string, string> = { serial: '序号', patientId: '患者ID', name: '姓名', gender: '性别', age: '年龄' };
                                                 const active = sortKey === key;
                                                 const Icon = active ? (sortDir === 'asc' ? ChevronUp : ChevronDown) : ChevronDown;
                                                 return (
                                                     <th key={key} onClick={() => handleSort(key)} className={`px-4 text-left border-r border-white/10 cursor-pointer select-none hover:bg-white/10 ${i === 0 ? 'w-[80px]' : ''}`}>
                                                         <span className="inline-flex items-center gap-1">
-                                                            {labels[key]}
+                                                            {t(tableLabels[key])}
                                                             <Icon size={14} className={active ? 'opacity-100' : 'opacity-30'} />
                                                         </span>
                                                     </th>
@@ -334,7 +356,7 @@ const PatientListScreen = () => {
                                                 return (
                                                     <th onClick={() => handleSort('projectName')} className="px-4 text-left border-r border-white/10 cursor-pointer select-none hover:bg-white/10">
                                                         <span className="inline-flex items-center gap-1">
-                                                            项目名称
+                                                            {t(tableLabels.projectName)}
                                                             <Icon size={14} className={active ? 'opacity-100' : 'opacity-30'} />
                                                         </span>
                                                     </th>
@@ -346,7 +368,7 @@ const PatientListScreen = () => {
                                                 return (
                                                     <th onClick={() => handleSort('examTime')} className="px-4 text-left border-r border-white/10 cursor-pointer select-none hover:bg-white/10">
                                                         <span className="inline-flex items-center gap-1">
-                                                            检查时间
+                                                            {t(tableLabels.examTime)}
                                                             <Icon size={14} className={active ? 'opacity-100' : 'opacity-30'} />
                                                         </span>
                                                     </th>
@@ -358,7 +380,7 @@ const PatientListScreen = () => {
                                                 return (
                                                     <th onClick={() => handleSort('checkStatus')} className="px-4 text-center cursor-pointer select-none hover:bg-white/10">
                                                         <span className="inline-flex items-center justify-center gap-1">
-                                                            {activeTab === 'completed' ? '图像状态' : '检查状态'}
+                                                            {t(tableLabels.checkStatus)}
                                                             <Icon size={14} className={active ? 'opacity-100' : 'opacity-30'} />
                                                         </span>
                                                     </th>
@@ -385,7 +407,7 @@ const PatientListScreen = () => {
                                                 <td className="px-4 font-mono text-[#546E7A]">{patient.serial}</td>
                                                 <td className="px-4 text-[#546E7A]">{patient.patientId}</td>
                                                 <td className="px-4 font-bold text-[#37474F]">{maskName(patient.name)}</td>
-                                                <td className="px-4">{patient.gender}</td>
+                                                <td className="px-4">{formatGender(patient.gender)}</td>
                                                 <td className="px-4">{patient.age}</td>
                                                 {activeTab === 'completed' && <td className="px-4 text-[#37474F]">{patient.projectName ?? '—'}</td>}
                                                 {activeTab === 'completed' && <td className="px-4 text-[#546E7A] text-[12px]">{patient.examTime ?? '—'}</td>}
@@ -419,7 +441,7 @@ const PatientListScreen = () => {
                                                         </button>
                                                     ) : (
                                                         <span className={`inline-flex min-w-[62px] h-[24px] px-2 rounded-full items-center justify-center text-[11px] font-bold ${checkStatusClass[patient.checkStatus]}`}>
-                                                            {patient.checkStatus}
+                                                            {formatCheckStatus(patient.checkStatus)}
                                                         </span>
                                                     )}
                                                 </td>
@@ -432,7 +454,7 @@ const PatientListScreen = () => {
                             {/* 卡片底部：分页 (Pagination Inside Card) */}
                             <div className="h-[50px] bg-[#F8FAFC] border-t border-[#EEF2F9] flex items-center justify-end px-6 gap-6 shrink-0">
                                 <div className="flex items-center gap-2 text-[12px] text-[#546E7A]">
-                                    <span className="opacity-70">每页显示:</span>
+                                    <span className="opacity-70">{t("patientList.perPage")}</span>
                                     <div className="flex items-center gap-2 px-2 py-1 border border-[#B0C4DE] rounded bg-white cursor-pointer hover:border-blue-400">
                                         <span className="font-bold">10</span>
                                         <ChevronDown size={14} className="text-[#90A4AE]" />
@@ -440,7 +462,7 @@ const PatientListScreen = () => {
                                 </div>
 
                                 <div className="text-[12px] text-[#546E7A]">
-                                    已选择 <span className="font-bold">{visibleSelectedCount}</span> / 当前列表 <span className="font-bold">{filteredPatients.length}</span> 条
+                                    {t("patientList.selectedSummary", { selected: visibleSelectedCount, total: filteredPatients.length })}
                                 </div>
 
                                 <div className="flex items-center gap-1 border-l border-gray-200 pl-4 ml-2">
@@ -468,7 +490,7 @@ const PatientListScreen = () => {
                             }}
                             className="flex items-center gap-2 px-12 h-[56px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 transition-all uppercase text-[14px] shadow-sm active:scale-95"
                         >
-                            <ChevronLeft size={22} /> 上一步
+                            <ChevronLeft size={22} /> {t("common.previousStep")}
                         </button>
                     </div>
                     <div className="flex-1 flex justify-end">
@@ -511,7 +533,7 @@ const PatientListScreen = () => {
                                 : 'bg-[#CBD5E1] text-white cursor-not-allowed shadow-none'
                                 }`}
                         >
-                            {activeTab === 'completed' ? '查看图像' : '下一步'} <ChevronRight size={22} />
+                            {activeTab === 'completed' ? t("patientList.viewImages") : t("common.nextStep")} <ChevronRight size={22} />
                         </button>
                     </div>
                 </footer>

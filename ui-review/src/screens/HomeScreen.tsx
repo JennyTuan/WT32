@@ -5,12 +5,14 @@
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader';
+import { useI18n } from '../lib/i18nContext';
+import type { TranslationKey } from '../lib/i18n';
 
 const modeCards = [
     {
         key: 'mobile',
-        title: '移动模式',
-        description: '进入移动摆位与设备转运准备流程。',
+        titleKey: 'home.mobile.title',
+        descriptionKey: 'home.mobile.description',
         icon: Move,
         accent: 'from-[#DCEBFF] to-[#F4F9FF]',
         border: 'border-[#9EC5FF]',
@@ -18,8 +20,8 @@ const modeCards = [
     },
     {
         key: 'routine',
-        title: '常规扫描',
-        description: '进入患者列表、协议选择与标准扫描流程。',
+        titleKey: 'home.routine.title',
+        descriptionKey: 'home.routine.description',
         icon: ScanLine,
         accent: 'from-[#E4F7EC] to-[#F7FCF9]',
         border: 'border-[#9ED8B4]',
@@ -27,8 +29,8 @@ const modeCards = [
     },
     {
         key: 'service',
-        title: '服务模式',
-        description: '进入预热、校准、QA 与硬件维护功能。',
+        titleKey: 'home.service.title',
+        descriptionKey: 'home.service.description',
         icon: Wrench,
         accent: 'from-[#FFF1E0] to-[#FFF9F2]',
         border: 'border-[#FFD199]',
@@ -38,6 +40,7 @@ const modeCards = [
 
 export default function HomeScreen() {
     const navigate = useNavigate();
+    const { t } = useI18n();
     const modeRoutes: Record<string, string> = {
         mobile: '/mobile/manual-scan',
         routine: '/patients',
@@ -61,10 +64,10 @@ export default function HomeScreen() {
                                 <div className={`w-16 h-16 rounded-2xl ${card.iconBg} text-white flex items-center justify-center shadow-lg mb-10`}>
                                     <Icon size={30} />
                                 </div>
-                                <div className="text-[30px] font-black tracking-tight text-[#37474F] mb-4">{card.title}</div>
-                                <p className="text-[15px] leading-7 text-[#546E7A] font-medium max-w-[220px]">{card.description}</p>
+                                <div className="text-[30px] font-black tracking-tight text-[#37474F] mb-4">{t(card.titleKey as TranslationKey)}</div>
+                                <p className="text-[15px] leading-7 text-[#546E7A] font-medium max-w-[220px]">{t(card.descriptionKey as TranslationKey)}</p>
                                 <div className="mt-12 inline-flex items-center rounded-full border border-white/80 bg-white/80 px-4 py-2 text-[12px] font-black tracking-[0.12em] text-[#607D8B] shadow-sm transition-colors group-hover:text-[#37474F]">
-                                    ENTER MODE
+                                    {t("home.enterMode")}
                                 </div>
                             </button>
                         );

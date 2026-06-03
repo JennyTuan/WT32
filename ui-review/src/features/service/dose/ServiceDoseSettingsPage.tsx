@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 import ServiceModeShell from "../shared/ServiceModeShell";
 import {
   getDoseSettings,
@@ -16,22 +18,33 @@ import {
 
 const BODY_PARTS = ["头颅", "颈部", "胸部", "腹部", "盆腔", "脊柱", "心脏", "四肢"] as const;
 
-const AGE_GROUP_LABELS: Record<AgeGroup, string> = {
-  adult: "成人",
-  pediatric: "儿童",
-  infant: "婴幼儿",
+const BODY_PART_LABEL_KEYS: Record<(typeof BODY_PARTS)[number], TranslationKey> = {
+  头颅: "service.doseSettings.bodyPart.head",
+  颈部: "service.doseSettings.bodyPart.neck",
+  胸部: "service.doseSettings.bodyPart.chest",
+  腹部: "service.doseSettings.bodyPart.abdomen",
+  盆腔: "service.doseSettings.bodyPart.pelvis",
+  脊柱: "service.doseSettings.bodyPart.spine",
+  心脏: "service.doseSettings.bodyPart.cardiac",
+  四肢: "service.doseSettings.bodyPart.extremities",
 };
 
-const THRESHOLD_OPTIONS: { value: ThresholdAction; label: string; desc: string }[] = [
-  { value: "log_only", label: "仅记录", desc: "超阈值时静默记入剂量日志，不打断流程" },
-  { value: "warn", label: "弹窗警告", desc: "扫描确认页给出黄色提醒，技师可点击继续" },
-  { value: "require_confirm", label: "强制二次确认", desc: "必须再次点击确认风险才能继续扫描" },
+const AGE_GROUP_LABEL_KEYS: Record<AgeGroup, TranslationKey> = {
+  adult: "service.doseSettings.age.adult",
+  pediatric: "service.doseSettings.age.pediatric",
+  infant: "service.doseSettings.age.infant",
+};
+
+const THRESHOLD_OPTIONS: { value: ThresholdAction; labelKey: TranslationKey; descKey: TranslationKey }[] = [
+  { value: "log_only", labelKey: "service.doseSettings.threshold.logOnly.label", descKey: "service.doseSettings.threshold.logOnly.desc" },
+  { value: "warn", labelKey: "service.doseSettings.threshold.warn.label", descKey: "service.doseSettings.threshold.warn.desc" },
+  { value: "require_confirm", labelKey: "service.doseSettings.threshold.requireConfirm.label", descKey: "service.doseSettings.threshold.requireConfirm.desc" },
 ];
 
-const NOISE_LEVEL_OPTIONS: { value: NoiseLevel; label: string; desc: string }[] = [
-  { value: "low", label: "低", desc: "低噪声容忍，剂量较高、图像最清晰" },
-  { value: "medium", label: "中", desc: "平衡剂量与图像质量（推荐）" },
-  { value: "high", label: "高", desc: "高噪声容忍，剂量最低、噪声较多" },
+const NOISE_LEVEL_OPTIONS: { value: NoiseLevel; labelKey: TranslationKey; descKey: TranslationKey }[] = [
+  { value: "low", labelKey: "service.doseSettings.noise.low.label", descKey: "service.doseSettings.noise.low.desc" },
+  { value: "medium", labelKey: "service.doseSettings.noise.medium.label", descKey: "service.doseSettings.noise.medium.desc" },
+  { value: "high", labelKey: "service.doseSettings.noise.high.label", descKey: "service.doseSettings.noise.high.desc" },
 ];
 
 type DrlRow = DrlEntryInput & { _key: string };
@@ -51,6 +64,7 @@ const compareDrl = (a: DrlRow, b: DrlRow): number => {
 };
 
 export default function ServiceDoseSettingsPage() {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<ApiDoseSettings | null>(null);
   const [drlRows, setDrlRows] = useState<DrlRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,11 +84,11 @@ export default function ServiceDoseSettingsPage() {
       setDirty(false);
       setSavedAt(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载失败");
+      setError(e instanceof Error ? e.message : t("service.doseSettings.errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchAll();
@@ -120,11 +134,11 @@ export default function ServiceDoseSettingsPage() {
 
   useEffect(() => {
     if (drlDuplicates.size > 0) {
-      setDrlError("存在重复的（部位 × 人群）组合，请删除或修改后再保存");
+      setDrlError(t("service.doseSettings.drlDuplicate"));
     } else {
       setDrlError(null);
     }
-  }, [drlDuplicates]);
+  }, [drlDuplicates, t]);
 
   const handleSave = async () => {
     if (!settings) return;
@@ -147,7 +161,7 @@ export default function ServiceDoseSettingsPage() {
       setSavedAt(Date.now());
       setDirty(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存失败");
+      setError(e instanceof Error ? e.message : t("service.doseSettings.errorSave"));
     } finally {
       setSaving(false);
     }
@@ -161,7 +175,7 @@ export default function ServiceDoseSettingsPage() {
     return (
       <ServiceModeShell currentRoute="/service/dose/settings" footerStatus={{ label: "IDLE", tone: "idle" }}>
         <section className="flex-1 flex items-center justify-center">
-          <div className="text-[14px] text-[#90A4AE]">{error ?? "加载剂量设置…"}</div>
+          <div className="text-[14px] text-[#90A4AE]">{error ?? t("service.doseSettings.loading")}</div>
         </section>
       </ServiceModeShell>
     );
@@ -172,11 +186,10 @@ export default function ServiceDoseSettingsPage() {
   return (
     <ServiceModeShell currentRoute="/service/dose/settings" footerStatus={{ label: "IDLE", tone: "idle" }}>
       <section className="flex min-h-0 flex-1 flex-col overflow-y-auto custom-scrollbar">
-        {/* 标题 + 操作行 */}
         <div className="flex items-start justify-between px-5 pt-4 pb-4">
           <div>
-            <div className="text-[16px] font-black text-[#1E293B]">剂量设置</div>
-            <div className="mt-0.5 text-[12px] text-[#94A3B8]">系统级剂量参考、阈值策略、DOM 默认值与合规配置</div>
+            <div className="text-[16px] font-black text-[#1E293B]">{t("service.doseSettings.title")}</div>
+            <div className="mt-0.5 text-[12px] text-[#94A3B8]">{t("service.doseSettings.subtitle")}</div>
           </div>
           <div className="flex items-center gap-3">
             {error && (
@@ -186,7 +199,7 @@ export default function ServiceDoseSettingsPage() {
             )}
             {showSaved && (
               <span className="flex items-center gap-1.5 text-[12px] font-bold text-[#16A34A]">
-                <CheckCircle2 size={14} /> 已保存
+                <CheckCircle2 size={14} /> {t("service.doseSettings.saved")}
               </span>
             )}
             <button
@@ -195,7 +208,7 @@ export default function ServiceDoseSettingsPage() {
               disabled={saving}
               className="flex items-center gap-1.5 rounded-md border border-[#D1D5DB] bg-white px-4 py-2 text-[13px] font-bold text-[#4F6479] hover:bg-gray-50 active:scale-95 transition-all disabled:opacity-40"
             >
-              <RotateCcw size={14} /> 撤销修改
+              <RotateCcw size={14} /> {t("service.doseSettings.undo")}
             </button>
             <button
               type="button"
@@ -203,31 +216,28 @@ export default function ServiceDoseSettingsPage() {
               disabled={saving || !dirty || drlDuplicates.size > 0}
               className="flex items-center gap-1.5 rounded-md bg-[#1D4ED8] px-5 py-2 text-[13px] font-bold text-white hover:bg-[#1e40af] active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <Save size={14} /> {saving ? "保存中…" : "保存设置"}
+              <Save size={14} /> {saving ? t("service.doseSettings.saving") : t("service.doseSettings.saveSettings")}
             </button>
           </div>
         </div>
 
         <Divider />
 
-        {/* ── ① 协议剂量参考默认值 ── */}
         <SectionLabel
-          title="协议剂量参考默认值"
-          hint="按部位 × 人群预设的代表性 CTDIvol / DLP 值；新建协议时可一键应用作为起点"
+          title={t("service.doseSettings.drlTitle")}
+          hint={t("service.doseSettings.drlHint")}
         />
         <div className="px-5 pb-5">
-          {/* 表头 */}
           <div className="grid grid-cols-[120px_160px_1fr_1fr_56px] items-center gap-4 border-b border-[#E2E8F0] px-2 pb-2 text-[11px] font-black uppercase tracking-wider text-[#94A3B8]">
-            <div>人群</div>
-            <div>部位</div>
+            <div>{t("service.doseSettings.population")}</div>
+            <div>{t("service.doseSettings.bodyPart")}</div>
             <div className="text-right">CTDIvol <span className="font-normal normal-case text-[#B0C4DE]">mGy</span></div>
             <div className="text-right">DLP <span className="font-normal normal-case text-[#B0C4DE]">mGy·cm</span></div>
             <div></div>
           </div>
-          {/* 行 */}
           {drlRows.length === 0 ? (
             <div className="py-10 text-center text-[13px] text-[#94A3B8]">
-              暂无剂量参考条目，点击下方"添加行"开始配置
+              {t("service.doseSettings.drlEmpty")}
             </div>
           ) : (
             [...drlRows].sort(compareDrl).map((row) => {
@@ -242,16 +252,16 @@ export default function ServiceDoseSettingsPage() {
                     value={row.age_group}
                     onChange={(v) => updateDrlRow(row._key, { age_group: v as AgeGroup })}
                   >
-                    <option value="adult">{AGE_GROUP_LABELS.adult}</option>
-                    <option value="pediatric">{AGE_GROUP_LABELS.pediatric}</option>
-                    <option value="infant">{AGE_GROUP_LABELS.infant}</option>
+                    <option value="adult">{t(AGE_GROUP_LABEL_KEYS.adult)}</option>
+                    <option value="pediatric">{t(AGE_GROUP_LABEL_KEYS.pediatric)}</option>
+                    <option value="infant">{t(AGE_GROUP_LABEL_KEYS.infant)}</option>
                   </BareSelect>
                   <BareSelect
                     value={row.body_part}
                     onChange={(v) => updateDrlRow(row._key, { body_part: v })}
                   >
                     {BODY_PARTS.map((p) => (
-                      <option key={p} value={p}>{p}</option>
+                      <option key={p} value={p}>{t(BODY_PART_LABEL_KEYS[p])}</option>
                     ))}
                   </BareSelect>
                   <BareNumberInput
@@ -270,7 +280,7 @@ export default function ServiceDoseSettingsPage() {
                     type="button"
                     onClick={() => removeDrlRow(row._key)}
                     className="mx-auto flex h-9 w-9 items-center justify-center rounded-md bg-transparent text-[#94A3B8] hover:bg-[#FEE2E2] hover:text-[#DC2626]"
-                    title="删除此条目"
+                    title={t("service.doseSettings.deleteEntry")}
                   >
                     <Trash2 size={16} />
                   </button>
@@ -284,7 +294,7 @@ export default function ServiceDoseSettingsPage() {
               onClick={addDrlRow}
               className="flex items-center gap-1.5 rounded-md bg-transparent border border-dashed border-[#94A3B8] px-3 py-1.5 text-[12px] font-bold text-[#4F6479] hover:border-[#4D94FF] hover:text-[#4D94FF]"
             >
-              <Plus size={13} /> 添加行
+              <Plus size={13} /> {t("service.doseSettings.addRow")}
             </button>
             {drlError && (
               <span className="flex items-center gap-1.5 text-[12px] font-bold text-[#EF6C00]">
@@ -296,10 +306,9 @@ export default function ServiceDoseSettingsPage() {
 
           <Divider />
 
-          {/* ── ② 通知阈值策略 ── */}
           <SectionLabel
-            title="通知阈值策略"
-            hint="扫描实测剂量超过协议阈值时的全局响应方式；具体阈值在各协议详情页配置"
+            title={t("service.doseSettings.thresholdTitle")}
+            hint={t("service.doseSettings.thresholdHint")}
           />
           <div className="px-5 pb-5 flex flex-col gap-3">
             <div className="flex gap-3">
@@ -315,9 +324,9 @@ export default function ServiceDoseSettingsPage() {
                   }`}
                 >
                   <div className={`text-[14px] font-black ${settings.threshold_action === opt.value ? "text-[#1D4ED8]" : "text-[#223547]"}`}>
-                    {opt.label}
+                    {t(opt.labelKey)}
                   </div>
-                  <div className="mt-1 text-[11px] leading-4 text-[#64748B]">{opt.desc}</div>
+                  <div className="mt-1 text-[11px] leading-4 text-[#64748B]">{t(opt.descKey)}</div>
                 </button>
               ))}
             </div>
@@ -325,18 +334,17 @@ export default function ServiceDoseSettingsPage() {
 
           <Divider />
 
-          {/* ── ③ DOM 三轴电流调制 ── */}
           <SectionLabel
-            title="DOM 三轴电流调制"
-            hint="基于 XYZ 三轴调制管电流，默认噪声等级控制图像质量与剂量平衡"
+            title={t("service.doseSettings.domTitle")}
+            hint={t("service.doseSettings.domHint")}
           />
           <div className="divide-y divide-[#F1F5F9]">
-            <SettingRow label="启用 DOM（默认）" desc="新建协议时默认启用 DOM；技师在协议页仍可单独关闭">
+            <SettingRow label={t("service.doseSettings.domLabel")} desc={t("service.doseSettings.domDesc")}>
               <Toggle checked={settings.dom_enabled} onChange={(v) => updateSettings("dom_enabled", v)} />
             </SettingRow>
             <div className={`px-5 pt-4 pb-5 ${!settings.dom_enabled ? "opacity-50 pointer-events-none" : ""}`}>
-              <div className="mb-2 text-[12px] font-bold text-[#475569]">默认噪声等级</div>
-              <div className="text-[11px] text-[#94A3B8] mb-3">"低"图像最清晰、剂量较高；"高"剂量最低、噪声较多</div>
+              <div className="mb-2 text-[12px] font-bold text-[#475569]">{t("service.doseSettings.defaultNoiseTitle")}</div>
+              <div className="text-[11px] text-[#94A3B8] mb-3">{t("service.doseSettings.defaultNoiseHint")}</div>
               <div className="flex gap-3">
                 {NOISE_LEVEL_OPTIONS.map((opt) => (
                   <button
@@ -350,9 +358,9 @@ export default function ServiceDoseSettingsPage() {
                     }`}
                   >
                     <div className={`text-[16px] font-black ${settings.dom_noise_level === opt.value ? "text-[#1D4ED8]" : "text-[#223547]"}`}>
-                      {opt.label}
+                      {t(opt.labelKey)}
                     </div>
-                    <div className="mt-1 text-[11px] leading-4 text-[#64748B]">{opt.desc}</div>
+                    <div className="mt-1 text-[11px] leading-4 text-[#64748B]">{t(opt.descKey)}</div>
                   </button>
                 ))}
               </div>
@@ -361,24 +369,23 @@ export default function ServiceDoseSettingsPage() {
 
           <Divider />
 
-          {/* ── ④ 合规与审计 ── */}
           <SectionLabel
-            title="合规与审计"
-            hint="剂量日志记录策略；DoseLog 自动记录始终开启，无法关闭"
+            title={t("service.doseSettings.complianceTitle")}
+            hint={t("service.doseSettings.complianceHint")}
           />
           <div className="divide-y divide-[#F1F5F9]">
             <div className="flex items-center justify-between px-5 py-4 bg-[#F8FAFC]">
               <div>
-                <div className="text-[14px] font-bold text-[#223547]">剂量日志自动记录</div>
-                <div className="mt-0.5 text-[12px] text-[#7B92A8]">每次扫描自动写入 DoseLog（系统强制开启）</div>
+                <div className="text-[14px] font-bold text-[#223547]">{t("service.doseSettings.autoLogLabel")}</div>
+                <div className="mt-0.5 text-[12px] text-[#7B92A8]">{t("service.doseSettings.autoLogDesc")}</div>
               </div>
               <div className="ml-6 flex items-center gap-1.5 text-[12px] font-bold text-[#16A34A]">
-                <CheckCircle2 size={14} /> 始终开启
+                <CheckCircle2 size={14} /> {t("service.doseSettings.alwaysOn")}
               </div>
             </div>
             <SettingRow
-              label="超阈值时写入审计日志"
-              desc="扫描预估剂量超过阈值时，同时在审计日志中留痕（合规追踪用）"
+              label={t("service.doseSettings.auditLabel")}
+              desc={t("service.doseSettings.auditDesc")}
             >
               <Toggle
                 checked={settings.audit_threshold_exceed}
@@ -457,7 +464,7 @@ function Toggle({
   );
 }
 
-// 平板友好的"无框"输入控件 —— 浅灰底色代替边框，focus 时显示蓝色 ring
+// Touch-friendly frameless input: a pale fill replaces borders until focus.
 function BareSelect({
   value,
   onChange,

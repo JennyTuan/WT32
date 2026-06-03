@@ -20,6 +20,7 @@ import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
+import { useI18n } from "../lib/i18nContext";
 
 const HOLD_DURATION_MS = 3000;
 const SCAN_DURATION_MS = 16000;
@@ -37,7 +38,7 @@ const FOURD_PARAMS = {
     fov: "500",
     phases: "10",
     acquisitionTime: "30 s",
-    breathingMode: "自由呼吸",
+    breathingMode: "free_breathing",
     triggerThreshold: "50%",
     ctdiVol: "40.95",
     dlp: "1334.97",
@@ -59,6 +60,7 @@ interface ProtocolGroup {
 }
 
 export default function FourDDiagnosticConfirmScreen() {
+    const { t } = useI18n();
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
@@ -107,10 +109,10 @@ export default function FourDDiagnosticConfirmScreen() {
         if (workflowPlans.length === 0) {
             return [{
                 id: "g1",
-                name: "胸部4D",
+                name: t("scanFlow.fourD.defaultGroup"),
                 sequences: [
-                    { id: "s1", name: "定位像", type: "scout", steps: ["激光灯定位", "参数确认", "执行扫描"] },
-                    { id: "s2", name: "4D扫描", type: "4d", steps: ["参数确认", "执行扫描"] },
+                    { id: "s1", name: t("scanFlow.scout"), type: "scout", steps: [t("scanFlow.step.laserPosition"), t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")] },
+                    { id: "s2", name: t("scanFlow.fourD.mode"), type: "4d", steps: [t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")] },
                 ],
             }];
         }
@@ -123,11 +125,11 @@ export default function FourDDiagnosticConfirmScreen() {
                 name: sequence.name,
                 type: sequence.type,
                 steps: sequence.type === "scout"
-                    ? ["激光灯定位", "参数确认", "执行扫描"]
-                    : ["参数确认", "执行扫描"],
+                    ? [t("scanFlow.step.laserPosition"), t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")]
+                    : [t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")],
             })),
         }));
-    }, [workflowPlans]);
+    }, [t, workflowPlans]);
 
     const groups = useMemo(() => buildGroups(), [buildGroups]);
     const allSequences = useMemo(() => groups.flatMap((group) => group.sequences), [groups]);
@@ -205,8 +207,8 @@ export default function FourDDiagnosticConfirmScreen() {
         if (demoWarmupRemaining > 0) {
             return {
                 stable: false,
-                label: "呼吸不平稳",
-                detail: `约 ${demoWarmupRemaining}s 后稳定`,
+                label: t("scanFlow.fourD.breathingUnstable"),
+                detail: t("scanFlow.fourD.stableAfter", { seconds: demoWarmupRemaining }),
             };
         }
 
@@ -226,7 +228,7 @@ export default function FourDDiagnosticConfirmScreen() {
 
         const recentPeaks = peaks.slice(-4);
         if (recentPeaks.length < 3) {
-            return { stable: false, label: "呼吸采集中", detail: "等待稳定波峰" };
+            return { stable: false, label: t("scanFlow.fourD.breathingAcquiring"), detail: t("scanFlow.fourD.waitStablePeak") };
         }
 
         const intervals = recentPeaks.slice(1).map((peak, index) => peak.index - recentPeaks[index].index);
@@ -243,10 +245,10 @@ export default function FourDDiagnosticConfirmScreen() {
 
         return {
             stable,
-            label: stable ? "呼吸平稳" : "呼吸不平稳",
-            detail: stable ? "允许执行扫描" : "请等待呼吸稳定",
+            label: stable ? t("scanFlow.fourD.breathingStable") : t("scanFlow.fourD.breathingUnstable"),
+            detail: stable ? t("scanFlow.executeScan") : t("scanFlow.fourD.waitStableBreath"),
         };
-    }, [breathingDemoElapsedSec, filteredWaveData]);
+    }, [breathingDemoElapsedSec, filteredWaveData, t]);
 
     const triggerScanSequence = useCallback(() => {
         if (!breathingStability.stable) return;
@@ -371,28 +373,28 @@ export default function FourDDiagnosticConfirmScreen() {
     }, []);
 
     const statusText =
-        scanStage === "arming" ? `长按触发 ${Math.max(0, (1 - holdProgress) * 3).toFixed(1)}s`
-        : scanStage === "enabled" ? "系统已使能"
-        : scanStage === "exposing" ? "正在采集..."
-        : scanStage === "paused" ? "扫描已暂停"
-        : scanStage === "completed" ? "采集完成"
-        : "等待执行";
+        scanStage === "arming" ? t("scanFlow.physicalGuide.holdToTrigger", { seconds: Math.max(0, (1 - holdProgress) * 3).toFixed(1) })
+        : scanStage === "enabled" ? t("scanFlow.physicalGuide.enabled")
+        : scanStage === "exposing" ? t("scanFlow.fourD.acquiring")
+        : scanStage === "paused" ? t("scanFlow.fourD.paused")
+        : scanStage === "completed" ? t("scanFlow.fourD.completed")
+        : t("scanFlow.fourD.waitExecute");
 
     const guideTitle =
-        scanStage === "arming" ? "持续按住绿色按钮"
-        : scanStage === "enabled" ? "系统已使能"
-        : scanStage === "exposing" ? "正在4D采集"
-        : scanStage === "paused" ? "扫描已暂停"
-        : "按住绿色按钮";
+        scanStage === "arming" ? t("scanFlow.physicalGuide.keepHolding")
+        : scanStage === "enabled" ? t("scanFlow.physicalGuide.enabled")
+        : scanStage === "exposing" ? t("scanFlow.fourD.running")
+        : scanStage === "paused" ? t("scanFlow.fourD.paused")
+        : t("scanFlow.physicalGuide.holdGreenButton");
 
     const sidebarParams = [
-        { label: "进出床", value: FOURD_PARAMS.bedMode, accent: false },
-        { label: "体位", value: FOURD_PARAMS.position, accent: false },
-        { label: "扫描长度", value: dynamicParams.scanLength.toFixed(1), accent: false },
+        { label: t("scanFlow.inOutTable"), value: FOURD_PARAMS.bedMode, accent: false },
+        { label: t("scanFlow.patientPosition"), value: FOURD_PARAMS.position, accent: false },
+        { label: t("scanFlow.scanLength"), value: dynamicParams.scanLength.toFixed(1), accent: false },
         { label: "mA", value: FOURD_PARAMS.mA, accent: true },
         { label: "KV", value: FOURD_PARAMS.kV, accent: true },
-        { label: "旋转时间", value: FOURD_PARAMS.rotationTime, accent: true },
-        { label: "焦点", value: FOURD_PARAMS.focus, accent: true },
+        { label: t("scanFlow.rotationTime"), value: FOURD_PARAMS.rotationTime, accent: true },
+        { label: t("scanFlow.fourD.focus"), value: FOURD_PARAMS.focus, accent: true },
         { label: "FOV", value: dynamicParams.fov.toString(), accent: true },
         { label: "CTDIvol", value: FOURD_PARAMS.ctdiVol, unit: "mGy", accent: false, dose: true },
         { label: "DLP", value: FOURD_PARAMS.dlp, unit: "mGy·cm", accent: false, dose: true },
@@ -431,7 +433,11 @@ export default function FourDDiagnosticConfirmScreen() {
         }];
     });
     const canExecuteScan = scanCompleted || scanStarted || breathingStability.stable;
-    const primaryActionLabel = scanCompleted ? "完成扫描" : scanStarted ? (scanPaused ? "继续扫描" : "暂停扫描") : "执行扫描";
+    const primaryActionLabel = scanCompleted
+        ? t("scanFlow.fourD.completeScan")
+        : scanStarted
+            ? (scanPaused ? t("scanFlow.continueExam") : t("scanFlow.fourD.pauseScan"))
+            : t("scanFlow.executeScan");
 
     const renderSteps = (sequence: Sequence, isActiveSequence: boolean, isCompletedSequence: boolean) => (
         <div className="flex flex-col ml-12 mt-1.5 gap-2.5 relative pb-2.5">
@@ -511,8 +517,8 @@ export default function FourDDiagnosticConfirmScreen() {
 
                     <div className={`border-b border-[#EEF2F9] transition-all duration-300 ${isTreeCollapsed ? "h-[48px] opacity-40 grayscale overflow-hidden" : "h-[220px] shrink-0"}`}>
                         <div className="flex items-center justify-between px-3 pt-2 pb-1">
-                            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#64748B]">扫描队列</span>
-                            <span className="text-[9px] font-bold text-[#94A3B8]">{groups.length} 组</span>
+                            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#64748B]">{t("scanFlow.fourD.scanQueue")}</span>
+                            <span className="text-[9px] font-bold text-[#94A3B8]">{t("scanFlow.fourD.groupCount", { count: groups.length })}</span>
                         </div>
                         <div className="h-[calc(100%-28px)] overflow-y-auto px-2 pb-2 flex flex-col gap-0">
                         {groups.map((group) => (
@@ -574,7 +580,7 @@ export default function FourDDiagnosticConfirmScreen() {
 
                     <div className="min-h-0 flex-1 bg-[#F8FAFC] flex flex-col overflow-hidden">
                         <div className="flex items-center justify-between px-3 pt-2 pb-1 shrink-0">
-                            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#64748B]">扫描参数</span>
+                            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-[#64748B]">{t("scanFlow.scanParameters")}</span>
                             <span className="text-[9px] font-bold text-[#94A3B8]">4D</span>
                         </div>
                         <div className="flex-1 px-2 pb-2 flex flex-col gap-2 overflow-y-auto overscroll-contain">
@@ -607,7 +613,7 @@ export default function FourDDiagnosticConfirmScreen() {
 
                         <div className="px-2 pb-2 flex justify-center shrink-0">
                             <button className="h-[32px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
-                                <Info size={14} /> 参数详情
+                                <Info size={14} /> {t("scanFlow.parameterDetails")}
                             </button>
                         </div>
                     </div>
@@ -729,7 +735,7 @@ export default function FourDDiagnosticConfirmScreen() {
                             </div>
 
                             <div className="absolute inset-x-3 bottom-0.5 flex items-center gap-2">
-                                <span className="text-[8px] font-black text-[#475569] uppercase opacity-70 shrink-0">床位进度</span>
+                                <span className="text-[8px] font-black text-[#475569] uppercase opacity-70 shrink-0">{t("scanFlow.fourD.bedProgress")}</span>
                                 <div className="flex flex-1 gap-1 items-end h-3">
                                     {Array.from({ length: bedSegmentCount }, (_, index) => {
                                         const isCompletedSegment = scanCompleted || index < bedProgress;
@@ -760,19 +766,19 @@ export default function FourDDiagnosticConfirmScreen() {
 
                         <div className="w-[230px] shrink-0 border-l border-[#B0C4DE]/60 bg-[#F8FAFC] px-2 py-1 flex flex-col justify-center">
                             <div className="grid grid-cols-2 gap-1">
-                                {renderControlSlider("最小间距", breathingControls.minSpacing, 0.5, 5, 0.1, (value) => {
+                                {renderControlSlider(t("scanFlow.fourD.minSpacing"), breathingControls.minSpacing, 0.5, 5, 0.1, (value) => {
                                     setBreathingControls((prev) => ({ ...prev, minSpacing: value }));
                                 }, " s")}
-                                {renderControlSlider("滤波阈", breathingControls.filterThreshold, 0.1, 1, 0.01, (value) => {
+                                {renderControlSlider(t("scanFlow.fourD.filterThreshold"), breathingControls.filterThreshold, 0.1, 1, 0.01, (value) => {
                                     setBreathingControls((prev) => ({ ...prev, filterThreshold: value }));
                                 })}
-                                {renderControlSlider("峰值阈", breathingControls.peakThreshold, 0.5, 2.5, 0.05, (value) => {
+                                {renderControlSlider(t("scanFlow.fourD.peakThreshold"), breathingControls.peakThreshold, 0.5, 2.5, 0.05, (value) => {
                                     setBreathingControls((prev) => ({ ...prev, peakThreshold: value }));
                                 })}
-                                {renderControlSlider("增益", breathingControls.gain, 0.5, 3, 0.1, (value) => {
+                                {renderControlSlider(t("scanFlow.fourD.gain"), breathingControls.gain, 0.5, 3, 0.1, (value) => {
                                     setBreathingControls((prev) => ({ ...prev, gain: value }));
                                 })}
-                                {renderControlSlider("谷值阈", breathingControls.valleyThreshold, 0.1, 0.8, 0.01, (value) => {
+                                {renderControlSlider(t("scanFlow.fourD.valleyThreshold"), breathingControls.valleyThreshold, 0.1, 0.8, 0.01, (value) => {
                                     setBreathingControls((prev) => ({ ...prev, valleyThreshold: value }));
                                 })}
                             </div>
@@ -787,7 +793,7 @@ export default function FourDDiagnosticConfirmScreen() {
                         onClick={() => navigate(-1)}
                         className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95"
                     >
-                        <ChevronLeft size={20} /> 上一步                    </button>
+                        <ChevronLeft size={20} /> {t("common.previousStep")}                    </button>
                 </div>
 
                 <div className="flex-1 flex justify-center">
@@ -796,7 +802,7 @@ export default function FourDDiagnosticConfirmScreen() {
                             onClick={() => setShowAbortConfirm(true)}
                             className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#F57C00] font-bold rounded-md border-2 border-[#F57C00] hover:bg-orange-50 transition-all uppercase text-[13px] shadow-sm active:scale-95"
                         >
-                            <AlertTriangle size={20} /> 中止检查                        </button>
+                            <AlertTriangle size={20} /> {t("scanFlow.abortExam")}                        </button>
                     )}
                 </div>
 
@@ -832,8 +838,8 @@ export default function FourDDiagnosticConfirmScreen() {
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
                 <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
                     <div className="border-b border-slate-200 px-5 py-4">
-                        <div className="text-[14px] font-black text-slate-700">实体按键操作引导</div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">长按三秒后触发4D采集，扫描进度会在主界面实时更新。</div>
+                        <div className="text-[14px] font-black text-slate-700">{t("scanFlow.physicalGuide.title")}</div>
+                        <div className="mt-1 text-[11px] font-medium text-slate-400">{t("scanFlow.fourD.guideDescription")}</div>
                     </div>
 
                     <div className="flex flex-1 flex-col">
@@ -871,7 +877,7 @@ export default function FourDDiagnosticConfirmScreen() {
 
                             <div className="w-full rounded-2xl border border-[#D6E0EA] bg-white/70 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
                                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                                    <span>长按进度</span>
+                                    <span>{t("scanFlow.holdProgress")}</span>
                                     <span>{Math.round(holdProgress * 100)}%</span>
                                 </div>
                                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#DCE6F1]">
@@ -900,21 +906,21 @@ export default function FourDDiagnosticConfirmScreen() {
                                 <CheckCircle size={22} className="text-emerald-600" />
                             </div>
                             <div>
-                                <div className="text-[15px] font-black text-[#37474F]">确认患者呼吸平稳</div>
-                                <div className="mt-0.5 text-[12px] font-medium text-emerald-700">请技师确认当前呼吸信号满足4D扫描条件</div>
+                                <div className="text-[15px] font-black text-[#37474F]">{t("scanFlow.fourD.breathingConfirmTitle")}</div>
+                                <div className="mt-0.5 text-[12px] font-medium text-emerald-700">{t("scanFlow.fourD.breathingConfirmSubtitle")}</div>
                             </div>
                         </div>
                         <div className="px-5 py-4">
                             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                                 <div className="flex items-center justify-between text-[12px] font-bold text-slate-600">
-                                    <span>呼吸状态</span>
+                                    <span>{t("scanFlow.fourD.breathingStatus")}</span>
                                     <span className="flex items-center gap-1.5 text-emerald-600">
                                         <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]" />
                                         {breathingStability.label}
                                     </span>
                                 </div>
                                 <div className="mt-2 text-[12px] leading-relaxed text-slate-500">
-                                    确认患者呼吸节律稳定，波形峰谷清晰，且受照阈值范围设置正确后再继续。
+                                    {t("scanFlow.fourD.breathingConfirmBody")}
                                 </div>
                             </div>
                         </div>
@@ -923,7 +929,7 @@ export default function FourDDiagnosticConfirmScreen() {
                                 onClick={() => setShowBreathingConfirm(false)}
                                 className="h-[40px] flex-1 rounded-lg border-2 border-[#B0C4DE] bg-white text-[13px] font-bold text-[#546E7A] transition-all hover:bg-gray-50 active:scale-95"
                             >
-                                返回检查
+                                {t("scanFlow.fourD.returnExam")}
                             </button>
                             <button
                                 onClick={() => {
@@ -932,7 +938,7 @@ export default function FourDDiagnosticConfirmScreen() {
                                 }}
                                 className="h-[40px] flex-1 rounded-lg bg-emerald-600 text-[13px] font-bold text-white shadow-md transition-all hover:bg-emerald-700 active:scale-95"
                             >
-                                已确认
+                                {t("scanFlow.fourD.confirmed")}
                             </button>
                         </div>
                     </div>
@@ -956,12 +962,12 @@ export default function FourDDiagnosticConfirmScreen() {
                     gender: selectedPatient.gender,
                     idNumber: "--",
                     patientId: selectedPatient.patientId,
-                    checkType: selectedPatient.checkType ?? "4D扫描",
+                    checkType: selectedPatient.checkType ?? t("scanFlow.fourD.mode"),
                 } : undefined}
                 scanData={{
                     ctdi: FOURD_PARAMS.ctdiVol,
                     dlp: FOURD_PARAMS.dlp,
-                    protocol: "4D扫描",
+                    protocol: t("scanFlow.fourD.mode"),
                 }}
             />
 
@@ -973,26 +979,26 @@ export default function FourDDiagnosticConfirmScreen() {
                                 <AlertTriangle size={20} className="text-[#F57C00]" />
                             </div>
                             <div>
-                                <div className="text-[15px] font-black text-[#37474F]">中止检查</div>
-                                <div className="text-[12px] text-[#78909C] mt-0.5">确认中止当前4D扫描流程？</div>
+                                <div className="text-[15px] font-black text-[#37474F]">{t("scanFlow.abortExam")}</div>
+                                <div className="text-[12px] text-[#78909C] mt-0.5">{t("scanFlow.fourD.abortQuestion")}</div>
                             </div>
                         </div>
                         <div className="px-5 py-3">
                             <p className="text-[13px] text-[#546E7A] leading-relaxed">
-                                中止后，<span className="font-bold text-[#37474F]">当前4D扫描将终止</span>，已采集数据会保留。                            </p>
+                                {t("scanFlow.abortBodyStart")}<span className="font-bold text-[#37474F]">{t("scanFlow.fourD.abortBodyStrong")}</span>{t("scanFlow.fourD.abortBodyEnd")}                            </p>
                         </div>
                         <div className="flex gap-2 px-5 pb-4">
                             <button
                                 onClick={() => setShowAbortConfirm(false)}
                                 className="flex-1 h-[40px] bg-white border-2 border-[#B0C4DE] text-[#546E7A] font-bold rounded-lg text-[13px] hover:bg-gray-50 transition-all active:scale-95"
                             >
-                                取消
+                                {t("common.cancel")}
                             </button>
                             <button
                                 onClick={() => navigate("/patients")}
                                 className="flex-1 h-[40px] bg-[#F57C00] text-white font-bold rounded-lg text-[13px] hover:bg-orange-600 shadow-md transition-all active:scale-95"
                             >
-                                确认中止
+                                {t("scanFlow.confirmAbort")}
                             </button>
                         </div>
                     </div>

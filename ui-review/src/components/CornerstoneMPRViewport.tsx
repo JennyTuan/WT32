@@ -70,6 +70,7 @@ interface CornerstoneMPRViewportProps {
   renderMode?: RenderMode;
   className?: string;
   currentSliceIndex?: number;
+  onSliceIndexChange?: (panel: PanelId, sliceIndex: number) => void;
   windowSyncKey?: number;
   layoutMode?: LayoutMode;
   volumePanelMode?: VolumePanelMode;
@@ -104,6 +105,9 @@ interface CornerstoneMPRViewportProps {
    * cached volumes instead of cold-loading DICOM on every tick.
    */
   preloadImageUrlsList?: string[][];
+  /** When false, disables the crosshair + reference-line overlay in all panels.
+   *  Defaults to true (the standard MPR working view). */
+  showCrosshairs?: boolean;
 }
 
 interface TextAnnotation {
@@ -535,6 +539,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       renderMode = 'MPR',
       className,
       currentSliceIndex,
+      onSliceIndexChange,
       windowSyncKey,
       layoutMode = 'four-up',
       volumePanelMode = 'slab',
@@ -557,6 +562,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       activeOrientation,
       onActiveOrientationChange,
       preloadImageUrlsList,
+      showCrosshairs: showCrosshairsProp = true,
     },
     ref
   ) {
@@ -568,6 +574,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     const engineRef = useRef<RenderingEngine | null>(null);
     const lastVoiRef = useRef<{ lower: number; upper: number } | null>(null);
     const lastEmittedVoiRef = useRef<{ lower: number; upper: number } | null>(null);
+    const lastEmittedSliceRef = useRef<Partial<Record<PanelId, number>>>({});
     const rafRef = useRef<number | null>(null);
 
     const engineId = useRef(`mpr-engine-${Math.random().toString(36).slice(2, 9)}`);
@@ -730,6 +737,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           next = next % total;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (vp as any).setSliceIndex?.(next);
+          onSliceIndexChange?.(panel, next);
           vp.render();
         } catch {
           /* ignore — viewport not ready */
@@ -1124,10 +1132,46 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     }, [onWindowLevelChange, status, vpAxial, vpCoronal, vpSagittal]);
 
     useEffect(() => {
+      const mprViewportElements: Array<{ element: HTMLDivElement | null; panel: PanelId; viewportId: string }> = [
+        { element: axialRef.current, panel: 'axial', viewportId: vpAxial },
+        { element: coronalRef.current, panel: 'coronal', viewportId: vpCoronal },
+        { element: sagittalRef.current, panel: 'sagittal', viewportId: vpSagittal },
+      ];
+      if (status !== 'ready' || !onSliceIndexChange || mprViewportElements.some(({ element }) => !element)) return;
+
+      const emitSliceIndex = (panel: PanelId, viewportId: string) => {
+        const vp = engineRef.current?.getViewport(viewportId) as Types.IVolumeViewport | undefined;
+        if (!vp) return;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const raw = (vp as any).getSliceIndex?.();
+          if (typeof raw !== 'number' || !Number.isFinite(raw)) return;
+          const next = Math.round(raw);
+          if (lastEmittedSliceRef.current[panel] === next) return;
+          lastEmittedSliceRef.current[panel] = next;
+          onSliceIndexChange(panel, next);
+        } catch {
+          // ignore
+        }
+      };
+
+      const subscriptions = mprViewportElements.map(({ element, panel, viewportId }) => {
+        const handleRendered = () => emitSliceIndex(panel, viewportId);
+        handleRendered();
+        element!.addEventListener(Enums.Events.IMAGE_RENDERED, handleRendered);
+        return () => {
+          element!.removeEventListener(Enums.Events.IMAGE_RENDERED, handleRendered);
+        };
+      });
+
+      return () => subscriptions.forEach((unsubscribe) => unsubscribe());
+    }, [onSliceIndexChange, status, vpAxial, vpCoronal, vpSagittal]);
+
+    useEffect(() => {
       if (status !== 'ready') return;
       const toolGroup = getOrCreateToolGroup(toolGroupId.current);
-      const enableMprCrosshairs = layoutMode === 'four-up' || renderMode === 'MPR';
-      const enableReferenceLines = layoutMode === 'four-up' || renderMode === 'MPR';
+      const enableMprCrosshairs = showCrosshairsProp && (layoutMode === 'four-up' || renderMode === 'MPR');
+      const enableReferenceLines = showCrosshairsProp && (layoutMode === 'four-up' || renderMode === 'MPR');
       if (layoutMode === 'four-up' && volumePanelMode === 'volume3d') {
         const volumeToolGroup = getOrCreateToolGroup(volumeToolGroupId.current);
         volumeToolGroup.setToolPassive(TOOL_NAMES.pan);
@@ -1198,7 +1242,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           setPrimaryTool(TOOL_NAMES.pan);
           break;
       }
-    }, [activeTool, layoutMode, renderMode, status, volumePanelMode]);
+    }, [activeTool, layoutMode, renderMode, status, volumePanelMode, showCrosshairsProp]);
 
     useEffect(() => {
       if (status !== 'ready') return;
@@ -1313,7 +1357,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
     const visibleAnnotations = useMemo(() => textAnnotations, [textAnnotations]);
     const panelBase = 'relative overflow-hidden bg-black';
-    const showCrosshairs = layoutMode === 'four-up' || renderMode === 'MPR';
+    const showCrosshairs = showCrosshairsProp && (layoutMode === 'four-up' || renderMode === 'MPR');
     const slabLabel = volumePanelMode === 'volume3d' ? '3D' : renderMode === 'MIP' ? 'MIP' : renderMode === 'MinIP' ? 'MinIP' : 'Coronal';
 
     const renderTextAnnotations = (panel: PanelId) =>

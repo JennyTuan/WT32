@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Network } from "lucide-react";
+import { useI18n } from "../lib/i18nContext";
 
 type ModuleStatus = { key: string; label: string; ok: boolean };
 
@@ -14,6 +15,7 @@ const MODULES: ModuleStatus[] = [
 ];
 
 export default function NetworkStatusButton({ iconSize = 24 }: { iconSize?: number }) {
+    const { t } = useI18n();
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement | null>(null);
 
@@ -32,7 +34,7 @@ export default function NetworkStatusButton({ iconSize = 24 }: { iconSize?: numb
         <div ref={ref} className="relative">
             <div
                 role="button"
-                aria-label="通讯状态"
+                aria-label={t("networkStatus.title")}
                 onClick={() => setOpen((o) => !o)}
                 className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70"
             >
@@ -46,7 +48,7 @@ export default function NetworkStatusButton({ iconSize = 24 }: { iconSize?: numb
             {open && (
                 <div className="absolute right-0 top-full mt-2 w-[200px] bg-white border border-[#B0C4DE] rounded-lg shadow-lg z-50 overflow-hidden">
                     <div className="px-3 py-1.5 bg-[#F8FAFC] border-b border-[#EEF2F9] text-[11px] font-bold text-[#90A4AE] uppercase tracking-wider">
-                        通讯状态
+                        {t("networkStatus.title")}
                     </div>
                     {MODULES.map((m, i) => (
                         <div

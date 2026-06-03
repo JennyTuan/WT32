@@ -191,7 +191,14 @@
       "Bash(curl -s \"http://127.0.0.1:8000/api/scan-sessions/\")",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(s.get\\('id'\\),'|',s.get\\('name'\\),'|',s.get\\('body_part'\\),'|',s.get\\('acquisition_type'\\)\\) for s in d[-10:]]\")",
       "Bash(curl -s \"http://127.0.0.1:8000/api/demo-dicom/limbs-helical\")",
-      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('defaultWW/WL=',d.get\\('defaultWindowWidth'\\),d.get\\('defaultWindowLevel'\\)\\); [print\\(s['key'],'ww=',s['windowWidth'],'wc=',s['windowCenter'],'url0=',s['urls'][0]\\) for s in d['series']]\")"
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('defaultWW/WL=',d.get\\('defaultWindowWidth'\\),d.get\\('defaultWindowLevel'\\)\\); [print\\(s['key'],'ww=',s['windowWidth'],'wc=',s['windowCenter'],'url0=',s['urls'][0]\\) for s in d['series']]\")",
+      "Bash(python -c \"from backend.routers import ai_inference; print\\('OK:', ai_inference.router.prefix\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"from backend.routers import ai_inference; print\\('OK:', ai_inference.router.prefix\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"from backend.main import app; print\\('routes:', [r.path for r in app.routes if '/ai' in getattr\\(r, 'path', ''\\)]\\)\")",
+      "Bash(./.venv/Scripts/python.exe)",
+      "Bash(./.venv/Scripts/python.exe -c \"from backend.routers import ai_inference\")",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(./.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('backend/routers/ai_inference.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

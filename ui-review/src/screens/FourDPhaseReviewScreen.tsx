@@ -16,6 +16,7 @@ import {
 import { loadSelectedPatient, formatPatientCardSubtitle } from "../lib/patientSession";
 import type { FourDPostScanState, BedPhaseCell, PhaseSelections } from "../lib/fourDTypes";
 import { generateMockScanResult } from "../lib/fourDTypes";
+import { useI18n } from "../lib/i18nContext";
 
 // ── Dev fallback: 直接访问 /fourd-phase-review 时注入 mock 数据 ──
 const DEV_MOCK_STATE: FourDPostScanState = {
@@ -122,6 +123,7 @@ interface FramePickerModalProps {
 function FramePickerModal({
   bedIdx, phaseIdx, cell, currentSelection, onSelect, onClose,
 }: FramePickerModalProps) {
+  const { t } = useI18n();
   const [localSel, setLocalSel] = useState(currentSelection);
 
   // ESC 关闭
@@ -146,9 +148,13 @@ function FramePickerModal({
         {/* ── Modal Header ── */}
         <div className="flex items-center justify-between bg-[#1E3A5F] px-6 py-4">
           <div>
-            <div className="text-[14px] font-black text-white">选择保留帧</div>
+            <div className="text-[14px] font-black text-white">{t("scanFlow.phaseReview.modalTitle")}</div>
             <div className="mt-0.5 text-[11px] text-blue-200">
-              床位 {bedIdx + 1} · 相位 {PHASE_LABELS[phaseIdx]} · 共 {cell.frameCount} 帧采集
+              {t("scanFlow.phaseReview.modalSubtitle", {
+                bed: bedIdx + 1,
+                phase: PHASE_LABELS[phaseIdx],
+                count: cell.frameCount,
+              })}
             </div>
           </div>
           <button
@@ -184,7 +190,7 @@ function FramePickerModal({
                   <div className="absolute top-2 left-2 flex flex-col gap-1">
                     {isBest && (
                       <span className="rounded bg-green-500/85 px-1.5 py-0.5 text-[9px] font-black text-white">
-                        推荐
+                        {t("scanFlow.phaseReview.recommended")}
                       </span>
                     )}
                   </div>
@@ -203,7 +209,7 @@ function FramePickerModal({
                   isSelected ? "bg-blue-50" : "bg-[#F8FAFC]"
                 }`}>
                   <span className={`text-[12px] font-bold ${isSelected ? "text-[#2563EB]" : "text-slate-600"}`}>
-                    帧 {fi + 1}
+                    {t("scanFlow.phaseReview.frameIndex", { index: fi + 1 })}
                   </span>
                   {isSelected
                     ? <CheckCircle2 size={14} className="text-[#4D94FF]" />
@@ -219,8 +225,7 @@ function FramePickerModal({
         <div className="mx-6 mb-4 flex items-start gap-2 rounded-lg bg-slate-50 px-4 py-3">
           <Info size={13} className="mt-0.5 shrink-0 text-slate-400" />
           <p className="text-[11px] text-slate-500 leading-relaxed">
-            SNR（信噪比）越高图像质量越好，推荐保留 SNR 最高的帧。
-            如需对比查看可在正式系统中调取完整图像。
+            {t("scanFlow.phaseReview.modalInfo")}
           </p>
         </div>
 
@@ -230,13 +235,13 @@ function FramePickerModal({
             onClick={onClose}
             className="px-5 py-2 rounded-lg border border-slate-200 text-[12px] font-bold text-slate-500 hover:bg-slate-50 transition-colors"
           >
-            取消
+            {t("common.cancel")}
           </button>
           <button
             onClick={() => { onSelect(localSel); onClose(); }}
             className="px-6 py-2 rounded-lg bg-[#4D94FF] text-white text-[12px] font-bold hover:bg-blue-600 transition-colors shadow-sm"
           >
-            确认保留帧 {localSel + 1}
+            {t("scanFlow.phaseReview.confirmFrame", { index: localSel + 1 })}
           </button>
         </div>
       </div>
@@ -249,6 +254,7 @@ function FramePickerModal({
 export default function FourDPhaseReviewScreen() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useI18n();
   const state = (location.state as FourDPostScanState | null) ?? DEV_MOCK_STATE;
   const scanResult = state.scanResult;
   const selectedPatient = useMemo(() => loadSelectedPatient(), []);
@@ -340,9 +346,9 @@ export default function FourDPhaseReviewScreen() {
         {/* 左：标题 */}
         <div className="flex flex-col gap-0.5 min-w-[160px]">
           <div className="text-[10px] font-bold uppercase tracking-widest text-blue-300">
-            4D 扫描后处理
+            {t("scanFlow.phaseReview.processTitle")}
           </div>
-          <div className="text-[18px] font-black text-white leading-tight">相位数据审核</div>
+          <div className="text-[18px] font-black text-white leading-tight">{t("scanFlow.phaseReview.title")}</div>
         </div>
 
         {/* 中：患者信息 */}
@@ -350,7 +356,7 @@ export default function FourDPhaseReviewScreen() {
           <div className="flex items-center gap-3 rounded-xl bg-white/10 px-4 py-2">
             <div className="h-8 w-8 rounded-full bg-blue-400/25 flex items-center justify-center">
               <span className="text-[13px] font-black text-blue-100">
-                {selectedPatient.name?.[0] ?? "患"}
+                {selectedPatient.name?.[0] ?? t("scanFlow.phaseReview.patientInitialFallback")}
               </span>
             </div>
             <div>
@@ -366,13 +372,13 @@ export default function FourDPhaseReviewScreen() {
         <div className="flex items-center gap-1.5 text-[11px] font-bold">
           <div className="flex items-center gap-1 rounded-full bg-[#4D94FF] px-3 py-1 text-white">
             <div className="h-1.5 w-1.5 rounded-full bg-white" />
-            相位审核
+            {t("scanFlow.phaseReview.stepCurrent")}
           </div>
           <ChevronRight size={12} className="text-blue-300" />
           {scanResult.rescanOccurred ? (
-            <span className="rounded-full bg-white/10 px-3 py-1 text-blue-300">重扫选择</span>
+            <span className="rounded-full bg-white/10 px-3 py-1 text-blue-300">{t("scanFlow.phaseReview.stepRescan")}</span>
           ) : (
-            <span className="rounded-full bg-white/5 px-3 py-1 text-blue-400/60">图像重建</span>
+            <span className="rounded-full bg-white/5 px-3 py-1 text-blue-400/60">{t("scanFlow.phaseReview.stepReconstruct")}</span>
           )}
         </div>
       </header>
@@ -385,7 +391,7 @@ export default function FourDPhaseReviewScreen() {
             <>
               <AlertCircle size={15} className="shrink-0 text-amber-500" />
               <span className="text-[12px] font-bold text-slate-700">
-                共 <span className="text-amber-600">{totalConflicts}</span> 个相位冲突
+                {t("scanFlow.phaseReview.conflictSummary", { count: totalConflicts })}
               </span>
               <div className="h-4 w-px bg-slate-200" />
               {/* 进度条 */}
@@ -397,14 +403,14 @@ export default function FourDPhaseReviewScreen() {
                   />
                 </div>
                 <span className="text-[11px] font-bold text-slate-500">
-                  {confirmedCount}/{totalConflicts} 已确认
+                  {t("scanFlow.phaseReview.confirmedProgress", { confirmed: confirmedCount, total: totalConflicts })}
                 </span>
               </div>
             </>
           ) : (
             <>
               <CheckCircle2 size={15} className="text-green-500" />
-              <span className="text-[12px] font-bold text-slate-700">所有相位数据正常，可直接进入下一步</span>
+              <span className="text-[12px] font-bold text-slate-700">{t("scanFlow.phaseReview.allNormal")}</span>
             </>
           )}
         </div>
@@ -416,7 +422,7 @@ export default function FourDPhaseReviewScreen() {
             className="flex items-center gap-1.5 rounded-lg bg-[#EFF6FF] px-4 py-2 text-[12px] font-bold text-[#4D94FF] border border-[#BFDBFE] hover:bg-blue-100 transition-colors active:scale-95"
           >
             <Sparkles size={13} />
-            自动选优（按 SNR）
+            {t("scanFlow.phaseReview.autoSelect")}
           </button>
         )}
       </div>
@@ -452,7 +458,9 @@ export default function FourDPhaseReviewScreen() {
                     className="flex flex-col items-end justify-center pr-2"
                     style={{ height: CELL_H }}
                   >
-                    <span className="text-[11px] font-black text-slate-600">床位 {bi + 1}</span>
+                    <span className="text-[11px] font-black text-slate-600">
+                      {t("scanFlow.phaseReview.bedLabel", { index: bi + 1 })}
+                    </span>
                     <span className="text-[9px] text-slate-400 font-mono">
                       {(bi * 19.2).toFixed(1)} mm
                     </span>
@@ -474,7 +482,7 @@ export default function FourDPhaseReviewScreen() {
                           style={{ width: CELL_W, height: CELL_H }}
                         >
                           <CheckCircle2 size={13} className="text-green-400" />
-                          <span className="mt-0.5 text-[9px] text-slate-300">正常</span>
+                          <span className="mt-0.5 text-[9px] text-slate-300">{t("scanFlow.phaseReview.normal")}</span>
                         </div>
                       </td>
                     );
@@ -488,12 +496,12 @@ export default function FourDPhaseReviewScreen() {
                           onClick={() => setModalPos({ bedIdx: bi, phaseIdx: pi })}
                           className="flex flex-col items-center justify-center rounded-lg border-2 border-amber-300 bg-amber-50 hover:bg-amber-100 transition-colors active:scale-95"
                           style={{ width: CELL_W, height: CELL_H }}
-                          title="点击重新选择"
+                          title={t("scanFlow.phaseReview.reselectTitle")}
                         >
                           <div className="flex items-center gap-1">
                             <CheckCircle2 size={11} className="text-amber-500" />
                             <span className="text-[12px] font-black text-amber-700">
-                              帧 {cell.selectedFrame + 1}
+                              {t("scanFlow.phaseReview.frameIndex", { index: cell.selectedFrame + 1 })}
                             </span>
                           </div>
                           <span className="text-[8px] font-bold text-amber-500 mt-0.5">
@@ -511,16 +519,16 @@ export default function FourDPhaseReviewScreen() {
                         onClick={() => setModalPos({ bedIdx: bi, phaseIdx: pi })}
                         className="flex flex-col items-center justify-center rounded-lg border-2 border-orange-300 bg-orange-50 hover:bg-orange-100 transition-colors active:scale-95"
                         style={{ width: CELL_W, height: CELL_H }}
-                        title={`${cell.frameCount} 帧，点击选择`}
+                        title={t("scanFlow.phaseReview.conflictTitle", { count: cell.frameCount })}
                       >
                         <div className="flex items-center gap-1">
                           <span className="text-[14px] font-black text-orange-600">
                             {cell.frameCount}
                           </span>
-                          <span className="text-[9px] font-bold text-orange-400">帧</span>
+                          <span className="text-[9px] font-bold text-orange-400">{t("scanFlow.phaseReview.frameUnit")}</span>
                         </div>
                         <span className="text-[8px] font-bold text-orange-400 mt-0.5">
-                          待确认
+                          {t("scanFlow.phaseReview.pendingConfirm")}
                         </span>
                       </button>
                     </td>
@@ -537,17 +545,17 @@ export default function FourDPhaseReviewScreen() {
             <div className="h-4 w-4 rounded border border-slate-100 bg-white flex items-center justify-center">
               <CheckCircle2 size={9} className="text-green-400" />
             </div>
-            正常（1 帧）
+            {t("scanFlow.phaseReview.legendNormal")}
           </div>
           <div className="flex items-center gap-1.5">
             <div className="h-4 w-4 rounded border-2 border-orange-300 bg-orange-50" />
-            冲突待确认（点击选帧）
+            {t("scanFlow.phaseReview.legendPending")}
           </div>
           <div className="flex items-center gap-1.5">
             <div className="h-4 w-4 rounded border-2 border-amber-300 bg-amber-50 flex items-center justify-center">
               <CheckCircle2 size={9} className="text-amber-500" />
             </div>
-            冲突已确认（点击修改）
+            {t("scanFlow.phaseReview.legendConfirmed")}
           </div>
         </div>
       </div>
@@ -558,15 +566,19 @@ export default function FourDPhaseReviewScreen() {
           onClick={() => navigate(-1)}
           className="flex items-center gap-2 px-8 h-[48px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-blue-50 shadow-sm transition-all uppercase text-[12px] active:scale-95"
         >
-          <ChevronLeft size={18} /> 返回扫描
+          <ChevronLeft size={18} /> {t("scanFlow.phaseReview.back")}
         </button>
 
         {/* 中间提示文字 */}
         <div className="text-center text-[11px] text-slate-400">
           {!allConfirmed
-            ? <span className="text-amber-500 font-bold">还有 {totalConflicts - confirmedCount} 个冲突未确认，可点击橙色格子或使用"自动选优"</span>
+            ? (
+              <span className="text-amber-500 font-bold">
+                {t("scanFlow.phaseReview.pendingMessage", { count: totalConflicts - confirmedCount })}
+              </span>
+            )
             : totalConflicts > 0
-              ? <span className="text-green-600 font-bold">所有冲突已确认，可进入下一步</span>
+              ? <span className="text-green-600 font-bold">{t("scanFlow.phaseReview.allConfirmedMessage")}</span>
               : null
           }
         </div>
@@ -579,7 +591,7 @@ export default function FourDPhaseReviewScreen() {
               : "bg-[#4D94FF]/70 text-white hover:bg-[#4D94FF]"
           }`}
         >
-          {scanResult.rescanOccurred ? "下一步：重扫选择" : "进入图像重建"}
+          {scanResult.rescanOccurred ? t("scanFlow.phaseReview.nextRescan") : t("scanFlow.phaseReview.nextReconstruct")}
           <ChevronRight size={18} />
         </button>
       </footer>

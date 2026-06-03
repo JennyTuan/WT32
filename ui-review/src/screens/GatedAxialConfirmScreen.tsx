@@ -5,6 +5,8 @@ import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { fetchSelectedScanSession } from "../lib/scanSession";
+import { useI18n } from "../lib/i18nContext";
+import type { TranslationKey } from "../lib/i18n";
 
 type BreathingMode = "free_breathing" | "breath_hold_inspiration";
 type TargetPhase = "max_inspiration" | "max_expiration" | "custom";
@@ -12,10 +14,10 @@ type TriggerDirection = "rising" | "falling";
 
 const BED_STEP_MM = 19.2;
 
-const TARGET_PHASE_OPTIONS: { value: TargetPhase; label: string; threshold: number; direction: TriggerDirection }[] = [
-    { value: "max_inspiration", label: "最大吸气", threshold: 1.0, direction: "rising" },
-    { value: "max_expiration", label: "最大呼气", threshold: -1.0, direction: "falling" },
-    { value: "custom", label: "自定义", threshold: 0.5, direction: "rising" },
+const TARGET_PHASE_OPTIONS: { value: TargetPhase; labelKey: TranslationKey; threshold: number; direction: TriggerDirection }[] = [
+    { value: "max_inspiration", labelKey: "scanFlow.gatingPhase.maxInspiration", threshold: 1.0, direction: "rising" },
+    { value: "max_expiration", labelKey: "scanFlow.gatingPhase.maxExpiration", threshold: -1.0, direction: "falling" },
+    { value: "custom", labelKey: "scanFlow.gatingPhase.custom", threshold: 0.5, direction: "rising" },
 ];
 
 /**
@@ -26,6 +28,7 @@ const TARGET_PHASE_OPTIONS: { value: TargetPhase; label: string; threshold: numb
  *   Bed step is fixed at 19.2 mm (detector collimation), not configurable.
  */
 export default function GatedAxialConfirmScreen() {
+    const { t } = useI18n();
     const [params] = useSearchParams();
     const breathingMode = (params.get("breathingMode") ?? "free_breathing") as BreathingMode;
     const isFreeBreathing = breathingMode === "free_breathing";
@@ -106,18 +109,18 @@ export default function GatedAxialConfirmScreen() {
     // ---------- left-aside extras (free-breathing only) ----------
     const gatingParamCard = isFreeBreathing ? (
         <div className="flex flex-col">
-            <ParamField label="目标相位">
+            <ParamField label={t("scanFlow.targetPhase")}>
                 <select
                     value={targetPhase}
                     onChange={(e) => handleTargetPhase(e.target.value as TargetPhase)}
                     className="h-[26px] w-full appearance-none rounded border border-[#B0C4DE] bg-white px-2 pr-6 text-[12px] font-bold text-[#37474F] outline-none focus:border-[#4D94FF]"
                 >
                     {TARGET_PHASE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
+                        <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
                     ))}
                 </select>
             </ParamField>
-            <ParamField label="触发方向">
+            <ParamField label={t("scanFlow.triggerDirection")}>
                 <select
                     value={direction}
                     onChange={(e) => {
@@ -126,11 +129,11 @@ export default function GatedAxialConfirmScreen() {
                     }}
                     className="h-[26px] w-full appearance-none rounded border border-[#B0C4DE] bg-white px-2 pr-6 text-[12px] font-bold text-[#37474F] outline-none focus:border-[#4D94FF]"
                 >
-                    <option value="rising">上行穿越</option>
-                    <option value="falling">下行穿越</option>
+                    <option value="rising">{t("scanFlow.triggerDirection.rising")}</option>
+                    <option value="falling">{t("scanFlow.triggerDirection.falling")}</option>
                 </select>
             </ParamField>
-            <ParamField label="阈值 (归一化 −2 ~ +2)">
+            <ParamField label={t("scanFlow.thresholdNormalized")}>
                 <input
                     type="number"
                     min={-2}
@@ -144,7 +147,7 @@ export default function GatedAxialConfirmScreen() {
                     className="h-[26px] w-full rounded border border-[#B0C4DE] bg-white px-2 text-right text-[12px] font-bold text-[#37474F] outline-none focus:border-[#4D94FF]"
                 />
             </ParamField>
-            <ParamField label="等待超时 (s)">
+            <ParamField label={t("scanFlow.waitTimeout")}>
                 <input
                     type="number"
                     min={5}

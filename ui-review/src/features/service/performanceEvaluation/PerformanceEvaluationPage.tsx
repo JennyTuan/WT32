@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ImageIcon, Loader2 } from "lucide-react";
 
 import ServiceModeShell from "../shared/ServiceModeShell";
+import type { TranslationKey } from "../../../lib/i18n";
 import { API_BASE_URL, apiFetch } from "../../../lib/apiClient";
+import { useI18n } from "../../../lib/i18nContext";
 
 type TabKey = "MTF" | "FWHM_H" | "FWHM_V";
 
@@ -63,8 +65,8 @@ type AnalyzeResponse = {
 
 const DEMO_PROFILES = {
   MTF: {
-    title: "空间分辨率 (MTF)",
-    subtitle: "调制传递函数曲线，用于观察空间频率与响应衰减关系。",
+    titleKey: "service.performance.demo.mtfTitle" as TranslationKey,
+    subtitleKey: "service.performance.demo.mtfSubtitle" as TranslationKey,
     unit: "lp/cm",
     yLabel: "MTF",
     points: [
@@ -83,8 +85,8 @@ const DEMO_PROFILES = {
     markers: { mtf50: 1.5, mtf10: 10.5 },
   },
   FWHM_H: {
-    title: "水平半高宽 (FWHM_H)",
-    subtitle: "水平方向扩散响应曲线，观察边缘锐度与成像扩展宽度。",
+    titleKey: "service.performance.demo.fwhmHTitle" as TranslationKey,
+    subtitleKey: "service.performance.demo.fwhmHSubtitle" as TranslationKey,
     unit: "Pixel",
     yLabel: "HU",
     points: Array.from({ length: 50 }, (_, i) => {
@@ -95,8 +97,8 @@ const DEMO_PROFILES = {
     peakCenter: 22,
   },
   FWHM_V: {
-    title: "垂直半高宽 (FWHM_V)",
-    subtitle: "垂直方向扩散响应曲线，用于检查扫描方向上的模糊控制。",
+    titleKey: "service.performance.demo.fwhmVTitle" as TranslationKey,
+    subtitleKey: "service.performance.demo.fwhmVSubtitle" as TranslationKey,
     unit: "Pixel",
     yLabel: "HU",
     points: Array.from({ length: 50 }, (_, i) => {
@@ -108,13 +110,14 @@ const DEMO_PROFILES = {
   },
 };
 
-const tabMeta: Record<TabKey, { label: string; accent: string }> = {
-  MTF: { label: "空间分辨率", accent: "text-[#1D4ED8]" },
-  FWHM_H: { label: "水平响应", accent: "text-[#0F766E]" },
-  FWHM_V: { label: "垂直响应", accent: "text-[#7C3AED]" },
+const tabMeta: Record<TabKey, { labelKey: TranslationKey; accent: string }> = {
+  MTF: { labelKey: "service.performance.tab.mtf", accent: "text-[#1D4ED8]" },
+  FWHM_H: { labelKey: "service.performance.tab.fwhmH", accent: "text-[#0F766E]" },
+  FWHM_V: { labelKey: "service.performance.tab.fwhmV", accent: "text-[#7C3AED]" },
 };
 
 export default function PerformanceEvaluationScreen() {
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabKey>("MTF");
   const [showBaseline, setShowBaseline] = useState(true);
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
@@ -142,7 +145,7 @@ export default function PerformanceEvaluationScreen() {
     apiFetch("/api/performance/datasets")
       .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
       .then((data) => setDatasets(data.datasets ?? []))
-      .catch((e) => console.warn("加载数据集失败", e));
+      .catch((e) => console.warn("Failed to load performance datasets", e));
   }, []);
 
   const activeDataset = datasets[0] ?? null;
@@ -172,27 +175,27 @@ export default function PerformanceEvaluationScreen() {
 
   const handleImport = async () => {
     if (!activeDataset) {
-      setError("未找到模体数据集 (backend/data/<id>/DICOM)");
+      setError(t("service.performance.errorMissingDataset"));
       return;
     }
     setLoading(true);
-    setError(null);
+      setError(null);
     try {
       const infoRes = await apiFetch(`/api/performance/dataset/${activeDataset.id}/slices`);
-      if (!infoRes.ok) throw new Error("获取切片信息失败");
+      if (!infoRes.ok) throw new Error(t("service.performance.errorFetchSlices"));
       const infoData: DatasetInfo = await infoRes.json();
       setInfo(infoData);
       const analyzeRes = await apiFetch(`/api/performance/dataset/${activeDataset.id}/analyze`, {
         method: "POST",
       });
-      if (!analyzeRes.ok) throw new Error("分析失败");
+      if (!analyzeRes.ok) throw new Error(t("service.performance.errorAnalyze"));
       const aData: AnalyzeResponse = await analyzeRes.json();
       applyAnalysis(aData);
       // Jump to the slice relevant to the active tab so the ROI/peak is visible.
       const targetSlice = activeTab === "MTF" ? aData.edge_slice_index : aData.peak_slice_index;
       setSliceIndex(targetSlice ?? 0);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "导入失败");
+      setError(e instanceof Error ? e.message : t("service.performance.errorImport"));
     } finally {
       setLoading(false);
     }
@@ -220,12 +223,12 @@ export default function PerformanceEvaluationScreen() {
       const res = await apiFetch(`/api/performance/dataset/${activeDataset.id}/analyze?${params}`, {
         method: "POST",
       });
-      if (!res.ok) throw new Error("重算失败");
+      if (!res.ok) throw new Error(t("service.performance.errorReanalyze"));
       const aData: AnalyzeResponse = await res.json();
       // Preserve user-edited overlay positions; just refresh curves.
       setAnalysis(aData);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "重算失败");
+      setError(e instanceof Error ? e.message : t("service.performance.errorReanalyze"));
     } finally {
       setLoading(false);
     }
@@ -355,8 +358,14 @@ export default function PerformanceEvaluationScreen() {
       };
     }
     const demo = DEMO_PROFILES[activeTab];
-    return { title: demo.title, subtitle: demo.subtitle, unit: demo.unit, yLabel: demo.yLabel, points: demo.points };
-  }, [analysis, activeTab]);
+    return {
+      title: t(demo.titleKey),
+      subtitle: t(demo.subtitleKey),
+      unit: demo.unit,
+      yLabel: demo.yLabel,
+      points: demo.points,
+    };
+  }, [analysis, activeTab, t]);
 
   const chartWidth = 244;
   const chartHeight = 184;
@@ -457,7 +466,7 @@ export default function PerformanceEvaluationScreen() {
                     {tab}
                   </span>
                   <span className={`mt-0.5 text-[10px] font-bold ${active ? "text-[#475569]" : "text-[#A3B2C2] group-hover:text-[#64748B]"}`}>
-                    {meta.label}
+                    {t(meta.labelKey)}
                   </span>
                   {active && (
                     <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#60A5FA] shadow-[0_0_10px_rgba(96,165,250,0.8)]" />
@@ -469,7 +478,7 @@ export default function PerformanceEvaluationScreen() {
 
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <span className="text-[12px] font-bold text-[#90A4AE]">显示基线</span>
+              <span className="text-[12px] font-bold text-[#90A4AE]">{t("service.performance.showBaseline")}</span>
               <div
                 onClick={() => setShowBaseline(!showBaseline)}
                 className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-all duration-200 ${showBaseline ? "bg-[#4D94FF]" : "bg-[#B0C4DE]"}`}
@@ -483,7 +492,7 @@ export default function PerformanceEvaluationScreen() {
               className="px-6 h-10 bg-[#2F54EB] text-white font-bold rounded-full hover:bg-blue-600 transition-all active:scale-95 shadow-md text-[13px] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {loading ? <Loader2 size={14} className="animate-spin" /> : null}
-              {loading ? "分析中…" : "导入图像"}
+              {loading ? t("service.performance.analyzing") : t("service.performance.importImages")}
             </button>
           </div>
         </div>
@@ -528,7 +537,7 @@ export default function PerformanceEvaluationScreen() {
                   )}
                   {activeTab === "MTF" && mtfRoi && mtfRoi.slice !== sliceIndex && (
                     <div className="absolute top-12 left-3 bg-black/60 text-[#FBBF24] text-[10px] font-bold px-2 py-1 rounded-md">
-                      ROI 在切片 {mtfRoi.slice + 1} (点击图像放置于本切片)
+                      {t("service.performance.roiOtherSlice", { slice: mtfRoi.slice + 1 })}
                     </div>
                   )}
                   {/* FWHM peak marker on its slice */}
@@ -545,7 +554,7 @@ export default function PerformanceEvaluationScreen() {
                   )}
                   {activeTab !== "MTF" && fwhmPeak && fwhmPeak.slice !== sliceIndex && (
                     <div className="absolute top-12 left-3 bg-black/60 text-[#22D3EE] text-[10px] font-bold px-2 py-1 rounded-md">
-                      采样点在切片 {fwhmPeak.slice + 1} (点击图像放置于本切片)
+                      {t("service.performance.sampleOtherSlice", { slice: fwhmPeak.slice + 1 })}
                     </div>
                   )}
                 </div>
@@ -575,7 +584,7 @@ export default function PerformanceEvaluationScreen() {
                   <ImageIcon size={32} />
                 </div>
                 <span className="text-[#4D94FF] text-[14px] font-bold tracking-widest uppercase">
-                  Target Phantom View
+                  {t("service.performance.targetPhantomView")}
                 </span>
                 {error && (
                   <span className="text-[#F87171] text-[11px] font-bold mt-2 max-w-[280px] text-center">{error}</span>
@@ -743,8 +752,8 @@ export default function PerformanceEvaluationScreen() {
                 </div>
 
                 <div className="mt-1 flex items-center justify-between text-[8px] font-bold text-[#94A3B8] border-t border-[#F1F5F9] pt-1">
-                  <span>Unit: {profile.unit}</span>
-                  <span>Axis: {profile.yLabel}</span>
+                  <span>{t("service.performance.unitLabel", { value: profile.unit })}</span>
+                  <span>{t("service.performance.axisLabel", { value: profile.yLabel })}</span>
                 </div>
               </div>
             </div>
@@ -752,19 +761,19 @@ export default function PerformanceEvaluationScreen() {
             <div className="bg-white rounded-3xl border border-[#D7E3F4] p-4 shadow-sm shrink-0">
               <div className="text-[12px] font-black text-[#1E293B] mb-3 uppercase tracking-tighter flex items-center gap-2">
                 <div className="w-1 h-3 bg-[#3B82F6] rounded-full" />
-                测量数值统计
+                {t("service.performance.measurementStats")}
               </div>
               <div className="space-y-2">
                 {activeTab === "MTF" ? (
                   <>
                     <div className="flex justify-between items-center">
-                      <span className="text-[11px] text-[#64748B] font-semibold">MTF50 频率</span>
+                      <span className="text-[11px] text-[#64748B] font-semibold">{t("service.performance.mtf50Frequency")}</span>
                       <span className="text-[12px] text-[#2563EB] font-black">
                         {analysis?.mtf.mtf50 != null ? `${analysis.mtf.mtf50.toFixed(2)} lp/cm` : "1.5 lp/cm"}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[11px] text-[#64748B] font-semibold">MTF10 频率</span>
+                      <span className="text-[11px] text-[#64748B] font-semibold">{t("service.performance.mtf10Frequency")}</span>
                       <span className="text-[12px] text-[#2563EB] font-black">
                         {analysis?.mtf.mtf10 != null ? `${analysis.mtf.mtf10.toFixed(2)} lp/cm` : "10.5 lp/cm"}
                       </span>
@@ -773,7 +782,7 @@ export default function PerformanceEvaluationScreen() {
                 ) : (
                   <>
                     <div className="flex justify-between items-center">
-                      <span className="text-[11px] text-[#64748B] font-semibold">FWHM 估值</span>
+                      <span className="text-[11px] text-[#64748B] font-semibold">{t("service.performance.fwhmEstimate")}</span>
                       <span className="text-[12px] text-[#059669] font-black">
                         {fwhmInfo ? `${fwhmInfo.fwhmPx.toFixed(2)} px` : "—"}
                       </span>
@@ -785,7 +794,7 @@ export default function PerformanceEvaluationScreen() {
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-[11px] text-[#64748B] font-semibold">峰值中心</span>
+                      <span className="text-[11px] text-[#64748B] font-semibold">{t("service.performance.peakCenter")}</span>
                       <span className="text-[12px] text-[#059669] font-black">
                         {fwhmInfo ? fwhmInfo.peakCenter.toFixed(1) : "—"}
                       </span>
@@ -793,16 +802,16 @@ export default function PerformanceEvaluationScreen() {
                   </>
                 )}
                 <div className="pt-2 border-t border-[#F1F5F9] flex justify-between items-center">
-                  <span className="text-[11px] text-[#64748B] font-semibold">数据状态</span>
+                  <span className="text-[11px] text-[#64748B] font-semibold">{t("service.performance.dataStatus")}</span>
                   <div className="flex items-center gap-1">
                     {analysis ? (
                       <>
-                        <span className="text-[12px] text-[#059669] font-black">已加载</span>
+                        <span className="text-[12px] text-[#059669] font-black">{t("service.performance.loaded")}</span>
                         <div className="w-1.5 h-1.5 rounded-full bg-[#059669]" />
                       </>
                     ) : (
                       <>
-                        <span className="text-[12px] text-[#DC2626] font-black">演示数据</span>
+                        <span className="text-[12px] text-[#DC2626] font-black">{t("service.performance.demoData")}</span>
                         <div className="w-1.5 h-1.5 rounded-full bg-[#DC2626] animate-pulse" />
                       </>
                     )}

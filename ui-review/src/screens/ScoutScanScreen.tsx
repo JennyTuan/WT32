@@ -21,6 +21,7 @@ import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
+import { useI18n } from "../lib/i18nContext";
 
 interface Sequence {
     id: string;
@@ -130,6 +131,7 @@ function FourDScoutParamPanel({
     onChange: (key: keyof FourDScoutParams, value: string) => void;
     readOnly: boolean;
 }) {
+    const { t } = useI18n();
     const editableCardCls = `p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${
         readOnly ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"
     }`;
@@ -144,7 +146,7 @@ function FourDScoutParamPanel({
             <div className="flex-1 p-2 pt-2 flex flex-col gap-2 overflow-y-auto">
                 <div className="grid grid-cols-2 gap-2">
                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                        <span className={labelCls}>进出床</span>
+                        <span className={labelCls}>{t("scanFlow.inOutTable")}</span>
                         <div className="relative w-full">
                             <select
                                 value={params.bedMode}
@@ -152,15 +154,15 @@ function FourDScoutParamPanel({
                                 disabled={readOnly}
                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                             >
-                                <option value="in">进床</option>
-                                <option value="out">出床</option>
+                                <option value="in">{t("scanFlow.tableIn")}</option>
+                                <option value="out">{t("scanFlow.tableOut")}</option>
                             </select>
                             <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                         </div>
                     </label>
 
                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                        <span className={labelCls}>体位</span>
+                        <span className={labelCls}>{t("scanFlow.patientPosition")}</span>
                         <div className="relative w-full">
                             <select
                                 value={params.position}
@@ -182,7 +184,7 @@ function FourDScoutParamPanel({
                     </label>
 
                     <div className={staticCardCls}>
-                        <span className={labelCls}>扫描长度</span>
+                        <span className={labelCls}>{t("scanFlow.scanLength")}</span>
                         <span className={`${valueCls} mt-[1px]`}>{params.scanLength}</span>
                     </div>
 
@@ -203,7 +205,7 @@ function FourDScoutParamPanel({
                     </div>
 
                     <div className={editableCardCls}>
-                        <span className={labelCls}>平扫角度</span>
+                        <span className={labelCls}>{t("scanFlow.flatScanAngle")}</span>
                         <div className="flex items-center gap-1 mt-[1px]">
                             <span className={valueCls}>{params.scoutAngle}</span>
                             <ChevronDown size={9} className={chevronCls} />
@@ -231,7 +233,7 @@ function FourDScoutParamPanel({
                             : "border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95"
                     }`}
                 >
-                    <Info size={14} /> 参数详情
+                    <Info size={14} /> {t("scanFlow.parameterDetails")}
                 </button>
             </div>
         </div>
@@ -239,6 +241,7 @@ function FourDScoutParamPanel({
 }
 
 function BreathingScoutViewport() {
+    const { t } = useI18n();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const projectionRef = useRef<Float32Array | null>(null);
@@ -560,13 +563,13 @@ function BreathingScoutViewport() {
 
             {loadState === "loading" && (
                 <div className="absolute inset-0 flex items-center justify-center text-[12px] font-medium tracking-[0.12em] text-[#9FB2C5]">
-                    正在载入真实 DICOM 影像...
+                    {t("scanFlow.realDicomLoading")}
                 </div>
             )}
 
             {loadState === "error" && (
                 <div className="absolute inset-0 flex items-center justify-center text-[12px] font-medium tracking-[0.08em] text-[#D1D9E1]">
-                    真实影像加载失败
+                    {t("scanFlow.realImageLoadError")}
                 </div>
             )}
 
@@ -610,7 +613,7 @@ function BreathingScoutViewport() {
                             <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-white/20" />
                         </div>
                         <div className="pointer-events-none absolute left-2 top-2 rounded border border-[#93C5FD]/40 bg-[#08111f]/90 px-2 py-1 text-[10px] font-black tracking-[0.08em] text-[#DBEAFE]">
-                            扫描范围
+                            {t("scanFlow.scanRange")}
                         </div>
 
                         <div className="absolute -top-3 left-1/2 h-6 w-12 -translate-x-1/2 cursor-ns-resize" onMouseDown={startCropDrag("top")} />
@@ -661,14 +664,16 @@ interface ScoutScanScreenProps {
 }
 
 const ScoutScanScreen = ({
-    firstStepLabel = "激光灯定位",
+    firstStepLabel,
     bottomPanelMode = "positioning",
     viewportBgClassName = "bg-[#1A222B]",
     breathingWorkflowVariant = "training",
 }: ScoutScanScreenProps) => {
+    const { t } = useI18n();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const navigate = useNavigate();
+    const resolvedFirstStepLabel = firstStepLabel ?? t("scanFlow.step.laserPosition");
 
     // 4D workflow detection - driven by scan session acquisition_type
     const [is4DWorkflow, setIs4DWorkflow] = useState(false);
@@ -873,22 +878,27 @@ const ScoutScanScreen = ({
     const buildSequenceSteps = useCallback((type: WorkflowSequenceType) => {
         // 4D workflows get their own 4-step sequence
         if (is4DWorkflow) {
-            if (type === 'scout') return ["呼吸采集", "激光灯定位", "参数确认", "执行扫描"];
-            return ["参数确认", "执行扫描"];
+            if (type === 'scout') return [
+                t("scanFlow.step.breathingAcquisition"),
+                t("scanFlow.step.laserPosition"),
+                t("scanFlow.step.parameterConfirm"),
+                t("scanFlow.step.executeScan"),
+            ];
+            return [t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")];
         }
         // Regular scan: existing logic unchanged
         if (type === "scout") {
             return isBreathingAcquisition
-                ? [firstStepLabel, "激光灯定位", "参数确认", "执行扫描"]
-                : [firstStepLabel, "参数确认", "执行扫描"];
+                ? [resolvedFirstStepLabel, t("scanFlow.step.laserPosition"), t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")]
+                : [resolvedFirstStepLabel, t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")];
         }
         if (type === "helical" || type === "axial" || type === "4d") {
             return bottomPanelMode === "breathing"
-                ? ["呼吸训练", "参数确认", "执行扫描"]
-                : ["参数确认", "执行扫描"];
+                ? [t("scanFlow.breathingTraining"), t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")]
+                : [t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")];
         }
-        return ["参数确认", "执行扫描"];
-    }, [bottomPanelMode, firstStepLabel, isBreathingAcquisition, is4DWorkflow]);
+        return [t("scanFlow.step.parameterConfirm"), t("scanFlow.step.executeScan")];
+    }, [bottomPanelMode, isBreathingAcquisition, is4DWorkflow, resolvedFirstStepLabel, t]);
 
     const buildGroupsFromWorkflowPlans = useCallback((): ProtocolGroup[] => {
         if (workflowPlans.length === 0) {
@@ -983,12 +993,12 @@ const ScoutScanScreen = ({
     }, [laserActive, selectedPosition, startPos, endPos]);
 
     const positioningHint = !laserActive
-        ? "请打开激光灯获取定位"
+        ? t("scanFlow.positioningHint.openLaser")
         : selectedPosition === "start"
-            ? "激光灯开启，机床移动中，正在实时采集起始床码"
+            ? t("scanFlow.positioningHint.start")
             : selectedPosition === "end"
-                ? "激光灯开启，机床移动中，正在实时采集结束床码"
-                : "激光灯已开启，请先选择起始位置或结束位置";
+                ? t("scanFlow.positioningHint.end")
+                : t("scanFlow.positioningHint.choosePoint");
 
     const persistPositioningToSession = useCallback(async () => {
         const scanSession = await fetchSelectedScanSession();
@@ -1230,7 +1240,7 @@ const ScoutScanScreen = ({
                     {isBreathingTraining ? (
                         <div className="border-t border-[#EEF2F9] bg-[#F8FAFC] px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 overflow-hidden">
                             <button className="h-[28px] w-full rounded-md text-[10px] font-bold flex items-center justify-center border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
-                                呼吸训练
+                                {t("scanFlow.breathingTraining")}
                             </button>
                             <div className="grid grid-cols-2 gap-1.5">
                                 <BreathingHelicalParamCard label="进出床" value={BREATHING_HELICAL_PARAM_PREVIEW.bedMode} />
@@ -1244,7 +1254,7 @@ const ScoutScanScreen = ({
                             </div>
                             <div className="mt-auto pt-0.5">
                                 <button className="h-[28px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border border-[#B0C4DE] bg-white text-[#4D94FF] hover:bg-blue-50 active:scale-95 shadow-sm transition-all">
-                                    <Info size={14} /> 参数详情
+                                    <Info size={14} /> {t("scanFlow.parameterDetails")}
                                 </button>
                             </div>
                         </div>
@@ -1360,7 +1370,7 @@ const ScoutScanScreen = ({
                                     <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-sm ${breathingPhase === 'stable' ? 'border-[#C8E6C9] bg-[#E8F5E9]' : 'border-[#FFE0B2] bg-[#FFF8E1]'}`}>
                                         <div className={`w-1.5 h-1.5 rounded-full ${breathingPhase === 'stable' ? 'bg-[#4CAF50]' : 'bg-[#FFA726] animate-pulse'}`}></div>
                                         <span className={`text-[11px] font-bold ${breathingPhase === 'stable' ? 'text-[#2E7D32]' : 'text-[#E65100]'}`}>
-                                            {breathingPhase === 'stable' ? '呼吸稳定 · 可继续' : `呼吸模拟中 · ${breathingReadyCountdown}s`}
+                                            {breathingPhase === 'stable' ? t("scanFlow.breathingStable") : t("scanFlow.breathingSimulating", { seconds: breathingReadyCountdown })}
                                         </span>
                                     </div>
                                 </div>
@@ -1380,7 +1390,7 @@ const ScoutScanScreen = ({
                                         className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[11px] font-bold shadow-sm transition-colors ${breathingParamsExpanded ? 'border-[#4D94FF] bg-[#E3F2FD] text-[#1565C0]' : 'border-[#B0C4DE] bg-white text-[#546E7A] hover:border-[#4D94FF] hover:text-[#1565C0]'}`}
                                     >
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                                        采集参数
+                                        {t("scanFlow.acquisitionParams")}
                                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${breathingParamsExpanded ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"/></svg>
                                     </button>
                                 </div>
@@ -1437,7 +1447,7 @@ const ScoutScanScreen = ({
                                     <div className="px-4 pt-3 pb-4">
                                         <div className="mb-2 flex items-center justify-between">
                                             <div className="flex items-baseline gap-2">
-                                                <span className="text-[13px] font-black text-[#37474F]">采集参数</span>
+                                                <span className="text-[13px] font-black text-[#37474F]">{t("scanFlow.acquisitionParams")}</span>
                                                 <span className="text-[10px] font-mono text-[#90A4AE]">Acquisition Controls</span>
                                             </div>
                                             <button
@@ -1598,7 +1608,7 @@ const ScoutScanScreen = ({
                         <div className="flex-1 flex flex-col gap-2 bg-transparent">
                             <div className="shrink-0 rounded-md border border-[#B0C4DE]/40 bg-white p-4 shadow-sm">
                                 <div className="mb-3 flex items-center justify-between">
-                                    <div className="text-[14px] font-black text-[#37474F]">采集参数</div>
+                                    <div className="text-[14px] font-black text-[#37474F]">{t("scanFlow.acquisitionParams")}</div>
                                     <div className="text-[10px] font-mono text-[#90A4AE]">Acquisition Controls</div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
@@ -1741,7 +1751,7 @@ const ScoutScanScreen = ({
                         onClick={handlePreviousStep}
                         className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95"
                     >
-                        <ChevronLeft size={20} /> 上一步
+                        <ChevronLeft size={20} /> {t("common.previousStep")}
                     </button>
                 </div>
 
@@ -1754,7 +1764,7 @@ const ScoutScanScreen = ({
                         <button
                             onClick={() => setShowAbortConfirm(true)}
                             className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#F57C00] font-bold rounded-md border-2 border-[#F57C00] hover:bg-orange-50 transition-all uppercase text-[13px] shadow-sm active:scale-95">
-                            <AlertTriangle size={20} /> 中止检查
+                            <AlertTriangle size={20} /> {t("scanFlow.abortExam")}
                         </button>
                     </div>
                 )}
@@ -1787,7 +1797,7 @@ const ScoutScanScreen = ({
                                 : (isBreathingAcquisitionStep ? 'bg-[#4D94FF] text-white hover:bg-blue-600' : (bottomPanelMode === 'breathing' ? 'bg-[#7EAAFF] text-white hover:bg-[#6FA0FF]' : 'bg-[#4D94FF] text-white hover:bg-blue-600'))
                         }`}
                     >
-                        {isBreathingAcquisitionStep ? '定位像' : (is4DWorkflow && activeStepIdx === 2 ? '执行扫描' : (bottomPanelMode === 'breathing' ? '断层扫描' : '下一步'))} <ChevronRight size={20} />
+                        {isBreathingAcquisitionStep ? t("scanFlow.scout") : (is4DWorkflow && activeStepIdx === 2 ? t("scanFlow.executeScan") : (bottomPanelMode === 'breathing' ? t("scanFlow.postScout.axial") : t("common.nextStep")))} <ChevronRight size={20} />
                     </button>
                 </div>
             </footer>
@@ -1801,8 +1811,8 @@ const ScoutScanScreen = ({
                                 <Trash2 size={16} className="text-[#F57C00]" />
                             </div>
                             <div>
-                                <div className="text-[14px] font-black text-[#37474F]">确认删除</div>
-                                <div className="text-[11px] text-[#78909C] mt-0.5">已选择 {selectedIds.length} 项，此操作不可恢复</div>
+                                <div className="text-[14px] font-black text-[#37474F]">{t("scanFlow.confirmDelete")}</div>
+                                <div className="text-[11px] text-[#78909C] mt-0.5">{t("scanFlow.selectedCannotUndo", { count: selectedIds.length })}</div>
                             </div>
                         </div>
                         <div className="flex gap-2 px-5 py-4">
@@ -1810,13 +1820,13 @@ const ScoutScanScreen = ({
                                 onClick={() => setShowDeleteConfirm(false)}
                                 className="flex-1 h-[40px] bg-white border-2 border-[#B0C4DE] text-[#546E7A] font-bold rounded-lg text-[13px] hover:bg-gray-50 transition-all active:scale-95"
                             >
-                                取消
+                                {t("common.cancel")}
                             </button>
                             <button
                                 onClick={handleConfirmDelete}
                                 className="flex-1 h-[40px] bg-[#D32F2F] text-white font-bold rounded-lg text-[13px] hover:bg-red-700 shadow-md transition-all active:scale-95"
                             >
-                                确认删除
+                                {t("scanFlow.confirmDelete")}
                             </button>
                         </div>
                     </div>
@@ -1846,7 +1856,7 @@ const ScoutScanScreen = ({
                 scanData={{
                     ctdi: "--",
                     dlp: "--",
-                    protocol: "定位像",
+                    protocol: t("scanFlow.scout"),
                 }}
             />
 
@@ -1859,13 +1869,13 @@ const ScoutScanScreen = ({
                                 <AlertTriangle size={20} className="text-[#F57C00]" />
                             </div>
                             <div>
-                                <div className="text-[15px] font-black text-[#37474F]">中止检查</div>
-                                <div className="text-[12px] text-[#78909C] mt-0.5">确认中止当前检查流程？</div>
+                                <div className="text-[15px] font-black text-[#37474F]">{t("scanFlow.abortExam")}</div>
+                                <div className="text-[12px] text-[#78909C] mt-0.5">{t("scanFlow.abortQuestion")}</div>
                             </div>
                         </div>
                         <div className="px-5 py-3">
                             <p className="text-[13px] text-[#546E7A] leading-relaxed">
-                                中止后，<span className="font-bold text-[#37474F]">当前扫描参数将清空</span>，需要重新进入流程。
+                                {t("scanFlow.abortBodyStart")}<span className="font-bold text-[#37474F]">{t("scanFlow.abortBodyStrong")}</span>{t("scanFlow.abortBodyEnd")}
                             </p>
                         </div>
                         <div className="flex gap-2 px-5 pb-5">
@@ -1873,7 +1883,7 @@ const ScoutScanScreen = ({
                                 onClick={() => setShowAbortConfirm(false)}
                                 className="flex-1 h-[40px] bg-white border-2 border-[#B0C4DE] text-[#546E7A] font-bold rounded-lg text-[13px] hover:bg-gray-50 transition-all active:scale-95"
                             >
-                                继续检查
+                                {t("scanFlow.continueExam")}
                             </button>
                             <button
                                 onClick={() => {
@@ -1882,7 +1892,7 @@ const ScoutScanScreen = ({
                                 }}
                                 className="flex-1 h-[40px] bg-[#F57C00] text-white font-bold rounded-lg text-[13px] hover:bg-orange-600 shadow-md transition-all active:scale-95"
                             >
-                                确认中止
+                                {t("scanFlow.confirmAbort")}
                             </button>
                         </div>
                     </div>

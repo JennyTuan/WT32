@@ -9,6 +9,7 @@ import AutoMaPanel, { NOISE_SLIDER_DEFAULT, type NoiseLevel } from "../component
 import ScanConfirmScreen from "./ScanConfirmScreen";
 import { buildWadoImageId, initCornerstone } from "../lib/cornerstone/initCornerstone";
 import { computeDoseModulation, type ScoutHuData } from "../lib/doseModulation";
+import { useI18n } from "../lib/i18nContext";
 
 // Optional cornerstone-backed loading source. When provided, TomographicScoutViewport
 // loads via cornerstone (so JPEG Lossless / other compressed transfer syntaxes work).
@@ -160,6 +161,7 @@ export function TomographicScoutViewport({
     onScoutHuChange?: (data: ScoutHuData | null) => void;
     onCropBoxChange?: (cropBox: { x: number; y: number; width: number; height: number }) => void;
 }) {
+    const { t } = useI18n();
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const projectionRef = useRef<Uint8ClampedArray | null>(null);
@@ -773,13 +775,13 @@ export function TomographicScoutViewport({
 
                 {loadState === "loading" && (
                     <div className="absolute inset-0 flex items-center justify-center bg-[#05080d]/80 text-[14px] font-bold text-white/70">
-                        正在载入定位像...
+                        {t("scanFlow.scoutLoading")}
                     </div>
                 )}
 
                 {loadState === "error" && (
                     <div className="absolute inset-0 flex items-center justify-center bg-[#05080d]/80 text-[14px] font-bold text-[#FCA5A5]">
-                        定位像加载失败
+                        {t("scanFlow.scoutLoadError")}
                     </div>
                 )}
 
@@ -806,7 +808,7 @@ export function TomographicScoutViewport({
                             <div
                                 className="absolute left-0 right-0 z-40 h-10 -translate-y-1/2 cursor-ns-resize touch-none"
                                 style={{ top: `${clamp01(scanPositionRatio) * 100}%`, pointerEvents: "auto" }}
-                                title="扫描位置"
+                                title={t("scanFlow.scanPosition")}
                                 onPointerDown={startPositionDrag}
                                 onPointerDownCapture={startPositionDrag}
                             >

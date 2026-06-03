@@ -27,38 +27,37 @@ import {
   type SystemSettingsSnapshot,
   type TimeSettings,
 } from "../../../lib/systemSettingsApi";
+import { useI18n } from "../../../lib/i18nContext";
+import type { TranslationKey } from "../../../lib/i18n";
 
-const LANGUAGE_OPTIONS: Array<{ value: GeneralSettings["language"]; label: string }> = [
-  { value: "zh-CN", label: "简体中文" },
-  { value: "en-US", label: "English (US)" },
-];
+const LANGUAGE_OPTIONS: GeneralSettings["language"][] = ["zh-CN", "en-US"];
+const LANGUAGE_LABEL_KEYS: Record<GeneralSettings["language"], TranslationKey> = {
+  "zh-CN": "language.zh-CN",
+  "en-US": "language.en-US",
+};
 
-const THEME_OPTIONS: Array<{ value: GeneralSettings["theme"]; label: string }> = [
-  { value: "light", label: "浅色" },
-  { value: "dark", label: "深色" },
-  { value: "auto", label: "跟随系统" },
-];
+const THEME_OPTIONS: GeneralSettings["theme"][] = ["light", "dark", "auto"];
+const THEME_LABEL_KEYS: Record<GeneralSettings["theme"], TranslationKey> = {
+  light: "systemSettings.theme.light",
+  dark: "systemSettings.theme.dark",
+  auto: "systemSettings.theme.auto",
+};
 
-const TIME_FORMAT_OPTIONS: Array<{ value: GeneralSettings["time_format"]; label: string }> = [
-  { value: "24h", label: "24 小时制" },
-  { value: "12h", label: "12 小时制" },
-];
+const TIME_FORMAT_OPTIONS: GeneralSettings["time_format"][] = ["24h", "12h"];
 
-const DATE_FORMAT_OPTIONS: Array<{ value: GeneralSettings["date_format"]; label: string }> = [
-  { value: "YYYY-MM-DD", label: "YYYY-MM-DD" },
-  { value: "DD/MM/YYYY", label: "DD/MM/YYYY" },
-  { value: "MM/DD/YYYY", label: "MM/DD/YYYY" },
-];
+const DATE_FORMAT_OPTIONS: GeneralSettings["date_format"][] = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY"];
 
-const LENGTH_UNIT_OPTIONS: Array<{ value: GeneralSettings["length_unit"]; label: string }> = [
-  { value: "mm", label: "毫米 (mm)" },
-  { value: "cm", label: "厘米 (cm)" },
-];
+const LENGTH_UNIT_OPTIONS: GeneralSettings["length_unit"][] = ["mm", "cm"];
+const LENGTH_UNIT_LABEL_KEYS: Record<GeneralSettings["length_unit"], TranslationKey> = {
+  mm: "systemSettings.unit.mm",
+  cm: "systemSettings.unit.cm",
+};
 
-const WEIGHT_UNIT_OPTIONS: Array<{ value: GeneralSettings["weight_unit"]; label: string }> = [
-  { value: "kg", label: "千克 (kg)" },
-  { value: "lb", label: "磅 (lb)" },
-];
+const WEIGHT_UNIT_OPTIONS: GeneralSettings["weight_unit"][] = ["kg", "lb"];
+const WEIGHT_UNIT_LABEL_KEYS: Record<GeneralSettings["weight_unit"], TranslationKey> = {
+  kg: "systemSettings.unit.kg",
+  lb: "systemSettings.unit.lb",
+};
 
 const TIMEZONE_OPTIONS = [
   "Asia/Shanghai",
@@ -72,16 +71,17 @@ const TIMEZONE_OPTIONS = [
   "UTC",
 ];
 
-const LICENSE_LABELS: Record<LicenseStatus, { label: string; tone: "ok" | "warn" | "err" }> = {
-  valid: { label: "有效", tone: "ok" },
-  expiring: { label: "即将到期", tone: "warn" },
-  expired: { label: "已过期", tone: "err" },
+const LICENSE_LABELS: Record<LicenseStatus, { labelKey: TranslationKey; tone: "ok" | "warn" | "err" }> = {
+  valid: { labelKey: "systemSettings.license.valid", tone: "ok" },
+  expiring: { labelKey: "systemSettings.license.expiring", tone: "warn" },
+  expired: { labelKey: "systemSettings.license.expired", tone: "err" },
 };
 
 const isIpLike = (value: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(value.trim());
 const isHostnameLike = (value: string) => /^[a-zA-Z0-9-]{1,63}$/.test(value.trim());
 
 export default function SystemSettingsPage() {
+  const { setLanguage, t } = useI18n();
   const [settings, setSettings] = useState<SystemSettingsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -97,13 +97,14 @@ export default function SystemSettingsPage() {
     try {
       const data = await getSystemSettings();
       setSettings(data);
+      setLanguage(data.general.language);
       setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "系统设置加载失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setLanguage]);
 
   useEffect(() => {
     load();
@@ -112,17 +113,17 @@ export default function SystemSettingsPage() {
   const validationIssues = useMemo(() => {
     if (!settings) return [];
     const issues: string[] = [];
-    if (!isHostnameLike(settings.network.hostname)) issues.push("主机名只能包含字母、数字和连字符");
+    if (!isHostnameLike(settings.network.hostname)) issues.push(t("systemSettings.validation.hostname"));
     if (settings.network.mode === "static") {
-      if (!isIpLike(settings.network.ip_address)) issues.push("静态 IP 格式无效");
-      if (!isIpLike(settings.network.netmask)) issues.push("子网掩码格式无效");
-      if (!isIpLike(settings.network.gateway)) issues.push("网关格式无效");
+      if (!isIpLike(settings.network.ip_address)) issues.push(t("systemSettings.validation.ipAddress"));
+      if (!isIpLike(settings.network.netmask)) issues.push(t("systemSettings.validation.netmask"));
+      if (!isIpLike(settings.network.gateway)) issues.push(t("systemSettings.validation.gateway"));
     }
-    if (settings.network.dns_primary && !isIpLike(settings.network.dns_primary)) issues.push("主 DNS 格式无效");
-    if (settings.network.dns_secondary && !isIpLike(settings.network.dns_secondary)) issues.push("备用 DNS 格式无效");
-    if (settings.time.ntp_enabled && !settings.time.ntp_server.trim()) issues.push("启用 NTP 后必须填写服务器地址");
+    if (settings.network.dns_primary && !isIpLike(settings.network.dns_primary)) issues.push(t("systemSettings.validation.dnsPrimary"));
+    if (settings.network.dns_secondary && !isIpLike(settings.network.dns_secondary)) issues.push(t("systemSettings.validation.dnsSecondary"));
+    if (settings.time.ntp_enabled && !settings.time.ntp_server.trim()) issues.push(t("systemSettings.validation.ntpServer"));
     return issues;
-  }, [settings]);
+  }, [settings, t]);
 
   const mutate = (updater: (current: SystemSettingsSnapshot) => SystemSettingsSnapshot) => {
     setSettings((current) => (current ? updater(current) : current));
@@ -132,6 +133,10 @@ export default function SystemSettingsPage() {
 
   const updateGeneral = <K extends keyof GeneralSettings>(key: K, value: GeneralSettings[K]) => {
     mutate((current) => ({ ...current, general: { ...current.general, [key]: value } }));
+  };
+  const handleLanguageChange = (value: GeneralSettings["language"]) => {
+    setLanguage(value);
+    updateGeneral("language", value);
   };
   const updateTime = <K extends keyof TimeSettings>(key: K, value: TimeSettings[K]) => {
     mutate((current) => ({ ...current, time: { ...current.time, [key]: value } }));
@@ -147,27 +152,29 @@ export default function SystemSettingsPage() {
     try {
       const updated = await updateSystemSettings(settings);
       setSettings(updated);
+      setLanguage(updated.general.language);
       setDirty(false);
-      setNotice("系统设置已保存");
+      setNotice(t("systemSettings.noticeSaved"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "系统设置保存失败");
+      setError(e instanceof Error ? e.message : t("systemSettings.errorSave"));
     } finally {
       setSaving(false);
     }
   };
 
   const handleReset = async () => {
-    if (!window.confirm("恢复默认系统设置？当前未保存修改将被替换。")) return;
+    if (!window.confirm(t("systemSettings.confirmReset"))) return;
     setSaving(true);
     setError(null);
     setNotice(null);
     try {
       const next = await resetSystemSettings();
       setSettings(next);
+      setLanguage(next.general.language);
       setDirty(false);
-      setNotice("已恢复默认系统设置");
+      setNotice(t("systemSettings.noticeReset"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "恢复默认设置失败");
+      setError(e instanceof Error ? e.message : t("systemSettings.errorReset"));
     } finally {
       setSaving(false);
     }
@@ -178,9 +185,9 @@ export default function SystemSettingsPage() {
     setError(null);
     try {
       const result = await syncSystemTime();
-      setNotice(`时间同步：${result.server} · 漂移 ${result.drift_ms.toFixed(1)} ms`);
+      setNotice(t("systemSettings.timeSync.notice", { server: result.server, drift: result.drift_ms.toFixed(1) }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "时间同步失败");
+      setError(e instanceof Error ? e.message : t("systemSettings.errorSyncTime"));
     } finally {
       setSyncing(false);
     }
@@ -192,7 +199,7 @@ export default function SystemSettingsPage() {
         <section className="flex h-full items-center justify-center bg-[#F8FBFF]">
           <div className="flex items-center gap-3 text-[13px] font-bold text-[#7B92A8]">
             <RefreshCw size={16} className="animate-spin text-[#4D94FF]" />
-            {error ?? "正在加载系统设置..."}
+            {error ?? t("systemSettings.loading")}
           </div>
         </section>
       </ServiceModeShell>
@@ -206,8 +213,8 @@ export default function SystemSettingsPage() {
       <section className="flex h-full min-h-0 flex-col bg-[#F8FBFF]">
         <div className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#E2EBF5] bg-white px-5">
           <div>
-            <div className="text-[16px] font-black leading-tight text-[#1E293B]">系统设置</div>
-            <div className="mt-1 text-[12px] text-[#7B92A8]">系统级参数、时间网络、设备偏好和基础配置</div>
+            <div className="text-[16px] font-black leading-tight text-[#1E293B]">{t("systemSettings.title")}</div>
+            <div className="mt-1 text-[12px] text-[#7B92A8]">{t("systemSettings.subtitle")}</div>
           </div>
 
           <div className="flex min-w-0 items-center gap-2">
@@ -218,46 +225,46 @@ export default function SystemSettingsPage() {
             ) : error ? (
               <StatusMessage tone="error" text={error} />
             ) : null}
-            <HeaderButton icon={RefreshCw} label="刷新" onClick={load} disabled={saving} />
-            <HeaderButton icon={RotateCcw} label="默认" onClick={handleReset} disabled={saving} />
+            <HeaderButton icon={RefreshCw} label={t("common.refresh")} onClick={load} disabled={saving} />
+            <HeaderButton icon={RotateCcw} label={t("common.default")} onClick={handleReset} disabled={saving} />
             <button
               type="button"
               onClick={handleSave}
               disabled={saving || !dirty || validationIssues.length > 0}
               className="flex h-9 items-center gap-1.5 rounded-md bg-[#1D4ED8] px-4 text-[12px] font-bold text-white hover:bg-[#1E40AF] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <Save size={14} /> {saving ? "保存中" : "保存"}
+              <Save size={14} /> {saving ? t("common.saving") : t("common.save")}
             </button>
           </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar">
           <div className="grid gap-3 [grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]">
-            <Panel title="常规" icon={Sliders}>
+            <Panel title={t("systemSettings.panelGeneral")} icon={Sliders}>
               <div className="grid grid-cols-2 gap-2.5">
-                <SelectField label="语言" value={settings.general.language} onChange={(v) => updateGeneral("language", v as GeneralSettings["language"])}>
-                  {LANGUAGE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <SelectField label={t("systemSettings.language")} value={settings.general.language} onChange={(v) => handleLanguageChange(v as GeneralSettings["language"])}>
+                  {LANGUAGE_OPTIONS.map((value) => <option key={value} value={value}>{t(LANGUAGE_LABEL_KEYS[value])}</option>)}
                 </SelectField>
-                <SelectField label="主题" value={settings.general.theme} onChange={(v) => updateGeneral("theme", v as GeneralSettings["theme"])}>
-                  {THEME_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <SelectField label={t("systemSettings.theme")} value={settings.general.theme} onChange={(v) => updateGeneral("theme", v as GeneralSettings["theme"])}>
+                  {THEME_OPTIONS.map((value) => <option key={value} value={value}>{t(THEME_LABEL_KEYS[value])}</option>)}
                 </SelectField>
-                <SelectField label="时间格式" value={settings.general.time_format} onChange={(v) => updateGeneral("time_format", v as GeneralSettings["time_format"])}>
-                  {TIME_FORMAT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <SelectField label={t("systemSettings.timeFormat")} value={settings.general.time_format} onChange={(v) => updateGeneral("time_format", v as GeneralSettings["time_format"])}>
+                  {TIME_FORMAT_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
                 </SelectField>
-                <SelectField label="日期格式" value={settings.general.date_format} onChange={(v) => updateGeneral("date_format", v as GeneralSettings["date_format"])}>
-                  {DATE_FORMAT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <SelectField label={t("systemSettings.dateFormat")} value={settings.general.date_format} onChange={(v) => updateGeneral("date_format", v as GeneralSettings["date_format"])}>
+                  {DATE_FORMAT_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
                 </SelectField>
-                <SelectField label="长度单位" value={settings.general.length_unit} onChange={(v) => updateGeneral("length_unit", v as GeneralSettings["length_unit"])}>
-                  {LENGTH_UNIT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <SelectField label={t("systemSettings.lengthUnit")} value={settings.general.length_unit} onChange={(v) => updateGeneral("length_unit", v as GeneralSettings["length_unit"])}>
+                  {LENGTH_UNIT_OPTIONS.map((value) => <option key={value} value={value}>{t(LENGTH_UNIT_LABEL_KEYS[value])}</option>)}
                 </SelectField>
-                <SelectField label="体重单位" value={settings.general.weight_unit} onChange={(v) => updateGeneral("weight_unit", v as GeneralSettings["weight_unit"])}>
-                  {WEIGHT_UNIT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <SelectField label={t("systemSettings.weightUnit")} value={settings.general.weight_unit} onChange={(v) => updateGeneral("weight_unit", v as GeneralSettings["weight_unit"])}>
+                  {WEIGHT_UNIT_OPTIONS.map((value) => <option key={value} value={value}>{t(WEIGHT_UNIT_LABEL_KEYS[value])}</option>)}
                 </SelectField>
               </div>
             </Panel>
 
             <Panel
-              title="时区与时间"
+              title={t("systemSettings.panelTime")}
               icon={Clock}
               action={
                 <button
@@ -266,52 +273,52 @@ export default function SystemSettingsPage() {
                   disabled={syncing || !settings.time.ntp_enabled}
                   className="flex h-8 items-center gap-1.5 rounded-md bg-[#EAF3FF] px-3 text-[12px] font-bold text-[#1D4ED8] hover:bg-[#DCEBFF] disabled:opacity-40"
                 >
-                  <Timer size={14} /> {syncing ? "同步中" : "立即同步"}
+                  <Timer size={14} /> {syncing ? t("systemSettings.syncing") : t("systemSettings.syncNow")}
                 </button>
               }
             >
               <div className="grid grid-cols-2 gap-2.5">
-                <SelectField label="时区" value={settings.time.timezone} onChange={(v) => updateTime("timezone", v)}>
+                <SelectField label={t("systemSettings.timezone")} value={settings.time.timezone} onChange={(v) => updateTime("timezone", v)}>
                   {TIMEZONE_OPTIONS.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
                 </SelectField>
-                <NumberField label="同步间隔(分钟)" value={settings.time.sync_interval_min} min={5} max={1440} onChange={(v) => updateTime("sync_interval_min", v)} />
-                <TextField label="NTP 主服务器" value={settings.time.ntp_server} onChange={(v) => updateTime("ntp_server", v)} mono />
-                <TextField label="NTP 备用服务器" value={settings.time.ntp_fallback} onChange={(v) => updateTime("ntp_fallback", v)} mono />
+                <NumberField label={t("systemSettings.syncInterval")} value={settings.time.sync_interval_min} min={5} max={1440} onChange={(v) => updateTime("sync_interval_min", v)} />
+                <TextField label={t("systemSettings.time.ntpServer")} value={settings.time.ntp_server} onChange={(v) => updateTime("ntp_server", v)} mono />
+                <TextField label={t("systemSettings.time.ntpFallback")} value={settings.time.ntp_fallback} onChange={(v) => updateTime("ntp_fallback", v)} mono />
                 <div className="col-span-2">
-                  <SwitchRow label="启用 NTP 自动同步" checked={settings.time.ntp_enabled} onChange={(v) => updateTime("ntp_enabled", v)} />
+                  <SwitchRow label={t("systemSettings.time.ntpAuto")} checked={settings.time.ntp_enabled} onChange={(v) => updateTime("ntp_enabled", v)} />
                 </div>
               </div>
             </Panel>
 
-            <Panel title="网络" icon={Network}>
+            <Panel title={t("systemSettings.panelNetwork")} icon={Network}>
               <div className="grid grid-cols-2 gap-2.5">
-                <TextField label="主机名" value={settings.network.hostname} onChange={(v) => updateNetwork("hostname", v)} mono maxLength={63} />
-                <SelectField label="IP 模式" value={settings.network.mode} onChange={(v) => updateNetwork("mode", v as NetworkSettings["mode"])}>
-                  <option value="dhcp">DHCP 自动获取</option>
-                  <option value="static">静态 IP</option>
+                <TextField label={t("systemSettings.network.hostname")} value={settings.network.hostname} onChange={(v) => updateNetwork("hostname", v)} mono maxLength={63} />
+                <SelectField label={t("systemSettings.ipMode")} value={settings.network.mode} onChange={(v) => updateNetwork("mode", v as NetworkSettings["mode"])}>
+                  <option value="dhcp">{t("systemSettings.network.dhcp")}</option>
+                  <option value="static">{t("systemSettings.network.static")}</option>
                 </SelectField>
-                <TextField label="IP 地址" value={settings.network.ip_address} onChange={(v) => updateNetwork("ip_address", v)} mono disabled={settings.network.mode === "dhcp"} />
-                <TextField label="子网掩码" value={settings.network.netmask} onChange={(v) => updateNetwork("netmask", v)} mono disabled={settings.network.mode === "dhcp"} />
-                <TextField label="默认网关" value={settings.network.gateway} onChange={(v) => updateNetwork("gateway", v)} mono disabled={settings.network.mode === "dhcp"} />
-                <TextField label="主 DNS" value={settings.network.dns_primary} onChange={(v) => updateNetwork("dns_primary", v)} mono />
-                <TextField label="备用 DNS" value={settings.network.dns_secondary} onChange={(v) => updateNetwork("dns_secondary", v)} mono />
-                <TextField label="代理地址" value={settings.network.proxy_url} onChange={(v) => updateNetwork("proxy_url", v)} mono disabled={!settings.network.proxy_enabled} />
+                <TextField label={t("systemSettings.network.ipAddress")} value={settings.network.ip_address} onChange={(v) => updateNetwork("ip_address", v)} mono disabled={settings.network.mode === "dhcp"} />
+                <TextField label={t("systemSettings.network.netmask")} value={settings.network.netmask} onChange={(v) => updateNetwork("netmask", v)} mono disabled={settings.network.mode === "dhcp"} />
+                <TextField label={t("systemSettings.network.gateway")} value={settings.network.gateway} onChange={(v) => updateNetwork("gateway", v)} mono disabled={settings.network.mode === "dhcp"} />
+                <TextField label={t("systemSettings.network.dnsPrimary")} value={settings.network.dns_primary} onChange={(v) => updateNetwork("dns_primary", v)} mono />
+                <TextField label={t("systemSettings.network.dnsSecondary")} value={settings.network.dns_secondary} onChange={(v) => updateNetwork("dns_secondary", v)} mono />
+                <TextField label={t("systemSettings.network.proxyUrl")} value={settings.network.proxy_url} onChange={(v) => updateNetwork("proxy_url", v)} mono disabled={!settings.network.proxy_enabled} />
                 <div className="col-span-2">
-                  <SwitchRow label="启用 HTTP 代理" checked={settings.network.proxy_enabled} onChange={(v) => updateNetwork("proxy_enabled", v)} />
+                  <SwitchRow label={t("systemSettings.network.proxyEnabled")} checked={settings.network.proxy_enabled} onChange={(v) => updateNetwork("proxy_enabled", v)} />
                 </div>
               </div>
             </Panel>
 
-            <Panel title="关于本机" icon={Info}>
+            <Panel title={t("systemSettings.panelAbout")} icon={Info}>
               <div className="flex flex-col gap-2 text-[12px]">
-                <ReadRow icon={Cpu} label="设备型号" value={settings.about.device_model} />
-                <ReadRow icon={Cpu} label="序列号" value={settings.about.serial_number} mono />
-                <ReadRow icon={Globe2} label="软件版本" value={settings.about.software_version} mono />
-                <ReadRow icon={Globe2} label="固件版本" value={settings.about.firmware_version} mono />
+                <ReadRow icon={Cpu} label={t("systemSettings.about.deviceModel")} value={settings.about.device_model} />
+                <ReadRow icon={Cpu} label={t("systemSettings.about.serialNumber")} value={settings.about.serial_number} mono />
+                <ReadRow icon={Globe2} label={t("systemSettings.about.softwareVersion")} value={settings.about.software_version} mono />
+                <ReadRow icon={Globe2} label={t("systemSettings.about.firmwareVersion")} value={settings.about.firmware_version} mono />
                 <div className="flex h-9 items-center justify-between rounded-md bg-[#F8FAFC] px-3">
-                  <span className="text-[11px] font-bold text-[#64748B]">许可证</span>
+                  <span className="text-[11px] font-bold text-[#64748B]">{t("systemSettings.about.license")}</span>
                   <div className="flex items-center gap-2">
-                    <LicenseBadge tone={license.tone}>{license.label}</LicenseBadge>
+                    <LicenseBadge tone={license.tone}>{t(license.labelKey)}</LicenseBadge>
                     <span className="font-mono text-[12px] font-bold text-[#334155]">
                       {settings.about.license_expires_at ?? "--"}
                     </span>

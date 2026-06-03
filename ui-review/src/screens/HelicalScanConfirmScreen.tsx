@@ -29,6 +29,7 @@ import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen
 import AppHeader from "../components/AppHeader";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import { TomographicScoutViewport, type TomographicScoutSeriesOverride } from "./SequenceScanConfirmScreen";
+import { useI18n } from "../lib/i18nContext";
 import {
     getLimbsDicomSeries,
     isLimbsHelicalScanSession,
@@ -155,6 +156,7 @@ export function FourDScoutViewport({
     revealY = 1,
     enableImageTools = false,
 }: FourDScoutViewportProps) {
+    const { t } = useI18n();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const projectionRef = useRef<Float32Array | null>(null);
@@ -407,12 +409,12 @@ export function FourDScoutViewport({
             className={`absolute inset-0 bg-black ${enableImageTools && interactionMode === "pan" ? "cursor-grab" : "cursor-crosshair"}`}
         >
             <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-            {loadState === "loading" && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#9FB2C5]">载入 DICOM 影像...</div>}
+            {loadState === "loading" && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#9FB2C5]">{t("scanFlow.imageLoading")}</div>}
             {loadState === "error" && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/85">
                     <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
-                    <span className="text-[14px] font-semibold text-red-400">影像加载失败</span>
-                    <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError?.message ?? "未知错误"}</span>
+                    <span className="text-[14px] font-semibold text-red-400">{t("scanFlow.imageLoadError")}</span>
+                    <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError?.message ?? t("scanFlow.unknownError")}</span>
                 </div>
             )}
             {enableImageTools && (
@@ -428,7 +430,7 @@ export function FourDScoutViewport({
                                 ? "bg-[#3B82F6] text-white shadow-[0_0_12px_rgba(59,130,246,0.55)]"
                                 : "bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0]"
                         }`}
-                        title="平移浏览"
+                        title={t("scanFlow.tool.pan")}
                     >
                         <Hand size={14} strokeWidth={1.8} />
                     </button>
@@ -443,7 +445,7 @@ export function FourDScoutViewport({
                                 ? "bg-[#3B82F6] text-white shadow-[0_0_12px_rgba(59,130,246,0.55)]"
                                 : "bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0]"
                         }`}
-                        title="窗宽窗位"
+                        title={t("scanFlow.tool.windowLevel")}
                     >
                         <WindowLevelIcon size={15} />
                     </button>
@@ -455,7 +457,7 @@ export function FourDScoutViewport({
                             setZoomScale((prev) => clamp(prev / 1.1, 0.5, 3.5));
                         }}
                         className="h-8 w-8 rounded-md bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0] flex items-center justify-center transition-colors"
-                        title="缩小"
+                        title={t("scanFlow.tool.zoomOut")}
                     >
                         <ZoomOut size={14} strokeWidth={1.8} />
                     </button>
@@ -466,7 +468,7 @@ export function FourDScoutViewport({
                             setZoomScale((prev) => clamp(prev * 1.1, 0.5, 3.5));
                         }}
                         className="h-8 w-8 rounded-md bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0] flex items-center justify-center transition-colors"
-                        title="放大"
+                        title={t("scanFlow.tool.zoomIn")}
                     >
                         <ZoomIn size={14} strokeWidth={1.8} />
                     </button>
@@ -477,7 +479,7 @@ export function FourDScoutViewport({
                             resetImageTools();
                         }}
                         className="h-8 w-8 rounded-md bg-transparent text-[#94A3B8] hover:bg-[#1E293B] hover:text-[#E2E8F0] flex items-center justify-center transition-colors"
-                        title="重置"
+                        title={t("scanFlow.tool.reset")}
                     >
                         <RotateCcw size={14} strokeWidth={1.8} />
                     </button>
@@ -1362,6 +1364,7 @@ const GatingHelicalConfirmScreen = () => {
 // Main HelicalScanConfirmScreen (unchanged for non-4D protocols)
 // ---------------------------------------------------------------------------
 const HelicalScanConfirmScreen = () => {
+    const { t } = useI18n();
     const isGatingWorkflow = false;
 
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
@@ -1608,7 +1611,7 @@ const HelicalScanConfirmScreen = () => {
                         />
                     ) : (
                         <div className="flex flex-1 items-center justify-center rounded-lg bg-[#05080d] text-[14px] font-bold text-white/70">
-                            正在加载定位像...
+                            {t("scanFlow.scoutLoading")}
                         </div>
                     )}
                     {helicalParam && showAutoMaPanel && (

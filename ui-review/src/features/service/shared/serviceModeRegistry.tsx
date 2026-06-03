@@ -21,42 +21,50 @@ import {
   Users,
   Wind,
 } from "lucide-react";
+import type { TranslationKey } from "../../../lib/i18n";
 
-export type ServiceModeSection = "硬件" | "设置" | "统计和报告" | "剂量管理";
+export type ServiceModeSection = "hardware" | "settings" | "reports" | "dose";
 
 export type ServiceModeItem = {
   route: string;
-  label: string;
+  labelKey: TranslationKey;
   section: ServiceModeSection;
   icon: LucideIcon;
 };
 
-export const SERVICE_MODE_SECTION_ORDER: ServiceModeSection[] = ["硬件", "设置", "统计和报告", "剂量管理"];
+export const SERVICE_MODE_SECTION_ORDER: ServiceModeSection[] = ["hardware", "settings", "reports", "dose"];
+
+export const SERVICE_MODE_SECTION_LABEL_KEYS: Record<ServiceModeSection, TranslationKey> = {
+  hardware: "service.section.hardware",
+  settings: "service.section.settings",
+  reports: "service.section.reports",
+  dose: "service.section.dose",
+};
 
 export const SERVICE_MODE_ITEMS: ServiceModeItem[] = [
-  { route: "/service/tube-warmup", label: "球管预热", section: "硬件", icon: Thermometer },
-  { route: "/service/air-calibration", label: "空气校正", section: "硬件", icon: Wind },
-  { route: "/service/daily-qa", label: "日常 QA", section: "硬件", icon: CheckCircle2 },
-  { route: "/service/hardware-test", label: "硬件测试", section: "硬件", icon: TestTube },
-  { route: "/service/battery", label: "电池管理", section: "硬件", icon: Battery },
-  { route: "/service/disk", label: "磁盘管理", section: "硬件", icon: Disc },
-  { route: "/service/performance", label: "性能评估", section: "硬件", icon: BarChart3 },
-  { route: "/mobile/manual-scan", label: "手动扫描", section: "硬件", icon: MousePointer2 },
+  { route: "/service/tube-warmup", labelKey: "service.item.tubeWarmup", section: "hardware", icon: Thermometer },
+  { route: "/service/air-calibration", labelKey: "service.item.airCalibration", section: "hardware", icon: Wind },
+  { route: "/service/daily-qa", labelKey: "service.item.dailyQa", section: "hardware", icon: CheckCircle2 },
+  { route: "/service/hardware-test", labelKey: "service.item.hardwareTest", section: "hardware", icon: TestTube },
+  { route: "/service/battery", labelKey: "service.item.battery", section: "hardware", icon: Battery },
+  { route: "/service/disk", labelKey: "service.item.disk", section: "hardware", icon: Disc },
+  { route: "/service/performance", labelKey: "service.item.performance", section: "hardware", icon: BarChart3 },
+  { route: "/mobile/manual-scan", labelKey: "service.item.manualScan", section: "hardware", icon: MousePointer2 },
 
-  { route: "/service/settings/protocol-management", label: "协议管理", section: "设置", icon: FolderCog },
-  { route: "/service/settings/corner-info", label: "四角信息", section: "设置", icon: LayoutTemplate },
-  { route: "/service/settings/dicom", label: "DICOM", section: "设置", icon: HardDriveDownload },
-  { route: "/service/settings/user-management", label: "用户管理", section: "设置", icon: Users },
-  { route: "/service/settings/system-settings", label: "系统设置", section: "设置", icon: Settings2 },
-  { route: "/service/settings/organization-info", label: "机构信息设置", section: "设置", icon: Building2 },
+  { route: "/service/settings/protocol-management", labelKey: "service.item.protocolManagement", section: "settings", icon: FolderCog },
+  { route: "/service/settings/corner-info", labelKey: "service.item.cornerInfo", section: "settings", icon: LayoutTemplate },
+  { route: "/service/settings/dicom", labelKey: "service.item.dicom", section: "settings", icon: HardDriveDownload },
+  { route: "/service/settings/user-management", labelKey: "service.item.userManagement", section: "settings", icon: Users },
+  { route: "/service/settings/system-settings", labelKey: "service.item.systemSettings", section: "settings", icon: Settings2 },
+  { route: "/service/settings/organization-info", labelKey: "service.item.organizationInfo", section: "settings", icon: Building2 },
 
-  { route: "/service/reports/qa-report", label: "质控报告", section: "统计和报告", icon: FileBarChart2 },
-  { route: "/service/reports/system-log", label: "系统日志", section: "统计和报告", icon: ScrollText },
-  { route: "/service/reports/runtime-stats", label: "运行统计", section: "统计和报告", icon: Activity },
-  { route: "/service/reports/audit-log", label: "审计日志", section: "统计和报告", icon: ShieldCheck },
+  { route: "/service/reports/qa-report", labelKey: "service.item.qaReport", section: "reports", icon: FileBarChart2 },
+  { route: "/service/reports/system-log", labelKey: "service.item.systemLog", section: "reports", icon: ScrollText },
+  { route: "/service/reports/runtime-stats", labelKey: "service.item.runtimeStats", section: "reports", icon: Activity },
+  { route: "/service/reports/audit-log", labelKey: "service.item.auditLog", section: "reports", icon: ShieldCheck },
 
-  { route: "/service/dose/settings", label: "剂量设置", section: "剂量管理", icon: Radiation },
-  { route: "/service/dose/logs", label: "剂量日志", section: "剂量管理", icon: BadgePercent },
+  { route: "/service/dose/settings", labelKey: "service.item.doseSettings", section: "dose", icon: Radiation },
+  { route: "/service/dose/logs", labelKey: "service.item.doseLogs", section: "dose", icon: BadgePercent },
 ];
 
 export const getServiceModeItem = (route: string) =>

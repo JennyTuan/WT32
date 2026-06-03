@@ -1,18 +1,36 @@
 import type { ApiDoseLog } from "../../../lib/logsApi";
+import {
+  DEFAULT_LANGUAGE,
+  translate,
+  type TranslationKey,
+  type TranslationValues,
+} from "../../../lib/i18n";
+import type { LanguageCode } from "../../../lib/systemSettingsApi";
 
 type DoseScanKind = "regular" | "contrast" | "gating" | "four_d";
 
-const SCAN_KIND_LABELS: Record<DoseScanKind, string> = {
-  regular: "常规",
-  contrast: "增强",
-  gating: "门控",
-  four_d: "4D",
+const SCAN_KIND_LABEL_KEYS: Record<DoseScanKind, TranslationKey> = {
+  regular: "service.doseLogs.scanKind.regular",
+  contrast: "service.doseLogs.scanKind.contrast",
+  gating: "service.doseLogs.scanKind.gating",
+  four_d: "service.doseLogs.scanKind.fourD",
 };
 
-const SERIES_TYPE_LABEL: Record<string, string> = {
-  topogram: "Scout",
-  helical: "螺旋",
-  axial: "轴扫",
+const SERIES_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
+  topogram: "service.doseLogs.series.topogram",
+  helical: "service.doseLogs.series.helical",
+  axial: "service.doseLogs.series.axial",
+};
+
+const BODY_PART_LABEL_KEYS: Record<string, TranslationKey> = {
+  头颅: "service.doseSettings.bodyPart.head",
+  颈部: "service.doseSettings.bodyPart.neck",
+  胸部: "service.doseSettings.bodyPart.chest",
+  腹部: "service.doseSettings.bodyPart.abdomen",
+  盆腔: "service.doseSettings.bodyPart.pelvis",
+  脊柱: "service.doseSettings.bodyPart.spine",
+  心脏: "service.doseSettings.bodyPart.cardiac",
+  四肢: "service.doseSettings.bodyPart.extremities",
 };
 
 const getDoseScanKind = (log: ApiDoseLog): DoseScanKind => {
@@ -55,6 +73,18 @@ const escapeHtml = (raw: string | number | null | undefined): string => {
     .replace(/"/g, "&quot;");
 };
 
+const escapeCssContent = (raw: string): string => raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+const localizeValue = (
+  value: string | null | undefined,
+  keyMap: Record<string, TranslationKey>,
+  t: (key: TranslationKey, values?: TranslationValues) => string,
+): string => {
+  if (!value) return "—";
+  const key = keyMap[value];
+  return key ? t(key) : value;
+};
+
 export type DoseReportRow = ApiDoseLog & { over_threshold?: boolean };
 
 export type DoseReportContext = {
@@ -66,21 +96,24 @@ export type DoseReportContext = {
   filtersDescription?: string;
   organization?: string;
   deviceModel?: string;
+  language?: LanguageCode;
 };
 
 export function printDoseLogReport(ctx: DoseReportContext): void {
+  const language = ctx.language ?? DEFAULT_LANGUAGE;
+  const t = (key: TranslationKey, values?: TranslationValues) => translate(language, key, values);
   const org = ctx.organization ?? "—";
   const device = ctx.deviceModel ?? "—";
   const now = new Date();
   const printedAt = formatDateTime(now.toISOString());
 
   const dateRangeText = (() => {
-    if (ctx.dateFrom && ctx.dateTo) return `${ctx.dateFrom} 至 ${ctx.dateTo}`;
-    if (ctx.dateFrom) return `自 ${ctx.dateFrom}`;
-    if (ctx.dateTo) return `至 ${ctx.dateTo}`;
+    if (ctx.dateFrom && ctx.dateTo) return t("service.doseReport.dateRangeBetween", { from: ctx.dateFrom, to: ctx.dateTo });
+    if (ctx.dateFrom) return t("service.doseReport.dateRangeFrom", { from: ctx.dateFrom });
+    if (ctx.dateTo) return t("service.doseReport.dateRangeTo", { to: ctx.dateTo });
     if (ctx.rows.length === 0) return "—";
     const sorted = ctx.rows.map((r) => r.scanned_at).sort();
-    return `${formatDate(sorted[0])} 至 ${formatDate(sorted[sorted.length - 1])}`;
+    return t("service.doseReport.dateRangeBetween", { from: formatDate(sorted[0]), to: formatDate(sorted[sorted.length - 1]) });
   })();
 
   const totalKvAvg = (() => {
@@ -91,15 +124,16 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
 
   const tableRows = ctx.rows
     .map((l) => {
-      const t = formatDateTime(l.scanned_at);
-      const scanKind = SCAN_KIND_LABELS[getDoseScanKind(l)];
-      const seriesLabel = SERIES_TYPE_LABEL[l.series_type] ?? l.series_type;
+      const timestamp = formatDateTime(l.scanned_at);
+      const scanKind = translate(language, SCAN_KIND_LABEL_KEYS[getDoseScanKind(l)]);
+      const seriesLabel = localizeValue(l.series_type, SERIES_TYPE_LABEL_KEYS, (key, values) => translate(language, key, values));
+      const bodyPart = localizeValue(l.body_part, BODY_PART_LABEL_KEYS, (key, values) => translate(language, key, values));
       const flagCell = l.over_threshold
-        ? `<span class="flag-over">超阈值</span>`
+        ? `<span class="flag-over">${escapeHtml(translate(language, "service.doseLogs.overThreshold"))}</span>`
         : "";
       return `
         <tr class="${l.over_threshold ? "row-over" : ""}">
-          <td class="mono">${escapeHtml(t)}</td>
+          <td class="mono">${escapeHtml(timestamp)}</td>
           <td>
             <div class="cell-primary">${escapeHtml(l.patient_name_snapshot ?? "—")}</div>
             <div class="cell-sub mono">${escapeHtml(l.patient_id_snapshot ?? "—")}</div>
@@ -107,7 +141,7 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
           <td>${escapeHtml(l.protocol_name_snapshot ?? "—")}</td>
           <td class="center">${escapeHtml(scanKind)}</td>
           <td class="center">${escapeHtml(seriesLabel)}</td>
-          <td class="center">${escapeHtml(l.body_part ?? "—")}</td>
+          <td class="center">${escapeHtml(bodyPart)}</td>
           <td class="center">${flagCell}</td>
           <td class="num mono">${escapeHtml(fmtInt(l.kv))} / ${escapeHtml(fmt(l.ma, 0))}</td>
           <td class="num mono">${escapeHtml(fmt(l.ctdi_vol))}</td>
@@ -118,16 +152,16 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
     .join("");
 
   const emptyState = ctx.rows.length === 0
-    ? `<tr><td colspan="11" class="empty">没有符合条件的剂量记录</td></tr>`
+    ? `<tr><td colspan="11" class="empty">${escapeHtml(t("service.doseReport.empty"))}</td></tr>`
     : "";
 
   const exceededCount = ctx.exceededCount ?? ctx.rows.filter((r) => r.over_threshold).length;
 
   const html = `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${escapeHtml(language)}">
 <head>
 <meta charset="UTF-8" />
-<title>剂量日志报告 ${printedAt}</title>
+<title>${escapeHtml(t("service.doseReport.title"))} ${escapeHtml(printedAt)}</title>
 <style>
   @page { size: A4; margin: 14mm 12mm 18mm 12mm; }
 
@@ -268,7 +302,7 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
     color: #90a4ae;
   }
   .page-number::after {
-    content: "第 " counter(page) " 页 / 共 " counter(pages) " 页";
+    content: "${escapeCssContent(t("service.doseReport.pageCounter"))}" counter(page) "${escapeCssContent(t("service.doseReport.pageOf"))}" counter(pages) "${escapeCssContent(t("service.doseReport.pageSuffix"))}";
   }
 
   @media screen {
@@ -297,45 +331,45 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
 </head>
 <body>
   <div class="toolbar">
-    <button class="secondary" onclick="window.close()">关闭</button>
-    <button onclick="window.print()">打印 / 另存为 PDF</button>
+    <button class="secondary" onclick="window.close()">${escapeHtml(t("service.doseReport.close"))}</button>
+    <button onclick="window.print()">${escapeHtml(t("service.doseReport.printSavePdf"))}</button>
   </div>
   <div class="page-shell">
     <header class="report-header">
       <div class="org-name">${escapeHtml(org)}</div>
       <div class="device-info">
-        <div><span class="label">设备型号：</span>${escapeHtml(device)}</div>
-        <div><span class="label">报告类型：</span>剂量日志</div>
+        <div><span class="label">${escapeHtml(t("service.doseReport.deviceModel"))}</span>${escapeHtml(device)}</div>
+        <div><span class="label">${escapeHtml(t("service.doseReport.reportType"))}</span>${escapeHtml(t("service.doseReport.reportTypeDoseLog"))}</div>
       </div>
     </header>
 
     <div class="report-title">
-      <h1>剂量日志报告</h1>
-      <div class="subtitle">CT Dose Log Report</div>
+      <h1>${escapeHtml(t("service.doseReport.title"))}</h1>
+      <div class="subtitle">${escapeHtml(t("service.doseReport.subtitle"))}</div>
     </div>
 
     <div class="meta-grid">
-      <div class="field"><span class="label">数据范围：</span><span class="value">${escapeHtml(dateRangeText)}</span></div>
-      <div class="field"><span class="label">记录数：</span><span class="value">${ctx.rows.length} 条</span></div>
-      <div class="field"><span class="label">平均 kV：</span><span class="value">${escapeHtml(totalKvAvg)}</span></div>
-      <div class="field"><span class="label">打印时间：</span><span class="value">${escapeHtml(printedAt)}</span></div>
-      <div class="field" style="grid-column: span 2;"><span class="label">筛选条件：</span><span class="value">${escapeHtml(ctx.filtersDescription ?? "全部")}</span></div>
+      <div class="field"><span class="label">${escapeHtml(t("service.doseReport.dataRange"))}</span><span class="value">${escapeHtml(dateRangeText)}</span></div>
+      <div class="field"><span class="label">${escapeHtml(t("service.doseReport.recordCount"))}</span><span class="value">${ctx.rows.length}</span></div>
+      <div class="field"><span class="label">${escapeHtml(t("service.doseReport.averageKv"))}</span><span class="value">${escapeHtml(totalKvAvg)}</span></div>
+      <div class="field"><span class="label">${escapeHtml(t("service.doseReport.printTime"))}</span><span class="value">${escapeHtml(printedAt)}</span></div>
+      <div class="field" style="grid-column: span 2;"><span class="label">${escapeHtml(t("service.doseReport.filters"))}</span><span class="value">${escapeHtml(ctx.filtersDescription ?? t("service.doseLogs.filterAll"))}</span></div>
     </div>
 
     <table>
       <thead>
         <tr>
-          <th style="width: 78px;">扫描时间</th>
-          <th style="width: 90px;">患者</th>
-          <th>协议</th>
-          <th class="center" style="width: 42px;">模式</th>
-          <th class="center" style="width: 42px;">序列</th>
-          <th class="center" style="width: 50px;">部位</th>
-          <th class="center" style="width: 46px;">标记</th>
+          <th style="width: 78px;">${escapeHtml(t("service.doseLogs.acquiredAt"))}</th>
+          <th style="width: 90px;">${escapeHtml(t("service.doseLogs.patient"))}</th>
+          <th>${escapeHtml(t("service.doseLogs.protocol"))}</th>
+          <th class="center" style="width: 42px;">${escapeHtml(t("service.doseLogs.scanMode"))}</th>
+          <th class="center" style="width: 42px;">${escapeHtml(t("service.doseLogs.series"))}</th>
+          <th class="center" style="width: 50px;">${escapeHtml(t("service.doseLogs.bodyPart"))}</th>
+          <th class="center" style="width: 46px;">${escapeHtml(t("service.doseLogs.marker"))}</th>
           <th class="num" style="width: 60px;">kV / mA</th>
           <th class="num" style="width: 50px;">CTDIvol<span class="unit">mGy</span></th>
           <th class="num" style="width: 56px;">DLP<span class="unit">mGy·cm</span></th>
-          <th class="num" style="width: 54px;">扫描长度<span class="unit">mm</span></th>
+          <th class="num" style="width: 54px;">${escapeHtml(t("service.doseLogs.scanLength"))}<span class="unit">mm</span></th>
         </tr>
       </thead>
       <tbody>
@@ -344,24 +378,24 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
     </table>
 
     <div class="summary-row">
-      <div class="stat"><span class="label">记录总数：</span><span class="value">${ctx.rows.length}</span></div>
-      <div class="stat"><span class="label">超阈值：</span><span class="value" style="color:#c62828">${exceededCount}</span></div>
-      <div class="stat highlight"><span class="label">合计 DLP：</span><span class="value">${ctx.totalDlp.toFixed(2)} mGy·cm</span></div>
+      <div class="stat"><span class="label">${escapeHtml(t("service.doseReport.summaryTotal"))}</span><span class="value">${ctx.rows.length}</span></div>
+      <div class="stat"><span class="label">${escapeHtml(t("service.doseLogs.overThreshold"))}：</span><span class="value" style="color:#c62828">${exceededCount}</span></div>
+      <div class="stat highlight"><span class="label">${escapeHtml(t("service.doseReport.totalDlp"))}</span><span class="value">${ctx.totalDlp.toFixed(2)} mGy·cm</span></div>
     </div>
 
     <div class="signature-block">
       <div class="signature-row">
         <div class="sig-cell">
-          <div class="role">操作员签字</div>
-          <div class="date-line">日期：____ 年 __ 月 __ 日</div>
+          <div class="role">${escapeHtml(t("service.doseReport.operatorSignature"))}</div>
+          <div class="date-line">${escapeHtml(t("service.doseReport.dateLine"))}</div>
         </div>
         <div class="sig-cell">
-          <div class="role">审核员签字</div>
-          <div class="date-line">日期：____ 年 __ 月 __ 日</div>
+          <div class="role">${escapeHtml(t("service.doseReport.reviewerSignature"))}</div>
+          <div class="date-line">${escapeHtml(t("service.doseReport.dateLine"))}</div>
         </div>
         <div class="sig-cell">
-          <div class="role">科室主任签字</div>
-          <div class="date-line">日期：____ 年 __ 月 __ 日</div>
+          <div class="role">${escapeHtml(t("service.doseReport.departmentDirectorSignature"))}</div>
+          <div class="date-line">${escapeHtml(t("service.doseReport.dateLine"))}</div>
         </div>
       </div>
     </div>
@@ -373,7 +407,7 @@ export function printDoseLogReport(ctx: DoseReportContext): void {
 
   const win = window.open("", "_blank", "width=900,height=1100");
   if (!win) {
-    alert("浏览器拦截了弹出窗口，请允许弹出后再次尝试。");
+    alert(t("service.doseReport.popupBlocked"));
     return;
   }
   win.document.open();

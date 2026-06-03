@@ -11,11 +11,13 @@ import { useNavigate } from "react-router-dom";
 
 import {
   SERVICE_MODE_ITEMS,
+  SERVICE_MODE_SECTION_LABEL_KEYS,
   SERVICE_MODE_SECTION_ORDER,
   type ServiceModeSection,
   getServiceModeItem,
 } from "./serviceModeRegistry";
 import AppHeader from "../../../components/AppHeader";
+import { useI18n } from "../../../lib/i18nContext";
 
 type FooterStatusTone = "idle" | "active" | "success";
 
@@ -40,7 +42,7 @@ const getFooterStatusClassName = (tone: FooterStatusTone) => {
 
 const buildExpandedState = (activeSection?: ServiceModeSection) =>
   SERVICE_MODE_SECTION_ORDER.reduce<Record<ServiceModeSection, boolean>>((acc, section) => {
-    acc[section] = section === (activeSection ?? "硬件");
+    acc[section] = section === (activeSection ?? "hardware");
     return acc;
   }, {} as Record<ServiceModeSection, boolean>);
 
@@ -52,19 +54,26 @@ export default function ServiceModeShell({
   footerStatus = { label: "IDLE", tone: "idle" },
 }: ServiceModeShellProps) {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
 
   const currentItem = getServiceModeItem(currentRoute);
+  const currentSectionLabel = currentItem ? t(SERVICE_MODE_SECTION_LABEL_KEYS[currentItem.section]) : t("service.section.hardware");
+  const currentItemLabel = currentItem ? t(currentItem.labelKey) : t("service.fallbackFeature");
   const [expandedSections, setExpandedSections] = useState<Record<ServiceModeSection, boolean>>(
     buildExpandedState(currentItem?.section),
   );
 
   const filteredItems = useMemo(() => {
-    const keyword = searchKeyword.trim();
+    const keyword = searchKeyword.trim().toLocaleLowerCase();
     if (!keyword) return SERVICE_MODE_ITEMS;
-    return SERVICE_MODE_ITEMS.filter((item) => item.label.includes(keyword));
-  }, [searchKeyword]);
+    return SERVICE_MODE_ITEMS.filter((item) => {
+      const itemLabel = t(item.labelKey).toLocaleLowerCase();
+      const sectionLabel = t(SERVICE_MODE_SECTION_LABEL_KEYS[item.section]).toLocaleLowerCase();
+      return itemLabel.includes(keyword) || sectionLabel.includes(keyword) || item.route.includes(keyword);
+    });
+  }, [searchKeyword, t]);
 
   const sectionedItems = useMemo(
     () =>
@@ -91,9 +100,9 @@ export default function ServiceModeShell({
           <div className="flex items-center justify-between mb-6 h-10">
             {!isCollapsed && (
               <div className="animate-in fade-in duration-300">
-                <div className="text-[14px] font-black text-[#37474F] uppercase tracking-wider">服务模式</div>
+                <div className="text-[14px] font-black text-[#37474F] uppercase tracking-wider">{t("service.mode")}</div>
                 <div className="text-[10px] text-[#90A4AE] font-bold mt-0.5">
-                  {currentItem?.section ?? "硬件"} / {currentItem?.label ?? "服务功能"}
+                  {currentSectionLabel} / {currentItemLabel}
                 </div>
               </div>
             )}
@@ -111,7 +120,7 @@ export default function ServiceModeShell({
                 type="text"
                 value={searchKeyword}
                 onChange={(event) => setSearchKeyword(event.target.value)}
-                placeholder="关键字搜索..."
+                placeholder={t("service.searchPlaceholder")}
                 className="w-full h-[36px] pl-10 pr-4 bg-white border border-[#B0C4DE] rounded-md text-[13px] focus:outline-none focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/20"
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#90A4AE]" size={16} />
@@ -167,7 +176,7 @@ export default function ServiceModeShell({
                           <div className={`p-1.5 rounded-md ${sectionActive ? "bg-white" : "bg-[#E8F0FA]"}`}>
                             <SectionIcon size={18} />
                           </div>
-                          <span className="text-[14px] font-bold">{group.section}</span>
+                          <span className="text-[14px] font-bold">{t(SERVICE_MODE_SECTION_LABEL_KEYS[group.section])}</span>
                         </div>
                         <div className={`transition-transform ${isExpanded ? "rotate-0" : "-rotate-90"}`}>
                           <ChevronDown size={16} />
@@ -194,7 +203,7 @@ export default function ServiceModeShell({
                                   <Icon size={17} />
                                 </div>
                                 <span className={`text-[13px] whitespace-nowrap ${active ? "font-bold" : "font-medium"}`}>
-                                  {item.label}
+                                  {t(item.labelKey)}
                                 </span>
                                 {active && <ChevronRight size={14} className="ml-auto text-[#1E88E5]" />}
                               </button>
@@ -219,10 +228,10 @@ export default function ServiceModeShell({
           onClick={() => navigate("/")}
           className="h-[36px] px-8 bg-white border border-[#B0C4DE] rounded-md text-[13px] font-bold text-[#37474F] hover:bg-gray-50 shadow-sm transition-all active:scale-95"
         >
-          首页
+          {t("common.home")}
         </button>
         <div className="ml-8 text-[13px] text-[#546E7A] font-medium">
-          服务模式 · {currentItem?.section ?? "硬件"} / {currentItem?.label ?? "服务功能"}
+          {t("service.mode")} · {currentSectionLabel} / {currentItemLabel}
         </div>
         <div className="ml-auto flex items-center gap-2">
           <div

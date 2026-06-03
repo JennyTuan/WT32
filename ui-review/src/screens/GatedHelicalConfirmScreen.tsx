@@ -4,6 +4,7 @@ import ScanConfirmScreen from "./ScanConfirmScreen";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { fetchSelectedScanSession } from "../lib/scanSession";
+import { useI18n } from "../lib/i18nContext";
 
 type BreathingMode = "breath_hold_inspiration" | "breath_hold_expiration";
 
@@ -21,6 +22,7 @@ type BreathingMode = "breath_hold_inspiration" | "breath_hold_expiration";
  * branch, but with DIBH-specific fields (屏息时相 / 屏息超时 / 振幅容差).
  */
 export default function GatedHelicalConfirmScreen() {
+    const { t } = useI18n();
     const [params] = useSearchParams();
     const initialBreathingMode = (params.get("breathingMode") ?? "breath_hold_inspiration") as BreathingMode;
 
@@ -89,17 +91,17 @@ export default function GatedHelicalConfirmScreen() {
     // ---------- left-aside gating params (DIBH) ----------
     const gatingParamCard = (
         <div className="flex flex-col">
-            <ParamField label="屏息时相">
+            <ParamField label={t("scanFlow.breathHold.phase")}>
                 <select
                     value={breathingMode}
                     onChange={(e) => setBreathingMode(e.target.value as BreathingMode)}
                     className="h-[26px] w-full appearance-none rounded border border-[#B0C4DE] bg-white px-2 pr-6 text-[12px] font-bold text-[#37474F] outline-none focus:border-[#4D94FF]"
                 >
-                    <option value="breath_hold_inspiration">深吸气末屏息</option>
-                    <option value="breath_hold_expiration">深呼气末屏息</option>
+                    <option value="breath_hold_inspiration">{t("scanFlow.breathHold.inspiration")}</option>
+                    <option value="breath_hold_expiration">{t("scanFlow.breathHold.expiration")}</option>
                 </select>
             </ParamField>
-            <ParamField label="屏息超时 (s)" hint="超过此时间未稳定即中止">
+            <ParamField label={t("scanFlow.breathHold.timeout")} hint={t("scanFlow.breathHold.timeoutHint")}>
                 <input
                     type="number"
                     min={5}
@@ -110,7 +112,7 @@ export default function GatedHelicalConfirmScreen() {
                     className="h-[26px] w-full rounded border border-[#B0C4DE] bg-white px-2 text-right text-[12px] font-bold text-[#37474F] outline-none focus:border-[#4D94FF]"
                 />
             </ParamField>
-            <ParamField label="振幅容差 (±mm)" hint="屏息平台允许的抖动范围">
+            <ParamField label={t("scanFlow.breathHold.amplitudeTolerance")} hint={t("scanFlow.breathHold.toleranceHint")}>
                 <input
                     type="number"
                     min={0.5}

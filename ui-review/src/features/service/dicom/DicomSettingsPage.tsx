@@ -14,6 +14,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 import ServiceModeShell from "../shared/ServiceModeShell";
 import {
   getDicomSettings,
@@ -28,24 +30,24 @@ import {
   type DicomSettingsSnapshot,
 } from "../../../lib/dicomSettingsApi";
 
-const ROLE_LABELS: Record<DicomNodeRole, string> = {
-  archive: "归档",
-  storage: "存储",
-  worklist: "工作列表",
-  printer: "胶片打印",
+const ROLE_LABEL_KEYS: Record<DicomNodeRole, TranslationKey> = {
+  archive: "service.dicom.role.archive",
+  storage: "service.dicom.role.storage",
+  worklist: "service.dicom.role.worklist",
+  printer: "service.dicom.role.printer",
 };
 
-const STATUS_LABELS: Record<DicomNodeStatus, string> = {
-  unknown: "未测试",
-  online: "可达",
-  offline: "离线",
+const STATUS_LABEL_KEYS: Record<DicomNodeStatus, TranslationKey> = {
+  unknown: "service.dicom.status.unknown",
+  online: "service.dicom.status.online",
+  offline: "service.dicom.status.offline",
 };
 
 const makeNodeId = () => `node-${Date.now().toString(36)}`;
 
-const createBlankNode = (): DicomRemoteNode => ({
+const createBlankNode = (name: string): DicomRemoteNode => ({
   id: makeNodeId(),
-  name: "新 DICOM 节点",
+  name,
   ae_title: "REMOTE_AE",
   host: "127.0.0.1",
   port: 104,
@@ -57,11 +59,11 @@ const createBlankNode = (): DicomRemoteNode => ({
   last_checked_at: null,
 });
 
-const formatDateTime = (value?: string | null) => {
+const formatDateTime = (value: string | null | undefined, locale: string) => {
   if (!value) return "--";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString("zh-CN", {
+  return d.toLocaleString(locale, {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -71,6 +73,7 @@ const formatDateTime = (value?: string | null) => {
 };
 
 export default function DicomSettingsPage() {
+  const { locale, t } = useI18n();
   const [settings, setSettings] = useState<DicomSettingsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -90,11 +93,11 @@ export default function DicomSettingsPage() {
       setSelectedNodeId(data.nodes[0]?.id ?? null);
       setDirty(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "DICOM 配置加载失败");
+      setError(e instanceof Error ? e.message : t("service.dicom.errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadSettings();
@@ -108,26 +111,28 @@ export default function DicomSettingsPage() {
   const validationIssues = useMemo(() => {
     if (!settings) return [];
     const issues: string[] = [];
+    const fallbackName = t("service.dicom.remoteNodeFallback");
 
-    if (!settings.local.ae_title.trim()) issues.push("本机 AE Title 不能为空");
-    if (settings.local.ae_title.trim().length > 16) issues.push("本机 AE Title 不能超过 16 个字符");
+    if (!settings.local.ae_title.trim()) issues.push(t("service.dicom.validation.localAeRequired"));
+    if (settings.local.ae_title.trim().length > 16) issues.push(t("service.dicom.validation.localAeLength"));
 
     const seen = new Set<string>();
     for (const node of settings.nodes) {
-      if (!node.name.trim()) issues.push("远端节点名称不能为空");
-      if (!node.ae_title.trim()) issues.push(`${node.name || "远端节点"} 的 AE Title 不能为空`);
-      if (node.ae_title.trim().length > 16) issues.push(`${node.name || "远端节点"} 的 AE Title 不能超过 16 个字符`);
-      if (!node.host.trim()) issues.push(`${node.name || "远端节点"} 的主机地址不能为空`);
-      if (seen.has(node.id)) issues.push("远端节点 ID 不能重复");
+      const nodeName = node.name || fallbackName;
+      if (!node.name.trim()) issues.push(t("service.dicom.validation.nodeNameRequired"));
+      if (!node.ae_title.trim()) issues.push(t("service.dicom.validation.nodeAeRequired", { name: nodeName }));
+      if (node.ae_title.trim().length > 16) issues.push(t("service.dicom.validation.nodeAeLength", { name: nodeName }));
+      if (!node.host.trim()) issues.push(t("service.dicom.validation.nodeHostRequired", { name: nodeName }));
+      if (seen.has(node.id)) issues.push(t("service.dicom.validation.nodeDuplicateId"));
       seen.add(node.id);
     }
 
     if (settings.routing.default_destination_id && !settings.nodes.some((node) => node.id === settings.routing.default_destination_id)) {
-      issues.push("默认发送目标必须选择已有节点");
+      issues.push(t("service.dicom.validation.defaultDestination"));
     }
 
     return issues;
-  }, [settings]);
+  }, [settings, t]);
 
   const mutateSettings = (updater: (current: DicomSettingsSnapshot) => DicomSettingsSnapshot) => {
     setSettings((current) => {
@@ -154,7 +159,7 @@ export default function DicomSettingsPage() {
   };
 
   const handleAddNode = () => {
-    const node = createBlankNode();
+    const node = createBlankNode(t("service.dicom.newNode"));
     mutateSettings((current) => ({
       ...current,
       nodes: [...current.nodes, node],
@@ -194,9 +199,10 @@ export default function DicomSettingsPage() {
             : item,
         ),
       }));
-      setNotice(`${node.name}: ${result.ok ? "端口可达" : "连接失败"}${result.latency_ms ? `, ${result.latency_ms} ms` : ""}`);
+      const resultLabel = result.ok ? t("service.dicom.noticeReachable") : t("service.dicom.noticeTestFailed");
+      setNotice(`${node.name}: ${resultLabel}${result.latency_ms ? `, ${result.latency_ms} ms` : ""}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "连接测试失败");
+      setError(e instanceof Error ? e.message : t("service.dicom.errorTest"));
     } finally {
       setTestingNodeId(null);
     }
@@ -211,16 +217,16 @@ export default function DicomSettingsPage() {
       const updated = await updateDicomSettings(settings);
       setSettings(updated);
       setDirty(false);
-      setNotice("DICOM 配置已保存");
+      setNotice(t("service.dicom.noticeSaved"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "DICOM 配置保存失败");
+      setError(e instanceof Error ? e.message : t("service.dicom.errorSave"));
     } finally {
       setSaving(false);
     }
   };
 
   const handleReset = async () => {
-    if (!window.confirm("恢复默认 DICOM 配置？当前未保存修改将被替换。")) return;
+    if (!window.confirm(t("service.dicom.confirmReset"))) return;
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -229,9 +235,9 @@ export default function DicomSettingsPage() {
       setSettings(next);
       setSelectedNodeId(next.nodes[0]?.id ?? null);
       setDirty(false);
-      setNotice("已恢复默认 DICOM 配置");
+      setNotice(t("service.dicom.noticeReset"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "恢复默认配置失败");
+      setError(e instanceof Error ? e.message : t("service.dicom.errorReset"));
     } finally {
       setSaving(false);
     }
@@ -243,7 +249,7 @@ export default function DicomSettingsPage() {
         <section className="flex h-full items-center justify-center bg-[#F8FBFF]">
           <div className="flex items-center gap-3 text-[13px] font-bold text-[#7B92A8]">
             <RefreshCw size={16} className="animate-spin text-[#4D94FF]" />
-            {error ?? "正在加载 DICOM 配置..."}
+            {error ?? t("service.dicom.loading")}
           </div>
         </section>
       </ServiceModeShell>
@@ -256,7 +262,7 @@ export default function DicomSettingsPage() {
         <div className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#E2EBF5] bg-white px-5">
           <div>
             <div className="text-[16px] font-black leading-tight text-[#1E293B]">DICOM</div>
-            <div className="mt-1 text-[12px] text-[#7B92A8]">本机 AE、远端节点和默认发送规则</div>
+            <div className="mt-1 text-[12px] text-[#7B92A8]">{t("service.dicom.subtitle")}</div>
           </div>
 
           <div className="flex min-w-0 items-center gap-2">
@@ -267,15 +273,15 @@ export default function DicomSettingsPage() {
             ) : error ? (
               <StatusMessage tone="error" text={error} />
             ) : null}
-            <HeaderButton icon={RefreshCw} label="刷新" onClick={loadSettings} disabled={saving} />
-            <HeaderButton icon={RotateCcw} label="默认" onClick={handleReset} disabled={saving} />
+            <HeaderButton icon={RefreshCw} label={t("common.refresh")} onClick={loadSettings} disabled={saving} />
+            <HeaderButton icon={RotateCcw} label={t("common.default")} onClick={handleReset} disabled={saving} />
             <button
               type="button"
               onClick={handleSave}
               disabled={saving || !dirty || validationIssues.length > 0}
               className="flex h-9 items-center gap-1.5 rounded-md bg-[#1D4ED8] px-4 text-[12px] font-bold text-white hover:bg-[#1E40AF] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <Save size={14} /> {saving ? "保存中" : "保存"}
+              <Save size={14} /> {saving ? t("common.saving") : t("common.save")}
             </button>
           </div>
         </div>
@@ -284,30 +290,30 @@ export default function DicomSettingsPage() {
           <div className="grid min-h-[500px] grid-rows-[112px_236px_172px] gap-3">
             <div className="min-w-0">
               <Panel
-                title="本机服务"
+                title={t("service.dicom.localService")}
                 icon={Server}
                 action={
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-bold text-[#64748B]">接收服务</span>
+                    <span className="text-[11px] font-bold text-[#64748B]">{t("service.dicom.receiveService")}</span>
                     <Switch checked={settings.local.receive_enabled} onChange={(value) => updateLocal("receive_enabled", value)} />
                   </div>
                 }
               >
                 <div className="grid grid-cols-[minmax(96px,1fr)_minmax(104px,1fr)_72px_72px_minmax(180px,2.4fr)] items-end gap-3">
                   <TextField label="AE Title" value={settings.local.ae_title} onChange={(value) => updateLocal("ae_title", value.toUpperCase())} maxLength={16} mono />
-                  <TextField label="监听地址" value={settings.local.bind_host} onChange={(value) => updateLocal("bind_host", value)} mono />
-                  <NumberField label="端口" value={settings.local.port} min={1} max={65535} onChange={(value) => updateLocal("port", value)} />
-                  <NumberField label="并发" value={settings.local.max_associations} min={1} max={32} onChange={(value) => updateLocal("max_associations", value)} />
-                  <TextField label="存储路径" value={settings.local.storage_path} onChange={(value) => updateLocal("storage_path", value)} mono />
+                  <TextField label={t("service.dicom.bindHost")} value={settings.local.bind_host} onChange={(value) => updateLocal("bind_host", value)} mono />
+                  <NumberField label={t("service.dicom.port")} value={settings.local.port} min={1} max={65535} onChange={(value) => updateLocal("port", value)} />
+                  <NumberField label={t("service.dicom.associations")} value={settings.local.max_associations} min={1} max={32} onChange={(value) => updateLocal("max_associations", value)} />
+                  <TextField label={t("service.dicom.storagePath")} value={settings.local.storage_path} onChange={(value) => updateLocal("storage_path", value)} mono />
                 </div>
               </Panel>
             </div>
 
             <div className="min-w-0">
               <Panel
-                title="远端节点"
+                title={t("service.dicom.remoteNodes")}
                 icon={DatabaseZap}
-                action={<HeaderButton icon={Plus} label="添加" onClick={handleAddNode} variant="soft" />}
+                action={<HeaderButton icon={Plus} label={t("service.dicom.add")} onClick={handleAddNode} variant="soft" />}
               >
                 <div className="grid h-full min-w-0 grid-cols-[210px_minmax(0,1fr)] gap-3">
                   <div className="min-h-0 overflow-y-auto pr-1 custom-scrollbar">
@@ -326,38 +332,38 @@ export default function DicomSettingsPage() {
                   {selectedNode ? (
                     <div className="flex min-w-0 flex-col gap-2">
                       <div className="grid min-w-0 grid-cols-[minmax(120px,1.4fr)_minmax(120px,1.2fr)_minmax(80px,0.8fr)] gap-2">
-                        <TextField label="名称" value={selectedNode.name} onChange={(value) => updateNode(selectedNode.id, "name", value)} />
+                        <TextField label={t("service.dicom.name")} value={selectedNode.name} onChange={(value) => updateNode(selectedNode.id, "name", value)} />
                         <TextField label="AE Title" value={selectedNode.ae_title} onChange={(value) => updateNode(selectedNode.id, "ae_title", value.toUpperCase())} maxLength={16} mono />
-                        <SelectField label="用途" value={selectedNode.role} onChange={(value) => updateNode(selectedNode.id, "role", value as DicomNodeRole)}>
-                          {Object.entries(ROLE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        <SelectField label={t("service.dicom.purpose")} value={selectedNode.role} onChange={(value) => updateNode(selectedNode.id, "role", value as DicomNodeRole)}>
+                          {(Object.entries(ROLE_LABEL_KEYS) as [DicomNodeRole, TranslationKey][]).map(([value, key]) => <option key={value} value={value}>{t(key)}</option>)}
                         </SelectField>
                       </div>
                       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_88px] gap-2">
-                        <TextField label="主机" value={selectedNode.host} onChange={(value) => updateNode(selectedNode.id, "host", value)} mono />
-                        <NumberField label="端口" value={selectedNode.port} min={1} max={65535} onChange={(value) => updateNode(selectedNode.id, "port", value)} />
+                        <TextField label={t("service.dicom.host")} value={selectedNode.host} onChange={(value) => updateNode(selectedNode.id, "host", value)} mono />
+                        <NumberField label={t("service.dicom.port")} value={selectedNode.port} min={1} max={65535} onChange={(value) => updateNode(selectedNode.id, "port", value)} />
                       </div>
 
                       <div className="mt-auto flex h-10 items-center justify-between rounded-md bg-[#F8FAFC] px-3">
                         <div className="flex min-w-0 items-center gap-2 text-[11px] text-[#64748B]">
                           <StatusDot status={selectedNode.last_status} />
-                          <span className="font-black text-[#334155]">{STATUS_LABELS[selectedNode.last_status]}</span>
-                          <span className="truncate">{formatDateTime(selectedNode.last_checked_at)}</span>
+                          <span className="font-black text-[#334155]">{t(STATUS_LABEL_KEYS[selectedNode.last_status])}</span>
+                          <span className="truncate">{formatDateTime(selectedNode.last_checked_at, locale)}</span>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                          <ToggleButton checked={selectedNode.enabled} label={selectedNode.enabled ? "已启用" : "已停用"} onChange={(value) => updateNode(selectedNode.id, "enabled", value)} />
+                          <ToggleButton checked={selectedNode.enabled} label={selectedNode.enabled ? t("service.dicom.enabled") : t("service.dicom.disabled")} onChange={(value) => updateNode(selectedNode.id, "enabled", value)} />
                           <button
                             type="button"
                             onClick={() => handleTestNode(selectedNode)}
                             disabled={testingNodeId === selectedNode.id}
                             className="flex h-8 items-center gap-1.5 rounded-md bg-[#1D4ED8] px-3 text-[11px] font-bold text-white hover:bg-[#1E40AF] disabled:opacity-50"
                           >
-                            <Wifi size={13} /> {testingNodeId === selectedNode.id ? "测试中" : "测试"}
+                            <Wifi size={13} /> {testingNodeId === selectedNode.id ? t("service.dicom.testing") : t("service.dicom.test")}
                           </button>
                           <button
                             type="button"
                             onClick={() => handleRemoveNode(selectedNode.id)}
                             className="flex h-8 w-8 items-center justify-center rounded-md bg-[#FEE2E2] text-[#DC2626] hover:bg-[#FECACA]"
-                            title="删除节点"
+                            title={t("service.dicom.deleteNode")}
                           >
                             <Trash2 size={14} />
                           </button>
@@ -366,33 +372,31 @@ export default function DicomSettingsPage() {
                     </div>
                   ) : (
                     <div className="flex items-center justify-center rounded-md border border-dashed border-[#CBD5E1] text-[12px] font-bold text-[#94A3B8]">
-                      暂无远端节点
+                      {t("service.dicom.noRemoteNodes")}
                     </div>
                   )}
                 </div>
               </Panel>
             </div>
 
-            <Panel title="发送策略" icon={Send}>
+            <Panel title={t("service.dicom.routing")} icon={Send}>
               <div className="flex h-full min-w-0 flex-col gap-2.5">
                 <div className="grid grid-cols-[minmax(180px,2.2fr)_minmax(96px,1fr)_minmax(96px,1fr)] gap-2.5">
                   <SelectField
-                    label="默认目标"
+                    label={t("service.dicom.defaultDestination")}
                     value={settings.routing.default_destination_id ?? ""}
                     onChange={(value) => updateRouting("default_destination_id", value || null)}
                   >
-                    <option value="">未选择</option>
+                    <option value="">{t("service.dicom.noneSelected")}</option>
                     {settings.nodes.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}
                   </SelectField>
-                  <NumberField label="重试次数" value={settings.routing.retry_count} min={0} max={10} onChange={(value) => updateRouting("retry_count", value)} />
-                  <NumberField label="间隔(秒)" value={settings.routing.retry_interval_sec} min={5} max={3600} onChange={(value) => updateRouting("retry_interval_sec", value)} />
+                  <NumberField label={t("service.dicom.retryCount")} value={settings.routing.retry_count} min={0} max={10} onChange={(value) => updateRouting("retry_count", value)} />
+                  <NumberField label={t("service.dicom.intervalSec")} value={settings.routing.retry_interval_sec} min={5} max={3600} onChange={(value) => updateRouting("retry_interval_sec", value)} />
                 </div>
                 <div className="grid grid-cols-5 gap-2">
-                  <SwitchRow label="自动发送" checked={settings.routing.auto_send_on_scan_complete} onChange={(value) => updateRouting("auto_send_on_scan_complete", value)} />
-                  
-                  <SwitchRow label="剂量报告" checked={settings.routing.include_dose_report} onChange={(value) => updateRouting("include_dose_report", value)} />
-                  <SwitchRow label="定位像" checked={settings.routing.include_localizer} onChange={(value) => updateRouting("include_localizer", value)} />
-                  
+                  <SwitchRow label={t("service.dicom.autoSend")} checked={settings.routing.auto_send_on_scan_complete} onChange={(value) => updateRouting("auto_send_on_scan_complete", value)} />
+                  <SwitchRow label={t("service.dicom.doseReport")} checked={settings.routing.include_dose_report} onChange={(value) => updateRouting("include_dose_report", value)} />
+                  <SwitchRow label={t("service.dicom.localizer")} checked={settings.routing.include_localizer} onChange={(value) => updateRouting("include_localizer", value)} />
                 </div>
               </div>
             </Panel>

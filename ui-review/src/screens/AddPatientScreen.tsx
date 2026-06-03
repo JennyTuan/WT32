@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { createPatient } from "../lib/patientsApi";
+import { useI18n } from "../lib/i18nContext";
 
 interface InputBoxProps {
     label: string;
@@ -91,6 +92,7 @@ const emptyForm = () => ({
 });
 
 const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) => {
+    const { t } = useI18n();
     const [formData, setFormData] = useState(emptyForm);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -114,30 +116,30 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
         setError(null);
 
         if (!formData.lastName.trim() && !formData.firstName.trim()) {
-            setError("请填写姓或名");
+            setError(t("addPatient.errorFirstOrLastName"));
             return;
         }
         if (!formData.patientId.trim()) {
-            setError("患者ID 不能为空");
+            setError(t("addPatient.errorPatientId"));
             return;
         }
         if (!formData.birthday) {
-            setError("请填写出生日期");
+            setError(t("addPatient.errorBirthday"));
             return;
         }
         if (!formData.gender) {
-            setError("请选择性别");
+            setError(t("addPatient.errorGender"));
             return;
         }
 
         const heightNum = formData.height ? Number(formData.height) : null;
         const weightNum = formData.weight ? Number(formData.weight) : null;
         if (heightNum !== null && Number.isNaN(heightNum)) {
-            setError("身高需为数字");
+            setError(t("addPatient.errorHeightNumber"));
             return;
         }
         if (weightNum !== null && Number.isNaN(weightNum)) {
-            setError("体重需为数字");
+            setError(t("addPatient.errorWeightNumber"));
             return;
         }
 
@@ -155,7 +157,7 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
             });
             onCreated?.();
         } catch (err) {
-            setError(err instanceof Error ? err.message : "保存失败");
+            setError(err instanceof Error ? err.message : t("addPatient.errorSave"));
         } finally {
             setSubmitting(false);
         }
@@ -167,7 +169,7 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
             <div className="w-[840px] bg-white rounded-xl border border-[#B0C4DE] shadow-2xl overflow-hidden flex flex-col transition-all duration-200">
                 {/* Tab-like Title Area */}
                 <div className="h-[64px] bg-[#F8FAFC] border-b border-[#EEF2F9] px-8 flex items-center justify-between">
-                    <h2 className="text-[24px] font-bold text-[#263238] tracking-tight">新增患者</h2>
+                    <h2 className="text-[24px] font-bold text-[#263238] tracking-tight">{t("addPatient.title")}</h2>
                     <button
                         onClick={onClose}
                         className="p-2 text-[#90A4AE] hover:text-[#D32F2F] hover:bg-red-50 rounded-full transition-all"
@@ -179,27 +181,27 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
                 {/* Form Body */}
                 <div className="p-10 flex flex-col gap-6 bg-white">
                     <div className="grid grid-cols-2 gap-x-12 gap-y-6">
-                        <InputBox label="姓" value={formData.lastName} onChange={update("lastName")} placeholder="请输入姓" required />
-                        <InputBox label="名" value={formData.firstName} onChange={update("firstName")} placeholder="请输入名" required />
+                        <InputBox label={t("addPatient.lastName")} value={formData.lastName} onChange={update("lastName")} placeholder={t("addPatient.lastNamePlaceholder")} required />
+                        <InputBox label={t("addPatient.firstName")} value={formData.firstName} onChange={update("firstName")} placeholder={t("addPatient.firstNamePlaceholder")} required />
 
-                        <InputBox label="出生日期" value={formData.birthday} onChange={update("birthday")} type="date" required />
+                        <InputBox label={t("addPatient.birthDate")} value={formData.birthday} onChange={update("birthday")} type="date" required />
                         <SelectBox
-                            label="性别"
+                            label={t("addPatient.gender")}
                             value={formData.gender}
                             onChange={update("gender")}
                             options={[
-                                { label: "请选择", value: "" },
-                                { label: "男", value: "male" },
-                                { label: "女", value: "female" },
+                                { label: t("addPatient.selectPlaceholder"), value: "" },
+                                { label: t("patientList.gender.male"), value: "male" },
+                                { label: t("patientList.gender.female"), value: "female" },
                             ]}
                             required
                         />
 
-                        <InputBox label="身高 (cm)" value={formData.height} onChange={update("height")} type="number" placeholder="请输入身高" />
-                        <InputBox label="体重 (kg)" value={formData.weight} onChange={update("weight")} type="number" placeholder="请输入体重" />
+                        <InputBox label={t("addPatient.height")} value={formData.height} onChange={update("height")} type="number" placeholder={t("addPatient.heightPlaceholder")} />
+                        <InputBox label={t("addPatient.weight")} value={formData.weight} onChange={update("weight")} type="number" placeholder={t("addPatient.weightPlaceholder")} />
 
-                        <InputBox label="身份证号" value={formData.idNumber} onChange={update("idNumber")} placeholder="可选" />
-                        <InputBox label="患者ID" value={formData.patientId} onChange={update("patientId")} required />
+                        <InputBox label={t("addPatient.idNumber")} value={formData.idNumber} onChange={update("idNumber")} placeholder={t("addPatient.optional")} />
+                        <InputBox label={t("addPatient.patientId")} value={formData.patientId} onChange={update("patientId")} required />
                     </div>
 
                     {error && (
@@ -216,14 +218,14 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
                         disabled={submitting}
                         className="h-[44px] px-10 rounded-md border-2 border-[#4D94FF] text-[#4D94FF] font-black text-[13px] uppercase tracking-widest hover:bg-blue-50 active:scale-95 transition-all disabled:opacity-50"
                     >
-                        取消
+                        {t("common.cancel")}
                     </button>
                     <button
                         onClick={handleSave}
                         disabled={submitting}
                         className="h-[44px] px-12 rounded-md bg-[#4D94FF] text-white font-black text-[13px] uppercase tracking-widest shadow-lg hover:bg-blue-600 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        {submitting ? "保存中..." : "保存"}
+                        {submitting ? t("common.saving") : t("common.save")}
                     </button>
                 </div>
             </div>

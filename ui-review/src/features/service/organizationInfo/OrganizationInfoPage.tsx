@@ -12,6 +12,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 import ServiceModeShell from "../shared/ServiceModeShell";
 import {
   getOrganizationInfo,
@@ -24,18 +26,19 @@ import {
   type ReportDisplay,
 } from "../../../lib/organizationInfoApi";
 
-const INSTITUTION_TYPE_OPTIONS: Array<{ value: InstitutionInfo["type"]; label: string }> = [
-  { value: "hospital", label: "综合医院" },
-  { value: "clinic", label: "诊所" },
-  { value: "imaging_center", label: "影像中心" },
-  { value: "research", label: "科研机构" },
-  { value: "other", label: "其他" },
-];
+const INSTITUTION_TYPE_LABEL_KEYS: Record<InstitutionInfo["type"], TranslationKey> = {
+  hospital: "service.organization.type.hospital",
+  clinic: "service.organization.type.clinic",
+  imaging_center: "service.organization.type.imagingCenter",
+  research: "service.organization.type.research",
+  other: "service.organization.type.other",
+};
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const URL_RE = /^(https?:\/\/)?[^\s]+\.[^\s]+$/;
 
 export default function OrganizationInfoPage() {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<OrganizationInfoSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -52,11 +55,11 @@ export default function OrganizationInfoPage() {
       setSettings(data);
       setDirty(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "机构信息加载失败");
+      setError(e instanceof Error ? e.message : t("service.organization.errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -65,11 +68,11 @@ export default function OrganizationInfoPage() {
   const validationIssues = useMemo(() => {
     if (!settings) return [];
     const issues: string[] = [];
-    if (!settings.institution.name.trim()) issues.push("机构名称不能为空");
-    if (settings.institution.website && !URL_RE.test(settings.institution.website)) issues.push("机构网址格式无效");
-    if (settings.contact.email && !EMAIL_RE.test(settings.contact.email)) issues.push("邮箱格式无效");
+    if (!settings.institution.name.trim()) issues.push(t("service.organization.validation.nameRequired"));
+    if (settings.institution.website && !URL_RE.test(settings.institution.website)) issues.push(t("service.organization.validation.website"));
+    if (settings.contact.email && !EMAIL_RE.test(settings.contact.email)) issues.push(t("service.organization.validation.email"));
     return issues;
-  }, [settings]);
+  }, [settings, t]);
 
   const mutate = (updater: (current: OrganizationInfoSnapshot) => OrganizationInfoSnapshot) => {
     setSettings((current) => (current ? updater(current) : current));
@@ -99,16 +102,16 @@ export default function OrganizationInfoPage() {
       const updated = await updateOrganizationInfo(settings);
       setSettings(updated);
       setDirty(false);
-      setNotice("机构信息已保存");
+      setNotice(t("service.organization.noticeSaved"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "机构信息保存失败");
+      setError(e instanceof Error ? e.message : t("service.organization.errorSave"));
     } finally {
       setSaving(false);
     }
   };
 
   const handleReset = async () => {
-    if (!window.confirm("恢复默认机构信息？当前未保存修改将被替换。")) return;
+    if (!window.confirm(t("service.organization.confirmReset"))) return;
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -116,9 +119,9 @@ export default function OrganizationInfoPage() {
       const next = await resetOrganizationInfo();
       setSettings(next);
       setDirty(false);
-      setNotice("已恢复默认机构信息");
+      setNotice(t("service.organization.noticeReset"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "恢复默认机构信息失败");
+      setError(e instanceof Error ? e.message : t("service.organization.errorReset"));
     } finally {
       setSaving(false);
     }
@@ -130,7 +133,7 @@ export default function OrganizationInfoPage() {
         <section className="flex h-full items-center justify-center bg-[#F8FBFF]">
           <div className="flex items-center gap-3 text-[13px] font-bold text-[#7B92A8]">
             <RefreshCw size={16} className="animate-spin text-[#4D94FF]" />
-            {error ?? "正在加载机构信息..."}
+            {error ?? t("service.organization.loading")}
           </div>
         </section>
       </ServiceModeShell>
@@ -142,8 +145,8 @@ export default function OrganizationInfoPage() {
       <section className="flex h-full min-h-0 flex-col bg-[#F8FBFF]">
         <div className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#E2EBF5] bg-white px-5">
           <div>
-            <div className="text-[16px] font-black leading-tight text-[#1E293B]">机构信息设置</div>
-            <div className="mt-1 text-[12px] text-[#7B92A8]">机构名称、标识、科室信息和对外显示内容</div>
+            <div className="text-[16px] font-black leading-tight text-[#1E293B]">{t("service.organization.title")}</div>
+            <div className="mt-1 text-[12px] text-[#7B92A8]">{t("service.organization.subtitle")}</div>
           </div>
 
           <div className="flex min-w-0 items-center gap-2">
@@ -154,77 +157,77 @@ export default function OrganizationInfoPage() {
             ) : error ? (
               <StatusMessage tone="error" text={error} />
             ) : null}
-            <HeaderButton icon={RefreshCw} label="刷新" onClick={load} disabled={saving} />
-            <HeaderButton icon={RotateCcw} label="默认" onClick={handleReset} disabled={saving} />
+            <HeaderButton icon={RefreshCw} label={t("common.refresh")} onClick={load} disabled={saving} />
+            <HeaderButton icon={RotateCcw} label={t("common.default")} onClick={handleReset} disabled={saving} />
             <button
               type="button"
               onClick={handleSave}
               disabled={saving || !dirty || validationIssues.length > 0}
               className="flex h-9 items-center gap-1.5 rounded-md bg-[#1D4ED8] px-4 text-[12px] font-bold text-white hover:bg-[#1E40AF] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <Save size={14} /> {saving ? "保存中" : "保存"}
+              <Save size={14} /> {saving ? t("common.saving") : t("common.save")}
             </button>
           </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar">
           <div className="grid gap-3 [grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]">
-            <Panel title="机构基本信息" icon={Building2}>
+            <Panel title={t("service.organization.institution")} icon={Building2}>
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="col-span-2">
-                  <TextField label="机构名称" value={settings.institution.name} onChange={(v) => updateInstitution("name", v)} maxLength={120} />
+                  <TextField label={t("service.organization.institutionName")} value={settings.institution.name} onChange={(v) => updateInstitution("name", v)} maxLength={120} />
                 </div>
-                <TextField label="机构简称" value={settings.institution.short_name} onChange={(v) => updateInstitution("short_name", v)} maxLength={60} />
-                <TextField label="机构代码" value={settings.institution.code} onChange={(v) => updateInstitution("code", v)} maxLength={40} mono />
-                <SelectField label="机构类型" value={settings.institution.type} onChange={(v) => updateInstitution("type", v as InstitutionInfo["type"])}>
-                  {INSTITUTION_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <TextField label={t("service.organization.institutionShortName")} value={settings.institution.short_name} onChange={(v) => updateInstitution("short_name", v)} maxLength={60} />
+                <TextField label={t("service.organization.institutionCode")} value={settings.institution.code} onChange={(v) => updateInstitution("code", v)} maxLength={40} mono />
+                <SelectField label={t("service.organization.institutionType")} value={settings.institution.type} onChange={(v) => updateInstitution("type", v as InstitutionInfo["type"])}>
+                  {(Object.entries(INSTITUTION_TYPE_LABEL_KEYS) as [InstitutionInfo["type"], TranslationKey][]).map(([value, key]) => <option key={value} value={value}>{t(key)}</option>)}
                 </SelectField>
-                <TextField label="执业许可证号" value={settings.institution.license_number} onChange={(v) => updateInstitution("license_number", v)} maxLength={80} mono />
+                <TextField label={t("service.organization.licenseNumber")} value={settings.institution.license_number} onChange={(v) => updateInstitution("license_number", v)} maxLength={80} mono />
                 <div className="col-span-2">
-                  <TextField label="官方网址" value={settings.institution.website} onChange={(v) => updateInstitution("website", v)} maxLength={255} mono />
+                  <TextField label={t("service.organization.website")} value={settings.institution.website} onChange={(v) => updateInstitution("website", v)} maxLength={255} mono />
                 </div>
-                <TextField label="Logo 路径" value={settings.institution.logo_url} onChange={(v) => updateInstitution("logo_url", v)} maxLength={512} mono />
-                <TextField label="印章路径" value={settings.institution.stamp_url} onChange={(v) => updateInstitution("stamp_url", v)} maxLength={512} mono />
+                <TextField label={t("service.organization.logoPath")} value={settings.institution.logo_url} onChange={(v) => updateInstitution("logo_url", v)} maxLength={512} mono />
+                <TextField label={t("service.organization.stampPath")} value={settings.institution.stamp_url} onChange={(v) => updateInstitution("stamp_url", v)} maxLength={512} mono />
               </div>
             </Panel>
 
-            <Panel title="联系方式" icon={Phone}>
+            <Panel title={t("service.organization.contact")} icon={Phone}>
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="col-span-2">
-                  <TextField label="详细地址" value={settings.contact.address} onChange={(v) => updateContact("address", v)} maxLength={255} />
+                  <TextField label={t("service.organization.address")} value={settings.contact.address} onChange={(v) => updateContact("address", v)} maxLength={255} />
                 </div>
-                <TextField label="所在城市" value={settings.contact.city} onChange={(v) => updateContact("city", v)} maxLength={80} />
-                <TextField label="邮政编码" value={settings.contact.postal_code} onChange={(v) => updateContact("postal_code", v)} maxLength={20} mono />
-                <TextField label="总机电话" value={settings.contact.phone} onChange={(v) => updateContact("phone", v)} maxLength={40} mono />
-                <TextField label="传真" value={settings.contact.fax} onChange={(v) => updateContact("fax", v)} maxLength={40} mono />
-                <TextField label="联系邮箱" value={settings.contact.email} onChange={(v) => updateContact("email", v)} maxLength={120} mono />
-                <TextField label="紧急联系电话" value={settings.contact.emergency_phone} onChange={(v) => updateContact("emergency_phone", v)} maxLength={40} mono />
+                <TextField label={t("service.organization.city")} value={settings.contact.city} onChange={(v) => updateContact("city", v)} maxLength={80} />
+                <TextField label={t("service.organization.postalCode")} value={settings.contact.postal_code} onChange={(v) => updateContact("postal_code", v)} maxLength={20} mono />
+                <TextField label={t("service.organization.phone")} value={settings.contact.phone} onChange={(v) => updateContact("phone", v)} maxLength={40} mono />
+                <TextField label={t("service.organization.fax")} value={settings.contact.fax} onChange={(v) => updateContact("fax", v)} maxLength={40} mono />
+                <TextField label={t("service.organization.email")} value={settings.contact.email} onChange={(v) => updateContact("email", v)} maxLength={120} mono />
+                <TextField label={t("service.organization.emergencyPhone")} value={settings.contact.emergency_phone} onChange={(v) => updateContact("emergency_phone", v)} maxLength={40} mono />
               </div>
             </Panel>
 
-            <Panel title="科室信息" icon={Stethoscope}>
+            <Panel title={t("service.organization.department")} icon={Stethoscope}>
               <div className="grid grid-cols-2 gap-2.5">
-                <TextField label="科室名称" value={settings.department.name} onChange={(v) => updateDepartment("name", v)} maxLength={80} />
-                <TextField label="科室代码" value={settings.department.code} onChange={(v) => updateDepartment("code", v)} maxLength={20} mono />
-                <TextField label="科室负责人" value={settings.department.head} onChange={(v) => updateDepartment("head", v)} maxLength={40} />
-                <TextField label="负责人职称" value={settings.department.head_title} onChange={(v) => updateDepartment("head_title", v)} maxLength={40} />
-                <TextField label="科室电话" value={settings.department.phone} onChange={(v) => updateDepartment("phone", v)} maxLength={40} mono />
-                <TextField label="所在房间" value={settings.department.room} onChange={(v) => updateDepartment("room", v)} maxLength={40} />
+                <TextField label={t("service.organization.departmentName")} value={settings.department.name} onChange={(v) => updateDepartment("name", v)} maxLength={80} />
+                <TextField label={t("service.organization.departmentCode")} value={settings.department.code} onChange={(v) => updateDepartment("code", v)} maxLength={20} mono />
+                <TextField label={t("service.organization.departmentHead")} value={settings.department.head} onChange={(v) => updateDepartment("head", v)} maxLength={40} />
+                <TextField label={t("service.organization.departmentHeadTitle")} value={settings.department.head_title} onChange={(v) => updateDepartment("head_title", v)} maxLength={40} />
+                <TextField label={t("service.organization.departmentPhone")} value={settings.department.phone} onChange={(v) => updateDepartment("phone", v)} maxLength={40} mono />
+                <TextField label={t("service.organization.departmentRoom")} value={settings.department.room} onChange={(v) => updateDepartment("room", v)} maxLength={40} />
               </div>
             </Panel>
 
-            <Panel title="报告显示" icon={FileText}>
+            <Panel title={t("service.organization.report")} icon={FileText}>
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="col-span-2">
-                  <TextField label="报告抬头" value={settings.report.header_text} onChange={(v) => updateReport("header_text", v)} maxLength={160} />
+                  <TextField label={t("service.organization.reportHeader")} value={settings.report.header_text} onChange={(v) => updateReport("header_text", v)} maxLength={160} />
                 </div>
                 <div className="col-span-2">
-                  <TextField label="报告页脚" value={settings.report.footer_text} onChange={(v) => updateReport("footer_text", v)} maxLength={160} />
+                  <TextField label={t("service.organization.reportFooter")} value={settings.report.footer_text} onChange={(v) => updateReport("footer_text", v)} maxLength={160} />
                 </div>
-                <TextField label="机密标签" value={settings.report.confidential_label} onChange={(v) => updateReport("confidential_label", v)} maxLength={40} />
-                <SwitchRow label="显示机构 Logo" checked={settings.report.show_logo} onChange={(v) => updateReport("show_logo", v)} />
-                <SwitchRow label="显示电子印章" checked={settings.report.show_stamp} onChange={(v) => updateReport("show_stamp", v)} />
-                <SwitchRow label="显示二维码" checked={settings.report.show_qr_code} onChange={(v) => updateReport("show_qr_code", v)} />
+                <TextField label={t("service.organization.reportConfidential")} value={settings.report.confidential_label} onChange={(v) => updateReport("confidential_label", v)} maxLength={40} />
+                <SwitchRow label={t("service.organization.showLogo")} checked={settings.report.show_logo} onChange={(v) => updateReport("show_logo", v)} />
+                <SwitchRow label={t("service.organization.showStamp")} checked={settings.report.show_stamp} onChange={(v) => updateReport("show_stamp", v)} />
+                <SwitchRow label={t("service.organization.showQrCode")} checked={settings.report.show_qr_code} onChange={(v) => updateReport("show_qr_code", v)} />
               </div>
             </Panel>
           </div>

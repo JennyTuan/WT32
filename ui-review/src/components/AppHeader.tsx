@@ -7,6 +7,7 @@ import SystemMenuButton from "./SystemMenuButton";
 import iconTable from "../assets/icon-table.svg";
 import iconGantry from "../assets/icon-gantry.svg";
 import iconTube from "../assets/icon-tube.svg";
+import { useI18n } from "../lib/i18nContext";
 
 type AppHeaderProps = {
   /** Patient name; null/undefined → 显示 "未选择患者" */
@@ -35,15 +36,15 @@ type AppHeaderProps = {
   clockOverride?: { time: string; date: string };
 };
 
-const formatClock = (date: Date) =>
-  date.toLocaleTimeString("zh-CN", {
+const formatClock = (date: Date, locale: string) =>
+  date.toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   });
 
-const formatDateLabel = (date: Date) =>
-  date.toLocaleDateString("zh-CN", {
+const formatDateLabel = (date: Date, locale: string) =>
+  date.toLocaleDateString(locale, {
     month: "numeric",
     day: "numeric",
     weekday: "short",
@@ -61,6 +62,7 @@ export default function AppHeader({
   onEmergencyClick,
   clockOverride,
 }: AppHeaderProps) {
+  const { locale, t } = useI18n();
   const [clock, setClock] = useState(() => new Date());
 
   useEffect(() => {
@@ -69,8 +71,8 @@ export default function AppHeader({
     return () => window.clearInterval(timer);
   }, [clockOverride]);
 
-  const timeLabel = clockOverride?.time ?? formatClock(clock);
-  const dateLabel = clockOverride?.date ?? formatDateLabel(clock);
+  const timeLabel = clockOverride?.time ?? formatClock(clock, locale);
+  const dateLabel = clockOverride?.date ?? formatDateLabel(clock, locale);
 
   const isLaserInteractive = typeof onLaserToggle === "function";
 
@@ -80,15 +82,15 @@ export default function AppHeader({
         <PatientHeaderCard name={patientName ?? null} patientId={patientId ?? null} />
         <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
           <div className="flex items-center gap-1 text-[11px] font-bold">
-            <img src={iconTable} alt="机床" className="w-3.5 h-3.5" />
+            <img src={iconTable} alt={t("appHeader.table")} className="w-3.5 h-3.5" />
             <span>{tableLabel}</span>
           </div>
           <div className="flex items-center gap-1 text-[11px] font-bold">
-            <img src={iconGantry} alt="机架角度" className="w-3.5 h-3.5" />
+            <img src={iconGantry} alt={t("appHeader.gantry")} className="w-3.5 h-3.5" />
             <span>{gantryLabel}</span>
           </div>
           <div className="flex items-center gap-1 text-[11px] font-bold">
-            <img src={iconTube} alt="球管" className="w-3.5 h-3.5" />
+            <img src={iconTube} alt={t("appHeader.tube")} className="w-3.5 h-3.5" />
             <span>{heatLabel}</span>
           </div>
         </div>
@@ -103,17 +105,17 @@ export default function AppHeader({
         <button
           type="button"
           onClick={onEmergencyClick}
-          aria-label="急诊"
+          aria-label={t("appHeader.emergency")}
           className="flex flex-col items-center gap-0.5 p-1 bg-transparent border-0 text-[#D32F2F] transition-opacity hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D32F2F]/50 rounded"
         >
           <Ambulance size={26} strokeWidth={1.8} />
-          <span className="text-[10px] font-black leading-none tracking-wider">急诊</span>
+          <span className="text-[10px] font-black leading-none tracking-wider">{t("appHeader.emergency")}</span>
         </button>
         <NetworkStatusButton />
         {isLaserInteractive ? (
           <button
             type="button"
-            aria-label="激光灯"
+            aria-label={t("appHeader.laser")}
             aria-pressed={laserActive ?? false}
             onClick={onLaserToggle}
             className={`relative p-1 transition-all ${

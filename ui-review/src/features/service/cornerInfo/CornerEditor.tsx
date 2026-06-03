@@ -1,12 +1,15 @@
 import { Eye, EyeOff } from "lucide-react";
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 import { CORNER_FIELD_EXAMPLES } from "../../../lib/cornerConfig";
 import type { CornerItem, CornerConfigData, CornerKey } from "../../../lib/cornerConfig";
+import { getCornerFieldLabel } from "./cornerInfoI18n";
 
-const CORNERS: { id: CornerKey; label: string; hint: string; accent: string }[] = [
-    { id: "topLeft",     label: "左上角", hint: "患者身份",     accent: "#3B82F6" },
-    { id: "topRight",    label: "右上角", hint: "检查与机构",   accent: "#10B981" },
-    { id: "bottomLeft",  label: "左下角", hint: "采集参数",     accent: "#F59E0B" },
-    { id: "bottomRight", label: "右下角", hint: "图像状态",     accent: "#8B5CF6" },
+const CORNERS: { id: CornerKey; labelKey: TranslationKey; hintKey: TranslationKey; accent: string }[] = [
+    { id: "topLeft",     labelKey: "service.corner.corner.topLeft",     hintKey: "service.corner.corner.topLeftHint",     accent: "#3B82F6" },
+    { id: "topRight",    labelKey: "service.corner.corner.topRight",    hintKey: "service.corner.corner.topRightHint",    accent: "#10B981" },
+    { id: "bottomLeft",  labelKey: "service.corner.corner.bottomLeft",  hintKey: "service.corner.corner.bottomLeftHint",  accent: "#F59E0B" },
+    { id: "bottomRight", labelKey: "service.corner.corner.bottomRight", hintKey: "service.corner.corner.bottomRightHint", accent: "#8B5CF6" },
 ];
 
 interface CornerEditorProps {
@@ -15,6 +18,8 @@ interface CornerEditorProps {
 }
 
 export default function CornerEditor({ config, onUpdate }: CornerEditorProps) {
+    const { t } = useI18n();
+
     const setCorner = (key: CornerKey, items: CornerItem[]) => {
         onUpdate({ ...config, corners: { ...config.corners, [key]: items } });
     };
@@ -51,10 +56,10 @@ export default function CornerEditor({ config, onUpdate }: CornerEditorProps) {
                                 />
                                 <div className="flex items-baseline gap-2 min-w-0">
                                     <span className="text-[14px] font-black text-[#1A2332] tracking-tight">
-                                        {corner.label}
+                                        {t(corner.labelKey)}
                                     </span>
                                     <span className="text-[12px] font-bold text-[#64748B]">
-                                        {corner.hint}
+                                        {t(corner.hintKey)}
                                     </span>
                                     <span className="text-[10px] font-black text-[#94A3B8] uppercase tracking-wider ml-1">
                                         {visibleCount}/{items.length}
@@ -66,7 +71,7 @@ export default function CornerEditor({ config, onUpdate }: CornerEditorProps) {
                                 className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-black border border-[#E2E8F0] text-[#64748B] hover:bg-[#F8FAFC] hover:border-[#CBD5E1] transition-colors"
                             >
                                 {allVisible ? <EyeOff size={11} strokeWidth={2.5} /> : <Eye size={11} strokeWidth={2.5} />}
-                                {allVisible ? "全关" : "全开"}
+                                {allVisible ? t("service.corner.closeAll") : t("service.corner.openAll")}
                             </button>
                         </div>
 
@@ -89,7 +94,7 @@ export default function CornerEditor({ config, onUpdate }: CornerEditorProps) {
                                     />
                                     <div className="flex-1 min-w-0 flex flex-col">
                                         <span className="text-[12px] font-black text-[#334155] truncate leading-tight">
-                                            {item.label}
+                                            {getCornerFieldLabel(item.key, item.label, t)}
                                         </span>
                                         <span
                                             className="text-[10px] text-[#94A3B8] truncate leading-tight"

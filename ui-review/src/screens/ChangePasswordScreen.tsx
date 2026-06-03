@@ -3,9 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { AlertCircle, KeyRound, ShieldCheck } from "lucide-react";
 
 import { useAuth } from "../lib/authContext";
+import { useI18n } from "../lib/i18nContext";
 
 export default function ChangePasswordScreen() {
     const { user, changePassword, logout } = useAuth();
+    const { t } = useI18n();
     const navigate = useNavigate();
 
     const [currentPassword, setCurrentPassword] = useState("");
@@ -20,11 +22,11 @@ export default function ChangePasswordScreen() {
         event.preventDefault();
         if (submitting) return;
         if (newPassword.length < 6) {
-            setError("新密码长度至少 6 位");
+            setError(t("changePassword.errorTooShort"));
             return;
         }
         if (newPassword !== confirmPassword) {
-            setError("两次输入的新密码不一致");
+            setError(t("changePassword.errorMismatch"));
             return;
         }
         setSubmitting(true);
@@ -33,7 +35,7 @@ export default function ChangePasswordScreen() {
             await changePassword(currentPassword, newPassword);
             navigate("/", { replace: true });
         } catch (err) {
-            setError(err instanceof Error ? err.message : "修改密码失败");
+            setError(err instanceof Error ? err.message : t("changePassword.errorFailed"));
         } finally {
             setSubmitting(false);
         }
@@ -47,32 +49,34 @@ export default function ChangePasswordScreen() {
                         <ShieldCheck size={28} strokeWidth={1.8} />
                     </div>
                     <h1 className="text-[20px] font-bold text-[#37474F]">
-                        {forced ? "首次登录，请修改密码" : "修改密码"}
+                        {forced ? t("changePassword.firstLoginTitle") : t("changePassword.title")}
                     </h1>
                     {user && (
                         <p className="mt-1 text-[12px] text-[#90A4AE]">
-                            当前账号：<span className="font-semibold text-[#546E7A]">{user.display_name} ({user.username})</span>
+                            <span className="font-semibold text-[#546E7A]">
+                                {t("changePassword.currentAccount", { name: user.display_name, username: user.username })}
+                            </span>
                         </p>
                     )}
                 </div>
 
                 <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                     <Field
-                        label="当前密码"
+                        label={t("changePassword.currentPassword")}
                         value={currentPassword}
                         onChange={setCurrentPassword}
                         disabled={submitting}
                         autoFocus
                     />
                     <Field
-                        label="新密码"
+                        label={t("changePassword.newPassword")}
                         value={newPassword}
                         onChange={setNewPassword}
                         disabled={submitting}
-                        hint="至少 6 位"
+                        hint={t("changePassword.minLengthHint")}
                     />
                     <Field
-                        label="确认新密码"
+                        label={t("changePassword.confirmNewPassword")}
                         value={confirmPassword}
                         onChange={setConfirmPassword}
                         disabled={submitting}
@@ -93,7 +97,7 @@ export default function ChangePasswordScreen() {
                                 disabled={submitting}
                                 className="flex-1 rounded-md border border-[#B0C4DE] py-2.5 text-[14px] font-semibold text-[#546E7A] hover:bg-[#F4F6FA]"
                             >
-                                取消
+                                {t("common.cancel")}
                             </button>
                         )}
                         <button
@@ -101,7 +105,7 @@ export default function ChangePasswordScreen() {
                             disabled={submitting}
                             className="flex-1 rounded-md bg-[#4A6982] py-2.5 text-[14px] font-semibold tracking-wider text-white shadow-sm hover:opacity-90 disabled:opacity-50"
                         >
-                            {submitting ? "提交中…" : "确认修改"}
+                            {submitting ? t("changePassword.submitting") : t("changePassword.submit")}
                         </button>
                     </div>
 
@@ -111,7 +115,7 @@ export default function ChangePasswordScreen() {
                             onClick={() => void logout()}
                             className="text-center text-[11px] text-[#90A4AE] underline hover:text-[#546E7A]"
                         >
-                            取消并登出
+                            {t("changePassword.cancelLogout")}
                         </button>
                     )}
                 </form>

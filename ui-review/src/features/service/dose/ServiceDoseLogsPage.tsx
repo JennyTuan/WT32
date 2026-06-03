@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, FileText, Printer, RefreshCw, Search, ChevronLeft, ChevronRight } from "lucide-react";
 
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 import ServiceModeShell from "../shared/ServiceModeShell";
 import { listDoseLogs, type ApiDoseLog } from "../../../lib/logsApi";
 import { listDrlEntries, type ApiDrlEntry } from "../../../lib/doseSettingsApi";
@@ -49,11 +51,12 @@ const buildSeedMap = (protocols: ProtocolListItem[]): Map<string, SeedParam> => 
 };
 
 const PAGE_SIZE = 50;
+const ALL_FILTER = "all";
 
-const SERIES_TYPE_LABEL: Record<string, string> = {
-  topogram: "Scout",
-  helical: "螺旋",
-  axial: "轴扫",
+const SERIES_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
+  topogram: "service.doseLogs.series.topogram",
+  helical: "service.doseLogs.series.helical",
+  axial: "service.doseLogs.series.axial",
 };
 
 const SERIES_TYPE_STYLES: Record<string, string> = {
@@ -64,11 +67,11 @@ const SERIES_TYPE_STYLES: Record<string, string> = {
 
 type DoseScanKind = "regular" | "contrast" | "gating" | "four_d";
 
-const SCAN_KIND_LABELS: Record<DoseScanKind, string> = {
-  regular: "常规",
-  contrast: "增强",
-  gating: "门控",
-  four_d: "4D",
+const SCAN_KIND_LABEL_KEYS: Record<DoseScanKind, TranslationKey> = {
+  regular: "service.doseLogs.scanKind.regular",
+  contrast: "service.doseLogs.scanKind.contrast",
+  gating: "service.doseLogs.scanKind.gating",
+  four_d: "service.doseLogs.scanKind.fourD",
 };
 
 const SCAN_KIND_STYLES: Record<DoseScanKind, string> = {
@@ -142,6 +145,25 @@ const fmtInt = (v: number | null): string => {
   return String(v);
 };
 
+const BODY_PART_LABEL_KEYS: Record<string, TranslationKey> = {
+  头颅: "service.doseSettings.bodyPart.head",
+  颈部: "service.doseSettings.bodyPart.neck",
+  胸部: "service.doseSettings.bodyPart.chest",
+  腹部: "service.doseSettings.bodyPart.abdomen",
+  盆腔: "service.doseSettings.bodyPart.pelvis",
+  脊柱: "service.doseSettings.bodyPart.spine",
+  心脏: "service.doseSettings.bodyPart.cardiac",
+  四肢: "service.doseSettings.bodyPart.extremities",
+};
+
+type Translate = ReturnType<typeof useI18n>["t"];
+
+const translateMaybe = (value: string | null | undefined, keyMap: Record<string, TranslationKey>, t: Translate): string => {
+  if (!value) return "—";
+  const key = keyMap[value];
+  return key ? t(key) : value;
+};
+
 const toIsoDayStart = (yyyyMmDd: string): Date | null => {
   if (!yyyyMmDd) return null;
   const d = new Date(`${yyyyMmDd}T00:00:00`);
@@ -155,14 +177,15 @@ const toIsoDayEnd = (yyyyMmDd: string): Date | null => {
 };
 
 export default function ServiceDoseLogsPage() {
+  const { language, t } = useI18n();
   const [logs, setLogs] = useState<ApiDoseLog[]>([]);
   const [drlEntries, setDrlEntries] = useState<ApiDrlEntry[]>([]);
   const [seedMap, setSeedMap] = useState<Map<string, SeedParam>>(() => new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [seriesTypeFilter, setSeriesTypeFilter] = useState<string>("全部");
-  const [bodyPartFilter, setBodyPartFilter] = useState<string>("全部");
+  const [seriesTypeFilter, setSeriesTypeFilter] = useState<string>(ALL_FILTER);
+  const [bodyPartFilter, setBodyPartFilter] = useState<string>(ALL_FILTER);
   const [onlyOverThreshold, setOnlyOverThreshold] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -197,11 +220,11 @@ export default function ServiceDoseLogsPage() {
       setDrlEntries(drl);
       setSeedMap(buildSeedMap(protos));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载失败");
+      setError(e instanceof Error ? e.message : t("service.doseLogs.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchLogs();
@@ -224,8 +247,8 @@ export default function ServiceDoseLogsPage() {
     const q = searchText.trim().toLowerCase();
 
     return logsWithFlag.filter(({ log: l, overThreshold }) => {
-      if (seriesTypeFilter !== "全部" && l.series_type !== seriesTypeFilter) return false;
-      if (bodyPartFilter !== "全部" && l.body_part !== bodyPartFilter) return false;
+      if (seriesTypeFilter !== ALL_FILTER && l.series_type !== seriesTypeFilter) return false;
+      if (bodyPartFilter !== ALL_FILTER && l.body_part !== bodyPartFilter) return false;
       if (onlyOverThreshold && !overThreshold) return false;
       if (from || to) {
         const t = new Date(l.scanned_at).getTime();
@@ -233,13 +256,13 @@ export default function ServiceDoseLogsPage() {
         if (to && t > to.getTime()) return false;
       }
       if (q) {
-        const scanKind = SCAN_KIND_LABELS[getDoseScanKind(l)];
+        const scanKind = t(SCAN_KIND_LABEL_KEYS[getDoseScanKind(l)]);
         const hay = `${l.patient_id_snapshot ?? ""} ${l.patient_name_snapshot ?? ""} ${l.protocol_name_snapshot ?? ""} ${l.series_label ?? ""} ${scanKind}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [logsWithFlag, seriesTypeFilter, bodyPartFilter, onlyOverThreshold, dateFrom, dateTo, searchText]);
+  }, [logsWithFlag, seriesTypeFilter, bodyPartFilter, onlyOverThreshold, dateFrom, dateTo, searchText, t]);
 
   const exceededCount = useMemo(
     () => filtered.filter((r) => r.overThreshold).length,
@@ -261,36 +284,36 @@ export default function ServiceDoseLogsPage() {
 
   const handleExport = useCallback(() => {
     const csv = buildCsv(filtered, [
-      { header: "扫描时间", value: ({ log: l }) => l.scanned_at },
-      { header: "患者姓名", value: ({ log: l }) => l.patient_name_snapshot ?? "" },
-      { header: "患者ID", value: ({ log: l }) => l.patient_id_snapshot ?? "" },
-      { header: "协议", value: ({ log: l }) => l.protocol_name_snapshot ?? "" },
-      { header: "扫描模式", value: ({ log: l }) => SCAN_KIND_LABELS[getDoseScanKind(l)] },
-      { header: "序列", value: ({ log: l }) => SERIES_TYPE_LABEL[l.series_type] ?? l.series_type },
-      { header: "部位", value: ({ log: l }) => l.body_part ?? "" },
-      { header: "超阈值", value: ({ overThreshold }) => (overThreshold ? "是" : "") },
+      { header: t("service.doseLogs.acquiredAt"), value: ({ log: l }) => l.scanned_at },
+      { header: t("service.doseLogs.patientName"), value: ({ log: l }) => l.patient_name_snapshot ?? "" },
+      { header: t("service.doseLogs.patientId"), value: ({ log: l }) => l.patient_id_snapshot ?? "" },
+      { header: t("service.doseLogs.protocol"), value: ({ log: l }) => l.protocol_name_snapshot ?? "" },
+      { header: t("service.doseLogs.scanMode"), value: ({ log: l }) => t(SCAN_KIND_LABEL_KEYS[getDoseScanKind(l)]) },
+      { header: t("service.doseLogs.series"), value: ({ log: l }) => translateMaybe(l.series_type, SERIES_TYPE_LABEL_KEYS, t) },
+      { header: t("service.doseLogs.bodyPart"), value: ({ log: l }) => translateMaybe(l.body_part, BODY_PART_LABEL_KEYS, t) },
+      { header: t("service.doseLogs.overThreshold"), value: ({ overThreshold }) => (overThreshold ? t("service.doseLogs.csv.overThreshold") : "") },
       { header: "kV", value: ({ log: l }) => l.kv ?? "" },
       { header: "mA", value: ({ log: l }) => l.ma ?? "" },
       { header: "CTDIvol (mGy)", value: ({ log: l }) => l.ctdi_vol ?? "" },
       { header: "DLP (mGy·cm)", value: ({ log: l }) => l.dlp ?? "" },
-      { header: "扫描长度 (mm)", value: ({ log: l }) => l.scan_length ?? "" },
-      { header: "旋转时间 (s)", value: ({ log: l }) => l.rotation_time ?? "" },
+      { header: t("service.doseLogs.scanLengthWithUnit"), value: ({ log: l }) => l.scan_length ?? "" },
+      { header: t("service.doseLogs.rotationTime"), value: ({ log: l }) => l.rotation_time ?? "" },
       { header: "Pitch", value: ({ log: l }) => l.pitch ?? "" },
-      { header: "准直", value: ({ log: l }) => l.collimator ?? "" },
-      { header: "操作者", value: ({ log: l }) => l.operator ?? "" },
+      { header: t("service.doseLogs.collimator"), value: ({ log: l }) => l.collimator ?? "" },
+      { header: t("service.doseLogs.operator"), value: ({ log: l }) => l.operator ?? "" },
     ]);
     downloadCsv(`dose-log-${timestampSuffix()}.csv`, csv);
     setExportMenuOpen(false);
-  }, [filtered]);
+  }, [filtered, t]);
 
   const handlePrintReport = useCallback(() => {
     const filterParts: string[] = [];
-    if (seriesTypeFilter !== "全部") {
-      filterParts.push(`序列：${SERIES_TYPE_LABEL[seriesTypeFilter] ?? seriesTypeFilter}`);
+    if (seriesTypeFilter !== ALL_FILTER) {
+      filterParts.push(t("service.doseLogs.filterSeries", { value: translateMaybe(seriesTypeFilter, SERIES_TYPE_LABEL_KEYS, t) }));
     }
-    if (bodyPartFilter !== "全部") filterParts.push(`部位：${bodyPartFilter}`);
-    if (onlyOverThreshold) filterParts.push("仅超阈值");
-    if (searchText.trim()) filterParts.push(`关键字：${searchText.trim()}`);
+    if (bodyPartFilter !== ALL_FILTER) filterParts.push(t("service.doseLogs.filterBodyPart", { value: translateMaybe(bodyPartFilter, BODY_PART_LABEL_KEYS, t) }));
+    if (onlyOverThreshold) filterParts.push(t("service.doseLogs.filterOverThreshold"));
+    if (searchText.trim()) filterParts.push(t("service.doseLogs.filterKeyword", { value: searchText.trim() }));
 
     printDoseLogReport({
       rows: filtered.map((r) => ({ ...r.log, over_threshold: r.overThreshold })),
@@ -298,10 +321,11 @@ export default function ServiceDoseLogsPage() {
       exceededCount,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
-      filtersDescription: filterParts.length > 0 ? filterParts.join(" / ") : "全部",
+      filtersDescription: filterParts.length > 0 ? filterParts.join(" / ") : t("service.doseLogs.filterAll"),
+      language,
     });
     setExportMenuOpen(false);
-  }, [filtered, totalDlp, exceededCount, dateFrom, dateTo, seriesTypeFilter, bodyPartFilter, onlyOverThreshold, searchText]);
+  }, [filtered, totalDlp, exceededCount, dateFrom, dateTo, seriesTypeFilter, bodyPartFilter, onlyOverThreshold, searchText, language, t]);
 
   return (
     <ServiceModeShell currentRoute="/service/dose/logs" footerStatus={{ label: "IDLE", tone: "idle" }}>
@@ -313,7 +337,7 @@ export default function ServiceDoseLogsPage() {
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
               <input
                 type="text"
-                placeholder="搜索患者ID / 姓名 / 协议..."
+                placeholder={t("service.doseLogs.searchPlaceholder")}
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 className="w-full pl-9 pr-4 h-10 border border-[#D6E2EF] rounded-lg text-[14px] text-[#37474F] placeholder:text-[#B0C4DE] focus:outline-none focus:border-[#4D94FF]"
@@ -326,7 +350,7 @@ export default function ServiceDoseLogsPage() {
                 className="px-4 h-10 bg-white border border-[#D6E2EF] text-[#37474F] font-bold rounded-lg flex items-center gap-2 text-[14px] hover:bg-[#F5F8FC] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Download size={14} />
-                导出
+                {t("service.doseLogs.export")}
                 <ChevronDown size={14} className={`transition-transform ${exportMenuOpen ? "rotate-180" : ""}`} />
               </button>
               {exportMenuOpen && (
@@ -337,8 +361,8 @@ export default function ServiceDoseLogsPage() {
                   >
                     <FileText size={14} className="text-[#90A4AE]" />
                     <div>
-                      <div className="font-bold">导出 CSV</div>
-                      <div className="text-[11px] text-[#90A4AE]">原始数据，Excel 可打开</div>
+                      <div className="font-bold">{t("service.doseLogs.exportCsv")}</div>
+                      <div className="text-[11px] text-[#90A4AE]">{t("service.doseLogs.exportCsvDesc")}</div>
                     </div>
                   </button>
                   <div className="h-px bg-[#E2EBF5]" />
@@ -348,8 +372,8 @@ export default function ServiceDoseLogsPage() {
                   >
                     <Printer size={14} className="text-[#90A4AE]" />
                     <div>
-                      <div className="font-bold">打印报告</div>
-                      <div className="text-[11px] text-[#90A4AE]">A4 排版，可签字归档</div>
+                      <div className="font-bold">{t("service.doseLogs.printReport")}</div>
+                      <div className="text-[11px] text-[#90A4AE]">{t("service.doseLogs.printReportDesc")}</div>
                     </div>
                   </button>
                 </div>
@@ -361,13 +385,13 @@ export default function ServiceDoseLogsPage() {
               className="px-4 h-10 bg-[#4D94FF] text-white font-bold rounded-lg flex items-center gap-2 text-[14px] hover:bg-blue-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-              刷新
+              {t("service.doseLogs.refresh")}
             </button>
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold text-[#263238]">日期范围</span>
+              <span className="text-[13px] font-bold text-[#263238]">{t("service.doseLogs.dateRange")}</span>
               <input
                 type="date"
                 value={dateFrom}
@@ -384,16 +408,16 @@ export default function ServiceDoseLogsPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold text-[#263238]">序列类型</span>
+              <span className="text-[13px] font-bold text-[#263238]">{t("service.doseLogs.seriesType")}</span>
               <div className="relative">
                 <select
                   value={seriesTypeFilter}
                   onChange={(e) => setSeriesTypeFilter(e.target.value)}
                   className="appearance-none h-9 pl-3 pr-8 border border-[#D6E2EF] rounded-lg text-[13px] text-[#37474F] focus:outline-none focus:border-[#4D94FF] bg-white cursor-pointer"
                 >
-                  <option value="全部">全部</option>
+                  <option value={ALL_FILTER}>{t("service.doseLogs.all")}</option>
                   {seriesTypes.map((s) => (
-                    <option key={s} value={s}>{SERIES_TYPE_LABEL[s] ?? s}</option>
+                    <option key={s} value={s}>{translateMaybe(s, SERIES_TYPE_LABEL_KEYS, t)}</option>
                   ))}
                 </select>
                 <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#90A4AE] pointer-events-none" />
@@ -401,16 +425,16 @@ export default function ServiceDoseLogsPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold text-[#263238]">部位</span>
+              <span className="text-[13px] font-bold text-[#263238]">{t("service.doseLogs.bodyPart")}</span>
               <div className="relative">
                 <select
                   value={bodyPartFilter}
                   onChange={(e) => setBodyPartFilter(e.target.value)}
                   className="appearance-none h-9 pl-3 pr-8 border border-[#D6E2EF] rounded-lg text-[13px] text-[#37474F] focus:outline-none focus:border-[#4D94FF] bg-white cursor-pointer"
                 >
-                  <option value="全部">全部</option>
+                  <option value={ALL_FILTER}>{t("service.doseLogs.all")}</option>
                   {bodyParts.map((b) => (
-                    <option key={b} value={b}>{b}</option>
+                    <option key={b} value={b}>{translateMaybe(b, BODY_PART_LABEL_KEYS, t)}</option>
                   ))}
                 </select>
                 <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#90A4AE] pointer-events-none" />
@@ -424,7 +448,7 @@ export default function ServiceDoseLogsPage() {
                 onChange={(e) => setOnlyOverThreshold(e.target.checked)}
                 className="accent-[#C62828]"
               />
-              <span className="font-bold">仅显示超阈值</span>
+              <span className="font-bold">{t("service.doseLogs.showOnlyOverThreshold")}</span>
             </label>
           </div>
         </div>
@@ -435,13 +459,13 @@ export default function ServiceDoseLogsPage() {
             <table className="w-full text-[13px]">
               <thead className="sticky top-0 z-10">
                 <tr className="bg-[#F5F8FC] text-[#37474F] font-black border-b border-[#E2EBF5]">
-                  <th className="text-left px-3 py-3 w-[110px]">扫描时间</th>
-                  <th className="text-left px-3 py-3 w-[160px]">患者</th>
-                  <th className="text-left px-3 py-3">协议</th>
-                  <th className="text-left px-3 py-3 w-[68px]">扫描模式</th>
-                  <th className="text-left px-3 py-3 w-[72px]">序列</th>
-                  <th className="text-left px-3 py-3 w-[80px]">部位</th>
-                  <th className="text-left px-3 py-3 w-[78px]">标记</th>
+                  <th className="text-left px-3 py-3 w-[110px]">{t("service.doseLogs.acquiredAt")}</th>
+                  <th className="text-left px-3 py-3 w-[160px]">{t("service.doseLogs.patient")}</th>
+                  <th className="text-left px-3 py-3">{t("service.doseLogs.protocol")}</th>
+                  <th className="text-left px-3 py-3 w-[68px]">{t("service.doseLogs.scanMode")}</th>
+                  <th className="text-left px-3 py-3 w-[72px]">{t("service.doseLogs.series")}</th>
+                  <th className="text-left px-3 py-3 w-[80px]">{t("service.doseLogs.bodyPart")}</th>
+                  <th className="text-left px-3 py-3 w-[78px]">{t("service.doseLogs.marker")}</th>
                   <th className="text-right px-3 py-3 w-[90px]">kV / mA</th>
                   <th className="text-right px-3 py-3 w-[88px]">
                     CTDIvol<span className="block text-[10px] text-[#90A4AE] font-normal">mGy</span>
@@ -450,7 +474,7 @@ export default function ServiceDoseLogsPage() {
                     DLP<span className="block text-[10px] text-[#90A4AE] font-normal">mGy·cm</span>
                   </th>
                   <th className="text-right px-3 py-3 w-[96px]">
-                    扫描长度<span className="block text-[10px] text-[#90A4AE] font-normal">mm</span>
+                    {t("service.doseLogs.scanLength")}<span className="block text-[10px] text-[#90A4AE] font-normal">mm</span>
                   </th>
                 </tr>
               </thead>
@@ -464,7 +488,7 @@ export default function ServiceDoseLogsPage() {
                 ) : pageRows.length === 0 ? (
                   <tr>
                     <td colSpan={11} className="text-center py-16 text-[#90A4AE] text-[14px]">
-                      {loading ? "加载中..." : "没有找到剂量记录"}
+                      {loading ? t("service.doseLogs.loading") : t("service.doseLogs.empty")}
                     </td>
                   </tr>
                 ) : (
@@ -475,11 +499,11 @@ export default function ServiceDoseLogsPage() {
                     >
                       <td className="px-3 py-3 whitespace-nowrap">
                         {(() => {
-                          const t = formatTimestamp(l.scanned_at);
+                          const ts = formatTimestamp(l.scanned_at);
                           return (
                             <>
-                              <div className="text-[13px] text-[#37474F] font-mono leading-tight">{t.date}</div>
-                              <div className="text-[11px] text-[#90A4AE] font-mono leading-tight mt-0.5">{t.time}</div>
+                              <div className="text-[13px] text-[#37474F] font-mono leading-tight">{ts.date}</div>
+                              <div className="text-[11px] text-[#90A4AE] font-mono leading-tight mt-0.5">{ts.time}</div>
                             </>
                           );
                         })()}
@@ -504,7 +528,7 @@ export default function ServiceDoseLogsPage() {
                             <span
                               className={`inline-flex items-center justify-center min-w-[54px] h-[22px] px-2 rounded-md text-[11px] font-bold ${SCAN_KIND_STYLES[scanKind]}`}
                             >
-                              {SCAN_KIND_LABELS[scanKind]}
+                              {t(SCAN_KIND_LABEL_KEYS[scanKind])}
                             </span>
                           );
                         })()}
@@ -513,17 +537,17 @@ export default function ServiceDoseLogsPage() {
                         <span
                           className={`inline-flex items-center justify-center min-w-[50px] h-[22px] px-2 rounded-full text-[11px] font-bold ${SERIES_TYPE_STYLES[l.series_type] ?? "bg-[#ECEFF1] text-[#546E7A] border border-[#CFD8DC]"}`}
                         >
-                          {SERIES_TYPE_LABEL[l.series_type] ?? l.series_type}
+                          {translateMaybe(l.series_type, SERIES_TYPE_LABEL_KEYS, t)}
                         </span>
                       </td>
-                      <td className="px-3 py-3 text-[#37474F] whitespace-nowrap">{l.body_part ?? "—"}</td>
+                      <td className="px-3 py-3 text-[#37474F] whitespace-nowrap">{translateMaybe(l.body_part, BODY_PART_LABEL_KEYS, t)}</td>
                       <td className="px-3 py-3 whitespace-nowrap">
                         {overThreshold ? (
                           <span
                             className="inline-flex items-center justify-center h-[22px] px-2 rounded-md text-[11px] font-bold bg-[#FFEBEE] text-[#C62828] border border-[#FFCDD2]"
-                            title="本次扫描剂量达到或超过报告剂量阈值"
+                            title={t("service.doseLogs.overThresholdTitle")}
                           >
-                            超阈值
+                            {t("service.doseLogs.overThreshold")}
                           </span>
                         ) : (
                           <span className="text-[#CFD8DC]">—</span>
@@ -546,29 +570,28 @@ export default function ServiceDoseLogsPage() {
           <div className="border-t border-[#E2EBF5] px-4 py-2 flex items-center justify-between text-[12px] text-[#546E7A]">
             <div className="flex items-center gap-4">
               <span>
-                共 <span className="font-bold text-[#263238]">{filtered.length}</span> 条记录
+                {t("service.doseLogs.totalRecords", { count: filtered.length })}
                 {filtered.length !== logs.length && (
-                  <span className="text-[#90A4AE]">（已过滤自 {logs.length} 条）</span>
+                  <span className="text-[#90A4AE]">{t("service.doseLogs.filteredFrom", { count: logs.length })}</span>
                 )}
               </span>
               <span className="text-[#90A4AE]">·</span>
               <span>
-                合计 DLP <span className="font-bold text-[#1E88E5] font-mono">{totalDlp.toFixed(2)}</span>
+                {t("service.doseLogs.totalDlp", { value: totalDlp.toFixed(2) })}
                 <span className="text-[10px] text-[#90A4AE] ml-1">mGy·cm</span>
               </span>
               {exceededCount > 0 && (
                 <>
                   <span className="text-[#90A4AE]">·</span>
                   <span>
-                    超阈值 <span className="font-bold text-[#C62828] font-mono">{exceededCount}</span>
-                    <span className="text-[10px] text-[#90A4AE] ml-1">条</span>
+                    {t("service.doseLogs.exceededCount", { count: exceededCount })}
                   </span>
                 </>
               )}
             </div>
             <div className="flex items-center gap-3">
               <span>
-                第 <span className="font-bold text-[#263238]">{safePage + 1}</span> / {pageCount} 页
+                {t("service.doseLogs.page", { page: safePage + 1, total: pageCount })}
               </span>
               <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}

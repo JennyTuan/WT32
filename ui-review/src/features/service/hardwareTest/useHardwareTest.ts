@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
+import type { LanguageCode } from "../../../lib/systemSettingsApi";
 import type {
   EditingField,
   HardwareTestAction,
@@ -8,194 +11,196 @@ import type {
   HardwareTestTabOption,
 } from "./types";
 
-const TAB_OPTIONS: HardwareTestTabOption[] = [
-  { id: "gantry", label: "机架" },
-  { id: "rail", label: "轨道" },
-  { id: "imaging", label: "影像" },
-];
-
-const TAB_LABELS: Record<HardwareTestTab, string> = {
-  gantry: "机架",
-  rail: "轨道",
-  imaging: "影像",
-};
+type Translate = (key: TranslationKey, values?: Record<string, string | number>) => string;
 
 const DEFAULT_AUTO_COMPLETE_MS = 1400;
 
-const INITIAL_ACTIONS: Record<HardwareTestTab, HardwareTestAction[]> = {
+const createTabOptions = (t: Translate): HardwareTestTabOption[] => [
+  { id: "gantry", label: t("service.hardwareTest.tab.gantry") },
+  { id: "rail", label: t("service.hardwareTest.tab.rail") },
+  { id: "imaging", label: t("service.hardwareTest.tab.imaging") },
+];
+
+const createTabLabels = (t: Translate): Record<HardwareTestTab, string> => ({
+  gantry: t("service.hardwareTest.tab.gantry"),
+  rail: t("service.hardwareTest.tab.rail"),
+  imaging: t("service.hardwareTest.tab.imaging"),
+});
+
+const createInitialActions = (t: Translate): Record<HardwareTestTab, HardwareTestAction[]> => ({
   gantry: [
     {
       id: "gantry-reset",
-      name: "机架复位",
+      name: t("service.hardwareTest.action.gantryReset"),
       code: "(RCB)",
       control: "reset",
-      idleLabel: "复位",
-      runningLabel: "停止",
-      runningResult: "复位中",
-      stoppedResult: "已停止",
-      completedResult: "已复位",
+      idleLabel: t("service.hardwareTest.button.reset"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.resetting"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
+      completedResult: t("service.hardwareTest.result.reset"),
       autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
       buttonTone: "neutral",
     },
     {
       id: "rotation-home",
-      name: "旋转找零",
+      name: t("service.hardwareTest.action.rotationHome"),
       control: "trigger",
-      idleLabel: "开始",
-      runningLabel: "停止",
-      runningResult: "执行中",
-      stoppedResult: "已停止",
-      completedResult: "已完成",
+      idleLabel: t("service.hardwareTest.button.start"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.executing"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
+      completedResult: t("service.hardwareTest.result.completed"),
       autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
     },
     {
       id: "rotation-control",
-      name: "旋转控制",
+      name: t("service.hardwareTest.action.rotationControl"),
       control: "toggle",
-      idleLabel: "开始",
-      runningLabel: "停止",
-      runningResult: "已开始",
-      stoppedResult: "已停止",
-      params: [{ key: "speed", label: "速度", value: "3", widthClass: "w-14" }],
+      idleLabel: t("service.hardwareTest.button.start"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.started"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
+      params: [{ key: "speed", label: t("service.hardwareTest.param.speed"), value: "3", widthClass: "w-14" }],
     },
     {
       id: "gantry-position",
-      name: "机架定位",
+      name: t("service.hardwareTest.action.gantryPosition"),
       control: "trigger",
-      idleLabel: "开始",
-      runningLabel: "停止",
-      runningResult: "定位中",
-      stoppedResult: "已停止",
-      completedResult: "已完成",
+      idleLabel: t("service.hardwareTest.button.start"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.positioning"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
+      completedResult: t("service.hardwareTest.result.completed"),
       autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
       params: [
-        { key: "speed", label: "速度", value: "3", widthClass: "w-14" },
-        { key: "angle", label: "角度", value: "180", widthClass: "w-16" },
+        { key: "speed", label: t("service.hardwareTest.param.speed"), value: "3", widthClass: "w-14" },
+        { key: "angle", label: t("service.hardwareTest.param.angle"), value: "180", widthClass: "w-16" },
       ],
     },
     {
       id: "tilt-reset",
-      name: "倾斜复位",
+      name: t("service.hardwareTest.action.tiltReset"),
       control: "reset",
-      idleLabel: "复位",
-      runningLabel: "停止",
-      runningResult: "复位中",
-      stoppedResult: "已停止",
-      completedResult: "已复位",
+      idleLabel: t("service.hardwareTest.button.reset"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.resetting"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
+      completedResult: t("service.hardwareTest.result.reset"),
       autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
       buttonTone: "neutral",
     },
     {
       id: "tilt-control",
-      name: "倾斜控制",
+      name: t("service.hardwareTest.action.tiltControl"),
       control: "toggle",
-      idleLabel: "开始",
-      runningLabel: "停止",
-      runningResult: "已开始",
-      stoppedResult: "已停止",
-      params: [{ key: "angle", label: "角度", value: "0", widthClass: "w-16" }],
+      idleLabel: t("service.hardwareTest.button.start"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.started"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
+      params: [{ key: "angle", label: t("service.hardwareTest.param.angle"), value: "0", widthClass: "w-16" }],
     },
   ],
   rail: [
     {
       id: "bed-reset",
-      name: "扫描床复位",
+      name: t("service.hardwareTest.action.bedReset"),
       code: "(UCB)",
       control: "reset",
-      idleLabel: "复位",
-      runningLabel: "停止",
-      runningResult: "复位中",
-      stoppedResult: "已停止",
-      completedResult: "已复位",
+      idleLabel: t("service.hardwareTest.button.reset"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.resetting"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
+      completedResult: t("service.hardwareTest.result.reset"),
       autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
       buttonTone: "neutral",
     },
     {
       id: "bed-move-target",
-      name: "移动开始(目标位置)",
+      name: t("service.hardwareTest.action.bedMoveTarget"),
       control: "trigger",
-      idleLabel: "开始",
-      runningLabel: "停止",
-      runningResult: "移动中",
-      stoppedResult: "已停止",
-      completedResult: "已完成",
+      idleLabel: t("service.hardwareTest.button.start"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.moving"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
+      completedResult: t("service.hardwareTest.result.completed"),
       autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
       params: [
-        { key: "speed", label: "速度", value: "33", widthClass: "w-14" },
-        { key: "position", label: "位置", value: "500", widthClass: "w-16" },
+        { key: "speed", label: t("service.hardwareTest.param.speed"), value: "33", widthClass: "w-14" },
+        { key: "position", label: t("service.hardwareTest.param.position"), value: "500", widthClass: "w-16" },
       ],
     },
   ],
   imaging: [
     {
       id: "rotor-control",
-      name: "Rotor(阳极)控制",
+      name: t("service.hardwareTest.action.rotorControl"),
       control: "toggle",
-      idleLabel: "开始",
-      runningLabel: "停止",
-      runningResult: "已开始",
-      stoppedResult: "已停止",
+      idleLabel: t("service.hardwareTest.button.start"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.started"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
     },
     {
       id: "laser-control",
-      name: "激光灯控制",
+      name: t("service.hardwareTest.action.laserControl"),
       control: "toggle",
-      idleLabel: "点亮",
-      runningLabel: "停止",
-      runningResult: "已点亮",
-      stoppedResult: "已关闭",
+      idleLabel: t("service.hardwareTest.button.light"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.lit"),
+      stoppedResult: t("service.hardwareTest.result.closed"),
     },
     {
       id: "collimator-reset",
-      name: "准直器复位",
+      name: t("service.hardwareTest.action.collimatorReset"),
       control: "reset",
-      idleLabel: "复位",
-      runningLabel: "停止",
-      runningResult: "复位中",
-      stoppedResult: "已停止",
-      completedResult: "已复位",
+      idleLabel: t("service.hardwareTest.button.reset"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.resetting"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
+      completedResult: t("service.hardwareTest.result.reset"),
       autoCompleteMs: DEFAULT_AUTO_COMPLETE_MS,
       buttonTone: "neutral",
     },
     {
       id: "collimator-control",
-      name: "准直器控制",
+      name: t("service.hardwareTest.action.collimatorControl"),
       control: "toggle",
-      idleLabel: "开始",
-      runningLabel: "停止",
-      runningResult: "已开始",
-      stoppedResult: "已停止",
+      idleLabel: t("service.hardwareTest.button.start"),
+      runningLabel: t("service.hardwareTest.button.stop"),
+      runningResult: t("service.hardwareTest.result.started"),
+      stoppedResult: t("service.hardwareTest.result.stopped"),
       params: [
-        { key: "collimator", label: "规格", value: "32*0.6", widthClass: "w-20" },
+        { key: "collimator", label: t("service.hardwareTest.param.collimator"), value: "32*0.6", widthClass: "w-20" },
         { key: "level", label: "1", value: "1", widthClass: "w-12" },
       ],
     },
   ],
-};
+});
 
-const INITIAL_LOGS: HardwareTestLog[] = [
+const createInitialLogs = (t: Translate): HardwareTestLog[] => [
   {
     id: "boot-1",
     time: "16:14:02",
-    module: "机架",
-    actionName: "系统初始化",
-    paramsSnapshot: "无参数",
-    result: "硬件测试控制台已就绪",
+    module: t("service.hardwareTest.tab.gantry"),
+    actionName: t("service.hardwareTest.log.systemInit"),
+    paramsSnapshot: t("service.hardwareTest.noParams"),
+    result: t("service.hardwareTest.log.consoleReady"),
   },
   {
     id: "boot-2",
     time: "16:14:05",
-    module: "机架",
-    actionName: "通信检测",
-    paramsSnapshot: "无参数",
-    result: "机架通讯正常",
+    module: t("service.hardwareTest.tab.gantry"),
+    actionName: t("service.hardwareTest.log.communicationCheck"),
+    paramsSnapshot: t("service.hardwareTest.noParams"),
+    result: t("service.hardwareTest.log.gantryCommunicationNormal"),
   },
 ];
 
-const cloneActions = () =>
-  Object.keys(INITIAL_ACTIONS).reduce<Record<HardwareTestTab, HardwareTestAction[]>>((acc, rawTab) => {
+const cloneActions = (source: Record<HardwareTestTab, HardwareTestAction[]>) =>
+  Object.keys(source).reduce<Record<HardwareTestTab, HardwareTestAction[]>>((acc, rawTab) => {
     const tab = rawTab as HardwareTestTab;
-    acc[tab] = INITIAL_ACTIONS[tab].map((action) => ({
+    acc[tab] = source[tab].map((action) => ({
       ...action,
       params: action.params?.map((param) => ({ ...param })),
     }));
@@ -207,8 +212,8 @@ const buildActionKey = (tab: HardwareTestTab, rowId: string) => `${tab}:${rowId}
 const buildFieldKey = (field: EditingField | null) =>
   field ? `${field.tab}:${field.rowId}:${field.paramKey}` : null;
 
-const formatTime = () =>
-  new Date().toLocaleTimeString("zh-CN", {
+const formatTime = (language: LanguageCode) =>
+  new Date().toLocaleTimeString(language, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -216,11 +221,17 @@ const formatTime = () =>
   });
 
 export function useHardwareTest() {
+  const { language, t } = useI18n();
+  const initialActions = useMemo(() => createInitialActions(t), [t]);
+  const initialLogs = useMemo(() => createInitialLogs(t), [t]);
+  const tabLabels = useMemo(() => createTabLabels(t), [t]);
+  const tabs = useMemo(() => createTabOptions(t), [t]);
+
   const [activeTab, setActiveTabState] = useState<HardwareTestTab>("gantry");
   const [editingField, setEditingField] = useState<EditingField | null>(null);
   const [runningActions, setRunningActions] = useState<Record<string, boolean>>({});
-  const [actionsByTab, setActionsByTab] = useState<Record<HardwareTestTab, HardwareTestAction[]>>(cloneActions);
-  const [logs, setLogs] = useState<HardwareTestLog[]>(INITIAL_LOGS);
+  const [actionsByTab, setActionsByTab] = useState<Record<HardwareTestTab, HardwareTestAction[]>>(() => cloneActions(initialActions));
+  const [logs, setLogs] = useState<HardwareTestLog[]>(initialLogs);
   const timersRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
@@ -228,6 +239,15 @@ export function useHardwareTest() {
       Object.values(timersRef.current).forEach((timerId) => window.clearTimeout(timerId));
     };
   }, []);
+
+  useEffect(() => {
+    Object.values(timersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+    timersRef.current = {};
+    setEditingField(null);
+    setRunningActions({});
+    setActionsByTab(cloneActions(initialActions));
+    setLogs(initialLogs);
+  }, [initialActions, initialLogs]);
 
   const rows = actionsByTab[activeTab];
   const editingFieldKey = buildFieldKey(editingField);
@@ -276,8 +296,8 @@ export function useHardwareTest() {
     const isRunning = Boolean(runningActions[actionKey]);
     const paramsSnapshot =
       row.params?.length
-        ? row.params.map((param) => `${param.label}=${param.value}`).join("，")
-        : "无参数";
+        ? row.params.map((param) => `${param.label}=${param.value}`).join(t("service.hardwareTest.paramSeparator"))
+        : t("service.hardwareTest.noParams");
 
     setEditingField(null);
 
@@ -285,22 +305,22 @@ export function useHardwareTest() {
       clearRunningTimer(actionKey);
       setRunningActions((prev) => ({ ...prev, [actionKey]: false }));
       prependLog({
-        time: formatTime(),
-        module: TAB_LABELS[activeTab],
+        time: formatTime(language),
+        module: tabLabels[activeTab],
         actionName: row.name,
         paramsSnapshot,
-        result: row.stoppedResult ?? "已停止",
+        result: row.stoppedResult ?? t("service.hardwareTest.result.stopped"),
       });
       return;
     }
 
     setRunningActions((prev) => ({ ...prev, [actionKey]: true }));
     prependLog({
-      time: formatTime(),
-      module: TAB_LABELS[activeTab],
+      time: formatTime(language),
+      module: tabLabels[activeTab],
       actionName: row.name,
       paramsSnapshot,
-      result: row.runningResult ?? "执行中",
+      result: row.runningResult ?? t("service.hardwareTest.result.executing"),
     });
 
     if (row.control !== "toggle") {
@@ -308,11 +328,11 @@ export function useHardwareTest() {
       timersRef.current[actionKey] = window.setTimeout(() => {
         setRunningActions((prev) => ({ ...prev, [actionKey]: false }));
         prependLog({
-          time: formatTime(),
-          module: TAB_LABELS[activeTab],
+          time: formatTime(language),
+          module: tabLabels[activeTab],
           actionName: row.name,
           paramsSnapshot,
-          result: row.completedResult ?? "已完成",
+          result: row.completedResult ?? t("service.hardwareTest.result.completed"),
         });
         delete timersRef.current[actionKey];
       }, row.autoCompleteMs ?? DEFAULT_AUTO_COMPLETE_MS);
@@ -332,7 +352,7 @@ export function useHardwareTest() {
     runningActions,
     setActiveTab,
     setEditingField,
-    tabs: TAB_OPTIONS,
+    tabs,
     updateParamValue,
   };
 }

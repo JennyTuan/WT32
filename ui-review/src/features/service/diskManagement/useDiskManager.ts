@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 import type {
   DiskActionResponse,
   DiskManagerConfig,
@@ -29,7 +31,7 @@ const api = async <T>(path: string, init?: RequestInit): Promise<T> => {
     if (detail?.message) {
       throw new Error(detail.message);
     }
-    throw new Error("请求失败");
+    throw new Error("Request failed");
   }
 
   return data as T;
@@ -42,23 +44,41 @@ const createEmptySelection = (): Record<DiskPartitionId, Set<string>> => ({
   Phantom: new Set(),
 });
 
-const getBlockedReason = (file: ScanFile, action: "reserve" | "release" | "purge") => {
+type DiskAction = "reserve" | "release" | "purge";
+
+const ACTION_RESULT_KEYS: Record<DiskAction, { done: TranslationKey; blocked: TranslationKey }> = {
+  reserve: {
+    done: "service.disk.actionDone.reserved",
+    blocked: "service.disk.actionBlocked.reserved",
+  },
+  release: {
+    done: "service.disk.actionDone.released",
+    blocked: "service.disk.actionBlocked.released",
+  },
+  purge: {
+    done: "service.disk.actionDone.deleted",
+    blocked: "service.disk.actionBlocked.deleted",
+  },
+};
+
+const getBlockedReason = (file: ScanFile, action: DiskAction, t: ReturnType<typeof useI18n>["t"]) => {
   if (action === "reserve" && file.status === "RESERVED") {
-    return "文件已保留";
+    return t("service.disk.block.alreadyReserved");
   }
   if (action === "release" && file.status !== "RESERVED") {
-    return "文件当前未保留";
+    return t("service.disk.block.notReserved");
   }
   if (file.active_recon_jobs > 0) {
-    return `存在 ${file.active_recon_jobs} 个重建任务`;
+    return t("service.disk.block.activeReconJobs", { count: file.active_recon_jobs });
   }
   if (action === "purge" && file.status === "RESERVED") {
-    return "文件已保留，请先释放";
+    return t("service.disk.block.releaseBeforeDelete");
   }
   return null;
 };
 
 export function useDiskManager() {
+  const { t } = useI18n();
   const [partitions, setPartitions] = useState<DiskPartition[]>([]);
   const [config, setConfig] = useState<DiskManagerConfig>({
     retention_days: 7,
@@ -85,11 +105,11 @@ export function useDiskManager() {
       setPartitions(data.partitions);
       setConfig(data.config);
     } catch (error) {
-      flash({ type: "error", text: error instanceof Error ? error.message : "加载磁盘数据失败" });
+      flash({ type: "error", text: error instanceof Error ? error.message : t("service.disk.loadFailed") });
     } finally {
       setLoading(false);
     }
-  }, [flash]);
+  }, [flash, t]);
 
   useEffect(() => {
     fetchPartitions();
@@ -151,45 +171,44 @@ export function useDiskManager() {
   const canRelease = useCallback(
     (partitionId: DiskPartitionId) => {
       const files = getSelectedScanFiles(partitionId);
-      if (files.length === 0) return { ok: false, reason: "未选择文件" };
-      const blocked = files.find((file) => getBlockedReason(file, "release"));
+      if (files.length === 0) return { ok: false, reason: t("service.disk.noSelection") };
+      const blocked = files.find((file) => getBlockedReason(file, "release", t));
       return blocked
-        ? { ok: false, reason: getBlockedReason(blocked, "release") ?? "当前无法释放" }
+        ? { ok: false, reason: getBlockedReason(blocked, "release", t) ?? t("service.disk.cannotRelease") }
         : { ok: true };
     },
-    [getSelectedScanFiles],
+    [getSelectedScanFiles, t],
   );
 
   const canReserve = useCallback(
     (partitionId: DiskPartitionId) => {
       const files = getSelectedScanFiles(partitionId);
-      if (files.length === 0) return { ok: false, reason: "未选择文件" };
-      const blocked = files.find((file) => getBlockedReason(file, "reserve"));
+      if (files.length === 0) return { ok: false, reason: t("service.disk.noSelection") };
+      const blocked = files.find((file) => getBlockedReason(file, "reserve", t));
       return blocked
-        ? { ok: false, reason: getBlockedReason(blocked, "reserve") ?? "当前无法保留" }
+        ? { ok: false, reason: getBlockedReason(blocked, "reserve", t) ?? t("service.disk.cannotReserve") }
         : { ok: true };
     },
-    [getSelectedScanFiles],
+    [getSelectedScanFiles, t],
   );
 
   const canPurge = useCallback(
     (partitionId: DiskPartitionId) => {
       const files = getSelectedScanFiles(partitionId);
-      if (files.length === 0) return { ok: false, reason: "未选择文件" };
-      const blocked = files.find((file) => getBlockedReason(file, "purge"));
+      if (files.length === 0) return { ok: false, reason: t("service.disk.noSelection") };
+      const blocked = files.find((file) => getBlockedReason(file, "purge", t));
       return blocked
-        ? { ok: false, reason: getBlockedReason(blocked, "purge") ?? "当前无法删除" }
+        ? { ok: false, reason: getBlockedReason(blocked, "purge", t) ?? t("service.disk.cannotDelete") }
         : { ok: true };
     },
-    [getSelectedScanFiles],
+    [getSelectedScanFiles, t],
   );
 
   const runAction = useCallback(
     async (
       partitionId: DiskPartitionId,
       fileIds: string[],
-      action: "reserve" | "release" | "purge",
-      successText: string,
+      action: DiskAction,
     ) => {
       setBusyPartition(partitionId);
       try {
@@ -200,31 +219,34 @@ export function useDiskManager() {
         });
 
         const blockedCount = data.blocked?.length ?? 0;
-        const text = blockedCount > 0 ? `${successText}${data.count} 个，阻止 ${blockedCount} 个` : `${successText}${data.count} 个`;
+        const resultKeys = ACTION_RESULT_KEYS[action];
+        const text = blockedCount > 0
+          ? t(resultKeys.blocked, { count: data.count, blocked: blockedCount })
+          : t(resultKeys.done, { count: data.count });
         flash({ type: blockedCount > 0 ? "error" : "success", text });
         clearSelection(partitionId);
         await fetchPartitions();
       } catch (error) {
-        flash({ type: "error", text: error instanceof Error ? error.message : "操作失败" });
+        flash({ type: "error", text: error instanceof Error ? error.message : t("service.disk.operationFailed") });
       } finally {
         setBusyPartition(null);
       }
     },
-    [clearSelection, fetchPartitions, flash],
+    [clearSelection, fetchPartitions, flash, t],
   );
 
   const reserveFiles = useCallback(
-    (partitionId: DiskPartitionId, fileIds: string[]) => runAction(partitionId, fileIds, "reserve", "已保留 "),
+    (partitionId: DiskPartitionId, fileIds: string[]) => runAction(partitionId, fileIds, "reserve"),
     [runAction],
   );
 
   const releaseFiles = useCallback(
-    (partitionId: DiskPartitionId, fileIds: string[]) => runAction(partitionId, fileIds, "release", "已释放 "),
+    (partitionId: DiskPartitionId, fileIds: string[]) => runAction(partitionId, fileIds, "release"),
     [runAction],
   );
 
   const purgeFiles = useCallback(
-    (partitionId: DiskPartitionId, fileIds: string[]) => runAction(partitionId, fileIds, "purge", "已删除 "),
+    (partitionId: DiskPartitionId, fileIds: string[]) => runAction(partitionId, fileIds, "purge"),
     [runAction],
   );
 
@@ -237,10 +259,10 @@ export function useDiskManager() {
         });
         await fetchPartitions();
       } catch (error) {
-        flash({ type: "error", text: error instanceof Error ? error.message : "阈值更新失败" });
+        flash({ type: "error", text: error instanceof Error ? error.message : t("service.disk.thresholdUpdateFailed") });
       }
     },
-    [fetchPartitions, flash],
+    [fetchPartitions, flash, t],
   );
 
   const updateConfig = useCallback(
@@ -251,12 +273,12 @@ export function useDiskManager() {
           body: JSON.stringify(patch),
         });
         setConfig(data);
-        flash({ type: "success", text: "配置已更新" });
+        flash({ type: "success", text: t("service.disk.configUpdated") });
       } catch (error) {
-        flash({ type: "error", text: error instanceof Error ? error.message : "配置更新失败" });
+        flash({ type: "error", text: error instanceof Error ? error.message : t("service.disk.configUpdateFailed") });
       }
     },
-    [flash],
+    [flash, t],
   );
 
   const getUsagePercent = useCallback(

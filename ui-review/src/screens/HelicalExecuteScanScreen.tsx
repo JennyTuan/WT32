@@ -9,6 +9,7 @@ import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/B
 import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession } from "../lib/scanSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { getLimbsDicomSeries, isLimbsHelicalScanSession, loadLimbsDicomDemoManifest } from "../lib/limbsDicomDemo";
+import { useI18n } from "../lib/i18nContext";
 
 type HelicalResultSeriesConfig = {
     basePath?: string;
@@ -74,13 +75,14 @@ const HELICAL_RESULT_SERIES: HelicalResultSeriesConfig = {
 };
 
 function HelicalExecuteIdleViewport({ isGated }: { isGated: boolean }) {
+    const { t } = useI18n();
     return (
         <div className="relative h-full w-full overflow-hidden bg-black">
             <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
                     <div className="text-[14px] font-semibold tracking-[0.28em] text-[#7E8CA0]">LIVE VIEW</div>
                     <div className="mt-3 text-[12px] text-[#566474]">
-                        {isGated ? "等待物理按键确认，系统将在指定呼吸相位曝光" : "等待触发扫描，影像将在扫描过程中实时显示"}
+                        {isGated ? t("scanFlow.live.gatedInstruction") : t("scanFlow.live.helicalInstruction")}
                     </div>
                 </div>
             </div>
@@ -172,6 +174,7 @@ function AxialRealtimeViewport({
     waitTimeoutMs?: number;
     waitTimedOut?: boolean;
 }) {
+    const { t } = useI18n();
     const imageUrls = useMemo(
         () =>
             Array.from(
@@ -203,14 +206,14 @@ function AxialRealtimeViewport({
                     <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-300">AXIAL LIVE</div>
                     <div className="mt-1 text-[12px] font-bold">
                         {stage === "completed"
-                            ? "采集完成"
+                            ? t("scanFlow.live.completed")
                             : waitTimedOut
-                                ? "等待超时 · 需技师介入"
+                                ? t("scanFlow.live.waitingTechnician")
                                 : waitingForBreath
-                                    ? "等待呼吸稳定"
+                                    ? t("scanFlow.live.waitingBreath")
                                     : scanActive
-                                        ? "实时采集中"
-                                        : "等待物理按键"}
+                                        ? t("scanFlow.live.liveAcquiring")
+                                        : t("scanFlow.live.waitingPhysical")}
                     </div>
                 </div>
 
@@ -230,12 +233,12 @@ function AxialRealtimeViewport({
                             <div className="text-[14px] font-semibold tracking-[0.28em] text-[#64748B]">AXIAL LIVE</div>
                             <div className="mt-3 text-[12px] text-[#475569]">
                                 {waitTimedOut
-                                    ? "呼吸信号长时间未进入触发窗，扫描已暂停，等待技师处理"
+                                    ? t("scanFlow.live.longBreathWait")
                                     : waitingForBreath
                                         ? waitTimeoutMs
-                                            ? `呼吸波形不稳，等待进入触发窗 ${(waitElapsedMs / 1000).toFixed(1)}s / ${(waitTimeoutMs / 1000).toFixed(0)}s`
-                                            : "呼吸波形不稳，等待进入触发窗"
-                                        : "等待物理按键触发，曝光后显示实时轴扫图像"}
+                                            ? t("scanFlow.live.waitingBreathWindowTimed", { elapsed: (waitElapsedMs / 1000).toFixed(1), timeout: (waitTimeoutMs / 1000).toFixed(0) })
+                                            : t("scanFlow.live.waitingBreathWindow")
+                                        : t("scanFlow.live.waitingPhysicalTrigger")}
                             </div>
                         </div>
                     </div>
@@ -244,7 +247,7 @@ function AxialRealtimeViewport({
                 <div className="absolute bottom-4 left-4 right-4">
                     <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
                         <span>
-                            床位 {displayBed} / {totalBeds || 1}
+                            {t("scanFlow.live.tablePosition")} {displayBed} / {totalBeds || 1}
                             <span className="ml-3 text-slate-400">Slice {stage === "completed" ? GATED_AXIAL_SLICES_PER_BED : Math.max(1, currentSlice)} / {GATED_AXIAL_SLICES_PER_BED}</span>
                         </span>
                         <span>{Math.round(progress * 100)}%</span>
@@ -276,6 +279,7 @@ function AxialRealtimeViewport({
 
 export default function HelicalExecuteScanScreen() {
     const navigate = useNavigate();
+    const { t } = useI18n();
     const [params] = useSearchParams();
     const executeMode = (params.get("mode") ?? "helical") as ExecuteMode;
     const isGated = executeMode === "gated_helical" || executeMode === "gated_axial";
@@ -825,62 +829,62 @@ export default function HelicalExecuteScanScreen() {
 
     const statusText =
         stage === "arming"
-            ? `Hold to trigger ${Math.max(0, ((1 - holdProgress) * 3)).toFixed(1)}s`
+            ? t("scanFlow.physicalGuide.holdToTrigger", { seconds: Math.max(0, ((1 - holdProgress) * 3)).toFixed(1) })
             : stage === "enabled"
                 ? axialWaitingForBreath
-                    ? "Waiting for stable respiration..."
-                    : "Scan enabled"
+                    ? t("scanFlow.live.waitingBreath")
+                    : t("scanFlow.physicalGuide.enabledStatus")
                 : stage === "exposing"
                     ? isGated
-                        ? "Gated exposure in progress..."
-                        : "Helical scan in progress..."
+                        ? t("scanFlow.physicalGuide.gatedExposure")
+                        : t("scanFlow.physicalGuide.scanning")
                     : stage === "paused"
-                        ? "Scan paused"
+                        ? t("scanFlow.live.scanPaused")
                     : stage === "rendering"
-                        ? "Rendering images..."
+                        ? t("scanFlow.imageReconstructing")
                         : stage === "completed"
                             ? isGated
-                                ? "Gated scan completed"
-                                : "Helical scan completed"
-                            : "Waiting";
+                                ? t("scanFlow.live.gatedCompleted")
+                                : t("scanFlow.live.helicalCompleted")
+                            : t("scanFlow.live.waiting");
 
     const guideTitle =
         stage === "arming"
-            ? "Keep holding the green button"
+            ? t("scanFlow.physicalGuide.keepHolding")
             : stage === "enabled"
                 ? axialWaitingForBreath
-                    ? "Waiting for stable respiration"
-                    : "System enabled"
+                    ? t("scanFlow.live.waitingBreath")
+                    : t("scanFlow.physicalGuide.enabled")
                 : stage === "exposing"
                     ? isGated
-                        ? "Running gated scan"
-                        : "Running helical scan"
+                        ? t("scanFlow.physicalGuide.runningGated")
+                        : t("scanFlow.live.helicalRunning")
                     : stage === "paused"
-                        ? "Scan paused"
+                        ? t("scanFlow.live.scanPaused")
                     : isGated
-                        ? "Hold for gated exposure"
-                        : "Hold the green button";
+                        ? t("scanFlow.physicalGuide.holdForGatedExposure")
+                        : t("scanFlow.physicalGuide.helicalHold");
 
     const showLiveViewport = stage === "exposing" || stage === "paused" || stage === "rendering" || stage === "completed";
 
     const executeButtonLabel = (() => {
-        if (stage === "completed") return "图像浏览";
-        if (bedWaitTimedOut) return "等待技师处理";
-        if (dibhTimedOut) return "等待技师处理";
-        if (dibhMidScanPaused) return "扫描暂停，等待处理";
-        if (stage === "rendering") return "图像重建中…";
-        if (stage === "exposing") return isGated ? "门控曝光中…" : "扫描中…";
+        if (stage === "completed") return t("scanFlow.imageBrowser");
+        if (bedWaitTimedOut) return t("scanFlow.live.waitingTechnician");
+        if (dibhTimedOut) return t("scanFlow.live.waitingTechnician");
+        if (dibhMidScanPaused) return t("scanFlow.scanPausedWaiting");
+        if (stage === "rendering") return t("scanFlow.imageReconstructing");
+        if (stage === "exposing") return isGated ? t("scanFlow.physicalGuide.gatedExposure") : t("scanFlow.physicalGuide.scanning");
         if (stage === "enabled") {
-            if (isGatedAxial && axialWaitingForBreath) return "等待呼吸信号…";
+            if (isGatedAxial && axialWaitingForBreath) return t("scanFlow.live.waitingStableRespiration");
             if (isHelicalDIBH) {
-                if (dibhStage === "countdown") return "屏息倒计时…";
-                if (dibhStage === "holding") return "等待屏息稳定…";
-                if (dibhStage === "stable") return "屏息稳定，准备曝光";
+                if (dibhStage === "countdown") return t("scanFlow.dibh.countdown");
+                if (dibhStage === "holding") return t("scanFlow.dibh.waitingStable");
+                if (dibhStage === "stable") return t("scanFlow.dibh.stableReady");
             }
-            return "扫描就绪…";
+            return t("scanFlow.physicalGuide.scanReady");
         }
-        if (stage === "arming") return "请按住物理按键";
-        return "执行扫描";
+        if (stage === "arming") return t("scanFlow.physicalGuide.keepHoldingPhysical");
+        return t("scanFlow.executeScan");
     })();
     // Only allow click on the bottom-right button at the very start (kick off
     // the guide overlay) and at the very end (navigate to image viewer). During
@@ -892,6 +896,9 @@ export default function HelicalExecuteScanScreen() {
         !dibhTimedOut &&
         !dibhMidScanPaused &&
         (stage === "idle" || stage === "arming" || stage === "completed");
+    const timeoutDirectionLabel = direction === "rising"
+        ? t("scanFlow.gatingTimeout.directionRising")
+        : t("scanFlow.gatingTimeout.directionFalling");
     const rightViewport = isGatedAxial ? (
         <AxialRealtimeViewport
             stage={stage}
@@ -980,11 +987,11 @@ export default function HelicalExecuteScanScreen() {
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
                 <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
                     <div className="border-b border-slate-200 px-5 py-4">
-                        <div className="text-[14px] font-black text-slate-700">Physical button guide</div>
+                        <div className="text-[14px] font-black text-slate-700">{t("scanFlow.physicalGuide.title")}</div>
                         <div className="mt-1 text-[11px] font-medium text-slate-400">
                             {isGated
-                                ? "Hold for three seconds to enable exposure at the selected respiratory phase."
-                                : "Hold for three seconds to enable and start the helical scan."}
+                                ? t("scanFlow.physicalGuide.gatedDescription")
+                                : t("scanFlow.physicalGuide.helicalDescription")}
                         </div>
                     </div>
 
@@ -1019,7 +1026,7 @@ export default function HelicalExecuteScanScreen() {
 
                             <div className="w-full rounded-2xl border border-[#D6E0EA] bg-white/70 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
                                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                                    <span>Hold progress</span>
+                                    <span>{t("scanFlow.holdProgress")}</span>
                                     <span>{Math.round(holdProgress * 100)}%</span>
                                 </div>
                                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#DCE6F1]">
@@ -1048,20 +1055,20 @@ export default function HelicalExecuteScanScreen() {
                                 <span className="text-[18px] font-black leading-none">!</span>
                             </div>
                             <div>
-                                <div className="text-[14px] font-black text-amber-900">门控等待超时</div>
+                                <div className="text-[14px] font-black text-amber-900">{t("scanFlow.gatingTimeout.title")}</div>
                                 <div className="mt-0.5 text-[11px] font-medium text-amber-700">
-                                    床位 {(pendingBedIndex ?? 0) + 1} / {totalBeds} · 等待 {(GATED_AXIAL_WAIT_TIMEOUT_MS / 1000).toFixed(0)} s 内未检测到有效触发
+                                    {t("scanFlow.gatingTimeout.subtitle", { bed: (pendingBedIndex ?? 0) + 1, total: totalBeds, seconds: (GATED_AXIAL_WAIT_TIMEOUT_MS / 1000).toFixed(0) })}
                                 </div>
                             </div>
                         </div>
                         <div className="space-y-3 px-6 py-5 text-[12px] leading-relaxed text-slate-600">
                             <p>
-                                呼吸波形在设定阈值 <span className="font-black text-slate-800">{effectiveThreshold.toFixed(2)}</span>（{direction === "rising" ? "上升" : "下降"}方向）上未稳定穿越触发窗，当前床位曝光已暂停。
+                                {t("scanFlow.gatingTimeout.body", { threshold: effectiveThreshold.toFixed(2), direction: timeoutDirectionLabel })}
                             </p>
-                            <p>请确认患者呼吸状态、传感器位置和波形质量，然后选择处理方式：</p>
+                            <p>{t("scanFlow.gatingTimeout.guide")}</p>
                             {thresholdLowered && (
                                 <p className="rounded-md bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-700">
-                                    已临时降低阈值至 {GATED_AXIAL_LOWERED_THRESHOLD.toFixed(2)}，本次扫描结果将以此阈值标注。
+                                    {t("scanFlow.gatingTimeout.loweredNotice", { threshold: GATED_AXIAL_LOWERED_THRESHOLD.toFixed(2) })}
                                 </p>
                             )}
                         </div>
@@ -1071,7 +1078,7 @@ export default function HelicalExecuteScanScreen() {
                                 onClick={handleTimeoutAbort}
                                 className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[12px] font-bold text-slate-600 transition hover:bg-slate-100"
                             >
-                                中止扫描
+                                {t("scanFlow.gatingTimeout.abort")}
                             </button>
                             <button
                                 type="button"
@@ -1079,14 +1086,14 @@ export default function HelicalExecuteScanScreen() {
                                 disabled={thresholdLowered}
                                 className="rounded-md border border-amber-400 bg-white px-4 py-2 text-[12px] font-bold text-amber-700 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                                临时降阈值至 {GATED_AXIAL_LOWERED_THRESHOLD.toFixed(2)}
+                                {t("scanFlow.gatingTimeout.lowerThreshold", { threshold: GATED_AXIAL_LOWERED_THRESHOLD.toFixed(2) })}
                             </button>
                             <button
                                 type="button"
                                 onClick={handleTimeoutRetry}
                                 className="rounded-md bg-[#1D4ED8] px-4 py-2 text-[12px] font-bold text-white shadow-sm transition hover:bg-[#1E40AF]"
                             >
-                                重试当前床位
+                                {t("scanFlow.gatingTimeout.retry")}
                             </button>
                         </div>
                     </div>
@@ -1101,17 +1108,17 @@ export default function HelicalExecuteScanScreen() {
                                 <span className="text-[18px] font-black leading-none">!</span>
                             </div>
                             <div>
-                                <div className="text-[14px] font-black text-amber-900">屏息未达稳定平台</div>
+                                <div className="text-[14px] font-black text-amber-900">{t("scanFlow.dibhDialog.failureTitle")}</div>
                                 <div className="mt-0.5 text-[11px] font-medium text-amber-700">
-                                    第 {dibhAttempt + 1} 次尝试 · {DIBH_FAILURE_TIMEOUT_S} s 内呼吸波形未进入容差区间
+                                    {t("scanFlow.dibhDialog.failureSubtitle", { attempt: dibhAttempt + 1, seconds: DIBH_FAILURE_TIMEOUT_S })}
                                 </div>
                             </div>
                         </div>
                         <div className="space-y-3 px-6 py-5 text-[12px] leading-relaxed text-slate-600">
                             <p>
-                                患者屏息时呼吸波形抖动超出容差 <span className="font-black text-slate-800">±2.0 mm</span>，系统未触发曝光以避免运动伪影。
+                                {t("scanFlow.dibhDialog.failureBody", { tolerance: "±2.0 mm" })}
                             </p>
-                            <p>请通过对讲机重新指导患者深吸气末屏息，然后选择处理方式：</p>
+                            <p>{t("scanFlow.dibhDialog.failureGuide")}</p>
                         </div>
                         <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4">
                             <button
@@ -1119,14 +1126,14 @@ export default function HelicalExecuteScanScreen() {
                                 onClick={handleDibhAbortScan}
                                 className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[12px] font-bold text-slate-600 transition hover:bg-slate-100"
                             >
-                                中止扫描
+                                {t("scanFlow.dibhDialog.abort")}
                             </button>
                             <button
                                 type="button"
                                 onClick={handleDibhRetry}
                                 className="rounded-md bg-[#1D4ED8] px-4 py-2 text-[12px] font-bold text-white shadow-sm transition hover:bg-[#1E40AF]"
                             >
-                                重新引导屏息
+                                {t("scanFlow.dibhDialog.retry")}
                             </button>
                         </div>
                     </div>
@@ -1141,19 +1148,19 @@ export default function HelicalExecuteScanScreen() {
                                 <span className="text-[18px] font-black leading-none">!</span>
                             </div>
                             <div>
-                                <div className="text-[14px] font-black text-amber-900">扫描中途暂停</div>
+                                <div className="text-[14px] font-black text-amber-900">{t("scanFlow.dibhDialog.midPauseTitle")}</div>
                                 <div className="mt-0.5 text-[11px] font-medium text-amber-700">
-                                    深吸气屏息失稳 · 已采集约 {Math.round(dibhExposureProgress * 100)}%
+                                    {t("scanFlow.dibhDialog.midPauseSubtitle", { progress: Math.round(dibhExposureProgress * 100) })}
                                 </div>
                             </div>
                         </div>
                         <div className="space-y-3 px-6 py-5 text-[12px] leading-relaxed text-slate-600">
                             <p>
-                                系统检测到患者屏息平台在曝光过程中离开容差区，已停止曝光和床进。当前序列不能作为连续螺旋采集继续拼接，需返回本序列起点重新开始扫描。
+                                {t("scanFlow.dibhDialog.midPauseBody")}
                             </p>
                             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
                                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                                    <span>中断位置</span>
+                                    <span>{t("scanFlow.dibhDialog.interruptPosition")}</span>
                                     <span>{Math.round(dibhExposureProgress * 100)}%</span>
                                 </div>
                                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
@@ -1164,7 +1171,7 @@ export default function HelicalExecuteScanScreen() {
                                 </div>
                             </div>
                             <p>
-                                请选择是否保留已采集数据。无论是否保存，下一步都会回到门控螺旋确认页，重新执行本次扫描。
+                                {t("scanFlow.dibhDialog.midPauseGuide")}
                             </p>
                         </div>
                         <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4">
@@ -1173,14 +1180,14 @@ export default function HelicalExecuteScanScreen() {
                                 onClick={() => handleDibhRestartFromPause(false)}
                                 className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[12px] font-bold text-slate-600 transition hover:bg-slate-100"
                             >
-                                不保存数据并返回重扫
+                                {t("scanFlow.dibhDialog.restartDiscard")}
                             </button>
                             <button
                                 type="button"
                                 onClick={() => handleDibhRestartFromPause(true)}
                                 className="rounded-md bg-[#1D4ED8] px-4 py-2 text-[12px] font-bold text-white shadow-sm transition hover:bg-[#1E40AF]"
                             >
-                                保存数据并返回重扫
+                                {t("scanFlow.dibhDialog.restartSave")}
                             </button>
                         </div>
                     </div>

@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../lib/authContext";
+import { useI18n } from "../lib/i18nContext";
 
 type SystemMenuButtonProps = {
     iconSize?: number;
@@ -24,7 +25,8 @@ export default function SystemMenuButton({
     const panelRef = useRef<HTMLDivElement | null>(null);
     const navigate = useNavigate();
     const { user, logout } = useAuth();
-    const displayName = user?.display_name ?? "未登录";
+    const { t } = useI18n();
+    const displayName = user?.display_name ?? t("systemMenu.loggedOut");
     const subLabel = user?.username ?? "—";
 
     useLayoutEffect(() => {
@@ -68,7 +70,7 @@ export default function SystemMenuButton({
             <div
                 ref={triggerRef}
                 role="button"
-                aria-label="系统菜单"
+                aria-label={t("appHeader.systemMenu")}
                 onClick={() => setOpen((o) => !o)}
                 className="relative p-1 text-[#546E7A] cursor-pointer hover:opacity-70"
             >
@@ -93,7 +95,7 @@ export default function SystemMenuButton({
                             onClick={close}
                         >
                             <Bell size={16} className="text-[#546E7A]" />
-                            <span className="flex-1 font-semibold tracking-wider">SYSTEM MESSAGE</span>
+                            <span className="flex-1 font-semibold tracking-wider">{t("systemMenu.systemMessage")}</span>
                             {badgeCount > 0 && (
                                 <span className="min-w-[18px] h-4 px-1 rounded-full bg-[#D32F2F] text-white text-[10px] font-bold flex items-center justify-center">
                                     {badgeCount}
@@ -109,7 +111,7 @@ export default function SystemMenuButton({
                             }}
                         >
                             <Settings size={16} className="text-[#546E7A]" />
-                            <span className="font-semibold tracking-wider">SETTING</span>
+                            <span className="font-semibold tracking-wider">{t("systemMenu.setting")}</span>
                         </button>
                         <button
                             type="button"
@@ -117,7 +119,7 @@ export default function SystemMenuButton({
                             onClick={close}
                         >
                             <Power size={16} className="text-[#546E7A]" />
-                            <span className="font-semibold tracking-wider">SHUT DOWN</span>
+                            <span className="font-semibold tracking-wider">{t("systemMenu.shutdown")}</span>
                         </button>
 
                         <div className="m-2 rounded-md border border-[#B0C4DE] bg-[#F8FAFC]">
@@ -139,7 +141,7 @@ export default function SystemMenuButton({
                                 }}
                             >
                                 <LogOut size={14} />
-                                <span>LOGOUT</span>
+                                <span>{t("systemMenu.logout")}</span>
                             </button>
                         </div>
                     </div>,

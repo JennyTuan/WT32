@@ -1,4 +1,5 @@
 import type { EditingField, HardwareTestAction, HardwareTestTab, HardwareTestTabOption } from "../types";
+import { useI18n } from "../../../../lib/i18nContext";
 
 type HardwareTestContentProps = {
   activeTab: HardwareTestTab;
@@ -25,6 +26,7 @@ export function HardwareTestContent({
   onStartEditing,
   onTabChange,
 }: HardwareTestContentProps) {
+  const { t } = useI18n();
   const activeRunningKey = Object.entries(runningActions).find(([, running]) => running)?.[0] ?? null;
 
   return (
@@ -47,9 +49,9 @@ export function HardwareTestContent({
       </div>
 
       <div className="grid grid-cols-[2fr_2fr_140px] border-b border-[#F1F5F9] bg-[#F8FAFC] px-5 py-2">
-        <div className="text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">测试项目</div>
-        <div className="text-center text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">参数调节</div>
-        <div className="text-center text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">操作控制</div>
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">{t("service.hardwareTest.column.testItem")}</div>
+        <div className="text-center text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">{t("service.hardwareTest.column.params")}</div>
+        <div className="text-center text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">{t("service.hardwareTest.column.control")}</div>
       </div>
 
       <div key={activeTab} className="flex-1 overflow-y-auto custom-scrollbar">
@@ -57,7 +59,7 @@ export function HardwareTestContent({
           const actionKey = buildActionKey(activeTab, row.id);
           const isRunning = Boolean(runningActions[actionKey]);
           const isDisabled = activeRunningKey !== null && activeRunningKey !== actionKey;
-          const actionLabel = isRunning ? row.runningLabel ?? "停止" : row.idleLabel;
+          const actionLabel = isRunning ? row.runningLabel ?? t("service.hardwareTest.button.stop") : row.idleLabel;
           const isPrimary = (row.buttonTone ?? "primary") === "primary";
 
           return (
@@ -124,7 +126,7 @@ export function HardwareTestContent({
                     );
                   })
                 ) : (
-                  <span className="text-[12px] italic text-[#CBD5E1]">无需参数</span>
+                  <span className="text-[12px] italic text-[#CBD5E1]">{t("service.hardwareTest.noParams")}</span>
                 )}
               </div>
 

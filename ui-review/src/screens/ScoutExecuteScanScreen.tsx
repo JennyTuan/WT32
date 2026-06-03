@@ -16,6 +16,8 @@ import {
 import DicomViewer from "../components/DicomViewer";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import ScanConfirmScreen from "./ScanConfirmScreen";
+import { useI18n } from "../lib/i18nContext";
+import type { TranslationKey } from "../lib/i18n";
 
 const HOLD_DURATION_MS = 3000;
 const EXPOSURE_DURATION_MS = 1200;
@@ -85,25 +87,25 @@ type PostScoutScanType = Extract<WorkflowSequenceType, "helical" | "axial" | "4d
 
 const DEFAULT_POST_SCOUT_SCAN_TYPE: PostScoutScanType = "helical";
 
-const POST_SCOUT_SCAN_CONFIG: Record<PostScoutScanType, { label: string; route: string }> = {
+const POST_SCOUT_SCAN_CONFIG: Record<PostScoutScanType, { labelKey: TranslationKey; route: string }> = {
     helical: {
-        label: "螺旋扫描",
+        labelKey: "scanFlow.postScout.helical",
         route: "/helical-confirm",
     },
     axial: {
-        label: "断层扫描",
+        labelKey: "scanFlow.postScout.axial",
         route: "/sequence-confirm",
     },
     "4d": {
-        label: "4D扫描",
+        labelKey: "scanFlow.postScout.fourD",
         route: "/fourd-confirm",
     },
     gated_helical: {
-        label: "门控螺旋扫描",
+        labelKey: "scanFlow.postScout.gatedHelical",
         route: "/gated-helical-confirm",
     },
     gated_axial: {
-        label: "门控断层扫描",
+        labelKey: "scanFlow.postScout.gatedAxial",
         route: "/gated-axial-confirm",
     },
 };
@@ -173,6 +175,7 @@ function ScoutProjectionViewport({
     active: boolean;
     series: ScoutDicomSeries;
 }) {
+    const { t } = useI18n();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const projectionRef = useRef<Uint8ClampedArray | null>(null);
@@ -469,13 +472,13 @@ function ScoutProjectionViewport({
 
             {loadState === "loading" && (
                 <div className="absolute inset-0 flex items-center justify-center text-[12px] font-medium tracking-[0.12em] text-[#9FB2C5]">
-                    正在载入定位像数据...
+                    {t("scanFlow.scoutLoadingData")}
                 </div>
             )}
 
             {loadState === "error" && (
                 <div className="absolute inset-0 flex items-center justify-center text-[12px] font-medium tracking-[0.08em] text-[#D1D9E1]">
-                    定位像加载失败
+                    {t("scanFlow.scoutLoadError")}
                 </div>
             )}
 
@@ -516,6 +519,7 @@ function ScoutProjectionViewport({
 
 export default function ScoutExecuteScanScreen() {
     const navigate = useNavigate();
+    const { t } = useI18n();
     const [stage, setStage] = useState<ScanStage>("idle");
     const [holdProgress, setHoldProgress] = useState(0);
     const [guideVisible, setGuideVisible] = useState(true);
@@ -616,6 +620,7 @@ export default function ScoutExecuteScanScreen() {
         }
         return postScoutAction.route;
     }, [postScoutAction.route, postScoutScanType, gatingBreathingMode]);
+    const postScoutActionLabel = t(postScoutAction.labelKey);
 
     useEffect(() => {
         if (stage !== "completed") return;
@@ -763,25 +768,25 @@ export default function ScoutExecuteScanScreen() {
 
     const statusText =
         stage === "arming"
-            ? `长按触发 ${Math.max(0, ((1 - holdProgress) * 3)).toFixed(1)}s`
+            ? t("scanFlow.physicalGuide.holdToTrigger", { seconds: Math.max(0, ((1 - holdProgress) * 3)).toFixed(1) })
             : stage === "enabled"
-                ? "使能已建立"
+                ? t("scanFlow.physicalGuide.enabledStatus")
                 : stage === "exposing"
-                    ? "曝光中..."
+                    ? t("scanFlow.physicalGuide.exposingStatus")
                     : stage === "rendering"
-                        ? "定位像生成中..."
+                        ? t("scanFlow.scoutGenerating")
                         : stage === "completed"
-                            ? "定位像已生成"
-                            : "等待操作";
+                            ? t("scanFlow.scoutGenerated")
+                            : t("scanFlow.physicalGuide.ready");
 
     const guideTitle =
         stage === "arming"
-            ? "持续按住绿色按钮"
+            ? t("scanFlow.physicalGuide.keepHolding")
             : stage === "enabled"
-                ? "系统已使能"
+                ? t("scanFlow.physicalGuide.enabled")
                 : stage === "exposing"
-                    ? "正在曝光"
-                    : "按住绿色按钮";
+                    ? t("scanFlow.physicalGuide.exposing")
+                    : t("scanFlow.physicalGuide.holdGreenButton");
 
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
@@ -790,7 +795,7 @@ export default function ScoutExecuteScanScreen() {
                 forceFourDScoutWorkflow={isFourDScoutWorkflow}
                 readOnlyMode
                 onExecuteScan={handleExecuteScanClick}
-                executeButtonLabel={stage === "completed" ? postScoutAction.label : "执行扫描"}
+                executeButtonLabel={stage === "completed" ? postScoutActionLabel : t("scanFlow.executeScan")}
             />
 
             <ThresholdGuardModal
@@ -822,8 +827,8 @@ export default function ScoutExecuteScanScreen() {
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
                 <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
                     <div className="border-b border-slate-200 px-5 py-4">
-                        <div className="text-[14px] font-black text-slate-700">实体按键操作引导</div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">演示长按三秒后触发使能与曝光，并在右侧生成定位像。</div>
+                        <div className="text-[14px] font-black text-slate-700">{t("scanFlow.physicalGuide.title")}</div>
+                        <div className="mt-1 text-[11px] font-medium text-slate-400">{t("scanFlow.physicalGuide.description")}</div>
                     </div>
 
                     <div className="flex flex-1 flex-col">
@@ -857,7 +862,7 @@ export default function ScoutExecuteScanScreen() {
 
                             <div className="w-full rounded-2xl border border-[#D6E0EA] bg-white/70 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
                                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                                    <span>长按进度</span>
+                                    <span>{t("scanFlow.holdProgress")}</span>
                                     <span>{Math.round(holdProgress * 100)}%</span>
                                 </div>
                                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#DCE6F1]">

@@ -3,14 +3,15 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, ChevronRight, Info } from "lucide-react";
 import { getFourDImageUrl } from "../lib/fourDImageSource";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
+import { useI18n } from "../lib/i18nContext";
 
 type PhaseStatus = "ok" | "duplicate" | "missing";
 
 interface DataSegment {
   id: string;
   time: string;
-  quality: "优秀" | "良好" | "一般";
-  candidateLabel: string;
+  quality: "excellent" | "good" | "fair";
+  candidateIndex: number;
   range: string;
   sliceCount: number;
   avgDose: string;
@@ -21,7 +22,7 @@ interface DataSegment {
 
 interface BedPhaseData {
   id: string;
-  label: string;
+  bedNo: number;
   range: string;
   segments: DataSegment[];
   selectedSegmentId?: string;
@@ -41,7 +42,7 @@ const PREVIEW_SLICES = {
 
 function makeSegment(idx: number, phaseIdx: number, bedIdx: number): DataSegment {
   const times = ["12:34:56.78", "12:45:12.34", "12:55:45.67", "13:02:18.22"];
-  const qualities: DataSegment["quality"][] = ["优秀", "良好", "一般"];
+  const qualities: DataSegment["quality"][] = ["excellent", "good", "fair"];
   const clarities = [9, 7, 6];
   const noises = [8, 7, 5];
   const motions = [9, 7, 6];
@@ -49,8 +50,8 @@ function makeSegment(idx: number, phaseIdx: number, bedIdx: number): DataSegment
   return {
     id: `seg-${phaseIdx}-${bedIdx}-${idx}`,
     time: times[(idx + bedIdx) % times.length] ?? "--",
-    quality: qualities[idx] ?? "良好",
-    candidateLabel: `候选 ${idx + 1}`,
+    quality: qualities[idx] ?? "good",
+    candidateIndex: idx + 1,
     range: `${390 + bedIdx * 30}.0 - ${440 + bedIdx * 30}.0 mm`,
     sliceCount: 280,
     avgDose: `CTDIvol ${(8.2 + bedIdx * 0.3).toFixed(1)} mGy`,
@@ -83,7 +84,7 @@ function buildMockPhases(): PhaseData[] {
 
       return {
         id: `bed-${i}-${String(bedNo).padStart(2, "0")}`,
-        label: `床位 ${String(bedNo).padStart(2, "0")}`,
+        bedNo,
         range,
         segments,
         selectedSegmentId: undefined,
@@ -92,12 +93,6 @@ function buildMockPhases(): PhaseData[] {
 
     return { label, status, beds };
   });
-}
-
-function parseBedNumber(label?: string): number | null {
-  if (!label) return null;
-  const match = label.match(/(\d+)/);
-  return match ? Number(match[1]) : null;
 }
 
 function MprTile({
@@ -223,6 +218,7 @@ function PreviewFrame({
 export default function PhaseFilterScreen() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useI18n();
   const routeState = location.state as FourDPostScanState | null;
   const fourDViewerState = useMemo<FourDPostScanState & { initialBrowseMode: "phase" }>(
     () => ({
@@ -246,7 +242,7 @@ export default function PhaseFilterScreen() {
 
   const currentPhase = phases[selectedPhaseIdx] ?? null;
   const selectedBed = currentPhase?.beds.find((bed) => bed.id === selectedBedId) ?? currentPhase?.beds[0] ?? null;
-  const activeBedNumber = parseBedNumber(selectedBed?.label);
+  const activeBedNumber = selectedBed?.bedNo ?? null;
   const bedCodeCount = Math.max(1, fourDViewerState.scanResult.bedCount);
   const allDuplicatesResolved = phases
     .filter((p) => p.status === "duplicate")
@@ -270,7 +266,7 @@ export default function PhaseFilterScreen() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <section className="flex w-[268px] shrink-0 flex-col border-r border-slate-200 bg-[#F3F4F6] px-3 py-4">
           <div className="mb-3 flex items-center gap-2">
-            <h2 className="text-[13px] font-bold text-slate-700">相位数据选择</h2>
+            <h2 className="text-[13px] font-bold text-slate-700">{t("scanFlow.phaseFilter.title")}</h2>
             <Info size={12} className="text-slate-400" />
           </div>
 
@@ -303,12 +299,12 @@ export default function PhaseFilterScreen() {
                       {phaseResolved ? (
                         <span className="flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
                           <CheckCircle2 size={10} />
-                          已选择
+                          {t("scanFlow.phaseFilter.selected")}
                         </span>
                       ) : (
                         <span className="flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
                           <AlertTriangle size={10} />
-                          待选择
+                          {t("scanFlow.phaseFilter.pending")}
                         </span>
                       )}
                     </button>
@@ -324,7 +320,9 @@ export default function PhaseFilterScreen() {
                                   : "border border-transparent text-slate-600"
                               }`}
                             >
-                              <span className="text-[11px] font-bold">{bed.label}</span>
+                              <span className="text-[11px] font-bold">
+                                {t("scanFlow.phaseFilter.bedLabel", { index: String(bed.bedNo).padStart(2, "0") })}
+                              </span>
                               <span className="text-[9px] text-slate-400">{bed.range}</span>
                             </div>
 
@@ -356,7 +354,9 @@ export default function PhaseFilterScreen() {
                                         }}
                                         className="h-3 w-3 accent-[#4D94FF]"
                                       />
-                                      <span className="truncate text-[10px] font-bold">{seg.candidateLabel}</span>
+                                      <span className="truncate text-[10px] font-bold">
+                                        {t("scanFlow.phaseFilter.candidate", { index: seg.candidateIndex })}
+                                      </span>
                                     </span>
                                     <span className={`shrink-0 text-[9px] ${active ? "text-[#4D94FF]" : "text-slate-400"}`}>
                                       {seg.time}
@@ -377,11 +377,11 @@ export default function PhaseFilterScreen() {
           <div className="mt-3 flex flex-col gap-1.5 text-[11px] text-slate-500">
             <div className="flex items-center gap-1.5">
               <AlertTriangle size={11} className="text-amber-500" />
-              存在床位相位重复
+              {t("scanFlow.phaseFilter.duplicateHint")}
             </div>
             <div className="flex items-center gap-1.5">
               <div className="h-2 w-2 rounded-full bg-red-500" />
-              数据缺失
+              {t("scanFlow.phaseFilter.missingHint")}
             </div>
           </div>
         </section>
@@ -427,25 +427,25 @@ export default function PhaseFilterScreen() {
         <div className="flex items-center gap-3 text-[12px]">
           <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-[11px] font-black text-slate-700">1</span>
-            <span className="font-medium">图像加载</span>
+            <span className="font-medium">{t("scanFlow.phaseFilter.imageLoadStep")}</span>
           </div>
           <div className="h-px w-6 bg-slate-300" />
           <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[#1565C0]">
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1E64F0] text-[11px] font-black text-white">2</span>
-            <span className="font-bold">相位筛选</span>
+            <span className="font-bold">{t("scanFlow.phaseFilter.phaseFilterStep")}</span>
           </div>
         </div>
         <button
           onClick={() => navigate("/image-viewer", { state: fourDViewerState })}
           disabled={!allDuplicatesResolved}
-          title={allDuplicatesResolved ? undefined : "请先为所有重复相位选择候选段"}
+          title={allDuplicatesResolved ? undefined : t("scanFlow.phaseFilter.disabledTitle")}
           className={`flex items-center gap-1.5 rounded-md px-6 py-2 text-[12px] font-bold shadow-sm transition-colors ${
             allDuplicatesResolved
               ? "bg-[#4D94FF] text-white hover:bg-blue-600"
               : "bg-slate-200 text-slate-400 cursor-not-allowed"
           }`}
         >
-          图像浏览
+          {t("scanFlow.imageBrowser")}
           <ChevronRight size={14} />
         </button>
       </footer>

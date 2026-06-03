@@ -15,6 +15,7 @@ import {
   type FourDDicomMpId,
 } from "../lib/fourDDicomSource";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
+import { useI18n } from "../lib/i18nContext";
 
 const PHASE_LABELS = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"] as const;
 const REQUEST_CONCURRENCY = 5;
@@ -93,6 +94,7 @@ function PhaseThumbnail({
   totalBeds: number;
   onDoubleClick: (payload: FullscreenImageState) => void;
 }) {
+  const { t } = useI18n();
   const phaseLabel = PHASE_LABELS[phase.phaseIndex];
   const partialBedProgress =
     phase.activeBedNumber === null ? 0 : phase.activeFileCount / FOUR_D_DICOM_SLICES_PER_PHASE;
@@ -102,28 +104,28 @@ function PhaseThumbnail({
   const canOpenFullscreen = !!phase.previewUrl;
   const statusConfig = {
     waiting: {
-      label: phase.completedBeds > 0 ? "排队中" : "待加载",
+      label: phase.completedBeds > 0 ? t("scanFlow.imageLoad.queued") : t("scanFlow.imageLoad.waiting"),
       dot: "bg-slate-400",
       text: "text-slate-300",
       emphasis: "",
       progress: "bg-[#4D94FF]",
     },
     loading: {
-      label: `床位 ${phase.activeBedNumber ?? "-"} 加载中`,
+      label: t("scanFlow.imageLoad.loadingBed", { bed: phase.activeBedNumber ?? "-" }),
       dot: "bg-[#4D94FF]",
       text: "text-[#BFDBFE]",
       emphasis: "ring-1 ring-inset ring-[#4D94FF]/80 z-[1]",
       progress: "bg-[#4D94FF]",
     },
     done: {
-      label: "已完成",
+      label: t("scanFlow.imageLoad.completed"),
       dot: "bg-emerald-400",
       text: "text-emerald-300",
       emphasis: "",
       progress: "bg-emerald-400",
     },
     error: {
-      label: "加载失败",
+      label: t("scanFlow.imageLoad.failed"),
       dot: "bg-rose-400",
       text: "text-rose-300",
       emphasis: "ring-1 ring-inset ring-rose-500/80 z-[1]",
@@ -136,7 +138,7 @@ function PhaseThumbnail({
       <button
         type="button"
         disabled={!canOpenFullscreen}
-        title={canOpenFullscreen ? "双击放大预览" : undefined}
+        title={canOpenFullscreen ? t("scanFlow.imageLoad.doubleClickOpen") : undefined}
         onDoubleClick={() => {
           if (!phase.previewUrl) return;
           onDoubleClick({
@@ -166,7 +168,7 @@ function PhaseThumbnail({
 
         {canOpenFullscreen && (
           <div className="absolute left-2 top-8 hidden bg-black/55 px-2 py-1 text-[9px] font-bold text-slate-200 group-hover:block">
-            双击放大
+            {t("scanFlow.imageLoad.doubleClickZoom")}
           </div>
         )}
 
@@ -189,14 +191,16 @@ function PhaseThumbnail({
             )}
           </div>
           {phase.status === "error" && (
-            <div className="mt-1 truncate text-[9px] font-bold text-rose-300">{phase.errorMessage ?? "加载失败"}</div>
+            <div className="mt-1 truncate text-[9px] font-bold text-rose-300">
+              {phase.errorMessage ?? t("scanFlow.imageLoad.failed")}
+            </div>
           )}
         </div>
 
         {phase.status === "loading" && (
           <div className="absolute right-2 top-8 flex items-center gap-1 border border-white/10 bg-black/55 px-2 py-1 text-[9px] font-bold text-slate-100">
             <LoaderCircle size={10} className="animate-spin" />
-            实时
+            {t("scanFlow.imageLoad.live")}
           </div>
         )}
       </button>
@@ -207,6 +211,7 @@ function PhaseThumbnail({
 export default function ImageLoadScreen() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useI18n();
   const routeState = location.state as FourDPostScanState | null;
 
   const phaseFilterState = useMemo<FourDPostScanState>(
@@ -306,7 +311,11 @@ export default function ImageLoadScreen() {
           } catch (error) {
             if (controller.signal.aborted) return;
             const message = error instanceof Error ? error.message : String(error);
-            setGlobalError(`床位 ${bedNumber} · 相位 ${PHASE_LABELS[phaseIndex]} 加载失败：${message}`);
+            setGlobalError(t("scanFlow.imageLoad.globalError", {
+              bed: bedNumber,
+              phase: PHASE_LABELS[phaseIndex],
+              message,
+            }));
             setPhaseLoads((prev) =>
               prev.map((phase) =>
                 phase.phaseIndex !== phaseIndex
@@ -348,19 +357,19 @@ export default function ImageLoadScreen() {
           <div>
             <div className="flex items-center gap-2">
               <Activity size={17} className="text-[#1E64F0]" />
-              <h1 className="text-[15px] font-black text-slate-800">4D 图像加载</h1>
+              <h1 className="text-[15px] font-black text-slate-800">{t("scanFlow.imageLoad.title")}</h1>
             </div>
             <div className="mt-1 text-[11px] font-medium text-slate-500">
-              正在按床位合并 10 个呼吸相位，生成相位筛选预览。
+              {t("scanFlow.imageLoad.subtitle")}
             </div>
           </div>
           <div className="grid w-[280px] grid-cols-2 gap-2">
             <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-              <div className="text-[10px] font-black uppercase text-slate-400">Overall</div>
+              <div className="text-[10px] font-black uppercase text-slate-400">{t("scanFlow.imageLoad.overall")}</div>
               <div className="mt-0.5 text-[18px] font-black tabular-nums text-slate-800">{overallProgress}%</div>
             </div>
             <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-              <div className="text-[10px] font-black uppercase text-slate-400">Phase</div>
+              <div className="text-[10px] font-black uppercase text-slate-400">{t("scanFlow.imageLoad.phase")}</div>
               <div className="mt-0.5 text-[18px] font-black tabular-nums text-slate-800">{donePhaseCount}/{PHASE_LABELS.length}</div>
             </div>
           </div>
@@ -398,19 +407,19 @@ export default function ImageLoadScreen() {
         <div className="flex items-center gap-3 text-[12px]">
           <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[#1565C0]">
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1E64F0] text-[11px] font-black text-white">1</span>
-            <span className="font-bold">图像加载</span>
+            <span className="font-bold">{t("scanFlow.phaseFilter.imageLoadStep")}</span>
           </div>
           <div className="h-px w-6 bg-slate-300" />
           <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-[11px] font-black text-slate-700">2</span>
-            <span className="font-medium">相位筛选</span>
+            <span className="font-medium">{t("scanFlow.phaseFilter.phaseFilterStep")}</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
           {allLoaded && (
             <div className="flex items-center gap-1.5 text-[12px] font-bold text-emerald-600">
               <CheckCircle2 size={15} />
-              全部相位加载完成
+              {t("scanFlow.imageLoad.allLoaded")}
             </div>
           )}
           <button
@@ -420,7 +429,7 @@ export default function ImageLoadScreen() {
               !allLoaded ? "cursor-not-allowed bg-slate-300" : "bg-[#4D94FF] hover:bg-blue-600"
             }`}
           >
-            下一步：相位筛选 <ChevronRight size={14} />
+            {t("scanFlow.imageLoad.nextPhaseFilter")} <ChevronRight size={14} />
           </button>
         </div>
       </footer>
@@ -429,9 +438,11 @@ export default function ImageLoadScreen() {
         <div className="absolute inset-0 z-50 bg-black">
           <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between bg-gradient-to-b from-black/75 via-black/35 to-transparent px-6 py-5 text-white">
             <div className="pointer-events-auto">
-              <div className="text-[18px] font-bold">相位 {fullscreenImage.phaseLabel}</div>
+              <div className="text-[18px] font-bold">
+                {t("scanFlow.imageLoad.fullscreenPhase", { phase: fullscreenImage.phaseLabel })}
+              </div>
               <div className="mt-1 text-[12px] text-slate-300">
-                预览来自床位 {fullscreenImage.sourceBedNumber ?? "-"}，双击影像退出全屏
+                {t("scanFlow.imageLoad.fullscreenSubtitle", { bed: fullscreenImage.sourceBedNumber ?? "-" })}
               </div>
             </div>
             <button
@@ -439,7 +450,7 @@ export default function ImageLoadScreen() {
               onClick={() => setFullscreenImage(null)}
               className="pointer-events-auto rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-white/15"
             >
-              关闭
+              {t("scanFlow.imageLoad.close")}
             </button>
           </div>
           <button

@@ -13,9 +13,13 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 import ServiceModeShell from "../shared/ServiceModeShell";
 import type { DiskPartition, DiskPartitionId, ScanFile } from "./types";
 import { useDiskManager } from "./useDiskManager";
+
+type Translate = ReturnType<typeof useI18n>["t"];
 
 type PartitionVisual = {
   color: string;
@@ -29,19 +33,32 @@ const PARTITION_VISUALS: Record<DiskPartitionId, PartitionVisual> = {
   Phantom: { color: "#805AD5", icon: Database },
 };
 
+const PARTITION_LABEL_KEYS: Record<DiskPartitionId, TranslationKey> = {
+  RawData: "service.disk.partition.RawData",
+  DICOM: "service.disk.partition.DICOM",
+  PACS: "service.disk.partition.PACS",
+  Phantom: "service.disk.partition.Phantom",
+};
+
+const FILE_STATUS_LABEL_KEYS: Record<ScanFile["status"], TranslationKey> = {
+  ACQUIRED: "service.disk.status.ACQUIRED",
+  RESERVED: "service.disk.status.RESERVED",
+  RELEASED: "service.disk.status.RELEASED",
+};
+
 const STATUS_STYLES = {
   ACQUIRED: "bg-[#F1F5F9] text-[#64748B] border border-[#E2E8F0]",
   RESERVED: "bg-[#E8F1FF] text-[#2F67D8] border border-[#BFD3FF]",
   RELEASED: "bg-[#E7F8EC] text-[#2F855A] border border-[#BFE3CC]",
 } as const;
 
-const getActionBlockedReason = (file: ScanFile, action: "reserve" | "release" | "purge") => {
-  if (action === "reserve" && file.status === "RESERVED") return "文件已保留";
-  if (action === "release" && file.status !== "RESERVED") return "文件当前未保留";
+const getActionBlockedReason = (file: ScanFile, action: "reserve" | "release" | "purge", t: Translate) => {
+  if (action === "reserve" && file.status === "RESERVED") return t("service.disk.block.alreadyReserved");
+  if (action === "release" && file.status !== "RESERVED") return t("service.disk.block.notReserved");
   if ((action === "release" || action === "purge") && file.active_recon_jobs > 0) {
-    return `存在 ${file.active_recon_jobs} 个重建任务`;
+    return t("service.disk.block.activeReconJobs", { count: file.active_recon_jobs });
   }
-  if (action === "purge" && file.status === "RESERVED") return "文件已保留，请先释放";
+  if (action === "purge" && file.status === "RESERVED") return t("service.disk.block.releaseBeforeDelete");
   return null;
 };
 
@@ -50,10 +67,10 @@ const formatMb = (value: number) => {
   return `${value.toFixed(0)} MB`;
 };
 
-const formatDateTime = (value: string) => {
+const formatDateTime = (value: string, locale: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("zh-CN", {
+  return date.toLocaleString(locale, {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -77,6 +94,7 @@ const PartitionHeader = ({
   onToggle: () => void;
   onThresholdCommit: (value: number) => void;
 }) => {
+  const { t } = useI18n();
   const [thresholdDraft, setThresholdDraft] = useState(String(partition.threshold));
   const visual = PARTITION_VISUALS[partition.id];
 
@@ -93,11 +111,11 @@ const PartitionHeader = ({
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3">
-          <h3 className="text-[16px] font-black text-[#223547]">{partition.label}</h3>
-          <span className="text-[12px] font-medium text-[#7B92A8]">{partition.files.length} 个文件</span>
+          <h3 className="text-[16px] font-black text-[#223547]">{t(PARTITION_LABEL_KEYS[partition.id])}</h3>
+          <span className="text-[12px] font-medium text-[#7B92A8]">{t("service.disk.fileCount", { count: partition.files.length })}</span>
           {isOverThreshold ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-[#FFF1F2] px-2 py-0.5 text-[10px] font-bold text-[#DC2626]">
-              <AlertTriangle size={11} /> 超阈值
+              <AlertTriangle size={11} /> {t("service.disk.overThreshold")}
             </span>
           ) : null}
         </div>
@@ -114,7 +132,7 @@ const PartitionHeader = ({
 
       <div className="flex shrink-0 items-center gap-3">
         <div className="flex items-center gap-2 text-[12px] font-bold text-[#627488]">
-          <span className="whitespace-nowrap">阈值</span>
+          <span className="whitespace-nowrap">{t("service.disk.threshold")}</span>
           <input
             value={thresholdDraft}
             onChange={(event) => setThresholdDraft(event.target.value.replace(/[^\d]/g, ""))}
@@ -134,7 +152,7 @@ const PartitionHeader = ({
         <button
           type="button"
           onClick={onToggle}
-          aria-label={isExpanded ? "收起分区" : "展开分区"}
+          aria-label={isExpanded ? t("service.disk.collapsePartition") : t("service.disk.expandPartition")}
           className="flex h-10 w-10 items-center justify-center rounded-full border border-[#D7E3F0] text-[#4F6479] transition-colors hover:bg-[#F8FAFC]"
         >
           {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
@@ -161,6 +179,7 @@ const FileTable = ({
   onReleaseFile: (fileId: string) => void;
   onPurgeFile: (fileId: string) => void;
 }) => {
+  const { locale, t } = useI18n();
   const allVisibleSelected = files.length > 0 && files.every((file) => selectedFileIds.has(file.id));
 
   return (
@@ -170,20 +189,20 @@ const FileTable = ({
           <thead className="border-b border-[#E6EEF6] bg-[#F8FAFD] text-[11px] font-black text-[#7B92A8]">
             <tr>
               <th className="w-10 px-3 py-3 text-center"><input type="checkbox" checked={allVisibleSelected} onChange={onToggleAll} /></th>
-              <th className="w-[96px] px-3 py-3 text-left">患者 ID</th>
-              <th className="px-3 py-3 text-left">协议名称</th>
-              <th className="w-[88px] px-3 py-3 text-left">序列</th>
-              <th className="w-[84px] px-3 py-3 text-left">大小</th>
-              <th className="w-[124px] px-3 py-3 text-left">采集时间</th>
-              <th className="w-[132px] px-3 py-3 text-left">状态</th>
-              <th className="w-[220px] px-3 py-3 text-right">操作</th>
+              <th className="w-[96px] px-3 py-3 text-left">{t("service.disk.patientId")}</th>
+              <th className="px-3 py-3 text-left">{t("service.disk.protocolName")}</th>
+              <th className="w-[88px] px-3 py-3 text-left">{t("service.disk.series")}</th>
+              <th className="w-[84px] px-3 py-3 text-left">{t("service.disk.size")}</th>
+              <th className="w-[124px] px-3 py-3 text-left">{t("service.disk.acquiredAt")}</th>
+              <th className="w-[132px] px-3 py-3 text-left">{t("service.disk.status")}</th>
+              <th className="w-[220px] px-3 py-3 text-right">{t("service.disk.actions")}</th>
             </tr>
           </thead>
           <tbody>
             {files.map((file, index) => {
-              const reserveBlocked = getActionBlockedReason(file, "reserve");
-              const releaseBlocked = getActionBlockedReason(file, "release");
-              const purgeBlocked = getActionBlockedReason(file, "purge");
+              const reserveBlocked = getActionBlockedReason(file, "reserve", t);
+              const releaseBlocked = getActionBlockedReason(file, "release", t);
+              const purgeBlocked = getActionBlockedReason(file, "purge", t);
 
               return (
                 <tr key={file.id} className={index < files.length - 1 ? "border-b border-[#EEF2F7]" : ""}>
@@ -192,23 +211,23 @@ const FileTable = ({
                   <td className="truncate px-3 py-3 text-[#31485E]" title={file.protocol_name}>{file.protocol_name}</td>
                   <td className="px-3 py-3 text-[#31485E]">{file.series_name}</td>
                   <td className="px-3 py-3 text-[#31485E]">{formatMb(file.file_size_mb)}</td>
-                  <td className="px-3 py-3 text-[#31485E]">{formatDateTime(file.acquired_at)}</td>
+                  <td className="px-3 py-3 text-[#31485E]">{formatDateTime(file.acquired_at, locale)}</td>
                   <td className="px-3 py-3">
                     <div className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold ${STATUS_STYLES[file.status]}`}>
                       {file.status === "RESERVED" ? <Lock size={11} /> : null}
-                      {file.status}
+                      {t(FILE_STATUS_LABEL_KEYS[file.status])}
                     </div>
                     {file.active_recon_jobs > 0 ? (
                       <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-[#D97706]">
-                        <ShieldAlert size={11} /> 重建中
+                        <ShieldAlert size={11} /> {t("service.disk.reconstructing")}
                       </div>
                     ) : null}
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex items-center justify-end gap-2">
-                      <button type="button" disabled={Boolean(reserveBlocked)} title={reserveBlocked ?? ""} onClick={() => onReserveFile(file.id)} className="min-w-[46px] whitespace-nowrap rounded-lg border border-[#D7E3F0] px-2.5 py-1.5 text-[11px] font-bold leading-none text-[#2F67D8] hover:bg-[#F5F9FF] disabled:cursor-not-allowed disabled:text-[#A0AEC0]">保留</button>
-                      <button type="button" disabled={Boolean(releaseBlocked)} title={releaseBlocked ?? ""} onClick={() => onReleaseFile(file.id)} className="min-w-[46px] whitespace-nowrap rounded-lg border border-[#D7E3F0] px-2.5 py-1.5 text-[11px] font-bold leading-none text-[#4F6479] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:text-[#A0AEC0]">释放</button>
-                      <button type="button" disabled={Boolean(purgeBlocked)} title={purgeBlocked ?? ""} onClick={() => onPurgeFile(file.id)} className="min-w-[46px] whitespace-nowrap rounded-lg bg-[#FEE2E2] px-2.5 py-1.5 text-[11px] font-bold leading-none text-[#DC2626] hover:bg-[#FECACA] disabled:cursor-not-allowed disabled:bg-[#F8D7DA] disabled:text-[#D4A1A8]">删除</button>
+                      <button type="button" disabled={Boolean(reserveBlocked)} title={reserveBlocked ?? ""} onClick={() => onReserveFile(file.id)} className="min-w-[46px] whitespace-nowrap rounded-lg border border-[#D7E3F0] px-2.5 py-1.5 text-[11px] font-bold leading-none text-[#2F67D8] hover:bg-[#F5F9FF] disabled:cursor-not-allowed disabled:text-[#A0AEC0]">{t("service.disk.reserve")}</button>
+                      <button type="button" disabled={Boolean(releaseBlocked)} title={releaseBlocked ?? ""} onClick={() => onReleaseFile(file.id)} className="min-w-[46px] whitespace-nowrap rounded-lg border border-[#D7E3F0] px-2.5 py-1.5 text-[11px] font-bold leading-none text-[#4F6479] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:text-[#A0AEC0]">{t("service.disk.release")}</button>
+                      <button type="button" disabled={Boolean(purgeBlocked)} title={purgeBlocked ?? ""} onClick={() => onPurgeFile(file.id)} className="min-w-[46px] whitespace-nowrap rounded-lg bg-[#FEE2E2] px-2.5 py-1.5 text-[11px] font-bold leading-none text-[#DC2626] hover:bg-[#FECACA] disabled:cursor-not-allowed disabled:bg-[#F8D7DA] disabled:text-[#D4A1A8]">{t("service.disk.delete")}</button>
                     </div>
                   </td>
                 </tr>
@@ -222,6 +241,7 @@ const FileTable = ({
 };
 
 export default function DiskManagementPage() {
+  const { t } = useI18n();
   const diskManager = useDiskManager();
 
   const footerStatus = useMemo(() => {
@@ -238,7 +258,7 @@ export default function DiskManagementPage() {
               <input
                 value={diskManager.searchQuery}
                 onChange={(event) => diskManager.setSearchQuery(event.target.value)}
-                placeholder="搜索患者 ID"
+                placeholder={t("service.disk.searchPlaceholder")}
                 className="h-10 w-[248px] rounded-xl border border-[#D7E3F0] bg-[#F8FAFC] pl-10 pr-4 text-[13px] font-medium text-[#31485E] outline-none focus:border-[#93C5FD]"
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8]" size={16} />
@@ -246,7 +266,7 @@ export default function DiskManagementPage() {
 
             <div className="flex shrink-0 flex-wrap items-center gap-3">
               <div className="flex items-center gap-2 text-[12px] font-bold text-[#4F6479]">
-                <span className="whitespace-nowrap">保留策略</span>
+                <span className="whitespace-nowrap">{t("service.disk.reservePolicy")}</span>
                 <input
                   type="number"
                   min={1}
@@ -255,7 +275,7 @@ export default function DiskManagementPage() {
                   onChange={(event) => diskManager.updateConfig({ retention_days: Number(event.target.value || 1) })}
                   className="h-9 w-16 rounded-xl border border-[#D7E3F0] px-2 text-center text-[13px] font-black text-[#223547] outline-none"
                 />
-                <span className="whitespace-nowrap">天</span>
+                <span className="whitespace-nowrap">{t("service.disk.days")}</span>
                 <input
                   type="time"
                   value={diskManager.config.retention_time}
@@ -271,7 +291,7 @@ export default function DiskManagementPage() {
                   diskManager.config.auto_cleanup ? "bg-[#2F67D8] text-white" : "border border-[#D7E3F0] bg-white text-[#4F6479]"
                 }`}
               >
-                自动清理：{diskManager.config.auto_cleanup ? "开启" : "关闭"}
+                {t("service.disk.autoCleanup", { state: diskManager.config.auto_cleanup ? t("service.disk.on") : t("service.disk.off") })}
               </button>
 
               <button
@@ -279,7 +299,7 @@ export default function DiskManagementPage() {
                 onClick={diskManager.refreshData}
                 className="inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-full border border-[#D7E3F0] bg-white px-4 text-[12px] font-black text-[#31485E] transition-colors hover:bg-[#F8FAFC]"
               >
-                <RefreshCcw size={15} className="text-[#2F67D8]" /> 刷新
+                <RefreshCcw size={15} className="text-[#2F67D8]" /> {t("service.disk.refresh")}
               </button>
             </div>
           </div>
@@ -292,7 +312,7 @@ export default function DiskManagementPage() {
         </div>
 
         {diskManager.loading ? (
-          <div className="rounded-md border border-[#B0C4DE] bg-white px-5 py-8 text-center text-[13px] text-[#94A3B8] shadow-sm">正在加载磁盘数据...</div>
+          <div className="rounded-md border border-[#B0C4DE] bg-white px-5 py-8 text-center text-[13px] text-[#94A3B8] shadow-sm">{t("service.disk.loading")}</div>
         ) : null}
 
         {diskManager.partitions.map((partition) => {
@@ -318,11 +338,11 @@ export default function DiskManagementPage() {
               {diskManager.expandedPartition === partition.id ? (
                 <div className="border-t border-[#EEF2F7] bg-[#FBFDFF] px-5 py-4 pb-5">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-4">
-                    <div className="text-[13px] font-semibold text-[#627488]">已选择 {diskManager.selectedCount[partition.id]} 项</div>
+                    <div className="text-[13px] font-semibold text-[#627488]">{t("service.disk.selectedCount", { count: diskManager.selectedCount[partition.id] })}</div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <button type="button" disabled={diskManager.busyPartition === partition.id || !canReserve.ok} title={canReserve.reason ?? ""} onClick={() => diskManager.reserveFiles(partition.id, selectedFiles.map((file) => file.id))} className="rounded-full bg-[#2F67D8] px-4 py-2 text-[12px] font-black text-white transition-all hover:bg-[#2558C0] disabled:cursor-not-allowed disabled:bg-[#CBD5E1]">保留选中</button>
-                      <button type="button" disabled={diskManager.busyPartition === partition.id || !canRelease.ok} title={canRelease.reason ?? ""} onClick={() => diskManager.releaseFiles(partition.id, selectedFiles.map((file) => file.id))} className="rounded-full border border-[#D7E3F0] bg-white px-4 py-2 text-[12px] font-black text-[#475569] transition-all hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#A0AEC0]">释放选中</button>
-                      <button type="button" disabled={diskManager.busyPartition === partition.id || !canPurge.ok} title={canPurge.reason ?? ""} onClick={() => diskManager.purgeFiles(partition.id, selectedFiles.map((file) => file.id))} className="rounded-full bg-[#E53E3E] px-4 py-2 text-[12px] font-black text-white transition-all hover:bg-[#C53030] disabled:cursor-not-allowed disabled:bg-[#FEB2B2]">删除选中</button>
+                      <button type="button" disabled={diskManager.busyPartition === partition.id || !canReserve.ok} title={canReserve.reason ?? ""} onClick={() => diskManager.reserveFiles(partition.id, selectedFiles.map((file) => file.id))} className="rounded-full bg-[#2F67D8] px-4 py-2 text-[12px] font-black text-white transition-all hover:bg-[#2558C0] disabled:cursor-not-allowed disabled:bg-[#CBD5E1]">{t("service.disk.reserveSelected")}</button>
+                      <button type="button" disabled={diskManager.busyPartition === partition.id || !canRelease.ok} title={canRelease.reason ?? ""} onClick={() => diskManager.releaseFiles(partition.id, selectedFiles.map((file) => file.id))} className="rounded-full border border-[#D7E3F0] bg-white px-4 py-2 text-[12px] font-black text-[#475569] transition-all hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#A0AEC0]">{t("service.disk.releaseSelected")}</button>
+                      <button type="button" disabled={diskManager.busyPartition === partition.id || !canPurge.ok} title={canPurge.reason ?? ""} onClick={() => diskManager.purgeFiles(partition.id, selectedFiles.map((file) => file.id))} className="rounded-full bg-[#E53E3E] px-4 py-2 text-[12px] font-black text-white transition-all hover:bg-[#C53030] disabled:cursor-not-allowed disabled:bg-[#FEB2B2]">{t("service.disk.deleteSelected")}</button>
                     </div>
                   </div>
 
@@ -338,9 +358,9 @@ export default function DiskManagementPage() {
 
                   {canReserve.reason || canRelease.reason || canPurge.reason ? (
                     <div className="mt-3 flex flex-wrap gap-4 text-[12px] font-medium text-[#A0AEC0]">
-                      {canReserve.reason ? <span>保留限制：{canReserve.reason}</span> : null}
-                      {canRelease.reason ? <span>释放限制：{canRelease.reason}</span> : null}
-                      {canPurge.reason ? <span>删除限制：{canPurge.reason}</span> : null}
+                      {canReserve.reason ? <span>{t("service.disk.reserveLimit", { reason: canReserve.reason })}</span> : null}
+                      {canRelease.reason ? <span>{t("service.disk.releaseLimit", { reason: canRelease.reason })}</span> : null}
+                      {canPurge.reason ? <span>{t("service.disk.deleteLimit", { reason: canPurge.reason })}</span> : null}
                     </div>
                   ) : null}
                 </div>

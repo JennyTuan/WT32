@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { CheckCircle2, AlertCircle, Save, RotateCcw } from "lucide-react";
+import { useI18n } from "../../../lib/i18nContext";
 import ServiceModeShell from "../shared/ServiceModeShell";
 import CornerEditor from "./CornerEditor";
 import CornerPreview from "./CornerPreview";
@@ -12,6 +13,7 @@ import {
 import type { CornerConfigData } from "../../../lib/cornerConfig";
 
 export default function CornerInfoPage() {
+    const { t } = useI18n();
     const [config, setConfig] = useState<CornerConfigData | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -31,7 +33,7 @@ export default function CornerInfoPage() {
             setIsDirty(false);
         } catch(err) {
             console.error("Failed to load corner config", err);
-            showToast("加载配置失败", "error");
+            showToast(t("service.corner.errorLoad"), "error");
         } finally {
             setLoading(false);
         }
@@ -49,16 +51,16 @@ export default function CornerInfoPage() {
             await saveCornerConfig(JSON.stringify(config));
             initialConfigRef.current = config;
             setIsDirty(false);
-            showToast("配置已成功保存", "success");
+            showToast(t("service.corner.noticeSaved"), "success");
         } catch {
-            showToast("保存失败，请稍后重试", "error");
+            showToast(t("service.corner.errorSave"), "error");
         } finally {
             setSaving(false);
         }
     };
 
     const handleResetAll = async () => {
-        if (!window.confirm("确定要恢复到出厂默认配置吗？当前修改将丢失。")) return;
+        if (!window.confirm(t("service.corner.confirmReset"))) return;
         setLoading(true);
         try {
             const apiConfig = await resetCornerConfig();
@@ -66,9 +68,9 @@ export default function CornerInfoPage() {
             setConfig(parsed);
             initialConfigRef.current = parsed;
             setIsDirty(false);
-            showToast("已恢复默认配置", "success");
+            showToast(t("service.corner.noticeReset"), "success");
         } catch {
-            showToast("恢复默认失败", "error");
+            showToast(t("service.corner.errorReset"), "error");
         } finally {
             setLoading(false);
         }
@@ -89,7 +91,7 @@ export default function CornerInfoPage() {
                         {loading ? (
                             <div className="flex-1 bg-white rounded-[32px] border border-[#DDEAF8] flex flex-col items-center justify-center text-[#94A3B8] gap-4 shadow-sm">
                                 <div className="w-10 h-10 border-4 border-[#3B82F6]/20 border-t-[#3B82F6] rounded-full animate-spin" />
-                                <span className="text-[13px] font-black uppercase tracking-widest opacity-50">Loading...</span>
+                                <span className="text-[13px] font-black uppercase tracking-widest opacity-50">{t("service.corner.loading")}</span>
                             </div>
                         ) : config ? (
                             <CornerEditor
@@ -104,7 +106,7 @@ export default function CornerInfoPage() {
                         <div className="flex items-center px-2">
                             <span className="text-[13px] font-black text-[#475569] uppercase tracking-[0.2em] flex items-center gap-2">
                                 <div className="w-2 h-4 bg-[#10B981] rounded-full" />
-                                实时预览
+                                {t("service.corner.preview")}
                             </span>
                         </div>
                         <div className="flex-1 min-h-0">
@@ -114,7 +116,7 @@ export default function CornerInfoPage() {
                             {isDirty && (
                                 <span className="flex items-center gap-1.5 text-[12px] font-black text-[#EF4444]">
                                     <span className="w-2 h-2 rounded-full bg-[#EF4444] animate-pulse" />
-                                    未保存
+                                    {t("service.corner.unsaved")}
                                 </span>
                             )}
                             <button
@@ -122,7 +124,7 @@ export default function CornerInfoPage() {
                                 className="flex items-center gap-1.5 px-4 py-2 border border-[#E2E8F0] bg-white text-[#64748B] rounded-xl font-black text-[12px] hover:bg-[#F8FAFC] active:scale-95 transition-all"
                             >
                                 <RotateCcw size={12} strokeWidth={2.5} />
-                                恢复默认
+                                {t("service.corner.resetDefault")}
                             </button>
                             <button
                                 onClick={handleSave}
@@ -130,7 +132,7 @@ export default function CornerInfoPage() {
                                 className="flex items-center gap-2 px-5 py-2 bg-[#3B82F6] text-white rounded-xl font-black text-[13px] hover:bg-[#2563EB] active:scale-95 transition-all disabled:opacity-50 shadow-sm shadow-blue-500/20"
                             >
                                 <Save size={14} strokeWidth={2.5} />
-                                {saving ? "保存中..." : "保存"}
+                                {saving ? t("common.saving") : t("common.save")}
                             </button>
                         </div>
                     </div>
