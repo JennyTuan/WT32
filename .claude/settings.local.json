@@ -214,7 +214,10 @@
       "Bash(cd /c/STN/projects/WT32/ui-review && rm -rf visual-check/latest visual-check/diff visual-check/_last-fail visual-check/runs && echo \"cleaned\")",
       "Bash(cd /c/STN/projects/WT32/ui-review && rm -rf visual-check tests scripts playwright.config.ts && echo \"deleted folders/files\")",
       "Bash(Select-Object -First 100)",
-      "PowerShell(git status --short --untracked-files=all | Where-Object { $_ -match '\\\\.\\(dcm|DCM\\)$|dicom|DICOM' } | Measure-Object -Line)"
+      "PowerShell(git status --short --untracked-files=all | Where-Object { $_ -match '\\\\.\\(dcm|DCM\\)$|dicom|DICOM' } | Measure-Object -Line)",
+      "PowerShell(git config http.postBuffer 524288000)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://github.com\" -UseBasicParsing -TimeoutSec 10; \"OK status=$\\($r.StatusCode\\)\" } catch { \"FAIL $\\($_.Exception.Message\\)\" })",
+      "PowerShell($env:FILTER_BRANCH_SQUELCH_WARNING = \"1\"; git filter-branch -f --index-filter \"git rm --cached --ignore-unmatch backend/data/data.7z\" -- '@{u}..HEAD' 2>&1 | Select-Object -Last 20)"
     ]
   }
 }

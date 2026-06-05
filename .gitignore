@@ -43,3 +43,6 @@ npm-debug.log*
 # Medical image data
 *.dicom
 *.mha
+
+# Large archives (too big for GitHub 100MB limit)
+*.7z
