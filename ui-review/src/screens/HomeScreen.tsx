@@ -59,14 +59,14 @@ export default function HomeScreen() {
                             <button
                                 key={card.key}
                                 onClick={() => navigate(modeRoutes[card.key])}
-                                className={`group h-[360px] rounded-[28px] border ${card.border} bg-gradient-to-b ${card.accent} p-8 text-left shadow-[0_18px_45px_rgba(55,71,79,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_22px_55px_rgba(55,71,79,0.14)]`}
+                                className={`group flex h-[360px] flex-col rounded-[28px] border ${card.border} bg-gradient-to-b ${card.accent} p-8 text-left shadow-[0_18px_45px_rgba(55,71,79,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_22px_55px_rgba(55,71,79,0.14)]`}
                             >
                                 <div className={`w-16 h-16 rounded-2xl ${card.iconBg} text-white flex items-center justify-center shadow-lg mb-10`}>
                                     <Icon size={30} />
                                 </div>
                                 <div className="text-[30px] font-black tracking-tight text-[#37474F] mb-4">{t(card.titleKey as TranslationKey)}</div>
                                 <p className="text-[15px] leading-7 text-[#546E7A] font-medium max-w-[220px]">{t(card.descriptionKey as TranslationKey)}</p>
-                                <div className="mt-12 inline-flex items-center rounded-full border border-white/80 bg-white/80 px-4 py-2 text-[12px] font-black tracking-[0.12em] text-[#607D8B] shadow-sm transition-colors group-hover:text-[#37474F]">
+                                <div className="mt-auto inline-flex items-center self-start rounded-full border border-white/80 bg-white/80 px-4 py-2 text-[12px] font-black tracking-[0.12em] text-[#607D8B] shadow-sm transition-colors group-hover:text-[#37474F]">
                                     {t("home.enterMode")}
                                 </div>
                             </button>

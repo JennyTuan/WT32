@@ -10,11 +10,14 @@ import {
   type ApiSystemLog,
   type LogLevel,
 } from "../../../lib/logsApi";
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 import { buildCsv, downloadCsv, timestampSuffix } from "../../../lib/csvExport";
 import LogDetailModal, { type DetailField, type DetailSection } from "./LogDetailModal";
 
 const PAGE_SIZE = 50;
-const ALL = "全部";
+const ALL = "all";
+type Translate = ReturnType<typeof useI18n>["t"];
 
 type AuditStatus = "success" | "attention" | "failed" | "cancelled" | "info";
 
@@ -22,6 +25,7 @@ type NormalizedAuditLog = {
   id: string;
   timestamp: string;
   module: string;
+  moduleStyle: string;
   event: string;
   status: AuditStatus;
   actor: string;
@@ -33,12 +37,12 @@ type NormalizedAuditLog = {
   raw: ApiSystemLog | ApiAuditLog;
 };
 
-const STATUS_LABELS: Record<AuditStatus, string> = {
-  success: "成功",
-  attention: "需关注",
-  failed: "失败",
-  cancelled: "已取消",
-  info: "记录",
+const STATUS_LABELS: Record<AuditStatus, TranslationKey> = {
+  success: "service.audit.status.success",
+  attention: "service.audit.status.attention",
+  failed: "service.audit.status.failed",
+  cancelled: "service.audit.status.cancelled",
+  info: "service.audit.status.info",
 };
 
 const STATUS_STYLES: Record<AuditStatus, string> = {
@@ -49,26 +53,26 @@ const STATUS_STYLES: Record<AuditStatus, string> = {
   info: "bg-[#E3F2FD] text-[#1565C0] border border-[#BBDEFB]",
 };
 
-const MODULE_STYLES: Record<string, string> = {
-  扫描流程: "bg-[#E3F2FD] text-[#1565C0] border border-[#BBDEFB]",
-  数据管理: "bg-[#F3E5F5] text-[#8E24AA] border border-[#E1BEE7]",
-  系统运行: "bg-[#ECEFF1] text-[#546E7A] border border-[#CFD8DC]",
-  系统设置: "bg-[#FFF3E0] text-[#EF6C00] border border-[#FFE0B2]",
+const MODULE_STYLES = {
+  scan: "bg-[#E3F2FD] text-[#1565C0] border border-[#BBDEFB]",
+  data: "bg-[#F3E5F5] text-[#8E24AA] border border-[#E1BEE7]",
+  runtime: "bg-[#ECEFF1] text-[#546E7A] border border-[#CFD8DC]",
+  settings: "bg-[#FFF3E0] text-[#EF6C00] border border-[#FFE0B2]",
 };
 
-const DISK_ACTION_LABELS: Record<string, string> = {
-  RESERVE: "保留扫描文件",
-  RELEASE: "释放扫描文件",
-  PURGE: "删除扫描文件",
-  UPDATE_THRESHOLD: "修改存储阈值",
-  UPDATE_CONFIG: "修改保留策略",
+const DISK_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
+  RESERVE: "service.audit.diskAction.reserve",
+  RELEASE: "service.audit.diskAction.release",
+  PURGE: "service.audit.diskAction.purge",
+  UPDATE_THRESHOLD: "service.audit.diskAction.updateThreshold",
+  UPDATE_CONFIG: "service.audit.diskAction.updateConfig",
 };
 
-const SYSTEM_EVENT_LABELS: Record<string, string> = {
-  app_started: "系统启动",
-  scan_started: "开始扫描",
-  scan_completed: "完成扫描",
-  scan_cancelled: "取消扫描",
+const SYSTEM_EVENT_LABEL_KEYS: Record<string, TranslationKey> = {
+  app_started: "service.audit.systemEvent.appStarted",
+  scan_started: "service.audit.systemEvent.scanStarted",
+  scan_completed: "service.audit.systemEvent.scanCompleted",
+  scan_cancelled: "service.audit.systemEvent.scanCancelled",
 };
 
 const formatTimestamp = (iso: string): { date: string; time: string } => {
@@ -99,10 +103,11 @@ const statusFromLevel = (level: LogLevel): AuditStatus => {
   return "info";
 };
 
-const systemModule = (log: ApiSystemLog): string => {
-  if (log.source === "scan_sessions") return "扫描流程";
-  if (log.source === "main") return "系统运行";
-  return "系统运行";
+const systemModule = (log: ApiSystemLog, t: Translate): { label: string; style: string } => {
+  if (log.source === "scan_sessions") {
+    return { label: t("service.audit.module.scanWorkflow"), style: MODULE_STYLES.scan };
+  }
+  return { label: t("service.audit.module.systemRuntime"), style: MODULE_STYLES.runtime };
 };
 
 const systemStatus = (log: ApiSystemLog): AuditStatus => {
@@ -112,24 +117,25 @@ const systemStatus = (log: ApiSystemLog): AuditStatus => {
   return statusFromLevel(log.level);
 };
 
-const normalizeSystemLog = (log: ApiSystemLog): NormalizedAuditLog => {
-  const event = SYSTEM_EVENT_LABELS[log.event] ?? log.event;
-  const module = systemModule(log);
-  const targetType = log.scan_session_id == null ? "系统" : "检查会话";
-  const targetName = log.scan_session_id == null ? "CT 控制端" : `Session #${log.scan_session_id}`;
+const normalizeSystemLog = (log: ApiSystemLog, t: Translate): NormalizedAuditLog => {
+  const event = SYSTEM_EVENT_LABEL_KEYS[log.event] ? t(SYSTEM_EVENT_LABEL_KEYS[log.event]) : log.event;
+  const module = systemModule(log, t);
+  const targetType = log.scan_session_id == null ? t("service.audit.target.system") : t("service.audit.target.examSession");
+  const targetName = log.scan_session_id == null ? t("service.audit.target.ctConsole") : `Session #${log.scan_session_id}`;
   const detail = log.message || log.details || "—";
 
   return {
     id: `system-${log.id}`,
     timestamp: log.timestamp,
-    module,
+    module: module.label,
+    moduleStyle: module.style,
     event,
     status: systemStatus(log),
-    actor: log.source === "main" ? "系统" : "本机操作员",
+    actor: log.source === "main" ? t("service.audit.actor.system") : t("service.audit.actor.localOperator"),
     targetType,
     targetName,
     detail,
-    rawSearchText: [module, event, targetType, targetName, detail, log.source, log.details ?? ""].join(" "),
+    rawSearchText: [module.label, event, targetType, targetName, detail, log.source, log.details ?? ""].join(" "),
     source: "system",
     raw: log,
   };
@@ -141,22 +147,24 @@ const fileListLabel = (fileIds: string[]): string => {
   return `${fileIds.slice(0, 3).join(", ")} +${fileIds.length - 3}`;
 };
 
-const normalizeDiskAudit = (log: ApiAuditLog, index: number): NormalizedAuditLog => {
-  const event = DISK_ACTION_LABELS[log.action] ?? log.action;
+const normalizeDiskAudit = (log: ApiAuditLog, index: number, t: Translate): NormalizedAuditLog => {
+  const event = DISK_ACTION_LABEL_KEYS[log.action] ? t(DISK_ACTION_LABEL_KEYS[log.action]) : log.action;
   const status: AuditStatus = log.result === "blocked" ? "attention" : log.result === "failed" ? "failed" : "success";
   const isConfig = log.action === "UPDATE_CONFIG";
   const isThreshold = log.action === "UPDATE_THRESHOLD";
-  const targetType = isConfig ? "存储策略" : isThreshold ? "存储分区阈值" : "扫描文件";
-  const targetName = isConfig ? "数据保留规则" : isThreshold ? (log.partition ?? "存储分区") : fileListLabel(log.file_ids);
-  const detail = formatDiskAuditDetail(log);
+  const targetType = isConfig ? t("service.audit.target.storagePolicy") : isThreshold ? t("service.audit.target.storageThreshold") : t("service.audit.target.scanFiles");
+  const targetName = isConfig ? t("service.audit.target.retentionRules") : isThreshold ? (log.partition ?? t("service.audit.target.storagePartition")) : fileListLabel(log.file_ids);
+  const detail = formatDiskAuditDetail(log, t);
+  const moduleLabel = isConfig || isThreshold ? t("service.audit.module.systemSettings") : t("service.audit.module.dataManagement");
 
   return {
     id: `disk-${log.timestamp}-${log.action}-${index}`,
     timestamp: log.timestamp,
-    module: isConfig || isThreshold ? "系统设置" : "数据管理",
+    module: moduleLabel,
+    moduleStyle: isConfig || isThreshold ? MODULE_STYLES.settings : MODULE_STYLES.data,
     event,
     status,
-    actor: "本机操作员",
+    actor: t("service.audit.actor.localOperator"),
     targetType,
     targetName,
     detail,
@@ -176,20 +184,29 @@ const normalizeDiskAudit = (log: ApiAuditLog, index: number): NormalizedAuditLog
   };
 };
 
-const formatDiskAuditDetail = (log: ApiAuditLog): string => {
+const formatDiskAuditDetail = (log: ApiAuditLog, t: Translate): string => {
   if (log.action === "UPDATE_CONFIG" && typeof log.detail.config === "object" && log.detail.config !== null) {
     const config = log.detail.config as Record<string, unknown>;
-    return `保留 ${config.retention_days ?? "-"} 天，${config.retention_time ?? "-"} 执行，自动清理 ${config.auto_cleanup ? "开" : "关"}`;
+    return t("service.audit.detail.updateConfig", {
+      days: String(config.retention_days ?? "-"),
+      time: String(config.retention_time ?? "-"),
+      autoCleanup: config.auto_cleanup ? t("service.audit.on") : t("service.audit.off"),
+    });
   }
   if (log.action === "UPDATE_THRESHOLD") {
-    return `分区 ${log.partition ?? "-"}，阈值 ${String(log.detail.threshold ?? "-")}%`;
+    return t("service.audit.detail.updateThreshold", {
+      partition: log.partition ?? "-",
+      threshold: String(log.detail.threshold ?? "-"),
+    });
   }
   const blocked = Array.isArray(log.detail.blocked) ? log.detail.blocked.length : 0;
-  const prefix = `分区 ${log.partition ?? "-"}，${log.file_ids.length} 个文件`;
-  return blocked > 0 ? `${prefix}，${blocked} 个受阻` : prefix;
+  return blocked > 0
+    ? t("service.audit.detail.filesBlocked", { partition: log.partition ?? "-", count: log.file_ids.length, blocked })
+    : t("service.audit.detail.files", { partition: log.partition ?? "-", count: log.file_ids.length });
 };
 
 export default function ServiceAuditLogPage() {
+  const { t } = useI18n();
   const [logs, setLogs] = useState<NormalizedAuditLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -213,16 +230,16 @@ export default function ServiceAuditLogPage() {
       ]);
       const auditedSystemRows = systemRows.filter((log) => log.source === "scan_sessions");
       const normalized = [
-        ...auditedSystemRows.map(normalizeSystemLog),
-        ...diskRows.map(normalizeDiskAudit),
+        ...auditedSystemRows.map((row) => normalizeSystemLog(row, t)),
+        ...diskRows.map((row, index) => normalizeDiskAudit(row, index, t)),
       ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       setLogs(normalized);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载失败");
+      setError(e instanceof Error ? e.message : t("service.logs.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchLogs();
@@ -270,17 +287,17 @@ export default function ServiceAuditLogPage() {
 
   const handleExport = useCallback(() => {
     const csv = buildCsv(filtered, [
-      { header: "时间", value: (l) => l.timestamp },
-      { header: "模块", value: (l) => l.module },
-      { header: "事件", value: (l) => l.event },
-      { header: "状态", value: (l) => STATUS_LABELS[l.status] },
-      { header: "操作者", value: (l) => l.actor },
-      { header: "对象类型", value: (l) => l.targetType },
-      { header: "对象", value: (l) => l.targetName },
-      { header: "详情", value: (l) => l.detail },
+      { header: t("service.logs.time"), value: (l) => l.timestamp },
+      { header: t("service.audit.module"), value: (l) => l.module },
+      { header: t("service.logs.event"), value: (l) => l.event },
+      { header: t("service.audit.status"), value: (l) => t(STATUS_LABELS[l.status]) },
+      { header: t("service.audit.actor"), value: (l) => l.actor },
+      { header: t("service.audit.targetType"), value: (l) => l.targetType },
+      { header: t("service.audit.target"), value: (l) => l.targetName },
+      { header: t("service.logs.details"), value: (l) => l.detail },
     ]);
     downloadCsv(`audit-log-${timestampSuffix()}.csv`, csv);
-  }, [filtered]);
+  }, [filtered, t]);
 
   return (
     <ServiceModeShell currentRoute="/service/reports/audit-log" footerStatus={{ label: "IDLE", tone: "idle" }}>
@@ -291,7 +308,7 @@ export default function ServiceAuditLogPage() {
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
               <input
                 type="text"
-                placeholder="搜索患者/检查会话、事件、文件 ID 或详情..."
+                placeholder={t("service.audit.searchPlaceholder")}
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 className="h-10 w-full rounded-lg border border-[#D6E2EF] pl-9 pr-4 text-[14px] text-[#37474F] placeholder:text-[#B0C4DE] focus:border-[#4D94FF] focus:outline-none"
@@ -303,7 +320,7 @@ export default function ServiceAuditLogPage() {
               className="flex h-10 items-center gap-2 rounded-lg border border-[#D6E2EF] bg-white px-4 text-[14px] font-bold text-[#37474F] transition-colors hover:bg-[#F5F8FC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Download size={14} />
-              导出 CSV
+              {t("service.logs.exportCsv")}
             </button>
             <button
               onClick={fetchLogs}
@@ -311,13 +328,13 @@ export default function ServiceAuditLogPage() {
               className="flex h-10 items-center gap-2 rounded-lg bg-[#4D94FF] px-4 text-[14px] font-bold text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-              刷新
+              {t("common.refresh")}
             </button>
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold text-[#263238]">日期范围</span>
+              <span className="text-[13px] font-bold text-[#263238]">{t("service.logs.dateRange")}</span>
               <input
                 type="date"
                 value={dateFrom}
@@ -333,24 +350,24 @@ export default function ServiceAuditLogPage() {
               />
             </div>
 
-            <FilterSelect label="模块" value={moduleFilter} onChange={setModuleFilter}>
-              <option value={ALL}>{ALL}</option>
+            <FilterSelect label={t("service.audit.module")} value={moduleFilter} onChange={setModuleFilter}>
+              <option value={ALL}>{t("service.logs.all")}</option>
               {modules.map((module) => (
                 <option key={module} value={module}>{module}</option>
               ))}
             </FilterSelect>
 
-            <FilterSelect label="事件" value={eventFilter} onChange={setEventFilter}>
-              <option value={ALL}>{ALL}</option>
+            <FilterSelect label={t("service.logs.event")} value={eventFilter} onChange={setEventFilter}>
+              <option value={ALL}>{t("service.logs.all")}</option>
               {events.map((event) => (
                 <option key={event} value={event}>{event}</option>
               ))}
             </FilterSelect>
 
-            <FilterSelect label="状态" value={statusFilter} onChange={setStatusFilter}>
-              <option value={ALL}>{ALL}</option>
+            <FilterSelect label={t("service.audit.status")} value={statusFilter} onChange={setStatusFilter}>
+              <option value={ALL}>{t("service.logs.all")}</option>
               {statuses.map((status) => (
-                <option key={status} value={status}>{STATUS_LABELS[status]}</option>
+                <option key={status} value={status}>{t(STATUS_LABELS[status])}</option>
               ))}
             </FilterSelect>
           </div>
@@ -361,14 +378,14 @@ export default function ServiceAuditLogPage() {
             <table className="w-full text-[13px]">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-[#E2EBF5] bg-[#F5F8FC] font-black text-[#37474F]">
-                  <th className="w-[120px] px-3 py-3 text-left">时间</th>
-                  <th className="w-[86px] px-3 py-3 text-left">模块</th>
-                  <th className="w-[120px] px-3 py-3 text-left">事件</th>
-                  <th className="w-[78px] px-3 py-3 text-left">状态</th>
-                  <th className="w-[90px] px-3 py-3 text-left">操作者</th>
-                  <th className="w-[105px] px-3 py-3 text-left">对象类型</th>
-                  <th className="px-3 py-3 text-left">对象</th>
-                  <th className="w-[230px] px-3 py-3 text-left">详情</th>
+                  <th className="w-[120px] px-3 py-3 text-left">{t("service.logs.time")}</th>
+                  <th className="w-[86px] px-3 py-3 text-left">{t("service.audit.module")}</th>
+                  <th className="w-[120px] px-3 py-3 text-left">{t("service.logs.event")}</th>
+                  <th className="w-[78px] px-3 py-3 text-left">{t("service.audit.status")}</th>
+                  <th className="w-[90px] px-3 py-3 text-left">{t("service.audit.actor")}</th>
+                  <th className="w-[105px] px-3 py-3 text-left">{t("service.audit.targetType")}</th>
+                  <th className="px-3 py-3 text-left">{t("service.audit.target")}</th>
+                  <th className="w-[230px] px-3 py-3 text-left">{t("service.logs.details")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -379,12 +396,12 @@ export default function ServiceAuditLogPage() {
                 ) : pageRows.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="py-16 text-center text-[14px] text-[#90A4AE]">
-                      {loading ? "加载中..." : "没有找到审计记录"}
+                      {loading ? t("service.logs.loading") : t("service.audit.noRecords")}
                     </td>
                   </tr>
                 ) : (
                   pageRows.map((log) => {
-                    const t = formatTimestamp(log.timestamp);
+                    const timestamp = formatTimestamp(log.timestamp);
                     return (
                       <tr
                         key={log.id}
@@ -392,18 +409,18 @@ export default function ServiceAuditLogPage() {
                         className="cursor-pointer border-t border-[#E2EBF5] hover:bg-[#F9FBFC]"
                       >
                         <td className="whitespace-nowrap px-3 py-3">
-                          <div className="font-mono text-[13px] leading-tight text-[#37474F]">{t.date}</div>
-                          <div className="mt-0.5 font-mono text-[11px] leading-tight text-[#90A4AE]">{t.time}</div>
+                          <div className="font-mono text-[13px] leading-tight text-[#37474F]">{timestamp.date}</div>
+                          <div className="mt-0.5 font-mono text-[11px] leading-tight text-[#90A4AE]">{timestamp.time}</div>
                         </td>
                         <td className="px-3 py-3">
-                          <span className={`inline-flex h-[22px] min-w-[64px] items-center justify-center rounded-md px-2 text-[11px] font-bold ${MODULE_STYLES[log.module] ?? "border border-[#CFD8DC] bg-[#ECEFF1] text-[#546E7A]"}`}>
+                          <span className={`inline-flex h-[22px] min-w-[64px] items-center justify-center rounded-md px-2 text-[11px] font-bold ${log.moduleStyle}`}>
                             {log.module}
                           </span>
                         </td>
                         <td className="px-3 py-3 text-[#37474F]">{log.event}</td>
                         <td className="px-3 py-3">
                           <span className={`inline-flex h-[22px] min-w-[54px] items-center justify-center rounded-full px-2 text-[11px] font-bold ${STATUS_STYLES[log.status]}`}>
-                            {STATUS_LABELS[log.status]}
+                            {t(STATUS_LABELS[log.status])}
                           </span>
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 text-[#546E7A]">{log.actor}</td>
@@ -424,11 +441,11 @@ export default function ServiceAuditLogPage() {
 
           <div className="flex items-center justify-between border-t border-[#E2EBF5] px-4 py-2 text-[12px] text-[#546E7A]">
             <div>
-              共 <span className="font-bold text-[#263238]">{filtered.length}</span> 条记录
-              {filtered.length !== logs.length && <span className="text-[#90A4AE]">（已过滤自 {logs.length} 条）</span>}
+              {t("service.logs.totalRecords", { count: filtered.length })}
+              {filtered.length !== logs.length && <span className="text-[#90A4AE]">{t("service.logs.filteredFrom", { count: logs.length })}</span>}
             </div>
             <div className="flex items-center gap-3">
-              <span>第 <span className="font-bold text-[#263238]">{safePage + 1}</span> / {pageCount} 页</span>
+              <span>{t("service.logs.page", { page: safePage + 1, total: pageCount })}</span>
               <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={safePage === 0}
@@ -450,8 +467,8 @@ export default function ServiceAuditLogPage() {
         {selectedLog && (
           <LogDetailModal
             title={`${selectedLog.module} · ${selectedLog.event}`}
-            subtitle={`${formatTimestamp(selectedLog.timestamp).date} ${formatTimestamp(selectedLog.timestamp).time} · ${STATUS_LABELS[selectedLog.status]}`}
-            sections={buildAuditDetailSections(selectedLog)}
+            subtitle={`${formatTimestamp(selectedLog.timestamp).date} ${formatTimestamp(selectedLog.timestamp).time} · ${t(STATUS_LABELS[selectedLog.status])}`}
+            sections={buildAuditDetailSections(selectedLog, t)}
             rawJson={selectedLog.raw}
             onClose={() => setSelectedLog(null)}
           />
@@ -461,19 +478,19 @@ export default function ServiceAuditLogPage() {
   );
 }
 
-function buildAuditDetailSections(log: NormalizedAuditLog): DetailSection[] {
+function buildAuditDetailSections(log: NormalizedAuditLog, t: Translate): DetailSection[] {
   const baseFields: DetailField[] = [
-    { label: "时间", value: log.timestamp, mono: true, span: "full" },
-    { label: "模块", value: log.module },
-    { label: "事件", value: log.event },
-    { label: "状态", value: STATUS_LABELS[log.status] },
-    { label: "操作者", value: log.actor },
-    { label: "对象类型", value: log.targetType },
-    { label: "对象", value: log.targetName },
-    { label: "详情", value: log.detail, span: "full" },
+    { label: t("service.logs.time"), value: log.timestamp, mono: true, span: "full" },
+    { label: t("service.audit.module"), value: log.module },
+    { label: t("service.logs.event"), value: log.event },
+    { label: t("service.audit.status"), value: t(STATUS_LABELS[log.status]) },
+    { label: t("service.audit.actor"), value: log.actor },
+    { label: t("service.audit.targetType"), value: log.targetType },
+    { label: t("service.audit.target"), value: log.targetName },
+    { label: t("service.logs.details"), value: log.detail, span: "full" },
   ];
 
-  const sections: DetailSection[] = [{ title: "基本信息", fields: baseFields }];
+  const sections: DetailSection[] = [{ title: t("service.logs.basicInfo"), fields: baseFields }];
 
   if (log.source === "disk") {
     const raw = log.raw as ApiAuditLog;
@@ -484,7 +501,7 @@ function buildAuditDetailSections(log: NormalizedAuditLog): DetailSection[] {
     ];
     if (raw.file_ids.length > 0) {
       extraFields.push({
-        label: `文件 ID（${raw.file_ids.length}）`,
+        label: t("service.audit.fileIds", { count: raw.file_ids.length }),
         value: (
           <div className="max-h-[160px] overflow-auto font-mono text-[12px] leading-relaxed">
             {raw.file_ids.join(", ")}
@@ -493,16 +510,16 @@ function buildAuditDetailSections(log: NormalizedAuditLog): DetailSection[] {
         span: "full",
       });
     }
-    sections.push({ title: "磁盘操作", fields: extraFields });
+    sections.push({ title: t("service.audit.diskOperation"), fields: extraFields });
   } else {
     const raw = log.raw as ApiSystemLog;
     sections.push({
-      title: "系统日志",
+      title: t("service.audit.systemLog"),
       fields: [
-        { label: "级别", value: raw.level, mono: true },
-        { label: "来源", value: raw.source, mono: true },
-        { label: "原始事件", value: raw.event, mono: true },
-        { label: "会话", value: raw.scan_session_id ?? "—", mono: true },
+        { label: t("service.logs.level"), value: raw.level, mono: true },
+        { label: t("service.logs.source"), value: raw.source, mono: true },
+        { label: t("service.audit.rawEvent"), value: raw.event, mono: true },
+        { label: t("service.logs.session"), value: raw.scan_session_id ?? "—", mono: true },
         { label: "Message", value: raw.message, span: "full" },
       ],
     });

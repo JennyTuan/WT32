@@ -1296,7 +1296,7 @@ const ScoutScanScreen = ({
                                     <div className="w-px flex-1 bg-[#C5D5E8] my-1" />
                                     <button
                                         onClick={handleSwap}
-                                        title="交换起始/结束位置"
+                                        title={t("scanFlow.positioning.swapRange")}
                                         className="w-[20px] h-[20px] rounded-full bg-white border border-[#B0C4DE] flex items-center justify-center text-[#78A0BF] hover:text-[#4D94FF] hover:border-[#4D94FF] hover:bg-[#EEF6FF] transition-all active:scale-90 shadow-sm shrink-0"
                                     >
                                         <ArrowUpDown size={10} />
@@ -1315,7 +1315,7 @@ const ScoutScanScreen = ({
                                         onClick={() => setSelectedPosition('start')}
                                         className="flex items-center gap-2 h-[32px] min-w-0 cursor-pointer"
                                     >
-                                        <span className={`text-[12px] font-bold w-[60px] shrink-0 transition-colors ${selectedPosition === 'start' ? 'text-[#4D94FF]' : 'text-[#90A4AE]'}`}>起始位置 :</span>
+                                        <span className={`text-[11px] font-bold w-[72px] shrink-0 transition-colors ${selectedPosition === 'start' ? 'text-[#4D94FF]' : 'text-[#90A4AE]'}`}>{t("scanFlow.positioning.startPosition")}</span>
                                         <input
                                             type="text"
                                             value={startPos}
@@ -1334,7 +1334,7 @@ const ScoutScanScreen = ({
                                         onClick={() => setSelectedPosition('end')}
                                         className="flex items-center gap-2 h-[32px] min-w-0 cursor-pointer"
                                     >
-                                        <span className={`text-[12px] font-bold w-[60px] shrink-0 transition-colors ${selectedPosition === 'end' ? 'text-[#66BB6A]' : 'text-[#90A4AE]'}`}>结束位置 :</span>
+                                        <span className={`text-[11px] font-bold w-[72px] shrink-0 transition-colors ${selectedPosition === 'end' ? 'text-[#66BB6A]' : 'text-[#90A4AE]'}`}>{t("scanFlow.positioning.endPosition")}</span>
                                         <input
                                             type="text"
                                             value={endPos}

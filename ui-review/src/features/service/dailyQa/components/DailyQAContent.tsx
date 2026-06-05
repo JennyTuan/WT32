@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 
+import { useI18n } from "../../../../lib/i18nContext";
+import { PHANTOM_LABEL_KEYS, QA_STATUS_LABEL_KEYS } from "../dailyQaI18n";
 import type { MetricKey, PhantomImageData, PhantomType, QACardItem, RoiPoint } from "../types";
 
 const STATUS_CONFIG: Record<"PASS" | "FAIL", { badge: string; accent: string; dot: string }> = {
@@ -15,11 +17,6 @@ const STATUS_CONFIG: Record<"PASS" | "FAIL", { badge: string; accent: string; do
   },
 };
 
-const STATUS_LABEL: Record<"PASS" | "FAIL", string> = {
-  PASS: "通过",
-  FAIL: "不通过",
-};
-
 const MetricViewport = ({
   card,
   onRoiPointChange,
@@ -28,6 +25,7 @@ const MetricViewport = ({
   image: PhantomImageData | null;
   onRoiPointChange: (metric: MetricKey, pointIndex: number, nextPoint: RoiPoint) => void;
 }) => {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
@@ -63,7 +61,7 @@ const MetricViewport = ({
             card.roiShape === "circle" ? "h-9 w-9 rounded-full" : "h-4 w-4 rounded-full"
           }`}
           style={{ left: `${point.x}%`, top: `${point.y}%` }}
-          title="拖动 ROI 重新计算"
+          title={t("service.dailyQa.dragRoiTitle")}
         />
       ))}
     </div>
@@ -87,11 +85,18 @@ const splitAccuracyActual = (value: string) => {
 };
 
 const QATableHeader = () => (
-  <>
-    <div className="text-[11px] font-bold lowercase tracking-[0.08em] text-[#6F88A6]">limit</div>
-    <div className="text-[11px] font-bold lowercase tracking-[0.08em] text-[#6F88A6]">actual</div>
-  </>
+  <QATableHeaderContent />
 );
+
+const QATableHeaderContent = () => {
+  const { t } = useI18n();
+  return (
+    <>
+      <div className="text-[11px] font-bold lowercase tracking-[0.08em] text-[#6F88A6]">{t("service.dailyQa.limit")}</div>
+      <div className="text-[11px] font-bold lowercase tracking-[0.08em] text-[#6F88A6]">{t("service.dailyQa.actual")}</div>
+    </>
+  );
+};
 
 const QATableValue = ({ value }: { value: string }) => (
   <span className={`text-[14px] font-bold leading-6 ${value === "-" ? "text-[#AEBFD2]" : "text-[#14283B]"}`}>{value}</span>
@@ -106,6 +111,7 @@ const QACard = ({
   image: PhantomImageData | null;
   onRoiPointChange: (metric: MetricKey, pointIndex: number, nextPoint: RoiPoint) => void;
 }) => {
+  const { t } = useI18n();
   const cfg = STATUS_CONFIG[card.status];
   const accuracyLimit = card.key === "accuracy" ? splitAccuracyLimit(card.limit) : null;
   const accuracyActual = card.key === "accuracy" ? splitAccuracyActual(card.actual) : null;
@@ -118,11 +124,11 @@ const QACard = ({
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-[17px] font-black tracking-tight text-[#1E2D3D]">{card.title}</h3>
-            <div className="mt-0.5 text-[11px] font-medium text-[#9DB5CB]">拖动 ROI 后自动重算</div>
+            <div className="mt-0.5 text-[11px] font-medium text-[#9DB5CB]">{t("service.dailyQa.autoRecalculateHint")}</div>
           </div>
           <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${cfg.badge}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`} />
-            {card.status}
+            {t(QA_STATUS_LABEL_KEYS[card.status])}
           </div>
         </div>
 
@@ -149,13 +155,13 @@ const QACard = ({
           </div>
 
           <div className="mt-6 flex items-center justify-between gap-3">
-            <span className="text-[13px] font-semibold text-[#223A57]">判定结果</span>
+            <span className="text-[13px] font-semibold text-[#223A57]">{t("service.dailyQa.judgmentResult")}</span>
             <span
               className={`inline-flex min-w-[76px] justify-center rounded-full px-4 py-2 text-[13px] font-black text-white ${
                 card.status === "PASS" ? "bg-[#2E7D32]" : "bg-[#C40000]"
               }`}
             >
-              {STATUS_LABEL[card.status]}
+              {t(QA_STATUS_LABEL_KEYS[card.status])}
             </span>
           </div>
         </div>
@@ -183,26 +189,28 @@ export function DailyQAContent({
   phantomType,
   selectedDate,
 }: DailyQAContentProps) {
+  const { t } = useI18n();
+
   return (
     <section className="relative flex h-full flex-1 flex-col overflow-hidden rounded-md border border-[#B0C4DE] bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between rounded-xl border border-[#E7EEF8] bg-[#F8FAFC] px-4 py-3 shadow-sm">
         <div className="flex items-center gap-5">
           <div className="flex items-center gap-3">
-            <span className="text-[13px] font-black text-[#90A4AE]">日期</span>
+            <span className="text-[13px] font-black text-[#90A4AE]">{t("service.dailyQa.date")}</span>
             <div className="min-w-[168px] rounded-lg border border-[#D7E3F0] bg-[#F8FAFC] px-4 py-2 text-[14px] font-bold text-[#37474F]">
               {selectedDate.replaceAll("-", "/")}
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="text-[13px] font-black text-[#90A4AE]">模体</span>
+            <span className="text-[13px] font-black text-[#90A4AE]">{t("service.dailyQa.phantom")}</span>
             <select
               value={phantomType}
               onChange={(event) => onPhantomTypeChange(event.target.value as PhantomType)}
               className="min-w-[110px] cursor-pointer appearance-none rounded-lg border border-[#B0C4DE] bg-white px-4 py-2 pr-10 text-[14px] font-bold text-[#37474F] focus:border-[#4D94FF] focus:outline-none"
             >
-              <option value="水模">水模</option>
-              <option value="气模">气模</option>
+              <option value="水模">{t(PHANTOM_LABEL_KEYS["水模"])}</option>
+              <option value="气模">{t(PHANTOM_LABEL_KEYS["气模"])}</option>
             </select>
           </div>
         </div>
@@ -212,7 +220,7 @@ export function DailyQAContent({
             onClick={onAnalyze}
             className="h-10 rounded-full bg-[#4D94FF] px-6 text-[14px] font-black text-white shadow-lg transition-all hover:bg-[#3B82F6] active:scale-95"
           >
-            运行 QA
+            {t("service.dailyQa.runQa")}
           </button>
         </div>
       </div>

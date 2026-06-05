@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { useI18n } from "../lib/i18nContext";
 
 // Opaque "noise level" used by the auto-mA slider. Concrete physical meaning
 // (target image noise σ, vendor-specific noise index, etc.) is still pending
@@ -185,6 +186,7 @@ export default function AutoMaPanel({
     noiseLevel = NOISE_SLIDER_DEFAULT,
     realMaCurve,
 }: AutoMaPanelProps) {
+    const { t } = useI18n();
     const [draftMin, setDraftMin] = useState(maMin);
     const [draftMax, setDraftMax] = useState(maMax);
     const [internalPositionRatio, setInternalPositionRatio] = useState(0.5);
@@ -566,11 +568,11 @@ export default function AutoMaPanel({
                 </div>
 
                 <div className="flex w-[240px] shrink-0 flex-col justify-center gap-3 px-4">
-                    <RangeControl label="mA 上限 (MAX)" value={draftMax} min={HARD_MIN} max={HARD_MAX} disabled={!autoMa} onChange={handleMaxChange} />
-                    <RangeControl label="mA 下限 (MIN)" value={draftMin} min={HARD_MIN} max={HARD_MAX} disabled={!autoMa} onChange={handleMinChange} />
+                    <RangeControl label={t("scanFlow.autoMa.max")} value={draftMax} min={HARD_MIN} max={HARD_MAX} disabled={!autoMa} onChange={handleMaxChange} />
+                    <RangeControl label={t("scanFlow.autoMa.min")} value={draftMin} min={HARD_MIN} max={HARD_MAX} disabled={!autoMa} onChange={handleMinChange} />
 
                     <RangeControl
-                        label="噪声等级"
+                        label={t("scanFlow.autoMa.noiseLevel")}
                         value={noiseLevel}
                         min={NOISE_SLIDER_MIN}
                         max={NOISE_SLIDER_MAX}

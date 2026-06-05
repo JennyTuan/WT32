@@ -1,4 +1,5 @@
 import { fetchSelectedScanSession } from "../../lib/scanSession";
+import type { LanguageCode } from "../../lib/systemSettingsApi";
 import type { 
     ApiProtocolSummary, 
     ApiSeriesDetail, 
@@ -37,12 +38,23 @@ export const fetchProtocolCatalogWithFallback = async () => {
     throw lastError ?? new Error("Failed to load protocol catalog");
 };
 
-export const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["series_type"], index: number): ApiSeriesDetail => {
+const draftSeriesName = (seriesType: ApiSeriesDetail["series_type"], index: number, language: LanguageCode = "zh-CN") => {
+    if (language === "en-US") {
+        if (seriesType === "topogram") return `Localizer ${index}`;
+        if (seriesType === "axial") return `Axial Scan ${index}`;
+        return `Helical Scan ${index}`;
+    }
+    if (seriesType === "topogram") return `定位像 ${index}`;
+    if (seriesType === "axial") return `断层扫描 ${index}`;
+    return `螺旋扫描 ${index}`;
+};
+
+export const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["series_type"], index: number, language?: LanguageCode): ApiSeriesDetail => {
     if (seriesType === "topogram") {
         return {
             id,
             series_type: "topogram",
-            series_label: `定位像 ${index}`,
+            series_label: draftSeriesName(seriesType, index, language),
             topogram_param: {
                 kv: 120,
                 ma: 50,
@@ -63,7 +75,7 @@ export const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["serie
         return {
             id,
             series_type: "axial",
-            series_label: `断层扫描 ${index}`,
+            series_label: draftSeriesName(seriesType, index, language),
             topogram_param: null,
             helical_param: null,
             axial_param: {
@@ -86,7 +98,7 @@ export const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["serie
     return {
         id,
         series_type: "helical",
-        series_label: `螺旋扫描 ${index}`,
+        series_label: draftSeriesName(seriesType, index, language),
         topogram_param: null,
         helical_param: {
             kv: 120,

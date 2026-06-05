@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { useI18n } from "../../../lib/i18nContext";
+
 export type DetailField = {
   label: string;
   value: ReactNode;
@@ -23,6 +25,8 @@ type LogDetailModalProps = {
 };
 
 export default function LogDetailModal({ title, subtitle, sections, rawJson, onClose }: LogDetailModalProps) {
+  const { t } = useI18n();
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -52,7 +56,7 @@ export default function LogDetailModal({ title, subtitle, sections, rawJson, onC
           <button
             onClick={onClose}
             className="ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#90A4AE] hover:bg-[#F5F8FC] hover:text-[#37474F]"
-            aria-label="关闭"
+            aria-label={t("service.logs.close")}
           >
             <X size={18} />
           </button>
@@ -87,7 +91,7 @@ export default function LogDetailModal({ title, subtitle, sections, rawJson, onC
           {rawText && (
             <div className="mt-5">
               <div className="mb-2 text-[12px] font-bold uppercase tracking-wider text-[#90A4AE]">
-                原始数据
+                {t("service.logs.rawData")}
               </div>
               <pre className="max-h-[200px] overflow-auto rounded-lg border border-[#E2EBF5] bg-[#F8FAFC] px-3 py-2 font-mono text-[11px] leading-relaxed text-[#37474F]">
                 {rawText}
@@ -101,7 +105,7 @@ export default function LogDetailModal({ title, subtitle, sections, rawJson, onC
             onClick={onClose}
             className="h-9 rounded-lg bg-[#4D94FF] px-4 text-[13px] font-bold text-white hover:bg-blue-600"
           >
-            关闭
+            {t("service.logs.close")}
           </button>
         </div>
       </div>

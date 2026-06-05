@@ -63,6 +63,7 @@ type ScanConfirmScreenProps = {
     onExecuteScan?: () => void;
     patientConfirmBeforeExecute?: boolean;
     executeButtonLabel?: string;
+    executeButtonCompact?: boolean;
     nextRoute?: string;
     allowBackNavigation?: boolean;
 };
@@ -418,6 +419,7 @@ const ScanConfirmScreen = ({
     onExecuteScan,
     patientConfirmBeforeExecute = false,
     executeButtonLabel,
+    executeButtonCompact = false,
     nextRoute = "/scout-execute",
     allowBackNavigation = true,
 }: ScanConfirmScreenProps) => {
@@ -582,10 +584,10 @@ const ScanConfirmScreen = ({
     const isHelicalMaLocked = Boolean(autoMaEnabled && onAutoMaEnabledChange);
     const currentProtocolLabel =
         parameterPanelMode === "helicalScan"
-            ? "螺旋扫描"
+            ? t("scanFlow.postScout.helical")
             : parameterPanelMode === "tomographicScan"
-                ? "断层扫描"
-                : "定位像";
+                ? t("scanFlow.postScout.axial")
+                : t("scanFlow.scout");
     const currentScanData = {
         ctdi: scoutDoseDisplayParams.doseCtdiVol,
         dlp: scoutDoseDisplayParams.doseDlp,
@@ -1312,9 +1314,10 @@ const ScanConfirmScreen = ({
                             setShowPatientConfirm(true);
                         }}
                         disabled={readOnlyMode && !onExecuteScan}
-                        className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md transition-all uppercase text-[13px] ${readOnlyMode && !onExecuteScan ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
+                        className={`flex items-center justify-center rounded-md font-bold uppercase transition-all ${executeButtonCompact ? "h-[46px] w-[236px] gap-1.5 px-4 text-center text-[11px] leading-[1.15]" : "h-[52px] gap-2 px-10 text-[13px]"} ${readOnlyMode && !onExecuteScan ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
                     >
-                        {resolvedExecuteButtonLabel} <ChevronRight size={20} />
+                        <span className={executeButtonCompact ? "min-w-0 whitespace-normal" : undefined}>{resolvedExecuteButtonLabel}</span>
+                        <ChevronRight size={executeButtonCompact ? 16 : 20} className="shrink-0" />
                     </button>
                 </div>
             </footer>
@@ -1475,6 +1478,40 @@ const InfoItem = ({ label, value, icon: Icon }: { label: string; value: string |
     </div>
 );
 
+const localizeGenderValue = (
+    gender: string,
+    t: (key: TranslationKey) => string,
+) => {
+    const normalized = gender.trim().toLowerCase();
+    if (normalized === "男" || normalized === "m" || normalized === "male") {
+        return t("patientList.gender.male");
+    }
+    if (normalized === "女" || normalized === "f" || normalized === "female") {
+        return t("patientList.gender.female");
+    }
+    return gender;
+};
+
+const localizeProtocolValue = (
+    protocol: string,
+    t: (key: TranslationKey) => string,
+) => {
+    const normalized = protocol.trim().toLowerCase();
+    if (normalized === "定位像" || normalized === "scout" || normalized === "localizer") {
+        return t("scanFlow.scout");
+    }
+    if (normalized === "螺旋扫描" || normalized === "helical" || normalized === "helical scan") {
+        return t("scanFlow.postScout.helical");
+    }
+    if (normalized === "断层扫描" || normalized === "轴位扫描" || normalized === "axial" || normalized === "axial scan") {
+        return t("scanFlow.postScout.axial");
+    }
+    if (normalized === "4d扫描" || normalized === "4d scan" || normalized === "4d") {
+        return t("scanFlow.fourD.mode");
+    }
+    return protocol;
+};
+
 export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> = ({
     isOpen,
     onClose,
@@ -1490,6 +1527,8 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
     scanData = { ctdi: "12.45", dlp: "658.2", protocol: "Scout" }
 }) => {
     const { t } = useI18n();
+    const localizedGender = localizeGenderValue(patientData.gender, t);
+    const localizedProtocol = localizeProtocolValue(scanData.protocol, t);
 
     if (!isOpen) return null;
 
@@ -1529,7 +1568,7 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                             <InfoItem label={t("scanFlow.patientConfirm.name")} value={patientData.name} icon={UserCircle} />
                             <div className="grid grid-cols-2 gap-4">
                                 <InfoItem label={t("scanFlow.patientConfirm.age")} value={patientData.age} />
-                                <InfoItem label={t("scanFlow.patientConfirm.gender")} value={patientData.gender} />
+                                <InfoItem label={t("scanFlow.patientConfirm.gender")} value={localizedGender} />
                             </div>
                             <InfoItem label={t("scanFlow.patientConfirm.checkType")} value={patientData.checkType} icon={Stethoscope} />
                             <InfoItem label={t("scanFlow.patientConfirm.patientId")} value={patientData.patientId} icon={Info} />
@@ -1561,7 +1600,7 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                             <div className="bg-[#EFF6FF] rounded-[28px] p-5 border border-[#DBEAFE] flex flex-col items-center justify-center min-h-[120px]">
                                 <div className="text-[10px] font-bold text-[#3B82F6] mb-1 uppercase">{t("scanFlow.currentProtocol")}</div>
                                 <div className="text-[28px] font-black text-[#2563EB] text-center leading-tight">
-                                    {scanData.protocol}
+                                    {localizedProtocol}
                                 </div>
                             </div>
                         </div>

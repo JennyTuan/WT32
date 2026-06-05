@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -78,22 +78,32 @@ export default function DicomSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ tone: "success" | "error"; msg: string } | null>(null);
   const [testingNodeId, setTestingNodeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = useCallback((tone: "success" | "error", msg: string) => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    setToast({ tone, msg });
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3000);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+  }, []);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    setNotice(null);
+    setLoadError(null);
     try {
       const data = await getDicomSettings();
       setSettings(data);
       setSelectedNodeId(data.nodes[0]?.id ?? null);
       setDirty(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("service.dicom.errorLoad"));
+      setLoadError(e instanceof Error ? e.message : t("service.dicom.errorLoad"));
     } finally {
       setLoading(false);
     }
@@ -140,7 +150,6 @@ export default function DicomSettingsPage() {
       return updater(current);
     });
     setDirty(true);
-    setNotice(null);
   };
 
   const updateLocal = <K extends keyof DicomLocalSettings>(key: K, value: DicomLocalSettings[K]) => {
@@ -188,7 +197,6 @@ export default function DicomSettingsPage() {
 
   const handleTestNode = async (node: DicomRemoteNode) => {
     setTestingNodeId(node.id);
-    setError(null);
     try {
       const result = await testDicomNode(node);
       mutateSettings((current) => ({
@@ -200,9 +208,9 @@ export default function DicomSettingsPage() {
         ),
       }));
       const resultLabel = result.ok ? t("service.dicom.noticeReachable") : t("service.dicom.noticeTestFailed");
-      setNotice(`${node.name}: ${resultLabel}${result.latency_ms ? `, ${result.latency_ms} ms` : ""}`);
+      showToast(result.ok ? "success" : "error", `${node.name}: ${resultLabel}${result.latency_ms ? `, ${result.latency_ms} ms` : ""}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("service.dicom.errorTest"));
+      showToast("error", e instanceof Error ? e.message : t("service.dicom.errorTest"));
     } finally {
       setTestingNodeId(null);
     }
@@ -211,15 +219,13 @@ export default function DicomSettingsPage() {
   const handleSave = async () => {
     if (!settings || validationIssues.length > 0) return;
     setSaving(true);
-    setError(null);
-    setNotice(null);
     try {
       const updated = await updateDicomSettings(settings);
       setSettings(updated);
       setDirty(false);
-      setNotice(t("service.dicom.noticeSaved"));
+      showToast("success", t("service.dicom.noticeSaved"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("service.dicom.errorSave"));
+      showToast("error", e instanceof Error ? e.message : t("service.dicom.errorSave"));
     } finally {
       setSaving(false);
     }
@@ -228,16 +234,14 @@ export default function DicomSettingsPage() {
   const handleReset = async () => {
     if (!window.confirm(t("service.dicom.confirmReset"))) return;
     setSaving(true);
-    setError(null);
-    setNotice(null);
     try {
       const next = await resetDicomSettings();
       setSettings(next);
       setSelectedNodeId(next.nodes[0]?.id ?? null);
       setDirty(false);
-      setNotice(t("service.dicom.noticeReset"));
+      showToast("success", t("service.dicom.noticeReset"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("service.dicom.errorReset"));
+      showToast("error", e instanceof Error ? e.message : t("service.dicom.errorReset"));
     } finally {
       setSaving(false);
     }
@@ -249,7 +253,7 @@ export default function DicomSettingsPage() {
         <section className="flex h-full items-center justify-center bg-[#F8FBFF]">
           <div className="flex items-center gap-3 text-[13px] font-bold text-[#7B92A8]">
             <RefreshCw size={16} className="animate-spin text-[#4D94FF]" />
-            {error ?? t("service.dicom.loading")}
+            {loadError ?? t("service.dicom.loading")}
           </div>
         </section>
       </ServiceModeShell>
@@ -258,20 +262,16 @@ export default function DicomSettingsPage() {
 
   return (
     <ServiceModeShell currentRoute="/service/settings/dicom" footerStatus={{ label: dirty ? "EDIT" : "IDLE", tone: dirty ? "active" : "idle" }}>
-      <section className="flex h-full min-h-0 flex-col bg-[#F8FBFF]">
-        <div className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#E2EBF5] bg-white px-5">
-          <div>
-            <div className="text-[16px] font-black leading-tight text-[#1E293B]">DICOM</div>
-            <div className="mt-1 text-[12px] text-[#7B92A8]">{t("service.dicom.subtitle")}</div>
+      <section className="relative flex h-full min-h-0 flex-col bg-[#F8FBFF]">
+        <div className="flex h-[58px] shrink-0 items-center justify-between gap-3 border-b border-[#E2EBF5] bg-white px-5">
+          <div className="min-w-0">
+            <div className="truncate text-[16px] font-black leading-tight text-[#1E293B]">DICOM</div>
+            <div className="mt-1 truncate text-[12px] text-[#7B92A8]">{t("service.dicom.subtitle")}</div>
           </div>
 
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {validationIssues[0] ? (
-              <StatusMessage tone="warning" text={validationIssues[0]} title={validationIssues.join("; ")} />
-            ) : notice ? (
-              <StatusMessage tone="success" text={notice} />
-            ) : error ? (
-              <StatusMessage tone="error" text={error} />
+              <StatusMessage text={validationIssues[0]} title={validationIssues.join("; ")} count={validationIssues.length} />
             ) : null}
             <HeaderButton icon={RefreshCw} label={t("common.refresh")} onClick={loadSettings} disabled={saving} />
             <HeaderButton icon={RotateCcw} label={t("common.default")} onClick={handleReset} disabled={saving} />
@@ -285,6 +285,20 @@ export default function DicomSettingsPage() {
             </button>
           </div>
         </div>
+
+        {toast && (
+          <div
+            role="status"
+            className={`pointer-events-none absolute right-5 top-[68px] z-30 flex items-center gap-2 rounded-md border px-4 py-2 text-[13px] font-bold shadow-lg ${
+              toast.tone === "success"
+                ? "border-[#C8E6C9] bg-[#E8F5E9] text-[#1B5E20]"
+                : "border-[#FFCDD2] bg-[#FFEBEE] text-[#C62828]"
+            }`}
+          >
+            {toast.tone === "success" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+            <span>{toast.msg}</span>
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar">
           <div className="grid min-h-[500px] grid-rows-[112px_236px_172px] gap-3">
@@ -431,17 +445,14 @@ function HeaderButton({
   );
 }
 
-function StatusMessage({ tone, text, title }: { tone: "success" | "warning" | "error"; text: string; title?: string }) {
-  const Icon = tone === "success" ? CheckCircle2 : AlertTriangle;
-  const className = {
-    success: "text-[#16A34A]",
-    warning: "text-[#D97706]",
-    error: "text-[#DC2626]",
-  }[tone];
-
+function StatusMessage({ text, title, count }: { text: string; title?: string; count?: number }) {
   return (
-    <span className={`flex max-w-[220px] items-center gap-1.5 truncate text-[12px] font-bold ${className}`} title={title ?? text}>
-      <Icon size={14} /> {text}
+    <span
+      className="flex h-9 shrink-0 items-center gap-1 rounded-md border border-[#FED7AA] bg-[#FFF7ED] px-2 text-[12px] font-bold text-[#D97706]"
+      title={title ?? text}
+    >
+      <AlertTriangle size={14} />
+      {count && count > 1 ? <span className="font-mono">{count}</span> : null}
     </span>
   );
 }

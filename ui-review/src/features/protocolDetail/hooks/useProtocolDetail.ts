@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useI18n } from "../../../lib/i18nContext";
 import type { 
     ApiProtocolDetail, 
     ApiProtocolSummary, 
@@ -10,10 +11,11 @@ import type {
     ReconDraft 
 } from "../types";
 import { 
-    AGE_LABEL, 
     DETAIL_TARGET_STORAGE_KEY, 
     SERIES_TYPE_LABEL, 
-    EDITABLE_SERIES_TYPES 
+    EDITABLE_SERIES_TYPES,
+    getLocalizedAgeLabel,
+    getLocalizedSeriesTypeLabel
 } from "../constants";
 import { 
     fetchProtocolCatalogWithFallback, 
@@ -41,6 +43,7 @@ import {
 export function useProtocolDetail() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
+    const { language, t } = useI18n();
     
     // URL Params
     const isNewMode = searchParams.get("mode") === "new";
@@ -68,7 +71,7 @@ export function useProtocolDetail() {
     const isFactory = protocol?.is_factory === true;
     const isReadOnly = isViewMode || (isCatalogSource && isFactory);
     const series = useMemo(() => protocol?.series ?? [], [protocol?.series]);
-    const ageLabel = protocol ? (AGE_LABEL[protocol.age_group] ?? protocol.age_group) : "-";
+    const ageLabel = protocol ? getLocalizedAgeLabel(protocol.age_group, language) : "-";
 
     const activeSeries = (selection.type === "series" || selection.type === "recon")
         ? series.find((item) => item.id === selection.seriesId) ?? null
@@ -148,7 +151,7 @@ export function useProtocolDetail() {
     useEffect(() => {
         if (isNewMode) {
             setProtocol({
-                id: 0, name: "新建协议", body_part: bodyPartOptions[0] || "",
+                id: 0, name: t("protocolDetail.newProtocol"), body_part: bodyPartOptions[0] || "",
                 age_group: "adult", patient_weight: "50-90kg", patient_position: "HFS",
                 table_direction: "in", scan_mode: "plain",
                 acquisition_type: "regular",
@@ -189,7 +192,7 @@ export function useProtocolDetail() {
         };
         loadProtocolSource();
         return () => { cancelled = true; };
-    }, [isNewMode, isCatalogSource, protocolId, bodyPartOptions]);
+    }, [isNewMode, isCatalogSource, protocolId, bodyPartOptions, t]);
 
     // Update basicDraft when protocol changes
     useEffect(() => {
@@ -258,7 +261,7 @@ export function useProtocolDetail() {
         setProtocol((current) => {
             if (!current) return current;
             const existingCount = current.series.filter((item) => item.series_type === seriesType).length;
-            const createdSeries = createDraftSeries(nextId, seriesType, existingCount + 1);
+            const createdSeries = createDraftSeries(nextId, seriesType, existingCount + 1, language);
             return { ...current, series: [...current.series, createdSeries] };
         });
         setSelection({ type: "series", seriesId: nextId });
@@ -279,7 +282,7 @@ export function useProtocolDetail() {
                         recon_series: [
                             ...item.recon_series,
                             {
-                                id: nextId, recon_name: `重建 ${nextReconIndex}`, kernel: "STANDARD",
+                                id: nextId, recon_name: t("protocolDetail.defaultReconName", { index: nextReconIndex }), kernel: "STANDARD",
                                 matrix: 512, window_width: 400, window_level: 40,
                                 slice_thickness: 1, increment: 1,
                             },
@@ -328,7 +331,11 @@ export function useProtocolDetail() {
 
     const handleSeriesModeChange = (modeLabel: string) => {
         if (!isNewMode || !activeSeries) return;
-        const nextType = EDITABLE_SERIES_TYPES.find((type) => SERIES_TYPE_LABEL[type].zh === modeLabel);
+        const nextType = EDITABLE_SERIES_TYPES.find((type) => (
+            getLocalizedSeriesTypeLabel(type, language) === modeLabel ||
+            SERIES_TYPE_LABEL[type].zh === modeLabel ||
+            SERIES_TYPE_LABEL[type].en === modeLabel
+        ));
         if (!nextType || nextType === activeSeries.series_type) return;
 
         setProtocol((current) => {
@@ -339,10 +346,10 @@ export function useProtocolDetail() {
                     if (seriesItem.id !== activeSeries.id) return seriesItem;
                     const renamedLabel =
                         nextType === "topogram"
-                            ? seriesItem.series_label.replace(/螺旋扫描|断层扫描/g, "定位像")
+                            ? seriesItem.series_label.replace(/螺旋扫描|断层扫描|Helical Scan|Axial Scan/g, language === "en-US" ? "Localizer" : "定位像")
                             : nextType === "helical"
-                                ? seriesItem.series_label.replace(/定位像|断层扫描/g, "螺旋扫描")
-                                : seriesItem.series_label.replace(/定位像|螺旋扫描/g, "断层扫描");
+                                ? seriesItem.series_label.replace(/定位像|断层扫描|Localizer|Axial Scan/g, language === "en-US" ? "Helical Scan" : "螺旋扫描")
+                                : seriesItem.series_label.replace(/定位像|螺旋扫描|Localizer|Helical Scan/g, language === "en-US" ? "Axial Scan" : "断层扫描");
 
                     return {
                         ...seriesItem,
@@ -442,10 +449,10 @@ export function useProtocolDetail() {
                 body: JSON.stringify(payload)
             });
 
-            if (!response.ok) throw new Error("保存协议至目录失败");
-            setSaveMessage("协议已更新");
+            if (!response.ok) throw new Error(t("protocolDetail.saveCatalogFailed"));
+            setSaveMessage(t("protocolDetail.saveUpdated"));
             setTimeout(() => navigate(-1), 1000);
-        } catch { setSaveMessage("保存失败，请重试"); } finally { setIsSaving(false); }
+        } catch { setSaveMessage(t("protocolDetail.saveFailed")); } finally { setIsSaving(false); }
     };
 
     const handleSave = async () => {
@@ -621,7 +628,7 @@ export function useProtocolDetail() {
             }
             await syncProtocolFromSession();
             navigate(-1);
-        } catch { setSaveMessage("保存失败，请稍后重试"); } finally { setIsSaving(false); }
+        } catch { setSaveMessage(t("protocolDetail.saveFailedLater")); } finally { setIsSaving(false); }
     };
 
     return {

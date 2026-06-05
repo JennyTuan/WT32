@@ -1,23 +1,35 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { INITIAL_WARMUP_LOGS } from "./constants";
+import { useI18n } from "../../../lib/i18nContext";
+import { createInitialWarmupLogs, createWarmupPhases } from "./constants";
 import { clampHeat, formatClock, getWarmupPhase } from "./utils";
 import type { WarmupLog, WarmupStatus } from "./types";
 
 export function useTubeWarmup() {
+  const { t } = useI18n();
+  const warmupPhases = useMemo(() => createWarmupPhases(t), [t]);
+  const initialWarmupLogs = useMemo(() => createInitialWarmupLogs(t), [t]);
   const [targetHeat, setTargetHeat] = useState(60);
   const [currentHeat, setCurrentHeat] = useState(12.4);
   const [inputValue, setInputValue] = useState("60");
   const [status, setStatus] = useState<WarmupStatus>("idle");
   const [warmupProgress, setWarmupProgress] = useState(0);
   const [showAbortConfirm, setShowAbortConfirm] = useState(false);
-  const [logs, setLogs] = useState<WarmupLog[]>([...INITIAL_WARMUP_LOGS]);
+  const [logs, setLogs] = useState<WarmupLog[]>(initialWarmupLogs);
   const [lastCompletedAt, setLastCompletedAt] = useState<string | null>(null);
 
   const warmupSessionRef = useRef({
     startHeat: 12.4,
     targetHeat: 60,
   });
+
+  useEffect(() => {
+    if (logs.length <= initialWarmupLogs.length) {
+      setLogs(initialWarmupLogs);
+    }
+    // Keep user-generated logs intact after a language switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialWarmupLogs]);
 
   useEffect(() => {
     if (status !== "warming" || showAbortConfirm) return;
@@ -35,7 +47,7 @@ export function useTubeWarmup() {
           setLogs((prevLogs) => [
             {
               time: formatClock(new Date()),
-              message: `预热完成，热容量已稳定在 ${sessionTarget.toFixed(1)}%。`,
+              message: t("service.tubeWarmup.log.completed", { target: sessionTarget.toFixed(1) }),
               tone: "success",
             },
             ...prevLogs,
@@ -47,9 +59,9 @@ export function useTubeWarmup() {
     }, 160);
 
     return () => window.clearInterval(interval);
-  }, [showAbortConfirm, status]);
+  }, [showAbortConfirm, status, t]);
 
-  const activePhase = useMemo(() => getWarmupPhase(warmupProgress), [warmupProgress]);
+  const activePhase = useMemo(() => getWarmupPhase(warmupProgress, warmupPhases), [warmupPhases, warmupProgress]);
   const recommendedTarget = useMemo(
     () => (currentHeat < 20 ? 60 : Math.min(75, clampHeat(Math.ceil(currentHeat / 10) * 10))),
     [currentHeat],
@@ -84,7 +96,7 @@ export function useTubeWarmup() {
       setLogs((prev) => [
         {
           time: formatClock(new Date()),
-          message: `目标热容量 ${normalizedTarget}% 不高于当前值，已跳过预热。`,
+          message: t("service.tubeWarmup.log.skipped", { target: normalizedTarget }),
           tone: "warning",
         },
         ...prev,
@@ -102,7 +114,10 @@ export function useTubeWarmup() {
     setLogs((prev) => [
       {
         time: formatClock(new Date()),
-        message: `开始球管预热，目标热容量 ${normalizedTarget}%，预计 ${Math.max(1, Math.ceil((normalizedTarget - currentHeat) / 6))} 分钟。`,
+        message: t("service.tubeWarmup.log.started", {
+          target: normalizedTarget,
+          minutes: Math.max(1, Math.ceil((normalizedTarget - currentHeat) / 6)),
+        }),
         tone: "info",
       },
       ...prev,
@@ -120,7 +135,7 @@ export function useTubeWarmup() {
     setLogs((prev) => [
       {
         time: formatClock(new Date()),
-        message: `预热已中止，当前热容量停留在 ${currentHeat.toFixed(2)}%。`,
+        message: t("service.tubeWarmup.log.aborted", { heat: currentHeat.toFixed(2) }),
         tone: "warning",
       },
       ...prev,

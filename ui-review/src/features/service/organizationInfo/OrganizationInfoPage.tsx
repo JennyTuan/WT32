@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Building2,
@@ -43,19 +43,29 @@ export default function OrganizationInfoPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ tone: "success" | "error"; msg: string } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = useCallback((tone: "success" | "error", msg: string) => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    setToast({ tone, msg });
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3000);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    setNotice(null);
+    setLoadError(null);
     try {
       const data = await getOrganizationInfo();
       setSettings(data);
       setDirty(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("service.organization.errorLoad"));
+      setLoadError(e instanceof Error ? e.message : t("service.organization.errorLoad"));
     } finally {
       setLoading(false);
     }
@@ -77,7 +87,6 @@ export default function OrganizationInfoPage() {
   const mutate = (updater: (current: OrganizationInfoSnapshot) => OrganizationInfoSnapshot) => {
     setSettings((current) => (current ? updater(current) : current));
     setDirty(true);
-    setNotice(null);
   };
 
   const updateInstitution = <K extends keyof InstitutionInfo>(key: K, value: InstitutionInfo[K]) => {
@@ -96,15 +105,13 @@ export default function OrganizationInfoPage() {
   const handleSave = async () => {
     if (!settings || validationIssues.length > 0) return;
     setSaving(true);
-    setError(null);
-    setNotice(null);
     try {
       const updated = await updateOrganizationInfo(settings);
       setSettings(updated);
       setDirty(false);
-      setNotice(t("service.organization.noticeSaved"));
+      showToast("success", t("service.organization.noticeSaved"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("service.organization.errorSave"));
+      showToast("error", e instanceof Error ? e.message : t("service.organization.errorSave"));
     } finally {
       setSaving(false);
     }
@@ -113,15 +120,13 @@ export default function OrganizationInfoPage() {
   const handleReset = async () => {
     if (!window.confirm(t("service.organization.confirmReset"))) return;
     setSaving(true);
-    setError(null);
-    setNotice(null);
     try {
       const next = await resetOrganizationInfo();
       setSettings(next);
       setDirty(false);
-      setNotice(t("service.organization.noticeReset"));
+      showToast("success", t("service.organization.noticeReset"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("service.organization.errorReset"));
+      showToast("error", e instanceof Error ? e.message : t("service.organization.errorReset"));
     } finally {
       setSaving(false);
     }
@@ -133,7 +138,7 @@ export default function OrganizationInfoPage() {
         <section className="flex h-full items-center justify-center bg-[#F8FBFF]">
           <div className="flex items-center gap-3 text-[13px] font-bold text-[#7B92A8]">
             <RefreshCw size={16} className="animate-spin text-[#4D94FF]" />
-            {error ?? t("service.organization.loading")}
+            {loadError ?? t("service.organization.loading")}
           </div>
         </section>
       </ServiceModeShell>
@@ -142,20 +147,16 @@ export default function OrganizationInfoPage() {
 
   return (
     <ServiceModeShell currentRoute="/service/settings/organization-info" footerStatus={{ label: dirty ? "EDIT" : "IDLE", tone: dirty ? "active" : "idle" }}>
-      <section className="flex h-full min-h-0 flex-col bg-[#F8FBFF]">
-        <div className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#E2EBF5] bg-white px-5">
-          <div>
-            <div className="text-[16px] font-black leading-tight text-[#1E293B]">{t("service.organization.title")}</div>
-            <div className="mt-1 text-[12px] text-[#7B92A8]">{t("service.organization.subtitle")}</div>
+      <section className="relative flex h-full min-h-0 flex-col bg-[#F8FBFF]">
+        <div className="flex h-[58px] shrink-0 items-center justify-between gap-3 border-b border-[#E2EBF5] bg-white px-5">
+          <div className="min-w-0">
+            <div className="truncate text-[16px] font-black leading-tight text-[#1E293B]">{t("service.organization.title")}</div>
+            <div className="mt-1 truncate text-[12px] text-[#7B92A8]">{t("service.organization.subtitle")}</div>
           </div>
 
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {validationIssues[0] ? (
-              <StatusMessage tone="warning" text={validationIssues[0]} title={validationIssues.join("; ")} />
-            ) : notice ? (
-              <StatusMessage tone="success" text={notice} />
-            ) : error ? (
-              <StatusMessage tone="error" text={error} />
+              <StatusMessage text={validationIssues[0]} title={validationIssues.join("; ")} count={validationIssues.length} />
             ) : null}
             <HeaderButton icon={RefreshCw} label={t("common.refresh")} onClick={load} disabled={saving} />
             <HeaderButton icon={RotateCcw} label={t("common.default")} onClick={handleReset} disabled={saving} />
@@ -169,6 +170,20 @@ export default function OrganizationInfoPage() {
             </button>
           </div>
         </div>
+
+        {toast && (
+          <div
+            role="status"
+            className={`pointer-events-none absolute right-5 top-[68px] z-30 flex items-center gap-2 rounded-md border px-4 py-2 text-[13px] font-bold shadow-lg ${
+              toast.tone === "success"
+                ? "border-[#C8E6C9] bg-[#E8F5E9] text-[#1B5E20]"
+                : "border-[#FFCDD2] bg-[#FFEBEE] text-[#C62828]"
+            }`}
+          >
+            {toast.tone === "success" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+            <span>{toast.msg}</span>
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar">
           <div className="grid gap-3 [grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]">
@@ -260,16 +275,14 @@ function HeaderButton({
   );
 }
 
-function StatusMessage({ tone, text, title }: { tone: "success" | "warning" | "error"; text: string; title?: string }) {
-  const Icon = tone === "success" ? CheckCircle2 : AlertTriangle;
-  const className = {
-    success: "text-[#16A34A]",
-    warning: "text-[#D97706]",
-    error: "text-[#DC2626]",
-  }[tone];
+function StatusMessage({ text, title, count }: { text: string; title?: string; count?: number }) {
   return (
-    <span className={`flex max-w-[260px] items-center gap-1.5 truncate text-[12px] font-bold ${className}`} title={title ?? text}>
-      <Icon size={14} /> {text}
+    <span
+      className="flex h-9 shrink-0 items-center gap-1 rounded-md border border-[#FED7AA] bg-[#FFF7ED] px-2 text-[12px] font-bold text-[#D97706]"
+      title={title ?? text}
+    >
+      <AlertTriangle size={14} />
+      {count && count > 1 ? <span className="font-mono">{count}</span> : null}
     </span>
   );
 }

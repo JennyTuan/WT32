@@ -4,7 +4,8 @@ import type {
     ApiSeriesDetail, 
     Selection 
 } from "../types";
-import { SERIES_TYPE_LABEL } from "../constants";
+import { getLocalizedSeriesTypeLabel } from "../constants";
+import { useI18n } from "../../../lib/i18nContext";
 
 interface ProtocolSidebarProps {
     protocol: ApiProtocolDetail | null;
@@ -25,6 +26,7 @@ export function ProtocolSidebar({
     onAppendRecon,
     ageLabel
 }: ProtocolSidebarProps) {
+    const { language, t } = useI18n();
     const series = protocol?.series ?? [];
     const topograms = series.filter((item) => item.series_type === "topogram");
     const acquisitions = series.filter((item) => item.series_type !== "topogram");
@@ -36,22 +38,22 @@ export function ProtocolSidebar({
     return (
         <aside className="w-[310px] flex flex-col bg-white border border-[#B0C4DE] rounded-md shadow-sm overflow-hidden shrink-0">
             <div className="h-[44px] bg-[#F8FAFC] border-b border-[#EEF2F9] flex items-center px-4 shrink-0">
-                <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">协议队列 (Protocols)</span>
+                <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">{t("protocolDetail.protocolQueueTitle")}</span>
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-4">
                 <div className="p-3 bg-[#F8FAFC] border border-[#EEF2F9] rounded-md">
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <span className="font-bold text-sm text-[#37474F]">{isNewMode ? "新建协议" : (protocol?.name ?? "-")}</span>
+                        <span className="font-bold text-sm text-[#37474F]">{isNewMode ? t("protocolDetail.newProtocol") : (protocol?.name ?? "-")}</span>
                         {!isNewMode && protocol?.body_part && (
                             <span className="bg-[#EEF2F9] text-[#546E7A] text-[10px] px-1.5 py-0.5 rounded">{protocol.body_part}</span>
                         )}
                         {!isNewMode && <span className="bg-[#EEF2F9] text-[#546E7A] text-[10px] px-1.5 py-0.5 rounded">{ageLabel}</span>}
-                        {isNewMode && <span className="bg-[#E3F2FD] text-[#1E88E5] text-[10px] px-1.5 py-0.5 rounded font-bold">新建</span>}
+                        {isNewMode && <span className="bg-[#E3F2FD] text-[#1E88E5] text-[10px] px-1.5 py-0.5 rounded font-bold">{t("protocolDetail.newBadge")}</span>}
                     </div>
                     <div className="flex items-start gap-2 text-[#4D94FF]">
                         <Info size={12} className="shrink-0 mt-0.5" />
-                        <p className="text-[10px] leading-tight font-bold">出厂模板保持不变，您在这里的修改仅作用于当前扫描流程。</p>
+                        <p className="text-[10px] leading-tight font-bold">{t("protocolDetail.sessionEditHint")}</p>
                     </div>
                 </div>
 
@@ -64,22 +66,22 @@ export function ProtocolSidebar({
                                 : "text-[#546E7A] border-transparent hover:bg-gray-50"
                         }`}
                     >
-                        协议基本信息
+                        {t("protocolDetail.basicInfo")}
                     </button>
 
                     <div className="mt-1 flex flex-col">
                         <div className="flex justify-between items-center px-1 mb-2">
-                            <span className="text-[10px] text-[#94A3B8] font-black uppercase tracking-widest">采集队列</span>
+                            <span className="text-[10px] text-[#94A3B8] font-black uppercase tracking-widest">{t("protocolDetail.acquisitionQueue")}</span>
                             <button
                                 onClick={() => onAppendSeries("helical")}
                                 className="text-[#4D94FF] flex items-center gap-1 text-[11px] hover:underline font-bold px-2 py-1 rounded hover:bg-blue-50 transition-colors"
                             >
-                                <Plus size={12} /> 新增
+                                <Plus size={12} /> {t("protocolDetail.add")}
                             </button>
                         </div>
 
                         <div className="space-y-2">
-                            {(topograms.length > 0 ? topograms : [{ id: -1, series_label: "定位像", series_type: "topogram" as const, recon_series: [] }]).map((seriesItem) => (
+                            {(topograms.length > 0 ? topograms : [{ id: -1, series_label: getLocalizedSeriesTypeLabel("topogram", language), series_type: "topogram" as const, recon_series: [] }]).map((seriesItem) => (
                                 <div
                                     key={seriesItem.id}
                                     onClick={() => {
@@ -97,7 +99,7 @@ export function ProtocolSidebar({
                                 >
                                     <span className={`text-[11px] font-bold ${isSeriesSelected(seriesItem.id) ? "text-white" : "text-[#37474F]"}`}>{seriesItem.series_label}</span>
                                     <span className={`text-[10px] mt-0.5 ${isSeriesSelected(seriesItem.id) ? "text-white/80" : "opacity-50"}`}>
-                                        {SERIES_TYPE_LABEL[seriesItem.series_type]?.en ?? seriesItem.series_type.toUpperCase()}
+                                        {getLocalizedSeriesTypeLabel(seriesItem.series_type, language)}
                                     </span>
                                 </div>
                             ))}
@@ -114,7 +116,7 @@ export function ProtocolSidebar({
                                     >
                                         <span className={`text-[11px] font-bold ${isSeriesSelected(seriesItem.id) ? "text-white" : "text-[#546E7A]"}`}>{seriesItem.series_label}</span>
                                         <span className={`text-[10px] font-medium uppercase tracking-tight ${isSeriesSelected(seriesItem.id) ? "text-white/80" : "text-[#94A3B8]"}`}>
-                                            {SERIES_TYPE_LABEL[seriesItem.series_type]?.zh ?? seriesItem.series_type}
+                                            {getLocalizedSeriesTypeLabel(seriesItem.series_type, language)}
                                         </span>
                                     </div>
 
@@ -138,7 +140,7 @@ export function ProtocolSidebar({
                                             onClick={() => onAppendRecon(seriesItem.id)}
                                             className="mt-0.5 w-full py-1.5 bg-white border border-[#4D94FF]/10 text-[#4D94FF] hover:border-[#4D94FF]/30 rounded text-[10px] font-black transition-all flex items-center justify-center gap-1.5 shadow-sm"
                                         >
-                                            <Plus size={10} strokeWidth={3} /> 新增重建
+                                            <Plus size={10} strokeWidth={3} /> {t("protocolDetail.addRecon")}
                                         </button>
                                     </div>
                                 </div>
@@ -154,11 +156,11 @@ export function ProtocolSidebar({
                                 : "text-[#546E7A] border-transparent hover:bg-gray-50"
                         }`}
                     >
-                        剂量 / 通知阈值
+                        {t("protocolDetail.doseThresholds")}
                         <ChevronRight size={14} className={selection.type === "dose" ? "text-[#1E88E5]" : "text-[#90A4AE] group-hover:text-[#4D94FF]"} />
                     </button>
                     <button className="flex items-center justify-between px-4 py-3 rounded-md text-[13px] font-bold text-[#546E7A] hover:bg-gray-50 transition-colors group">
-                        高级设置
+                        {t("protocolDetail.advancedSettings")}
                         <ChevronRight size={14} className="text-[#90A4AE] group-hover:text-[#4D94FF]" />
                     </button>
                 </nav>

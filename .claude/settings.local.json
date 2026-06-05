@@ -198,7 +198,23 @@
       "Bash(./.venv/Scripts/python.exe)",
       "Bash(./.venv/Scripts/python.exe -c \"from backend.routers import ai_inference\")",
       "Bash(./.venv/Scripts/python.exe -c ' *)",
-      "Bash(./.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('backend/routers/ai_inference.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(./.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('backend/routers/ai_inference.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(ls components/)",
+      "Bash(ls shared/)",
+      "Bash(cat .claude/launch.json)",
+      "Bash(ls .claude/)",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:5175)",
+      "Bash(curl -s -X POST http://localhost:8000/api/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"username\\\\\":\\\\\"U0001\\\\\",\\\\\"password\\\\\":\\\\\"U0001\\\\\"}\")",
+      "Bash(curl -s -X POST http://localhost:8000/api/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"username\\\\\":\\\\\"U0001\\\\\",\\\\\"password\\\\\":\\\\\"admin123\\\\\"}\")",
+      "Bash(curl -s -X POST http://localhost:8000/api/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"username\\\\\":\\\\\"U0001\\\\\",\\\\\"password\\\\\":\\\\\"123456\\\\\"}\")",
+      "Bash(curl -s -X POST http://localhost:8000/api/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"username\\\\\":\\\\\"admin\\\\\",\\\\\"password\\\\\":\\\\\"admin\\\\\"}\")",
+      "Bash(findstr :8000)",
+      "Bash(npx playwright *)",
+      "Bash(cd /c/STN/projects/WT32/ui-review && rm -rf tests/scout-flow.spec.ts-snapshots test-results playwright-report visual-check && echo \"cleaned\")",
+      "Bash(cd /c/STN/projects/WT32/ui-review && rm -rf visual-check/latest visual-check/diff visual-check/_last-fail visual-check/runs && echo \"cleaned\")",
+      "Bash(cd /c/STN/projects/WT32/ui-review && rm -rf visual-check tests scripts playwright.config.ts && echo \"deleted folders/files\")",
+      "Bash(Select-Object -First 100)",
+      "PowerShell(git status --short --untracked-files=all | Where-Object { $_ -match '\\\\.\\(dcm|DCM\\)$|dicom|DICOM' } | Measure-Object -Line)"
     ]
   }
 }

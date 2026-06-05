@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
 import { loadDailyQaRecords, saveDailyQaRecords } from "./storage";
 import type {
   DailyQaMetricResult,
@@ -12,8 +14,9 @@ import type {
 } from "./types";
 
 const TODAY = new Date().toISOString().slice(0, 10);
-const OPERATOR_NAME = "操作员 A";
+const OPERATOR_NAME = "Operator A";
 const DEVICE_NAME = "CT Simulator A1";
+export const ALL_PHANTOMS = "all";
 
 const NOISE_LIMIT = 3.0;
 const UNIFORMITY_LIMIT = 4.0;
@@ -21,6 +24,17 @@ const WATER_REFERENCE = 0;
 const WATER_TOLERANCE = 4;
 const AIR_REFERENCE = -1000;
 const AIR_TOLERANCE = 10;
+
+type Translate = ReturnType<typeof useI18n>["t"];
+type AnalysisStage = "pending" | "acquiring" | "roi" | "calculating" | "done";
+
+const STAGE_LABEL_KEYS: Record<AnalysisStage, TranslationKey> = {
+  pending: "service.dailyQa.stage.pending",
+  acquiring: "service.dailyQa.stage.acquiring",
+  roi: "service.dailyQa.stage.roi",
+  calculating: "service.dailyQa.stage.calculating",
+  done: "service.dailyQa.stage.done",
+};
 
 const AUTO_ROI: Record<MetricKey, RoiPoint[]> = {
   noise: [{ x: 50, y: 50 }],
@@ -62,23 +76,23 @@ const simulatePhantomImage = (phantomType: PhantomType, date: string): PhantomIm
   seed: Array.from(`${phantomType}-${date}`).reduce((sum, char) => sum + char.charCodeAt(0), 0),
 });
 
-const computeNoiseResult = (roi: RoiPoint[]): DailyQaMetricResult & { value: number } => {
+const computeNoiseResult = (roi: RoiPoint[], t: Translate): DailyQaMetricResult & { value: number } => {
   const center = roi[0];
   const offset = distance(center, AUTO_ROI.noise[0]);
   const value = Number((2.18 + offset * 0.045).toFixed(2));
   const status = value <= NOISE_LIMIT ? "PASS" : "FAIL";
   return {
     key: "noise",
-    title: "噪声",
+    title: t("service.dailyQa.metric.noise"),
     limit: `≤ ${NOISE_LIMIT.toFixed(1)}`,
     actual: formatFixed(value),
     status,
-    summary: `中心 ROI 标准差 ${formatFixed(value)}`,
+    summary: t("service.dailyQa.metric.noiseSummary", { value: formatFixed(value) }),
     value,
   };
 };
 
-const computeUniformityResult = (roi: RoiPoint[]): DailyQaMetricResult & { value: number } => {
+const computeUniformityResult = (roi: RoiPoint[], t: Translate): DailyQaMetricResult & { value: number } => {
   const center = roi[0];
   const peripherals = roi.slice(1);
   const avgOffset =
@@ -88,16 +102,16 @@ const computeUniformityResult = (roi: RoiPoint[]): DailyQaMetricResult & { value
   const status = value <= UNIFORMITY_LIMIT ? "PASS" : "FAIL";
   return {
     key: "uniformity",
-    title: "均匀性",
+    title: t("service.dailyQa.metric.uniformity"),
     limit: `≤ ${UNIFORMITY_LIMIT.toFixed(1)} HU`,
     actual: `${formatFixed(value)} HU`,
     status,
-    summary: `中心与四周最大差值 ${formatFixed(value)} HU`,
+    summary: t("service.dailyQa.metric.uniformitySummary", { value: formatFixed(value) }),
     value,
   };
 };
 
-const computeAccuracyResult = (roi: RoiPoint[]): DailyQaMetricResult & { value: number } => {
+const computeAccuracyResult = (roi: RoiPoint[], t: Translate): DailyQaMetricResult & { value: number } => {
   const waterOffset = distance(roi[0], AUTO_ROI.accuracy[0]);
   const airOffset = distance(roi[1], AUTO_ROI.accuracy[1]);
   const waterValue = Number((WATER_REFERENCE + waterOffset * 0.22 - 0.9).toFixed(2));
@@ -109,7 +123,7 @@ const computeAccuracyResult = (roi: RoiPoint[]): DailyQaMetricResult & { value: 
 
   return {
     key: "accuracy",
-    title: "准确性",
+    title: t("service.dailyQa.metric.accuracy"),
     limit: `Water ${WATER_REFERENCE}±${WATER_TOLERANCE}, Air ${AIR_REFERENCE}±${AIR_TOLERANCE}`,
     actual: `W ${formatFixed(waterValue)} / A ${formatFixed(airValue)}`,
     status,
@@ -119,42 +133,43 @@ const computeAccuracyResult = (roi: RoiPoint[]): DailyQaMetricResult & { value: 
 };
 
 export function useDailyQa() {
+  const { t } = useI18n();
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [phantomType, setPhantomType] = useState<PhantomType>("水模");
   const [showAnalyzeConfirm, setShowAnalyzeConfirm] = useState(false);
   const [isRunningQa, setIsRunningQa] = useState(false);
-  const [analysisStage, setAnalysisStage] = useState("待执行");
+  const [analysisStage, setAnalysisStage] = useState<AnalysisStage>("pending");
   const [roiState, setRoiState] = useState(createDefaultRoiState());
   const [phantomImage, setPhantomImage] = useState<PhantomImageData | null>(null);
   const [records, setRecords] = useState<DailyQaRecord[]>(() => loadDailyQaRecords());
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
-  const [recordPhantomFilter, setRecordPhantomFilter] = useState<PhantomType | "全部">("全部");
+  const [recordPhantomFilter, setRecordPhantomFilter] = useState<PhantomType | typeof ALL_PHANTOMS>(ALL_PHANTOMS);
   const [recordDateFilter, setRecordDateFilter] = useState("");
   const [previewRecordId, setPreviewRecordId] = useState<string | null>(null);
 
   const metrics = useMemo(() => {
     if (!phantomImage) {
       return [
-        { key: "noise", title: "噪声", limit: `≤ ${NOISE_LIMIT.toFixed(1)}`, actual: "-", status: "FAIL", summary: "等待执行 QA", value: 0 },
-        { key: "uniformity", title: "均匀性", limit: `≤ ${UNIFORMITY_LIMIT.toFixed(1)} HU`, actual: "-", status: "FAIL", summary: "等待执行 QA", value: 0 },
-        { key: "accuracy", title: "准确性", limit: `Water ${WATER_REFERENCE}±${WATER_TOLERANCE}, Air ${AIR_REFERENCE}±${AIR_TOLERANCE}`, actual: "-", status: "FAIL", summary: "等待执行 QA", value: 0 },
+        { key: "noise", title: t("service.dailyQa.metric.noise"), limit: `≤ ${NOISE_LIMIT.toFixed(1)}`, actual: "-", status: "FAIL", summary: t("service.dailyQa.waiting"), value: 0 },
+        { key: "uniformity", title: t("service.dailyQa.metric.uniformity"), limit: `≤ ${UNIFORMITY_LIMIT.toFixed(1)} HU`, actual: "-", status: "FAIL", summary: t("service.dailyQa.waiting"), value: 0 },
+        { key: "accuracy", title: t("service.dailyQa.metric.accuracy"), limit: `Water ${WATER_REFERENCE}±${WATER_TOLERANCE}, Air ${AIR_REFERENCE}±${AIR_TOLERANCE}`, actual: "-", status: "FAIL", summary: t("service.dailyQa.waiting"), value: 0 },
       ] as Array<DailyQaMetricResult & { value: number }>;
     }
 
     return [
-      computeNoiseResult(roiState.noise),
-      computeUniformityResult(roiState.uniformity),
-      computeAccuracyResult(roiState.accuracy),
+      computeNoiseResult(roiState.noise, t),
+      computeUniformityResult(roiState.uniformity, t),
+      computeAccuracyResult(roiState.accuracy, t),
     ];
-  }, [phantomImage, roiState]);
+  }, [phantomImage, roiState, t]);
 
   const cards = useMemo<QACardItem[]>(
     () => [
-      { ...metrics[0], viewportLabel: "中心 ROI", roiPoints: roiState.noise, roiShape: "circle" },
-      { ...metrics[1], viewportLabel: "中心 + 四周 ROI", roiPoints: roiState.uniformity, roiShape: "dot" },
+      { ...metrics[0], viewportLabel: t("service.dailyQa.viewport.centerRoi"), roiPoints: roiState.noise, roiShape: "circle" },
+      { ...metrics[1], viewportLabel: t("service.dailyQa.viewport.centerPeripheralRoi"), roiPoints: roiState.uniformity, roiShape: "dot" },
       { ...metrics[2], viewportLabel: "Water / Air ROI", roiPoints: roiState.accuracy, roiShape: "dot" },
     ],
-    [metrics, roiState],
+    [metrics, roiState, t],
   );
 
   const overallJudgment: "PASS" | "FAIL" = metrics.every((metric) => metric.status === "PASS") ? "PASS" : "FAIL";
@@ -162,7 +177,7 @@ export function useDailyQa() {
   const filteredRecords = useMemo(
     () =>
       records.filter((record) => {
-        const matchPhantom = recordPhantomFilter === "全部" || record.phantomType === recordPhantomFilter;
+        const matchPhantom = recordPhantomFilter === ALL_PHANTOMS || record.phantomType === recordPhantomFilter;
         const matchDate = !recordDateFilter || record.date === recordDateFilter;
         return matchPhantom && matchDate;
       }),
@@ -185,23 +200,23 @@ export function useDailyQa() {
   const runQa = async () => {
     setShowAnalyzeConfirm(false);
     setIsRunningQa(true);
-    setAnalysisStage("采集模体图像");
+    setAnalysisStage("acquiring");
 
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const image = simulatePhantomImage(phantomType, selectedDate);
     setPhantomImage(image);
     setRoiState(createDefaultRoiState());
 
-    setAnalysisStage("自动生成 ROI");
+    setAnalysisStage("roi");
     await new Promise((resolve) => window.setTimeout(resolve, 300));
 
-    setAnalysisStage("计算指标并生成报告");
+    setAnalysisStage("calculating");
     await new Promise((resolve) => window.setTimeout(resolve, 500));
 
     const nextMetrics = [
-      computeNoiseResult(AUTO_ROI.noise),
-      computeUniformityResult(AUTO_ROI.uniformity),
-      computeAccuracyResult(AUTO_ROI.accuracy),
+      computeNoiseResult(AUTO_ROI.noise, t),
+      computeUniformityResult(AUTO_ROI.uniformity, t),
+      computeAccuracyResult(AUTO_ROI.accuracy, t),
     ];
     const judgment = nextMetrics.every((metric) => metric.status === "PASS") ? "PASS" : "FAIL";
     const timestamp = new Date();
@@ -231,7 +246,7 @@ export function useDailyQa() {
     setRecords(nextRecords);
     saveDailyQaRecords(nextRecords);
     setIsRunningQa(false);
-    setAnalysisStage("执行完成");
+    setAnalysisStage("done");
   };
 
   const toggleRecordSelection = (recordId: string) => {
@@ -257,7 +272,7 @@ export function useDailyQa() {
   };
 
   return {
-    analysisStage,
+    analysisStage: t(STAGE_LABEL_KEYS[analysisStage]),
     cards,
     filteredRecords,
     isRunningQa,

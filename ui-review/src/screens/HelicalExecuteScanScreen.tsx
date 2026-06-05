@@ -982,6 +982,7 @@ export default function HelicalExecuteScanScreen() {
                 onExecuteScan={executeButtonClickable ? handleExecuteScanClick : undefined}
                 patientConfirmBeforeExecute={stage !== "completed"}
                 executeButtonLabel={executeButtonLabel}
+                executeButtonCompact={stage === "arming"}
             />
 
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>

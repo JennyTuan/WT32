@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -86,25 +86,35 @@ export default function SystemSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ tone: "success" | "error"; msg: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = useCallback((tone: "success" | "error", msg: string) => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    setToast({ tone, msg });
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3000);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    setNotice(null);
+    setLoadError(null);
     try {
       const data = await getSystemSettings();
       setSettings(data);
       setLanguage(data.general.language);
       setDirty(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "系统设置加载失败");
+      setLoadError(e instanceof Error ? e.message : t("systemSettings.errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, [setLanguage]);
+  }, [setLanguage, t]);
 
   useEffect(() => {
     load();
@@ -128,7 +138,6 @@ export default function SystemSettingsPage() {
   const mutate = (updater: (current: SystemSettingsSnapshot) => SystemSettingsSnapshot) => {
     setSettings((current) => (current ? updater(current) : current));
     setDirty(true);
-    setNotice(null);
   };
 
   const updateGeneral = <K extends keyof GeneralSettings>(key: K, value: GeneralSettings[K]) => {
@@ -147,16 +156,14 @@ export default function SystemSettingsPage() {
   const handleSave = async () => {
     if (!settings || validationIssues.length > 0) return;
     setSaving(true);
-    setError(null);
-    setNotice(null);
     try {
       const updated = await updateSystemSettings(settings);
       setSettings(updated);
       setLanguage(updated.general.language);
       setDirty(false);
-      setNotice(t("systemSettings.noticeSaved"));
+      showToast("success", t("systemSettings.noticeSaved"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("systemSettings.errorSave"));
+      showToast("error", e instanceof Error ? e.message : t("systemSettings.errorSave"));
     } finally {
       setSaving(false);
     }
@@ -165,16 +172,14 @@ export default function SystemSettingsPage() {
   const handleReset = async () => {
     if (!window.confirm(t("systemSettings.confirmReset"))) return;
     setSaving(true);
-    setError(null);
-    setNotice(null);
     try {
       const next = await resetSystemSettings();
       setSettings(next);
       setLanguage(next.general.language);
       setDirty(false);
-      setNotice(t("systemSettings.noticeReset"));
+      showToast("success", t("systemSettings.noticeReset"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("systemSettings.errorReset"));
+      showToast("error", e instanceof Error ? e.message : t("systemSettings.errorReset"));
     } finally {
       setSaving(false);
     }
@@ -182,12 +187,11 @@ export default function SystemSettingsPage() {
 
   const handleSyncTime = async () => {
     setSyncing(true);
-    setError(null);
     try {
       const result = await syncSystemTime();
-      setNotice(t("systemSettings.timeSync.notice", { server: result.server, drift: result.drift_ms.toFixed(1) }));
+      showToast("success", t("systemSettings.timeSync.notice", { server: result.server, drift: result.drift_ms.toFixed(1) }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("systemSettings.errorSyncTime"));
+      showToast("error", e instanceof Error ? e.message : t("systemSettings.errorSyncTime"));
     } finally {
       setSyncing(false);
     }
@@ -199,7 +203,7 @@ export default function SystemSettingsPage() {
         <section className="flex h-full items-center justify-center bg-[#F8FBFF]">
           <div className="flex items-center gap-3 text-[13px] font-bold text-[#7B92A8]">
             <RefreshCw size={16} className="animate-spin text-[#4D94FF]" />
-            {error ?? t("systemSettings.loading")}
+            {loadError ?? t("systemSettings.loading")}
           </div>
         </section>
       </ServiceModeShell>
@@ -210,20 +214,16 @@ export default function SystemSettingsPage() {
 
   return (
     <ServiceModeShell currentRoute="/service/settings/system-settings" footerStatus={{ label: dirty ? "EDIT" : "IDLE", tone: dirty ? "active" : "idle" }}>
-      <section className="flex h-full min-h-0 flex-col bg-[#F8FBFF]">
-        <div className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#E2EBF5] bg-white px-5">
-          <div>
-            <div className="text-[16px] font-black leading-tight text-[#1E293B]">{t("systemSettings.title")}</div>
-            <div className="mt-1 text-[12px] text-[#7B92A8]">{t("systemSettings.subtitle")}</div>
+      <section className="relative flex h-full min-h-0 flex-col bg-[#F8FBFF]">
+        <div className="flex h-[58px] shrink-0 items-center justify-between gap-3 border-b border-[#E2EBF5] bg-white px-5">
+          <div className="min-w-0">
+            <div className="truncate text-[16px] font-black leading-tight text-[#1E293B]">{t("systemSettings.title")}</div>
+            <div className="mt-1 truncate text-[12px] text-[#7B92A8]">{t("systemSettings.subtitle")}</div>
           </div>
 
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {validationIssues[0] ? (
-              <StatusMessage tone="warning" text={validationIssues[0]} title={validationIssues.join("; ")} />
-            ) : notice ? (
-              <StatusMessage tone="success" text={notice} />
-            ) : error ? (
-              <StatusMessage tone="error" text={error} />
+              <StatusMessage text={validationIssues[0]} title={validationIssues.join("; ")} count={validationIssues.length} />
             ) : null}
             <HeaderButton icon={RefreshCw} label={t("common.refresh")} onClick={load} disabled={saving} />
             <HeaderButton icon={RotateCcw} label={t("common.default")} onClick={handleReset} disabled={saving} />
@@ -237,6 +237,20 @@ export default function SystemSettingsPage() {
             </button>
           </div>
         </div>
+
+        {toast && (
+          <div
+            role="status"
+            className={`pointer-events-none absolute right-5 top-[68px] z-30 flex items-center gap-2 rounded-md border px-4 py-2 text-[13px] font-bold shadow-lg ${
+              toast.tone === "success"
+                ? "border-[#C8E6C9] bg-[#E8F5E9] text-[#1B5E20]"
+                : "border-[#FFCDD2] bg-[#FFEBEE] text-[#C62828]"
+            }`}
+          >
+            {toast.tone === "success" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+            <span>{toast.msg}</span>
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar">
           <div className="grid gap-3 [grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]">
@@ -356,16 +370,14 @@ function HeaderButton({
   );
 }
 
-function StatusMessage({ tone, text, title }: { tone: "success" | "warning" | "error"; text: string; title?: string }) {
-  const Icon = tone === "success" ? CheckCircle2 : AlertTriangle;
-  const className = {
-    success: "text-[#16A34A]",
-    warning: "text-[#D97706]",
-    error: "text-[#DC2626]",
-  }[tone];
+function StatusMessage({ text, title, count }: { text: string; title?: string; count?: number }) {
   return (
-    <span className={`flex max-w-[260px] items-center gap-1.5 truncate text-[12px] font-bold ${className}`} title={title ?? text}>
-      <Icon size={14} /> {text}
+    <span
+      className="flex h-9 shrink-0 items-center gap-1 rounded-md border border-[#FED7AA] bg-[#FFF7ED] px-2 text-[12px] font-bold text-[#D97706]"
+      title={title ?? text}
+    >
+      <AlertTriangle size={14} />
+      {count && count > 1 ? <span className="font-mono">{count}</span> : null}
     </span>
   );
 }

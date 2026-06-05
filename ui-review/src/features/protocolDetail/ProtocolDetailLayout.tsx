@@ -8,6 +8,7 @@ import type {
     ReconDraft,
 } from "./types";
 import { ProtocolSidebar } from "./components/ProtocolSidebar";
+import { useI18n } from "../../lib/i18nContext";
 import { 
     BasicInfoPanel, 
     ScoutParamsPanel, 
@@ -75,10 +76,13 @@ export function ProtocolDetailLayout({
     onSave,
     onCancel
 }: ProtocolDetailLayoutProps) {
+    const { t } = useI18n();
+    const isErrorMessage = saveMessage ? /失败|failed/i.test(saveMessage) : false;
+
     return (
         <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl text-[#37474F] font-sans select-none">
             <header className="flex items-center px-5 h-[52px] bg-[#E8EAF1] border-b border-[#B0C4DE] shrink-0 z-10">
-                <span className="text-[16px] font-bold text-[#37474F]">协议编辑器 (Session Detail)</span>
+                <span className="text-[16px] font-bold text-[#37474F]">{t("protocolDetail.header")}</span>
             </header>
 
             <main className="flex-1 overflow-hidden p-2 flex gap-3">
@@ -139,7 +143,7 @@ export function ProtocolDetailLayout({
 
             <footer className="flex items-center justify-end gap-3 px-5 h-[56px] bg-[#E8EAF1] border-t border-[#B0C4DE] shrink-0">
                 {saveMessage && (
-                    <span className={`mr-auto text-[12px] font-bold ${saveMessage.includes("失败") ? "text-[#D32F2F]" : "text-[#1E88E5]"}`}>
+                    <span className={`mr-auto text-[12px] font-bold ${isErrorMessage ? "text-[#D32F2F]" : "text-[#1E88E5]"}`}>
                         {saveMessage}
                     </span>
                 )}
@@ -147,7 +151,7 @@ export function ProtocolDetailLayout({
                     onClick={onCancel}
                     className="h-[36px] px-6 bg-white border border-[#B0C4DE] rounded-md text-[13px] font-bold text-[#546E7A] hover:bg-[#DCE6F2] transition-colors"
                 >
-                    取消
+                    {t("common.cancel")}
                 </button>
                 {!isReadOnly && (
                     <button
@@ -155,7 +159,7 @@ export function ProtocolDetailLayout({
                         disabled={isSaving || selection.type === "dose"}
                         className="h-[36px] px-6 bg-[#4D94FF] rounded-md text-[13px] font-bold text-white hover:bg-[#1E88E5] transition-colors disabled:bg-[#B0C4DE] disabled:cursor-not-allowed"
                     >
-                        {isSaving ? "保存中..." : "保存"}
+                        {isSaving ? `${t("common.saving")}...` : t("common.save")}
                     </button>
                 )}
             </footer>

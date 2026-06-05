@@ -1578,7 +1578,7 @@ const ViewScreen = () => {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2 relative">
-                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.windowPreset")}</span>
+                                        <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.windowPreset")}</span>
                                         <div
                                             onClick={() => {
                                                 setIsWindowPresetOpen(!isWindowPresetOpen);
@@ -1596,7 +1596,7 @@ const ViewScreen = () => {
                                             <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                         </div>
                                         {isWindowPresetOpen && (
-                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                            <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                 {WINDOW_PRESETS.map((preset) => {
                                                     const active = activeWindowPreset?.key === preset.key;
                                                     return (
@@ -1648,7 +1648,7 @@ const ViewScreen = () => {
                                 <div className="col-span-2 flex flex-col gap-2">
                                     {/* Layout Dropdown */}
                                     <div className="hidden items-center gap-2 relative">
-                                        <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.layout")}</span>
+                                        <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.layout")}</span>
                                         {isFourDLungReconSeries ? (
                                             <div
                                                 onClick={() => setIsLayoutOpen(!isLayoutOpen)}
@@ -1669,7 +1669,7 @@ const ViewScreen = () => {
                                             </div>
                                         )}
                                         {isLayoutOpen && isFourDLungReconSeries && (
-                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                            <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                 {(["MIP", "MinIP", "Avg"] as const).map((opt) => (
                                                     <div
                                                         key={opt}
@@ -1686,7 +1686,7 @@ const ViewScreen = () => {
                                             </div>
                                         )}
                                         {isLayoutOpen && !isFourDLungReconSeries && (
-                                            <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                            <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                 {VIEW_LAYOUT_OPTIONS.map((opt) => (
                                                     <div
                                                         key={opt}
@@ -1709,7 +1709,7 @@ const ViewScreen = () => {
                                                     <Param label="WL" value={String(Math.round(displayWl))} />
                                                 </div>
                                                 <div className="flex items-center gap-2 relative">
-                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.voiCurve")}</span>
+                                                    <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.voiCurve")}</span>
                                                     <div
                                                         onClick={() => {
                                                             setIsVoiLutOpen(!isVoiLutOpen);
@@ -1726,7 +1726,7 @@ const ViewScreen = () => {
                                                         <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVoiLutOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                     </div>
                                                     {isVoiLutOpen && (
-                                                        <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                        <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                             {([
                                                                 { value: "LINEAR" as const, label: "Linear" },
                                                                 { value: "LINEAR_EXACT" as const, label: "Linear Exact" },
@@ -1744,7 +1744,7 @@ const ViewScreen = () => {
                                                     )}
                                                 </div>
                                                 <div className="flex items-center gap-2 relative">
-                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.interpolation")}</span>
+                                                    <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.interpolation")}</span>
                                                     <div
                                                         onClick={() => {
                                                             setIsInterpolationOpen(!isInterpolationOpen);
@@ -1761,7 +1761,7 @@ const ViewScreen = () => {
                                                         <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isInterpolationOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                     </div>
                                                     {isInterpolationOpen && (
-                                                        <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                        <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                             {([
                                                                 { value: "LINEAR" as const, label: "Linear" },
                                                                 { value: "NEAREST" as const, label: "Nearest" },
@@ -1788,7 +1788,7 @@ const ViewScreen = () => {
                                                     />
                                                 </div>
                                                 <div className="flex items-start gap-2">
-                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">{t("view.controls.smoothing")}</span>
+                                                    <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.smoothing")}</span>
                                                     <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                         <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
                                                             <input type="range" min={0} max={1} step={0.05} value={imageSmoothing} onChange={(event) => setImageSmoothing(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
@@ -1797,7 +1797,7 @@ const ViewScreen = () => {
                                                     </div>
                                                 </div>
                                                 <div className="flex items-start gap-2">
-                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">{t("view.controls.sharpening")}</span>
+                                                    <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.sharpening")}</span>
                                                     <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                         <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
                                                             <input type="range" min={0} max={1} step={0.05} value={imageSharpening} onChange={(event) => setImageSharpening(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
@@ -1809,7 +1809,7 @@ const ViewScreen = () => {
 
                                             <PanelSection title={t("view.controls.volumeRendering")}>
                                             <div className="flex items-center gap-2 relative">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.volumePreset")}</span>
+                                                <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.volumePreset")}</span>
                                                 <div
                                                     onClick={() => {
                                                         setIsVolumePresetOpen(!isVolumePresetOpen);
@@ -1826,7 +1826,7 @@ const ViewScreen = () => {
                                                     <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVolumePresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                 </div>
                                                 {isVolumePresetOpen && (
-                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 max-h-[260px] overflow-y-auto bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1">
+                                                    <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 max-h-[260px] overflow-y-auto bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1">
                                                         {VOLUME_PRESETS.map((preset) => (
                                                             <div
                                                                 key={preset}
@@ -1841,7 +1841,7 @@ const ViewScreen = () => {
                                             </div>
 
                                             <div className="flex items-center gap-2 relative">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.sampleQuality")}</span>
+                                                <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.sampleQuality")}</span>
                                                 <div
                                                     onClick={() => {
                                                         setIsVolumeQualityOpen(!isVolumeQualityOpen);
@@ -1858,7 +1858,7 @@ const ViewScreen = () => {
                                                     <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVolumeQualityOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                 </div>
                                                 {isVolumeQualityOpen && (
-                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                    <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                         {([
                                                             { value: "performance" as const, label: t("view.quality.performance") },
                                                             { value: "standard" as const, label: t("view.quality.standard") },
@@ -1880,7 +1880,7 @@ const ViewScreen = () => {
                                             <PanelSection title={t("view.controls.projection")}>
 
                                             <div className="flex items-center gap-2 relative">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.projectionMode")}</span>
+                                                <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.projectionMode")}</span>
                                                 <div
                                                     onClick={() => {
                                                         setIsRenderModeOpen(!isRenderModeOpen);
@@ -1897,7 +1897,7 @@ const ViewScreen = () => {
                                                     <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                 </div>
                                                 {isRenderModeOpen && (
-                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                    <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                         {(["MIP", "MinIP"] as const).map((opt) => (
                                                             <div
                                                                 key={opt}
@@ -1912,7 +1912,7 @@ const ViewScreen = () => {
                                             </div>
 
                                             <div className="flex items-start gap-2">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">{t("view.controls.thickness")}</span>
+                                                <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.thickness")}</span>
                                                 <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                     <div className="grid grid-cols-[minmax(0,1fr)_48px] items-center gap-2">
                                                         <input
@@ -1982,7 +1982,7 @@ const ViewScreen = () => {
                                                     ))}
                                                 </div>
                                                 <div className="flex items-start gap-2">
-                                                    <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">{t("view.controls.angle")}</span>
+                                                    <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.angle")}</span>
                                                     <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                         <div className="grid grid-cols-[minmax(0,1fr)_46px] items-center gap-2">
                                                             <input
@@ -2017,7 +2017,7 @@ const ViewScreen = () => {
                                     {isFourDLungReconSeries && (
                                         <>
                                             <div className="flex items-center gap-2 relative">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.mode")}</span>
+                                                <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.mode")}</span>
                                                 <div
                                                     onClick={() => setIsBrowseModeOpen(!isBrowseModeOpen)}
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isBrowseModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
@@ -2028,7 +2028,7 @@ const ViewScreen = () => {
                                                     <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isBrowseModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                 </div>
                                                 {isBrowseModeOpen && (
-                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                    <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                         {([
                                                             { k: "phase" as const, l: "4D Cine" },
                                                         ].map(({ k, l }) => (
@@ -2053,7 +2053,7 @@ const ViewScreen = () => {
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-2 relative">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.volumeRendering")}</span>
+                                                <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.volumeRendering")}</span>
                                                 <div
                                                     onClick={() => setIsLayoutOpen(!isLayoutOpen)}
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between cursor-pointer transition-all ${isLayoutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
@@ -2062,7 +2062,7 @@ const ViewScreen = () => {
                                                     <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isLayoutOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                 </div>
                                                 {isLayoutOpen && (
-                                                    <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                    <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                                                         {(["MIP", "MinIP", "Avg"] as const).map((opt) => (
                                                             <div
                                                                 key={opt}
@@ -2080,7 +2080,7 @@ const ViewScreen = () => {
                                                 )}
                                             </div>
                                             <div className="flex items-start gap-2">
-                                                <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">{t("view.controls.thickness")}</span>
+                                                <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.thickness")}</span>
                                                 <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                     <div className="grid grid-cols-[minmax(0,1fr)_48px] items-center gap-2">
                                                         <input
@@ -3155,6 +3155,8 @@ const PanelSection = ({ title, children }: { title: string; children: ReactNode 
     </div>
 );
 
+const VIEW_CONTROL_LABEL_CLASS = "w-[72px] shrink-0 text-[10px] font-semibold leading-[1.1] text-[#546E7A]";
+
 type DisplayControlsProps = {
     selectedVoiLutMode: "LINEAR" | "LINEAR_EXACT" | "SIGMOID";
     setSelectedVoiLutMode: (value: "LINEAR" | "LINEAR_EXACT" | "SIGMOID") => void;
@@ -3194,7 +3196,7 @@ const DisplayControls = ({
     return (
     <>
         <div className="flex items-center gap-2 relative">
-            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.voiCurve")}</span>
+            <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.voiCurve")}</span>
             <div
                 onClick={() => {
                     setIsVoiLutOpen(!isVoiLutOpen);
@@ -3209,7 +3211,7 @@ const DisplayControls = ({
                 <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVoiLutOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
             </div>
             {isVoiLutOpen && (
-                <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                     {([
                         { value: "LINEAR" as const, label: "Linear" },
                         { value: "LINEAR_EXACT" as const, label: "Linear Exact" },
@@ -3223,7 +3225,7 @@ const DisplayControls = ({
             )}
         </div>
         <div className="flex items-center gap-2 relative">
-            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0">{t("view.controls.interpolation")}</span>
+            <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.interpolation")}</span>
             <div
                 onClick={() => {
                     setIsInterpolationOpen(!isInterpolationOpen);
@@ -3238,7 +3240,7 @@ const DisplayControls = ({
                 <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isInterpolationOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
             </div>
             {isInterpolationOpen && (
-                <div className="absolute top-[calc(100%+3px)] left-[68px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                     {([
                         { value: "LINEAR" as const, label: "Linear" },
                         { value: "NEAREST" as const, label: "Nearest" },
@@ -3256,7 +3258,7 @@ const DisplayControls = ({
             <input type="checkbox" checked={isImageInverted} onChange={(event) => setIsImageInverted(event.target.checked)} className="h-4 w-4 accent-[#4D94FF]" />
         </div>
         <div className="flex items-start gap-2">
-            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">{t("view.controls.smoothing")}</span>
+            <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.smoothing")}</span>
             <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                 <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
                     <input type="range" min={0} max={1} step={0.05} value={imageSmoothing} onChange={(event) => setImageSmoothing(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
@@ -3265,7 +3267,7 @@ const DisplayControls = ({
             </div>
         </div>
         <div className="flex items-start gap-2">
-            <span className="text-[11px] font-semibold text-[#546E7A] whitespace-nowrap w-[60px] shrink-0 pt-1">{t("view.controls.sharpening")}</span>
+            <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.sharpening")}</span>
             <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                 <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
                     <input type="range" min={0} max={1} step={0.05} value={imageSharpening} onChange={(event) => setImageSharpening(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />

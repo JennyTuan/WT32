@@ -4,10 +4,13 @@ import { ChevronDown, Download, RefreshCw, Search, ChevronLeft, ChevronRight } f
 import ServiceModeShell from "../shared/ServiceModeShell";
 import { listSystemLogs, type ApiSystemLog, type LogLevel } from "../../../lib/logsApi";
 import { buildCsv, downloadCsv, timestampSuffix } from "../../../lib/csvExport";
+import { useI18n } from "../../../lib/i18nContext";
 import LogDetailModal, { type DetailSection } from "./LogDetailModal";
 
 const LEVELS: LogLevel[] = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
 const PAGE_SIZE = 50;
+const ALL_FILTER = "all";
+type Translate = ReturnType<typeof useI18n>["t"];
 
 const LEVEL_STYLES: Record<LogLevel, string> = {
   DEBUG: "bg-[#ECEFF1] text-[#546E7A] border border-[#CFD8DC]",
@@ -40,13 +43,14 @@ const toIsoDayEnd = (yyyyMmDd: string): Date | null => {
 };
 
 export default function ServiceSystemLogPage() {
+  const { t } = useI18n();
   const [logs, setLogs] = useState<ApiSystemLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [levelFilter, setLevelFilter] = useState<"全部" | LogLevel>("全部");
-  const [sourceFilter, setSourceFilter] = useState<string>("全部");
-  const [eventFilter, setEventFilter] = useState<string>("全部");
+  const [levelFilter, setLevelFilter] = useState<typeof ALL_FILTER | LogLevel>(ALL_FILTER);
+  const [sourceFilter, setSourceFilter] = useState<string>(ALL_FILTER);
+  const [eventFilter, setEventFilter] = useState<string>(ALL_FILTER);
   const [searchText, setSearchText] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -60,11 +64,11 @@ export default function ServiceSystemLogPage() {
       const data = await listSystemLogs({ limit: 2000 });
       setLogs(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载失败");
+      setError(e instanceof Error ? e.message : t("service.logs.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchLogs();
@@ -84,9 +88,9 @@ export default function ServiceSystemLogPage() {
     const q = searchText.trim().toLowerCase();
 
     return logs.filter((l) => {
-      if (levelFilter !== "全部" && l.level !== levelFilter) return false;
-      if (sourceFilter !== "全部" && l.source !== sourceFilter) return false;
-      if (eventFilter !== "全部" && l.event !== eventFilter) return false;
+      if (levelFilter !== ALL_FILTER && l.level !== levelFilter) return false;
+      if (sourceFilter !== ALL_FILTER && l.source !== sourceFilter) return false;
+      if (eventFilter !== ALL_FILTER && l.event !== eventFilter) return false;
       if (from || to) {
         const t = new Date(l.timestamp).getTime();
         if (from && t < from.getTime()) return false;
@@ -110,28 +114,27 @@ export default function ServiceSystemLogPage() {
 
   const handleExport = useCallback(() => {
     const csv = buildCsv(filtered, [
-      { header: "时间", value: (l) => l.timestamp },
-      { header: "级别", value: (l) => l.level },
-      { header: "来源", value: (l) => l.source },
-      { header: "事件", value: (l) => l.event },
-      { header: "描述", value: (l) => l.message },
-      { header: "会话", value: (l) => l.scan_session_id ?? "" },
-      { header: "详情", value: (l) => l.details ?? "" },
+      { header: t("service.logs.time"), value: (l) => l.timestamp },
+      { header: t("service.logs.level"), value: (l) => l.level },
+      { header: t("service.logs.source"), value: (l) => l.source },
+      { header: t("service.logs.event"), value: (l) => l.event },
+      { header: t("service.logs.description"), value: (l) => l.message },
+      { header: t("service.logs.session"), value: (l) => l.scan_session_id ?? "" },
+      { header: t("service.logs.details"), value: (l) => l.details ?? "" },
     ]);
     downloadCsv(`system-log-${timestampSuffix()}.csv`, csv);
-  }, [filtered]);
+  }, [filtered, t]);
 
   return (
     <ServiceModeShell currentRoute="/service/reports/system-log" footerStatus={{ label: "IDLE", tone: "idle" }}>
       <section className="flex-1 flex flex-col relative overflow-hidden h-full">
-        {/* toolbar */}
         <div className="p-4 border-b border-[#E2EBF5]">
           <div className="flex items-center gap-3 mb-3">
             <div className="flex-1 relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
               <input
                 type="text"
-                placeholder="搜索描述 / 来源 / 事件..."
+                placeholder={t("service.logs.systemSearchPlaceholder")}
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 className="w-full pl-9 pr-4 h-10 border border-[#D6E2EF] rounded-lg text-[14px] text-[#37474F] placeholder:text-[#B0C4DE] focus:outline-none focus:border-[#4D94FF]"
@@ -143,7 +146,7 @@ export default function ServiceSystemLogPage() {
               className="px-4 h-10 bg-white border border-[#D6E2EF] text-[#37474F] font-bold rounded-lg flex items-center gap-2 text-[14px] hover:bg-[#F5F8FC] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Download size={14} />
-              导出 CSV
+              {t("service.logs.exportCsv")}
             </button>
             <button
               onClick={fetchLogs}
@@ -151,13 +154,13 @@ export default function ServiceSystemLogPage() {
               className="px-4 h-10 bg-[#4D94FF] text-white font-bold rounded-lg flex items-center gap-2 text-[14px] hover:bg-blue-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-              刷新
+              {t("common.refresh")}
             </button>
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold text-[#263238]">日期范围</span>
+              <span className="text-[13px] font-bold text-[#263238]">{t("service.logs.dateRange")}</span>
               <input
                 type="date"
                 value={dateFrom}
@@ -174,14 +177,14 @@ export default function ServiceSystemLogPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold text-[#263238]">级别</span>
+              <span className="text-[13px] font-bold text-[#263238]">{t("service.logs.level")}</span>
               <div className="relative">
                 <select
                   value={levelFilter}
-                  onChange={(e) => setLevelFilter(e.target.value as "全部" | LogLevel)}
+                  onChange={(e) => setLevelFilter(e.target.value as typeof ALL_FILTER | LogLevel)}
                   className="appearance-none h-9 pl-3 pr-8 border border-[#D6E2EF] rounded-lg text-[13px] text-[#37474F] focus:outline-none focus:border-[#4D94FF] bg-white cursor-pointer"
                 >
-                  <option value="全部">全部</option>
+                  <option value={ALL_FILTER}>{t("service.logs.all")}</option>
                   {LEVELS.map((lv) => (
                     <option key={lv} value={lv}>{lv}</option>
                   ))}
@@ -191,14 +194,14 @@ export default function ServiceSystemLogPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold text-[#263238]">来源</span>
+              <span className="text-[13px] font-bold text-[#263238]">{t("service.logs.source")}</span>
               <div className="relative">
                 <select
                   value={sourceFilter}
                   onChange={(e) => setSourceFilter(e.target.value)}
                   className="appearance-none h-9 pl-3 pr-8 border border-[#D6E2EF] rounded-lg text-[13px] text-[#37474F] focus:outline-none focus:border-[#4D94FF] bg-white cursor-pointer"
                 >
-                  <option value="全部">全部</option>
+                  <option value={ALL_FILTER}>{t("service.logs.all")}</option>
                   {sources.map((s) => (
                     <option key={s} value={s}>{s}</option>
                   ))}
@@ -208,14 +211,14 @@ export default function ServiceSystemLogPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-bold text-[#263238]">事件</span>
+              <span className="text-[13px] font-bold text-[#263238]">{t("service.logs.event")}</span>
               <div className="relative">
                 <select
                   value={eventFilter}
                   onChange={(e) => setEventFilter(e.target.value)}
                   className="appearance-none h-9 pl-3 pr-8 border border-[#D6E2EF] rounded-lg text-[13px] text-[#37474F] focus:outline-none focus:border-[#4D94FF] bg-white cursor-pointer"
                 >
-                  <option value="全部">全部</option>
+                  <option value={ALL_FILTER}>{t("service.logs.all")}</option>
                   {events.map((ev) => (
                     <option key={ev} value={ev}>{ev}</option>
                   ))}
@@ -226,7 +229,6 @@ export default function ServiceSystemLogPage() {
           </div>
         </div>
 
-        {/* table */}
         <div className="flex-1 overflow-hidden flex flex-col min-h-0">
           <div className="flex-1 overflow-auto">
             <table className="w-full table-fixed text-[13px]">
@@ -240,12 +242,12 @@ export default function ServiceSystemLogPage() {
               </colgroup>
               <thead className="sticky top-0 z-10">
                 <tr className="bg-[#F5F8FC] text-[#37474F] font-black border-b border-[#E2EBF5]">
-                  <th className="text-left px-3 py-3">时间</th>
-                  <th className="text-left px-3 py-3">级别</th>
-                  <th className="text-left px-3 py-3">来源</th>
-                  <th className="text-left px-3 py-3">事件</th>
-                  <th className="text-left px-3 py-3">描述</th>
-                  <th className="text-left px-3 py-3">会话</th>
+                  <th className="text-left px-3 py-3">{t("service.logs.time")}</th>
+                  <th className="text-left px-3 py-3">{t("service.logs.level")}</th>
+                  <th className="text-left px-3 py-3">{t("service.logs.source")}</th>
+                  <th className="text-left px-3 py-3">{t("service.logs.event")}</th>
+                  <th className="text-left px-3 py-3">{t("service.logs.description")}</th>
+                  <th className="text-left px-3 py-3">{t("service.logs.session")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -258,7 +260,7 @@ export default function ServiceSystemLogPage() {
                 ) : pageRows.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-16 text-[#90A4AE] text-[14px]">
-                      {loading ? "加载中..." : "没有找到日志记录"}
+                      {loading ? t("service.logs.loading") : t("service.logs.noSystemLogs")}
                     </td>
                   </tr>
                 ) : (
@@ -303,18 +305,15 @@ export default function ServiceSystemLogPage() {
             </table>
           </div>
 
-          {/* pagination */}
           <div className="border-t border-[#E2EBF5] px-4 py-2 flex items-center justify-between text-[12px] text-[#546E7A]">
             <div>
-              共 <span className="font-bold text-[#263238]">{filtered.length}</span> 条记录
+              {t("service.logs.totalRecords", { count: filtered.length })}
               {filtered.length !== logs.length && (
-                <span className="text-[#90A4AE]">（已过滤自 {logs.length} 条）</span>
+                <span className="text-[#90A4AE]">{t("service.logs.filteredFrom", { count: logs.length })}</span>
               )}
             </div>
             <div className="flex items-center gap-3">
-              <span>
-                第 <span className="font-bold text-[#263238]">{safePage + 1}</span> / {pageCount} 页
-              </span>
+              <span>{t("service.logs.page", { page: safePage + 1, total: pageCount })}</span>
               <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={safePage === 0}
@@ -337,7 +336,7 @@ export default function ServiceSystemLogPage() {
           <LogDetailModal
             title={`${selectedLog.level} · ${selectedLog.event}`}
             subtitle={formatTimestamp(selectedLog.timestamp).date + " " + formatTimestamp(selectedLog.timestamp).time}
-            sections={buildSystemLogSections(selectedLog)}
+            sections={buildSystemLogSections(selectedLog, t)}
             rawJson={parseDetails(selectedLog.details)}
             onClose={() => setSelectedLog(null)}
           />
@@ -356,20 +355,20 @@ function parseDetails(raw: string | null): unknown {
   }
 }
 
-function buildSystemLogSections(log: ApiSystemLog): DetailSection[] {
+function buildSystemLogSections(log: ApiSystemLog, t: Translate): DetailSection[] {
   return [
     {
-      title: "基本信息",
+      title: t("service.logs.basicInfo"),
       fields: [
-        { label: "级别", value: log.level, mono: true },
-        { label: "来源", value: log.source, mono: true },
-        { label: "事件", value: log.event, mono: true },
-        { label: "会话", value: log.scan_session_id ?? "—", mono: true },
-        { label: "时间", value: log.timestamp, mono: true, span: "full" },
+        { label: t("service.logs.level"), value: log.level, mono: true },
+        { label: t("service.logs.source"), value: log.source, mono: true },
+        { label: t("service.logs.event"), value: log.event, mono: true },
+        { label: t("service.logs.session"), value: log.scan_session_id ?? "—", mono: true },
+        { label: t("service.logs.time"), value: log.timestamp, mono: true, span: "full" },
       ],
     },
     {
-      title: "描述",
+      title: t("service.logs.description"),
       fields: [
         { label: "Message", value: log.message, span: "full" },
       ],
