@@ -1,0 +1,54 @@
+{
+  "updated_at": "2026-06-04T00:56:25.955378+00:00",
+  "general": {
+    "language": "en-US",
+    "theme": "light",
+    "time_format": "24h",
+    "date_format": "YYYY-MM-DD",
+    "length_unit": "mm",
+    "weight_unit": "kg"
+  },
+  "time": {
+    "timezone": "Asia/Shanghai",
+    "ntp_enabled": true,
+    "ntp_server": "ntp.aliyun.com",
+    "ntp_fallback": "pool.ntp.org",
+    "sync_interval_min": 60
+  },
+  "network": {
+    "hostname": "wt32-ct",
+    "mode": "dhcp",
+    "ip_address": "192.168.1.50",
+    "netmask": "255.255.255.0",
+    "gateway": "192.168.1.1",
+    "dns_primary": "223.5.5.5",
+    "dns_secondary": "8.8.8.8",
+    "proxy_enabled": false,
+    "proxy_url": ""
+  },
+  "device": {
+    "auto_lock_min": 10,
+    "screensaver_min": 15,
+    "beep_enabled": true,
+    "volume": 70,
+    "brightness": 80,
+    "show_patient_avatar": true,
+    "confirm_before_scan": true
+  },
+  "maintenance": {
+    "auto_logout_min": 30,
+    "boot_self_check": true,
+    "allow_remote_assist": false,
+    "crash_report_upload": true,
+    "daily_restart_enabled": false,
+    "daily_restart_time": "03:00"
+  },
+  "about": {
+    "device_model": "WT32-CT Prototype",
+    "serial_number": "WT32-2026-000123",
+    "software_version": "1.4.0-beta",
+    "firmware_version": "FW-3.1.7",
+    "license_status": "valid",
+    "license_expires_at": "2027-01-01"
+  }
+}
