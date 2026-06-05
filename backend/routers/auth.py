@@ -10,12 +10,13 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..auth_utils import get_current_user, hash_password, verify_password
-from ..database import get_db
+from ..database import EMERGENCY_USERNAME, get_db
 from .logs import write_system_log
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-MAX_FAILED_ATTEMPTS = 5
+MAX_FAILED_ATTEMPTS = 6
+ACCOUNT_LOCKED_DETAIL = "账号已锁定，请联系管理员"
 
 
 class LoginPayload(BaseModel):
@@ -47,9 +48,14 @@ def _serialize_me(user: models.UserAccount) -> dict[str, Any]:
 
 @router.post("/login")
 def login(payload: LoginPayload, request: Request, db: Session = Depends(get_db)):
+    username = payload.username.strip()
+    if username == EMERGENCY_USERNAME:
+        # Emergency account has no password — it can only be entered via the
+        # dedicated emergency-login flow with confirmation.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
     candidate = (
         db.query(models.UserAccount)
-        .filter(models.UserAccount.username == payload.username.strip())
+        .filter(models.UserAccount.username == username)
         .first()
     )
     # Always do hash verification (or a dummy one) to keep timing similar.
@@ -58,12 +64,15 @@ def login(payload: LoginPayload, request: Request, db: Session = Depends(get_db)
         verify_password(payload.password, "$2b$12$abcdefghijklmnopqrstuv")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
+    if candidate.status == "locked":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_LOCKED_DETAIL)
     if not candidate.login_allowed or candidate.status != "active":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已停用或被锁定")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已停用")
 
     if not verify_password(payload.password, candidate.password_hash):
         candidate.failed_attempts = (candidate.failed_attempts or 0) + 1
-        if candidate.failed_attempts >= MAX_FAILED_ATTEMPTS:
+        just_locked = candidate.failed_attempts >= MAX_FAILED_ATTEMPTS
+        if just_locked:
             candidate.status = "locked"
             candidate.locked_at = datetime.utcnow()
             write_system_log(
@@ -74,6 +83,8 @@ def login(payload: LoginPayload, request: Request, db: Session = Depends(get_db)
                 message=f"User {candidate.username} locked after {candidate.failed_attempts} failed attempts",
             )
         db.commit()
+        if just_locked:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNT_LOCKED_DETAIL)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
     candidate.failed_attempts = 0
@@ -90,6 +101,37 @@ def login(payload: LoginPayload, request: Request, db: Session = Depends(get_db)
 
     request.session["user_id"] = candidate.id
     return _serialize_me(candidate)
+
+
+@router.post("/emergency-login")
+def emergency_login(request: Request, db: Session = Depends(get_db)):
+    user = (
+        db.query(models.UserAccount)
+        .filter(models.UserAccount.username == EMERGENCY_USERNAME)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="紧急账号未初始化")
+
+    previous_user_id = request.session.get("user_id")
+    previous_username = None
+    if previous_user_id:
+        prev = db.query(models.UserAccount).filter(models.UserAccount.id == previous_user_id).first()
+        previous_username = prev.username if prev else None
+
+    user.last_login_at = datetime.utcnow()
+    write_system_log(
+        db,
+        level="WARNING",
+        source="auth",
+        event="emergency_login",
+        message=f"Emergency login session started (previous user: {previous_username or 'none'})",
+    )
+    db.commit()
+    db.refresh(user)
+
+    request.session["user_id"] = user.id
+    return _serialize_me(user)
 
 
 @router.post("/logout")

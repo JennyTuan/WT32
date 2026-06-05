@@ -3,9 +3,9 @@
  *
  * 数据流：
  *   FourDDiagnosticConfirmScreen
- *     → FourDPhaseReviewScreen   (scanResult)
  *     → FourDRescanSelectScreen  (scanResult + phaseSelections)
- *     → /image-viewer
+ *     → ImageLoadScreen / PhaseFilterScreen
+ *     → ViewScreen
  */
 
 /** 单个 床位×相位 格子的数据 */
@@ -56,19 +56,6 @@ export interface FourDPostScanState {
 }
 
 // ─── 工具函数 ──────────────────────────────────────────────────────────────────
-
-/** 检查矩阵中是否存在任何相位冗余 */
-export function hasPhaseConflicts(result: FourDScanResult): boolean {
-  return result.phaseMatrix.some((bed) => bed.some((cell) => cell.frameCount > 1));
-}
-
-/** 统计矩阵中冗余格子总数 */
-export function countConflicts(result: FourDScanResult): number {
-  return result.phaseMatrix.reduce(
-    (total, bed) => total + bed.filter((cell) => cell.frameCount > 1).length,
-    0
-  );
-}
 
 /**
  * 生成 Mock 扫描结果（原型阶段由扫描界面调用）。

@@ -1427,6 +1427,9 @@ def _seed_dose_defaults(db) -> None:
         print(f"Seeded DRL entries: {added} added, {updated} updated")
 
 
+EMERGENCY_USERNAME = "emergency"
+
+
 def _seed_user_management_defaults(db) -> None:
     from . import models
 
@@ -1647,6 +1650,18 @@ def _seed_user_management_defaults(db) -> None:
             "password_reset_required": False,
             "password_updated_at": now,
         },
+        {
+            "username": EMERGENCY_USERNAME,
+            "display_name": "紧急管理员",
+            "employee_id": EMERGENCY_USERNAME,
+            "department": "急诊",
+            "title": "紧急管理员",
+            "role_code": "technologist",
+            "status": "active",
+            "login_allowed": True,
+            "password_reset_required": False,
+            "password_updated_at": now,
+        },
     ]
 
     for user in db.query(models.UserAccount).all():
@@ -1694,6 +1709,18 @@ def _seed_user_management_defaults(db) -> None:
     for user in db.query(models.UserAccount).filter(models.UserAccount.password_hash.is_(None)).all():
         user.password_hash = hash_password(user.username)
         user.password_reset_required = True
+        changed = True
+
+    emergency = (
+        db.query(models.UserAccount)
+        .filter(models.UserAccount.username == EMERGENCY_USERNAME)
+        .first()
+    )
+    if emergency and (not emergency.login_allowed or emergency.status != "active"):
+        emergency.login_allowed = True
+        emergency.status = "active"
+        emergency.failed_attempts = 0
+        emergency.locked_at = None
         changed = True
 
     if changed:

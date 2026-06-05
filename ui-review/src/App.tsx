@@ -18,7 +18,6 @@ import HelicalExecuteScanScreen from "./screens/HelicalExecuteScanScreen";
 import GatedHelicalConfirmScreen from "./screens/GatedHelicalConfirmScreen";
 import GatedAxialConfirmScreen from "./screens/GatedAxialConfirmScreen";
 import FourDDiagnosticConfirmScreen from "./screens/FourDDiagnosticConfirmScreen";
-import FourDPhaseReviewScreen from "./screens/FourDPhaseReviewScreen";
 import FourDRescanSelectScreen from "./screens/FourDRescanSelectScreen";
 import ViewScreen from "./screens/ViewScreen";
 import ImageLoadScreen from "./screens/ImageLoadScreen";
@@ -47,6 +46,7 @@ import OrganizationInfoPage from "./features/service/organizationInfo/Organizati
 import LoginScreen from "./screens/LoginScreen";
 import ChangePasswordScreen from "./screens/ChangePasswordScreen";
 import RequireAuth from "./components/RequireAuth";
+import EmergencyModeBanner from "./components/EmergencyModeBanner";
 import { AuthProvider } from "./lib/authContext";
 import { useI18n } from "./lib/i18nContext";
 
@@ -117,6 +117,7 @@ export default function App() {
               transform: `translate(-50%, -50%) scale(${scale})`,
             }}
           >
+            <EmergencyModeBanner />
             <Routes>
               <Route path="/login" element={<LoginScreen />} />
               <Route element={<RequireAuth />}>
@@ -139,7 +140,6 @@ export default function App() {
               <Route path="/gated-helical-confirm" element={<GatedHelicalConfirmScreen />} />
               <Route path="/gated-axial-confirm" element={<GatedAxialConfirmScreen />} />
               <Route path="/fourd-confirm" element={<FourDDiagnosticConfirmScreen />} />
-              <Route path="/fourd-phase-review" element={<FourDPhaseReviewScreen />} />
               <Route path="/fourd-rescan-select" element={<FourDRescanSelectScreen />} />
               <Route path="/image-load" element={<ImageLoadScreen />} />
               <Route path="/phase-filter" element={<PhaseFilterScreen />} />

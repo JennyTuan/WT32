@@ -17,6 +17,8 @@ import {
   getServiceModeItem,
 } from "./serviceModeRegistry";
 import AppHeader from "../../../components/AppHeader";
+import { useAuth } from "../../../lib/authContext";
+import { isRouteAllowedInEmergency } from "../../../lib/emergencyAccess";
 import { useI18n } from "../../../lib/i18nContext";
 
 type FooterStatusTone = "idle" | "active" | "success";
@@ -55,6 +57,8 @@ export default function ServiceModeShell({
 }: ServiceModeShellProps) {
   const navigate = useNavigate();
   const { t } = useI18n();
+  const { isEmergencySession } = useAuth();
+  const restrictedTooltip = t("emergency.restrictedTooltip");
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
 
@@ -188,24 +192,33 @@ export default function ServiceModeShell({
                           {group.items.map((item) => {
                             const active = item.route === currentRoute;
                             const Icon = item.icon;
+                            const restricted = isEmergencySession && !isRouteAllowedInEmergency(item.route);
 
                             return (
                               <button
                                 key={item.route}
-                                onClick={() => navigate(item.route)}
+                                onClick={() => {
+                                  if (restricted) return;
+                                  navigate(item.route);
+                                }}
+                                disabled={restricted}
+                                title={restricted ? restrictedTooltip : undefined}
+                                aria-disabled={restricted}
                                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all ${
-                                  active
+                                  restricted
+                                    ? "cursor-not-allowed text-[#B0BEC5] opacity-60"
+                                    : active
                                     ? "bg-[#E3F2FD] text-[#1E88E5] border border-[#A9D0FF]"
                                     : "text-[#546E7A] hover:bg-gray-50"
                                 }`}
                               >
-                                <div className={active ? "text-[#1E88E5]" : "text-[#90A4AE]"}>
+                                <div className={restricted ? "text-[#B0BEC5]" : active ? "text-[#1E88E5]" : "text-[#90A4AE]"}>
                                   <Icon size={17} />
                                 </div>
                                 <span className={`text-[13px] whitespace-nowrap ${active ? "font-bold" : "font-medium"}`}>
                                   {t(item.labelKey)}
                                 </span>
-                                {active && <ChevronRight size={14} className="ml-auto text-[#1E88E5]" />}
+                                {active && !restricted && <ChevronRight size={14} className="ml-auto text-[#1E88E5]" />}
                               </button>
                             );
                           })}

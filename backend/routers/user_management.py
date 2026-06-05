@@ -10,7 +10,7 @@ from sqlalchemy.sql import func
 
 from .. import models, schemas
 from ..auth_utils import hash_password
-from ..database import get_db
+from ..database import EMERGENCY_USERNAME, get_db
 from .logs import write_system_log
 
 router = APIRouter(prefix="/user-management", tags=["user-management"])
@@ -193,7 +193,12 @@ def get_user_management_snapshot(db: Session = Depends(get_db)):
         db.query(models.UserRole).all(),
         key=lambda role: (role_order.get(role.code, 99), role.name),
     )
-    users = db.query(models.UserAccount).order_by(models.UserAccount.id.asc()).all()
+    users = (
+        db.query(models.UserAccount)
+        .filter(models.UserAccount.username != EMERGENCY_USERNAME)
+        .order_by(models.UserAccount.id.asc())
+        .all()
+    )
     return {
         "users": [_serialize_user(user) for user in users],
         "roles": [_serialize_role(role, counts.get(role.code, 0)) for role in roles],

@@ -34,6 +34,12 @@ export async function login(username: string, password: string): Promise<Current
   return response.json();
 }
 
+export async function emergencyLogin(): Promise<CurrentUser> {
+  const response = await apiFetch("/api/auth/emergency-login", { method: "POST" });
+  if (!response.ok) throw await parseError(response, "紧急登录失败");
+  return response.json();
+}
+
 export async function logout(): Promise<void> {
   await apiFetch("/api/auth/logout", { method: "POST" });
 }
