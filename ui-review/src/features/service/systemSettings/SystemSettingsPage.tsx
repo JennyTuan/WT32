@@ -101,6 +101,9 @@ export default function SystemSettingsPage() {
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
   }, []);
 
+  const tRef = useRef(t);
+  useEffect(() => { tRef.current = t; }, [t]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -110,11 +113,11 @@ export default function SystemSettingsPage() {
       setLanguage(data.general.language);
       setDirty(false);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : t("systemSettings.errorLoad"));
+      setLoadError(e instanceof Error ? e.message : tRef.current("systemSettings.errorLoad"));
     } finally {
       setLoading(false);
     }
-  }, [setLanguage, t]);
+  }, [setLanguage]);
 
   useEffect(() => {
     load();
