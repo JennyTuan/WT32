@@ -134,7 +134,7 @@ export default function OrganizationInfoPage() {
 
   if (loading || !settings) {
     return (
-      <ServiceModeShell currentRoute="/service/settings/organization-info" footerStatus={{ label: "IDLE", tone: "idle" }}>
+      <ServiceModeShell currentRoute="/service/settings/organization-info">
         <section className="flex h-full items-center justify-center bg-[#F8FBFF]">
           <div className="flex items-center gap-3 text-[13px] font-bold text-[#7B92A8]">
             <RefreshCw size={16} className="animate-spin text-[#4D94FF]" />
@@ -146,7 +146,7 @@ export default function OrganizationInfoPage() {
   }
 
   return (
-    <ServiceModeShell currentRoute="/service/settings/organization-info" footerStatus={{ label: dirty ? "EDIT" : "IDLE", tone: dirty ? "active" : "idle" }}>
+    <ServiceModeShell currentRoute="/service/settings/organization-info">
       <section className="relative flex h-full min-h-0 flex-col bg-[#F8FBFF]">
         <div className="flex h-[58px] shrink-0 items-center justify-between gap-3 border-b border-[#E2EBF5] bg-white px-5">
           <div className="min-w-0">

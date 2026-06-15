@@ -300,7 +300,7 @@ export default function ServiceAuditLogPage() {
   }, [filtered, t]);
 
   return (
-    <ServiceModeShell currentRoute="/service/reports/audit-log" footerStatus={{ label: "IDLE", tone: "idle" }}>
+    <ServiceModeShell currentRoute="/service/reports/audit-log">
       <section className="flex-1 flex flex-col relative overflow-hidden h-full">
         <div className="border-b border-[#E2EBF5] p-4">
           <div className="mb-3 flex items-center gap-3">

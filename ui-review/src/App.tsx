@@ -23,6 +23,7 @@ import ViewScreen from "./screens/ViewScreen";
 import ImageLoadScreen from "./screens/ImageLoadScreen";
 import PhaseFilterScreen from "./screens/PhaseFilterScreen";
 import ManualScanScreen from "./screens/ManualScanScreen";
+import MobileModePlaceholderScreen from "./screens/MobileModePlaceholderScreen";
 import MockScanScreen from "./screens/MockScanScreen";
 import TubeWarmupScreen from "./screens/TubeWarmupScreen";
 import AirCalibrationScreen from "./screens/AirCalibrationScreen";
@@ -145,6 +146,7 @@ export default function App() {
               <Route path="/phase-filter" element={<PhaseFilterScreen />} />
               <Route path="/image-viewer" element={<ViewScreen />} />
 
+              <Route path="/mobile" element={<MobileModePlaceholderScreen />} />
               <Route path="/mobile/manual-scan" element={<ManualScanScreen />} />
               <Route path="/mobile/mock-scan" element={<MockScanScreen />} />
               <Route path="/mobile/image-viewer" element={<ViewScreen />} />

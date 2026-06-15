@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ElementType } from "react";
+import { useEffect, useState, type ElementType } from "react";
 import {
   AlertTriangle,
   ChevronDown,
@@ -244,13 +244,8 @@ export default function DiskManagementPage() {
   const { t } = useI18n();
   const diskManager = useDiskManager();
 
-  const footerStatus = useMemo(() => {
-    const overloaded = diskManager.partitions.some((partition) => diskManager.isOverThreshold(partition.id));
-    return overloaded ? { label: "ALERT", tone: "active" as const } : { label: "IDLE", tone: "idle" as const };
-  }, [diskManager]);
-
   return (
-    <ServiceModeShell currentRoute="/service/disk" footerStatus={footerStatus}>
+    <ServiceModeShell currentRoute="/service/disk">
       <section className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar">
         <div className="rounded-md border border-[#B0C4DE] bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4">

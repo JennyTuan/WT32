@@ -476,7 +476,7 @@ export default function UserManagementPage() {
 
   if (loading && !snapshot) {
     return (
-      <ServiceModeShell currentRoute="/service/settings/user-management" footerStatus={{ label: "IDLE", tone: "idle" }}>
+      <ServiceModeShell currentRoute="/service/settings/user-management">
         <section className="flex h-full items-center justify-center bg-white text-[14px] font-bold text-[#90A4AE]">
           {t("service.user.loading")}
         </section>
@@ -485,7 +485,7 @@ export default function UserManagementPage() {
   }
 
   return (
-    <ServiceModeShell currentRoute="/service/settings/user-management" footerStatus={{ label: "IDLE", tone: "idle" }}>
+    <ServiceModeShell currentRoute="/service/settings/user-management">
       <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F6F9FC]">
         <div className="shrink-0 border-b border-[#E2EBF5] bg-[#F8FBFF] px-4 py-2">
           <div className="flex items-center justify-between gap-3">

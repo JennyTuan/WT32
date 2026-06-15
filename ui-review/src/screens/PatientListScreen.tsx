@@ -429,10 +429,11 @@ const PatientListScreen = () => {
                                                                             scanResult: generateMockScanResult(9, 10, 165.0),
                                                                             showSliceLoadingBeforeImageLoad: false,
                                                                             initialBrowseMode: 'phase',
+                                                                            offlineRecon: true,
                                                                         },
                                                                     });
                                                                 } else {
-                                                                    navigate('/image-viewer');
+                                                                    navigate('/image-viewer', { state: { offlineRecon: true } });
                                                                 }
                                                             }}
                                                             className="inline-flex h-[24px] px-2 rounded-full items-center justify-center gap-1 text-[11px] font-bold bg-[#E3F2FD] text-[#1E88E5] border border-[#BBDEFB]"
@@ -517,10 +518,11 @@ const PatientListScreen = () => {
                                                     scanResult: generateMockScanResult(9, 10, 165.0),
                                                     showSliceLoadingBeforeImageLoad: false,
                                                     initialBrowseMode: 'phase',
+                                                    offlineRecon: true,
                                                 },
                                             });
                                         } else {
-                                            navigate('/image-viewer');
+                                            navigate('/image-viewer', { state: { offlineRecon: true } });
                                         }
                                     } else {
                                         navigate('/protocol-select');

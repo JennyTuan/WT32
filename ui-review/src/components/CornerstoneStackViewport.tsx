@@ -11,6 +11,7 @@ import {
   initCornerstone,
   TOOL_NAMES,
 } from '../lib/cornerstone/initCornerstone';
+import { useI18n } from '../lib/i18nContext';
 
 type ActiveTool = 'pan' | 'zoom' | 'zoomin' | 'window' | 'ruler' | 'eraser' | 'zoomout' | 'fit' | 'flip' | 'reset' | 'annotate';
 type InterpolationMode = 'NEAREST' | 'LINEAR' | 'FAST_LINEAR';
@@ -76,13 +77,13 @@ type DicomErrorCode =
   | 'NETWORK_ERROR'
   | 'UNKNOWN';
 
-const DICOM_ERROR_MESSAGES: Record<DicomErrorCode, string> = {
-  DICOM_INVALID: '影像文件格式错误，无法解析（可能被加密软件锁定或文件已损坏）',
-  DICOM_NOT_FOUND: '影像文件不存在或路径错误',
-  DICOM_PERMISSION_DENIED: '影像文件无法读取，系统权限被拒绝（可能被安全软件锁定）',
-  DICOM_READ_ERROR: '影像文件读取异常，请稍后重试',
-  NETWORK_ERROR: '无法连接到影像服务，请检查网络',
-  UNKNOWN: '影像加载失败',
+const DICOM_ERROR_I18N_KEYS: Record<DicomErrorCode, string> = {
+  DICOM_INVALID: 'dicomError.invalid',
+  DICOM_NOT_FOUND: 'dicomError.notFound',
+  DICOM_PERMISSION_DENIED: 'dicomError.permissionDenied',
+  DICOM_READ_ERROR: 'dicomError.readError',
+  NETWORK_ERROR: 'dicomError.network',
+  UNKNOWN: 'dicomError.unknown',
 };
 
 async function probeDicomUrl(url: string): Promise<{ ok: true } | { ok: false; code: DicomErrorCode; detail?: string }> {
@@ -95,7 +96,7 @@ async function probeDicomUrl(url: string): Promise<{ ok: true } | { ok: false; c
       try {
         const body = (await resp.json()) as { code?: string; message?: string; file?: string };
         const code = body.code as DicomErrorCode | undefined;
-        if (code && code in DICOM_ERROR_MESSAGES) {
+        if (code && code in DICOM_ERROR_I18N_KEYS) {
           return { ok: false, code, detail: body.file };
         }
         return { ok: false, code: 'UNKNOWN', detail: body.message };
@@ -147,6 +148,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
     },
     ref
   ) {
+    const { t } = useI18n();
     const elementRef = useRef<HTMLDivElement>(null);
     const renderingEngineRef = useRef<RenderingEngine | null>(null);
     const viewportRef = useRef<StackViewport | null>(null);
@@ -223,7 +225,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
           const probe = await probeDicomUrl(urls[0]);
           if (disposed) return;
           if (!probe.ok) {
-            const msg = DICOM_ERROR_MESSAGES[probe.code] + (probe.detail ? `（${probe.detail}）` : '');
+            const msg = t(DICOM_ERROR_I18N_KEYS[probe.code] as never) + (probe.detail ? `（${probe.detail}）` : '');
             setStatus('error');
             setErrorMsg(msg);
             return;
@@ -573,7 +575,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         {status === 'error' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/80">
             <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
-            <span className="text-[14px] font-semibold text-red-400">影像加载失败</span>
+            <span className="text-[14px] font-semibold text-red-400">{t('dicomError.unknown' as never)}</span>
             <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{errorMsg}</span>
           </div>
         )}

@@ -22,15 +22,6 @@ export default function TubeWarmupPage() {
           warmupProgress={warmup.warmupProgress}
         />
       }
-      footerStatus={{
-        label: warmup.status === "warming" ? "RUN" : warmup.status === "completed" ? "OK" : "IDLE",
-        tone:
-          warmup.status === "warming"
-            ? "active"
-            : warmup.status === "completed"
-              ? "success"
-              : "idle",
-      }}
     >
       <WarmupContent {...warmup} />
     </ServiceModeShell>

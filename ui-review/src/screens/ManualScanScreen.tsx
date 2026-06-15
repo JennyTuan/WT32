@@ -67,7 +67,7 @@ export default function ManualScanScreen() {
   const [windowWidth] = useState(400);
 
   return (
-    <ServiceModeShell currentRoute="/mobile/manual-scan" footerStatus={{ label: "IDLE", tone: "idle" }}>
+    <ServiceModeShell currentRoute="/mobile/manual-scan">
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-md border border-[#BFD0E4] bg-[linear-gradient(180deg,#F8FBFF_0%,#EEF3F9_100%)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_22px_rgba(148,163,184,0.12)]">
           <div className="relative min-h-0 flex-1 overflow-hidden rounded-[10px] bg-[#050A19] shadow-[inset_0_0_0_1px_rgba(26,38,66,0.95)]">

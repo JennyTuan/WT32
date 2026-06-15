@@ -9,10 +9,6 @@ export default function HardwareTestPage() {
   return (
     <ServiceModeShell
       currentRoute="/service/hardware-test"
-      footerStatus={{
-        label: hardwareTest.anyRunning ? "ACTIVE" : "IDLE",
-        tone: hardwareTest.anyRunning ? "active" : "idle",
-      }}
     >
       <div className="flex-1 flex flex-col h-full min-h-0">
         <HardwareTestContent

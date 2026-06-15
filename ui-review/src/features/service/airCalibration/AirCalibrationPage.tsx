@@ -25,10 +25,6 @@ export default function AirCalibrationPage() {
           totalCombinations={calibration.totalCombinations}
         />
       }
-      footerStatus={{
-        label: calibration.isCalibrating ? "RUN" : calibration.runStatus === "completed" ? "DONE" : "IDLE",
-        tone: calibration.isCalibrating ? "active" : calibration.runStatus === "completed" ? "success" : "idle",
-      }}
     >
       <AirCalibrationContent
         completedCount={calibration.completedCount}

@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
-import { classifyDicomFetchFailure, type DicomLoadFailure } from "../lib/dicomFetchError";
+import { classifyDicomFetchFailure, translateDicomLoadFailure, type DicomLoadFailure } from "../lib/dicomFetchError";
 import {
     ChevronDown,
     ChevronLeft,
@@ -414,7 +414,7 @@ export function FourDScoutViewport({
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/85">
                     <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
                     <span className="text-[14px] font-semibold text-red-400">{t("scanFlow.imageLoadError")}</span>
-                    <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError?.message ?? t("scanFlow.unknownError")}</span>
+                    <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError ? translateDicomLoadFailure(t as (key: string) => string, loadError) : t("scanFlow.unknownError")}</span>
                 </div>
             )}
             {enableImageTools && (
@@ -703,8 +703,8 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
                     {loadState === "error" && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/85">
                             <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
-                            <span className="text-[14px] font-semibold text-red-400">影像加载失败</span>
-                            <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError?.message ?? "未知错误"}</span>
+                            <span className="text-[14px] font-semibold text-red-400">{t("dicomError.unknown")}</span>
+                            <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError ? translateDicomLoadFailure(t as (key: string) => string, loadError) : t("scanFlow.unknownError")}</span>
                         </div>
                     )}
 

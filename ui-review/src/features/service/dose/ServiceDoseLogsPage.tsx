@@ -328,7 +328,7 @@ export default function ServiceDoseLogsPage() {
   }, [filtered, totalDlp, exceededCount, dateFrom, dateTo, seriesTypeFilter, bodyPartFilter, onlyOverThreshold, searchText, language, t]);
 
   return (
-    <ServiceModeShell currentRoute="/service/dose/logs" footerStatus={{ label: "IDLE", tone: "idle" }}>
+    <ServiceModeShell currentRoute="/service/dose/logs">
       <section className="flex-1 flex flex-col relative overflow-hidden h-full">
         {/* toolbar */}
         <div className="p-4 border-b border-[#E2EBF5]">

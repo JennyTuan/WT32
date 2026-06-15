@@ -126,7 +126,7 @@ export default function ServiceSystemLogPage() {
   }, [filtered, t]);
 
   return (
-    <ServiceModeShell currentRoute="/service/reports/system-log" footerStatus={{ label: "IDLE", tone: "idle" }}>
+    <ServiceModeShell currentRoute="/service/reports/system-log">
       <section className="flex-1 flex flex-col relative overflow-hidden h-full">
         <div className="p-4 border-b border-[#E2EBF5]">
           <div className="flex items-center gap-3 mb-3">

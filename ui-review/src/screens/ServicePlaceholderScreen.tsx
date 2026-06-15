@@ -12,7 +12,7 @@ export default function ServicePlaceholderScreen({
   description,
 }: ServicePlaceholderScreenProps) {
   return (
-    <ServiceModeShell currentRoute={currentRoute} footerStatus={{ label: "IDLE", tone: "idle" }}>
+    <ServiceModeShell currentRoute={currentRoute}>
       <section className="flex h-full items-center justify-center rounded-md border border-[#B0C4DE] bg-white shadow-sm">
         <div className="max-w-[480px] text-center px-10">
           <div className="text-[26px] font-black text-[#31485E]">{title}</div>

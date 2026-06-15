@@ -21,25 +21,11 @@ import { useAuth } from "../../../lib/authContext";
 import { isRouteAllowedInEmergency } from "../../../lib/emergencyAccess";
 import { useI18n } from "../../../lib/i18nContext";
 
-type FooterStatusTone = "idle" | "active" | "success";
-
-type FooterStatus = {
-  label: string;
-  tone: FooterStatusTone;
-};
-
 type ServiceModeShellProps = {
   currentRoute: string;
   currentHeat?: number;
   children: ReactNode;
   overlays?: ReactNode;
-  footerStatus?: FooterStatus;
-};
-
-const getFooterStatusClassName = (tone: FooterStatusTone) => {
-  if (tone === "active") return "bg-[#1E88E5]";
-  if (tone === "success") return "bg-[#43A047]";
-  return "bg-[#607D8B]";
 };
 
 const buildExpandedState = (activeSection?: ServiceModeSection) =>
@@ -53,7 +39,6 @@ export default function ServiceModeShell({
   currentHeat = 60,
   children,
   overlays,
-  footerStatus = { label: "IDLE", tone: "idle" },
 }: ServiceModeShellProps) {
   const navigate = useNavigate();
   const { t } = useI18n();
@@ -245,13 +230,6 @@ export default function ServiceModeShell({
         </button>
         <div className="ml-8 text-[13px] text-[#546E7A] font-medium">
           {t("service.mode")} · {currentSectionLabel} / {currentItemLabel}
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${getFooterStatusClassName(footerStatus.tone)}`}
-          >
-            {footerStatus.label}
-          </div>
         </div>
       </footer>
 

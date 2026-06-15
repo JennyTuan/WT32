@@ -42,7 +42,7 @@ export default function HomeScreen() {
     const navigate = useNavigate();
     const { t } = useI18n();
     const modeRoutes: Record<string, string> = {
-        mobile: '/mobile/manual-scan',
+        mobile: '/mobile',
         routine: '/patients',
         service: '/service/tube-warmup',
     };

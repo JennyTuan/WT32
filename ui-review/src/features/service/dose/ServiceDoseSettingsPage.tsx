@@ -173,7 +173,7 @@ export default function ServiceDoseSettingsPage() {
 
   if (loading || !settings) {
     return (
-      <ServiceModeShell currentRoute="/service/dose/settings" footerStatus={{ label: "IDLE", tone: "idle" }}>
+      <ServiceModeShell currentRoute="/service/dose/settings">
         <section className="flex-1 flex items-center justify-center">
           <div className="text-[14px] text-[#90A4AE]">{error ?? t("service.doseSettings.loading")}</div>
         </section>
@@ -184,7 +184,7 @@ export default function ServiceDoseSettingsPage() {
   const showSaved = !dirty && savedAt && Date.now() - savedAt < 5000;
 
   return (
-    <ServiceModeShell currentRoute="/service/dose/settings" footerStatus={{ label: "IDLE", tone: "idle" }}>
+    <ServiceModeShell currentRoute="/service/dose/settings">
       <section className="flex min-h-0 flex-1 flex-col overflow-y-auto custom-scrollbar">
         <div className="flex items-start justify-between px-5 pt-4 pb-4">
           <div>

@@ -15,17 +15,6 @@ import {
     RefreshCw,
     Play,
     Pause,
-    Sparkles,
-    X,
-    Bone,
-    Brain,
-    Activity,
-    Heart,
-    Eye,
-    Loader2,
-    AlertTriangle,
-    CheckCircle2,
-    ChevronLeft,
 } from "lucide-react";
 import type { ChangeEvent, ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -41,7 +30,6 @@ import {
     type LimbsDicomDemoSeries,
 } from "../lib/limbsDicomDemo";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
-import { apiFetch, buildApiUrl } from "../lib/apiClient";
 import AppHeader from "../components/AppHeader";
 import CornerstoneMPRViewport, {
     type CornerstoneMPRHandle,
@@ -430,8 +418,10 @@ const ViewScreen = () => {
     const { locale, t } = useI18n();
 
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
-    const fourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode }) | null;
+    const fourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode; offlineRecon?: boolean }) | null;
     const isFourDEntry = !!fourDState?.scanResult;
+    // ─── 离线重建模式 (从已完成患者列表进入) ────────────────────────────────────
+    const isOfflineRecon = !!fourDState?.offlineRecon;
 
     // ─── 脑部螺旋 demo 数据切换 ───────────────────────────────────────────────
     // Active only when the workflow protocol ID matches AND this is NOT a 4D entry,
@@ -550,92 +540,6 @@ const ViewScreen = () => {
         count: 320,
     });
 
-    // ─── AI 高级分析 ──────────────────────────────────────────────────────────
-    type AiFeatureKey = "fracture" | "lung-nodule" | "stroke" | "cardiac" | "fundus";
-    type AiAnalysisStage = "idle" | "running" | "done" | "error";
-    const [aiPanelOpen, setAiPanelOpen] = useState(false);
-    const [aiActiveFeature, setAiActiveFeature] = useState<AiFeatureKey | null>(null);
-    const [aiStage, setAiStage] = useState<AiAnalysisStage>("idle");
-    const [aiProgress, setAiProgress] = useState(0);
-    const [aiStageLabel, setAiStageLabel] = useState<string>(() => t("view.ai.stage.start"));
-    const [aiReport, setAiReport] = useState<FractureReport | null>(null);
-    const [aiError, setAiError] = useState<string | null>(null);
-    const aiStreamRef = useRef<EventSource | null>(null);
-    const closeAiStream = useCallback(() => {
-        if (aiStreamRef.current) {
-            aiStreamRef.current.close();
-            aiStreamRef.current = null;
-        }
-    }, []);
-    const startFractureAnalysis = useCallback(async () => {
-        setAiActiveFeature("fracture");
-        setAiStage("running");
-        setAiProgress(0);
-        setAiStageLabel(t("view.ai.stage.submit"));
-        setAiError(null);
-        setAiReport(null);
-        closeAiStream();
-        try {
-            const resp = await apiFetch("/api/ai/fracture/analyze", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    series_id: selectedSeriesId,
-                    body_part: scanSession?.body_part ?? null,
-                }),
-            });
-            if (!resp.ok) throw new Error(`Analyze request failed (${resp.status})`);
-            const { job_id } = await resp.json() as { job_id: string };
-            const es = new EventSource(buildApiUrl(`/api/ai/jobs/${job_id}/stream`), { withCredentials: true });
-            aiStreamRef.current = es;
-            es.onmessage = (ev) => {
-                try {
-                    const snap = JSON.parse(ev.data) as {
-                        status: "queued" | "running" | "done" | "error";
-                        progress: number;
-                        stage: string;
-                        result: FractureReport | null;
-                        error: string | null;
-                    };
-                    setAiProgress(snap.progress);
-                    setAiStageLabel(snap.stage);
-                    if (snap.status === "done" && snap.result) {
-                        setAiReport(snap.result);
-                        setAiStage("done");
-                        es.close();
-                        aiStreamRef.current = null;
-                    } else if (snap.status === "error") {
-                        setAiError(snap.error ?? t("view.ai.stage.inferenceFailed"));
-                        setAiStage("error");
-                        es.close();
-                        aiStreamRef.current = null;
-                    }
-                } catch {
-                    // ignore malformed frames
-                }
-            };
-            es.onerror = () => {
-                setAiError(t("view.ai.stage.serviceFailed"));
-                setAiStage("error");
-                es.close();
-                aiStreamRef.current = null;
-            };
-        } catch (err) {
-            setAiError(err instanceof Error ? err.message : String(err));
-            setAiStage("error");
-        }
-    }, [closeAiStream, selectedSeriesId, scanSession?.body_part, t]);
-    const resetAiPanel = useCallback(() => {
-        closeAiStream();
-        setAiActiveFeature(null);
-        setAiStage("idle");
-        setAiProgress(0);
-        setAiStageLabel(t("view.ai.stage.start"));
-        setAiReport(null);
-        setAiError(null);
-    }, [closeAiStream, t]);
-    useEffect(() => () => { closeAiStream(); }, [closeAiStream]);
-
     const [selectedLayout, setSelectedLayout] = useState<LayoutKey>("four-up");
     const [selectedVolumePreset, setSelectedVolumePreset] = useState<VolumePreset>("CT-Lung");
     // Apply the body-part-derived default volume preset exactly once per scan
@@ -668,6 +572,38 @@ const ViewScreen = () => {
     const [isVoiLutOpen, setIsVoiLutOpen] = useState(false);
     const [isInterpolationOpen, setIsInterpolationOpen] = useState(false);
     const [isVolumeQualityOpen, setIsVolumeQualityOpen] = useState(false);
+
+    // ─── 离线重建参数状态 (仅 isOfflineRecon 模式使用) ──────────────────────────
+    type ReconParams = {
+        thickness: string;
+        spacing: string;
+        kernel: string;
+        fov: string;
+        centerX: string;
+        centerY: string;
+        zStart: string;
+        zEnd: string;
+        matrix: "512" | "1024";
+        metalArtifact: boolean;
+        reconMode: string;
+    };
+    const [reconParams, setReconParams] = useState<ReconParams>({
+        thickness: "",
+        spacing: "",
+        kernel: "",
+        fov: "",
+        centerX: "0",
+        centerY: "0",
+        zStart: "",
+        zEnd: "",
+        matrix: "512",
+        metalArtifact: false,
+        reconMode: "",
+    });
+    type ReconStatus = "idle" | "running" | "done";
+    const [reconStatus, setReconStatus] = useState<ReconStatus>("idle");
+    const [isReconMatrixOpen, setIsReconMatrixOpen] = useState(false);
+
     const currentLayoutSpec = useMemo(
         () => LAYOUT_SPECS[selectedLayout] ?? LAYOUT_SPECS["four-up"],
         [selectedLayout]
@@ -997,12 +933,6 @@ const ViewScreen = () => {
     const isTopogramSeries = selectedSeries.seriesType === "topogram";
     const isFourDLungReconSeries = selectedSeries.seriesType === "4d";
     const totalSlices = selectedSeries.count;
-    // Image URL list for the selected series — passed into AI workstation
-    const selectedSeriesImageUrls = useMemo<string[]>(() => {
-        if (selectedSeries.dicomUrls?.length) return selectedSeries.dicomUrls;
-        return Array.from({ length: selectedSeries.count }, (_, idx) =>
-            getSeriesDicomUrl(idx, selectedSeries.seriesType, isBrainHelicalDemo, selectedSeries));
-    }, [selectedSeries, isBrainHelicalDemo]);
     // Single flex container for both 2D and 3D; CornerstoneMPRViewport does its own 2×2 panel grid internally.
     // (`currentLayoutSpec` retained for backward-compatible dropdown but no longer drives the outer layout —
     //  the Cornerstone MPR implementation doesn't honor per-panel spans anyway.)
@@ -1082,6 +1012,26 @@ const ViewScreen = () => {
             window.cancelAnimationFrame(frameId);
         };
     }, [imageMode, selectedSeriesId]);
+
+    // ─── 离线重建参数同步：当选中序列变化时,用该序列当前值回填表单 ──────────
+    useEffect(() => {
+        if (!isOfflineRecon || !selectedSeries) return;
+        const stripMm = (v?: string) => (v ? v.replace(/\s*mm\s*$/i, "").trim() : "");
+        setReconParams({
+            thickness: stripMm(selectedSeries.thickness),
+            spacing: selectedSeries.seriesType === "helical" ? stripMm(selectedSeries.thickness) : "—",
+            kernel: selectedSeries.kernel && selectedSeries.kernel !== "—" ? selectedSeries.kernel : "",
+            fov: stripMm(selectedSeries.fov),
+            centerX: "0",
+            centerY: "0",
+            zStart: "",
+            zEnd: "",
+            matrix: selectedSeries.matrix === "1024" ? "1024" : "512",
+            metalArtifact: false,
+            reconMode: "",
+        });
+        setReconStatus("idle");
+    }, [isOfflineRecon, selectedSeriesId, selectedSeries]);
 
     useEffect(() => {
         setSelectedPhaseIndex(0);
@@ -1536,7 +1486,9 @@ const ViewScreen = () => {
                     <div className="h-[44px] bg-[#F8FAFC] border-b border-t border-[#EEF2F9] px-3 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                             <SlidersHorizontal size={14} className="text-[#4D94FF]" />
-                            <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">{t("view.params")}</span>
+                            <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">
+                                {isOfflineRecon ? t("view.offlineRecon.title") : t("view.params")}
+                            </span>
                         </div>
                         {!isFourDLungReconSeries && !isTopogramSeries ? (
                             <div className="flex items-center gap-1 rounded-full border border-[#DCE6F2] bg-[#F1F5F9] p-[3px] shadow-sm overflow-hidden">
@@ -1562,6 +1514,23 @@ const ViewScreen = () => {
                     <div className="flex-1 bg-[#F8FAFC] overflow-hidden flex flex-col">
                         <div className="flex-1 p-3 grid grid-cols-2 gap-2 overflow-y-auto">
                             {imageMode === "2D" || isTopogramSeries ? (
+                                isOfflineRecon && !isTopogramSeries ? (
+                                    <OfflineReconPanel
+                                        params={reconParams}
+                                        setParams={setReconParams}
+                                        isHelical={selectedSeries.seriesType === "helical"}
+                                        ww={Math.round(displayWw)}
+                                        wl={Math.round(displayWl)}
+                                        status={reconStatus}
+                                        isMatrixOpen={isReconMatrixOpen}
+                                        setIsMatrixOpen={setIsReconMatrixOpen}
+                                        onApply={() => {
+                                            setReconStatus("running");
+                                            window.setTimeout(() => setReconStatus("done"), 1200);
+                                        }}
+                                        t={t}
+                                    />
+                                ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
                                     <PanelSection title={t("view.display")}>
                                     <div className="rounded-md border border-[#DCE6F2] bg-white px-2.5 py-2 shadow-sm">
@@ -1644,6 +1613,7 @@ const ViewScreen = () => {
                                     />
                                     </PanelSection>
                                 </div>
+                                )
                             ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
                                     {/* Layout Dropdown */}
@@ -2493,26 +2463,7 @@ const ViewScreen = () => {
             </main>
 
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
-                <div className="flex-1">
-                    <button
-                        type="button"
-                        onClick={() => { setAiPanelOpen(true); resetAiPanel(); }}
-                        className="group relative flex items-center gap-3 h-[52px] pl-4 pr-5 rounded-md text-white font-bold shadow-lg active:scale-95 transition-all overflow-hidden"
-                        style={{
-                            background: "linear-gradient(135deg, #6D28D9 0%, #4338CA 45%, #2563EB 100%)",
-                        }}
-                    >
-                        <span className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                              style={{ background: "linear-gradient(135deg, #7C3AED 0%, #4F46E5 45%, #3B82F6 100%)" }} />
-                        <span className="relative flex items-center justify-center w-7 h-7 rounded-full bg-white/15 ring-1 ring-white/30">
-                            <Sparkles size={16} strokeWidth={2.2} />
-                        </span>
-                        <span className="relative flex flex-col items-start leading-tight">
-                            <span className="text-[13px] uppercase tracking-wider">{t("view.ai.button")}</span>
-                            <span className="text-[10px] font-normal text-white/75 normal-case tracking-normal">{t("view.ai.subtitle")}</span>
-                        </span>
-                    </button>
-                </div>
+                <div className="flex-1" />
                 <div className="flex-1" />
                 <div className="flex-1 flex justify-end">
                     <button
@@ -2535,611 +2486,10 @@ const ViewScreen = () => {
                 </div>
             </footer>
 
-            {aiPanelOpen && (
-                <AiAdvancedPanel
-                    activeFeature={aiActiveFeature}
-                    stage={aiStage}
-                    progress={aiProgress}
-                    stageLabel={aiStageLabel}
-                    report={aiReport}
-                    errorMessage={aiError}
-                    bodyPart={scanSession?.body_part || (isLimbsDicomDemo ? "EXTREMITY" : null)}
-                    seriesName={selectedSeries.name}
-                    imageUrls={selectedSeriesImageUrls}
-                    totalSlices={selectedSeries.count}
-                    defaultWw={selectedSeries.defaultWw ?? ww}
-                    defaultWl={selectedSeries.defaultWl ?? wl}
-                    onClose={() => { setAiPanelOpen(false); resetAiPanel(); }}
-                    onStartFracture={startFractureAnalysis}
-                    onBackToMenu={resetAiPanel}
-                />
-            )}
         </div>
     );
 };
 
-// ─── AI 高级分析 弹窗 ────────────────────────────────────────────────────────
-type AiAdvancedPanelProps = {
-    activeFeature: "fracture" | "lung-nodule" | "stroke" | "cardiac" | "fundus" | null;
-    stage: "idle" | "running" | "done" | "error";
-    progress: number;
-    stageLabel: string;
-    report: FractureReport | null;
-    errorMessage: string | null;
-    bodyPart: string | null;
-    seriesName: string;
-    imageUrls: string[];
-    totalSlices: number;
-    defaultWw: number;
-    defaultWl: number;
-    onClose: () => void;
-    onStartFracture: () => void;
-    onBackToMenu: () => void;
-};
-
-const AI_FEATURES: ReadonlyArray<{
-    key: "fracture" | "lung-nodule" | "stroke" | "cardiac" | "fundus";
-    titleKey: TranslationKey;
-    subtitle: string;
-    descKey: TranslationKey;
-    icon: (props: { size?: number }) => ReactNode;
-    accent: string;
-    status: "available" | "coming-soon";
-}> = [
-    {
-        key: "fracture",
-        titleKey: "view.ai.feature.fracture.title",
-        subtitle: "Bone Cortex Signs",
-        descKey: "view.ai.feature.fracture.desc",
-        icon: ({ size = 22 }) => <Bone size={size} />,
-        accent: "from-amber-500 to-orange-600",
-        status: "available",
-    },
-    {
-        key: "lung-nodule",
-        titleKey: "view.ai.feature.lungNodule.title",
-        subtitle: "Pulmonary Image Signs",
-        descKey: "view.ai.feature.lungNodule.desc",
-        icon: ({ size = 22 }) => <Activity size={size} />,
-        accent: "from-cyan-500 to-blue-600",
-        status: "coming-soon",
-    },
-    {
-        key: "stroke",
-        titleKey: "view.ai.feature.stroke.title",
-        subtitle: "Brain Density Signs",
-        descKey: "view.ai.feature.stroke.desc",
-        icon: ({ size = 22 }) => <Brain size={size} />,
-        accent: "from-rose-500 to-pink-600",
-        status: "coming-soon",
-    },
-    {
-        key: "cardiac",
-        titleKey: "view.ai.feature.cardiac.title",
-        subtitle: "Coronary Calcification Signs",
-        descKey: "view.ai.feature.cardiac.desc",
-        icon: ({ size = 22 }) => <Heart size={size} />,
-        accent: "from-red-500 to-rose-600",
-        status: "coming-soon",
-    },
-    {
-        key: "fundus",
-        titleKey: "view.ai.feature.terms.title",
-        subtitle: "Plain-Language Terms",
-        descKey: "view.ai.feature.terms.desc",
-        icon: ({ size = 22 }) => <Eye size={size} />,
-        accent: "from-emerald-500 to-teal-600",
-        status: "coming-soon",
-    },
-];
-
-type FractureFinding = {
-    id: string;
-    site: string;
-    type: string;
-    severity: "high" | "medium" | "info";
-    confidence: number;
-    ao: string;
-    note: string;
-    /** Slice index (1-based percent of series) where bbox is best visible */
-    keySlicePct: number;
-    /** bbox in container percent — coords are in keyPlane's image space */
-    bbox: { x: number; y: number; w: number; h: number };
-    /** Teaching: how a clinician would read this lesion */
-    teaching: string;
-    /** Normal-reference slice for compare mode */
-    comparePct: number;
-    /** MPR plane on which bbox is drawn. Defaults to axial. */
-    keyPlane?: "axial" | "coronal" | "sagittal";
-};
-
-type FractureReport = {
-    findings: FractureFinding[];
-    summary_advice: string;
-    model_version: string;
-    elapsed_ms: number;
-};
-
-const severityStyles = {
-    high: { bg: "bg-red-50", ring: "ring-red-200", text: "text-red-700", dot: "bg-red-500", labelKey: "view.ai.severity.high" },
-    medium: { bg: "bg-amber-50", ring: "ring-amber-200", text: "text-amber-700", dot: "bg-amber-500", labelKey: "view.ai.severity.medium" },
-    info: { bg: "bg-sky-50", ring: "ring-sky-200", text: "text-sky-700", dot: "bg-sky-500", labelKey: "view.ai.severity.info" },
-} as const;
-
-const AiAdvancedPanel = ({
-    activeFeature,
-    stage,
-    progress,
-    stageLabel,
-    report,
-    errorMessage,
-    bodyPart,
-    seriesName,
-    imageUrls,
-    totalSlices,
-    defaultWw,
-    defaultWl,
-    onClose,
-    onStartFracture,
-    onBackToMenu,
-}: AiAdvancedPanelProps) => {
-    const { t } = useI18n();
-    const isFractureFlow = activeFeature === "fracture";
-    const isWorkstation = isFractureFlow && stage === "done" && !!report;
-    const panelShellClass = isWorkstation
-        ? "relative h-full w-full rounded-none bg-[#0B1220] shadow-none overflow-hidden flex flex-col"
-        : "relative w-[880px] max-h-[690px] rounded-2xl bg-white shadow-2xl overflow-hidden flex flex-col";
-
-    return (
-        <div
-            className="absolute inset-0 z-[120] flex items-center justify-center"
-            style={{
-                background: isWorkstation ? "#0B1220" : "rgba(8, 12, 24, 0.55)",
-                backdropFilter: isWorkstation ? "none" : "blur(6px)",
-            }}
-            onClick={onClose}
-        >
-            <div
-                className={panelShellClass}
-                onClick={(e) => e.stopPropagation()}
-            >
-                {!isWorkstation && (
-                <header className="relative px-7 py-5 text-white"
-                    style={{ background: "linear-gradient(135deg, #4338CA 0%, #6D28D9 50%, #2563EB 100%)" }}>
-                    <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-3">
-                            <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/15 ring-1 ring-white/25">
-                                <Sparkles size={22} strokeWidth={2} />
-                            </span>
-                            <div>
-                                <div className="text-[17px] font-bold tracking-wide">{t("view.ai.centerTitle")}</div>
-                                <div className="text-[11px] text-white/75 mt-0.5">
-                                    {t("view.ai.basedOnSeries", { bodyPart: bodyPart || "Lower Extremity" })}
-                                </div>
-                            </div>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 transition flex items-center justify-center ring-1 ring-white/20"
-                            aria-label={t("scanFlow.imageLoad.close")}
-                        >
-                            <X size={18} />
-                        </button>
-                    </div>
-                </header>
-                )}
-
-                {!isFractureFlow && (
-                    <div className="flex-1 overflow-y-auto px-7 py-6">
-                        <div className="text-[12px] text-slate-500 mb-4">
-                            {t("view.ai.menuDescription")}
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            {AI_FEATURES.map((feat) => {
-                                const isAvail = feat.status === "available";
-                                return (
-                                    <button
-                                        key={feat.key}
-                                        type="button"
-                                        disabled={!isAvail}
-                                        onClick={() => isAvail && feat.key === "fracture" && onStartFracture()}
-                                        className={`group relative text-left rounded-xl p-4 border transition-all ${
-                                            isAvail
-                                                ? "border-slate-200 bg-white hover:border-indigo-400 hover:shadow-lg cursor-pointer"
-                                                : "border-slate-200 bg-slate-50 cursor-not-allowed opacity-70"
-                                        }`}
-                                    >
-                                        <div className="flex items-start gap-3">
-                                            <div className={`flex items-center justify-center w-11 h-11 rounded-lg bg-gradient-to-br ${feat.accent} text-white shadow-sm shrink-0`}>
-                                                {feat.icon({ size: 22 })}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[14px] font-bold text-slate-800">{t(feat.titleKey)}</span>
-                                                    {isAvail ? (
-                                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">{t("view.ai.available")}</span>
-                                                    ) : (
-                                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">{t("view.ai.comingSoon")}</span>
-                                                    )}
-                                                </div>
-                                                <div className="text-[10px] uppercase tracking-wider text-slate-400 mt-0.5">{feat.subtitle}</div>
-                                                <p className="text-[11.5px] text-slate-600 mt-2 leading-relaxed">{t(feat.descKey)}</p>
-                                            </div>
-                                        </div>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                        <div className="mt-5 px-4 py-3 rounded-lg bg-amber-50 ring-1 ring-amber-200 flex gap-2.5 items-start">
-                            <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />
-                            <div className="text-[11px] text-amber-800 leading-relaxed">
-                                <b>{t("view.ai.safetyTitle")}</b>{t("view.ai.safetyBody")}
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {isFractureFlow && stage === "running" && (
-                    <div className="flex-1 flex flex-col items-center justify-center px-10 py-12">
-                        <div className="relative w-20 h-20 mb-5">
-                            <Loader2 size={80} className="animate-spin text-indigo-500" strokeWidth={1.6} />
-                            <Bone size={28} className="absolute inset-0 m-auto text-indigo-600" />
-                        </div>
-                        <div className="text-[15px] font-bold text-slate-800">
-                            {t("view.ai.runningTitle", { feature: t("view.ai.feature.fracture.title") })}
-                        </div>
-                        <div className="text-[11.5px] text-slate-500 mt-1">{t("view.ai.runningSubtitle")}</div>
-                        <div className="w-full max-w-[420px] mt-6">
-                            <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                                <div className="h-full bg-gradient-to-r from-indigo-500 to-blue-500 transition-[width] duration-100"
-                                     style={{ width: `${progress}%` }} />
-                            </div>
-                            <div className="mt-2 flex justify-between text-[10px] text-slate-500">
-                                <span>{stageLabel}</span>
-                                <span>{progress}%</span>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {isFractureFlow && stage === "error" && (
-                    <div className="flex-1 flex flex-col items-center justify-center px-10 py-12">
-                        <div className="w-14 h-14 mb-4 rounded-full bg-red-50 ring-1 ring-red-200 flex items-center justify-center">
-                            <AlertTriangle size={26} className="text-red-600" />
-                        </div>
-                        <div className="text-[14px] font-bold text-slate-800">{t("view.ai.errorTitle")}</div>
-                        <div className="text-[11.5px] text-slate-500 mt-1 max-w-[420px] text-center">
-                            {errorMessage ?? t("view.ai.errorFallback")}
-                        </div>
-                        <div className="flex gap-2 mt-5">
-                            <button onClick={onBackToMenu}
-                                    className="px-3 h-8 rounded-md text-[12px] text-slate-600 bg-white border border-slate-200 hover:border-slate-300">
-                                {t("view.ai.back")}
-                            </button>
-                            <button onClick={onStartFracture}
-                                    className="px-3 h-8 rounded-md text-[12px] font-bold text-white bg-indigo-600 hover:bg-indigo-700">
-                                {t("view.ai.retry")}
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {isWorkstation && report && (
-                    <FractureWorkstation
-                        report={report}
-                        seriesName={seriesName}
-                        imageUrls={imageUrls}
-                        totalSlices={totalSlices}
-                        defaultWw={defaultWw}
-                        defaultWl={defaultWl}
-                        onClose={onClose}
-                        onBackToMenu={onBackToMenu}
-                    />
-                )}
-            </div>
-        </div>
-    );
-};
-
-type FractureWorkstationProps = {
-    report: FractureReport;
-    seriesName: string;
-    imageUrls: string[];
-    totalSlices: number;
-    defaultWw: number;
-    defaultWl: number;
-    onClose: () => void;
-    onBackToMenu: () => void;
-};
-
-const FractureWorkstation = ({
-    report,
-    seriesName,
-    imageUrls,
-    totalSlices,
-    defaultWw,
-    defaultWl,
-    onClose,
-    onBackToMenu,
-}: FractureWorkstationProps) => {
-    const { t } = useI18n();
-    const findings = report.findings;
-    const [activeFindingId, setActiveFindingId] = useState<string>(findings[0]?.id ?? "");
-    const [showCompare, setShowCompare] = useState(false);
-    const [viewportStatus, setViewportStatus] = useState<"loading" | "ready" | "error">("loading");
-    const activeFinding = findings.find((f) => f.id === activeFindingId) ?? findings[0];
-    const plane: "axial" | "coronal" | "sagittal" = activeFinding.keyPlane ?? "axial";
-    // Axial slice index derived from keySlicePct — the only panel the viewport
-    // accepts programmatic slice control for. Non-axial keyPlanes can't be
-    // driven here, so we anchor the bbox to whatever slice the panel is on
-    // when the finding activates (see anchorSlice below).
-    const axialNavTarget = useMemo(() => {
-        const pct = showCompare ? activeFinding.comparePct : activeFinding.keySlicePct;
-        return Math.min(totalSlices - 1, Math.max(0, Math.round(pct * (totalSlices - 1))));
-    }, [activeFinding, showCompare, totalSlices]);
-    const [panelSlices, setPanelSlices] = useState<Partial<Record<"axial" | "coronal" | "sagittal", number>>>({});
-    // Pinned slice on the bbox's keyPlane for the active finding. Reset when
-    // the finding or compare flips so a new anchor gets captured.
-    const [anchorSlice, setAnchorSlice] = useState<number | null>(null);
-    useEffect(() => {
-        setAnchorSlice(null);
-    }, [activeFindingId, showCompare]);
-    const handleSliceChange = (panel: "axial" | "coronal" | "sagittal", nextSliceIndex: number) => {
-        setPanelSlices((prev) => (prev[panel] === nextSliceIndex ? prev : { ...prev, [panel]: nextSliceIndex }));
-        if (panel === plane) {
-            setAnchorSlice((prev) => (prev !== null ? prev : (plane === "axial" ? axialNavTarget : nextSliceIndex)));
-        }
-    };
-    const displayedSliceIndex = panelSlices.axial ?? axialNavTarget;
-    const showFindingOverlay = !showCompare
-        && viewportStatus === "ready"
-        && anchorSlice !== null
-        && panelSlices[plane] === anchorSlice;
-    return (
-        <div className="flex h-full w-full min-h-0">
-            {/* LEFT: image workstation */}
-            <div className="flex-1 min-w-0 flex flex-col bg-[#0B1220]">
-                <div className="flex items-center justify-between px-4 h-10 border-b border-white/5 shrink-0">
-                    <div className="flex items-center gap-3 min-w-0">
-                        <button
-                            type="button"
-                            onClick={onBackToMenu}
-                            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 text-[11px] font-bold text-slate-200 shadow-sm transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white active:bg-white/15"
-                        >
-                            <ChevronLeft size={14} strokeWidth={2.4} />
-                            <span>{t("view.ai.back")}</span>
-                        </button>
-                        <span className="text-white font-bold text-[12px]">{t("view.ai.feature.fracture.title")}</span>
-                        <span className="text-slate-500 text-[11px] truncate">· {seriesName}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                            onClick={() => setShowCompare((v) => !v)}
-                            className={`px-2.5 h-6 rounded text-[10px] font-bold transition ring-1 ${
-                                showCompare
-                                    ? "bg-emerald-500/20 text-emerald-300 ring-emerald-400/40"
-                                    : "bg-white/5 text-slate-300 ring-white/10 hover:bg-white/10"
-                            }`}
-                        >
-                            {showCompare ? t("view.ai.compareOn") : t("view.ai.normalCompare")}
-                        </button>
-                        <button
-                            onClick={onClose}
-                            className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 text-slate-300 flex items-center justify-center"
-                        >
-                            <X size={13} />
-                        </button>
-                    </div>
-                </div>
-
-                <div className="flex-1 relative p-2 min-h-0">
-                    <div className="absolute inset-2 overflow-hidden bg-black">
-                        <CornerstoneMPRViewport
-                            imageUrls={imageUrls}
-                            currentSliceIndex={axialNavTarget}
-                            onSliceIndexChange={handleSliceChange}
-                            activeTool="window"
-                            windowCenter={defaultWl}
-                            windowWidth={defaultWw}
-                            renderMode="MPR"
-                            layoutMode="four-up"
-                            volumePanelMode="volume3d"
-                            volumePreset="CT-Bone"
-                            volumeSampleDistanceMultiplier={0.75}
-                            showCrosshairs={false}
-                            onStatusChange={setViewportStatus}
-                            className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden bg-black"
-                        />
-                        {viewportStatus === "error" && (
-                            <div className="absolute bottom-3 left-3 right-3 px-2 py-1.5 rounded bg-red-950/80 ring-1 ring-red-500/40 text-[10px] text-red-200 z-30">
-                                {t("view.ai.imageLoadFailed")}
-                            </div>
-                        )}
-                        {/* BBox overlay positioned over the finding's keyPlane quadrant */}
-                        {showFindingOverlay && (() => {
-                            const plane = activeFinding.keyPlane ?? "axial";
-                            const quadrant =
-                                plane === "axial" ? "top-0 left-0"
-                                    : plane === "coronal" ? "top-0 left-1/2"
-                                        : "top-1/2 left-0";
-                            const stroke =
-                                activeFinding.severity === "high" ? "#EF4444"
-                                    : activeFinding.severity === "medium" ? "#F59E0B"
-                                        : "#38BDF8";
-                            const labelBg =
-                                activeFinding.severity === "high" ? "#DC2626"
-                                    : activeFinding.severity === "medium" ? "#D97706"
-                                        : "#0284C7";
-                            return (
-                                <div className={`pointer-events-none absolute ${quadrant} w-1/2 h-1/2 z-20`}>
-                                    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                                        <rect
-                                            x={activeFinding.bbox.x}
-                                            y={activeFinding.bbox.y}
-                                            width={activeFinding.bbox.w}
-                                            height={activeFinding.bbox.h}
-                                            fill="none"
-                                            stroke={stroke}
-                                            strokeWidth="0.5"
-                                            vectorEffect="non-scaling-stroke"
-                                        />
-                                    </svg>
-                                    <div
-                                        className="absolute"
-                                        style={{
-                                            left: `${Math.min(activeFinding.bbox.x + activeFinding.bbox.w, 75)}%`,
-                                            top: `${Math.max(activeFinding.bbox.y - 1, 0)}%`,
-                                            transform: "translate(6px, -2px)",
-                                        }}
-                                    >
-                                        <div
-                                            className="px-1.5 py-0.5 rounded text-[9px] font-bold text-white shadow-lg whitespace-nowrap"
-                                            style={{ background: labelBg }}
-                                        >
-                                            {activeFinding.site}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })()}
-                        {/* Compact HUD: slice and window values */}
-                        <div className="pointer-events-none absolute top-1.5 right-1.5 z-20 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[9px] text-white shadow-sm">
-                            S {displayedSliceIndex + 1}/{totalSlices} · WW {defaultWw} / WL {defaultWl}
-                        </div>
-                        {showCompare && (
-                            <div className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded bg-emerald-600/90 text-[10px] text-white font-bold z-20">
-                                {t("view.ai.normalCompareSlice")}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Teaching strip — scrollable for long text, capped height */}
-                <div className="shrink-0 px-5 py-2.5 border-t border-white/5 bg-[#0F1A2E] max-h-[110px] overflow-y-auto">
-                    <div className="flex items-start gap-2">
-                        <span className="mt-0.5 inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-black text-white shrink-0"
-                              style={{
-                                  background:
-                                      activeFinding.severity === "high" ? "#DC2626"
-                                          : activeFinding.severity === "medium" ? "#D97706"
-                                              : "#0284C7",
-                              }}>
-                            i
-                        </span>
-                        <div className="flex-1 min-w-0">
-                            <div className="text-[10.5px] font-bold text-white mb-0.5">
-                                {t("view.ai.teachingTitle")}
-                            </div>
-                            <p className="text-[11px] text-slate-300 leading-snug">
-                                {showCompare
-                                    ? t("view.ai.compareTeaching")
-                                    : activeFinding.teaching}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* RIGHT: findings + report */}
-            <div className="w-[400px] shrink-0 border-l border-slate-200 bg-white flex flex-col min-h-0">
-                <div className="px-4 h-10 border-b border-slate-100 flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-1.5 text-[10.5px] text-emerald-700 font-medium">
-                        <CheckCircle2 size={13} />
-                        {t("view.ai.workstationDone", {
-                            seconds: (report.elapsed_ms / 1000).toFixed(1),
-                            version: report.model_version,
-                        })}
-                    </div>
-                </div>
-                <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
-                    <div className="grid grid-cols-3 gap-1.5 mb-3">
-                        <SummaryStat label={t("view.ai.statDetected")} value={String(findings.length)} tone="primary" />
-                        <SummaryStat label={t("view.ai.statAttention")} value={String(findings.filter((f) => f.severity === "high").length)} tone="danger" />
-                        <SummaryStat
-                            label={t("view.ai.statAverage")}
-                            value={`${findings.length > 0
-                                ? Math.round((findings.reduce((s, f) => s + f.confidence, 0) / findings.length) * 100)
-                                : 0}%`}
-                            tone="ok"
-                        />
-                    </div>
-
-                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">{t("view.ai.findingList")}</div>
-                    <div className="space-y-1.5">
-                        {findings.map((f, idx) => {
-                            const s = severityStyles[f.severity];
-                            const active = f.id === activeFindingId;
-                            const plane = f.keyPlane ?? "axial";
-                            return (
-                                <button
-                                    key={f.id}
-                                    type="button"
-                                    onClick={() => { setActiveFindingId(f.id); setShowCompare(false); }}
-                                    className={`w-full text-left flex gap-2 p-2 rounded-md ring-1 transition ${
-                                        active
-                                            ? `${s.bg} ${s.ring} shadow-sm`
-                                            : "bg-white ring-slate-200 hover:ring-slate-300"
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-center w-5 h-5 rounded bg-white shadow-sm shrink-0 text-[9px] font-black text-slate-700">
-                                        #{idx + 1}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                            <span className="text-[11.5px] font-bold text-slate-800">{f.site}</span>
-                                            <span className={`flex items-center gap-1 text-[9px] font-bold ${s.text}`}>
-                                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${s.dot}`} />
-                                                {t(s.labelKey)}
-                                            </span>
-                                        </div>
-                                        <p className="text-[10px] text-slate-600 mt-0.5">{f.type}</p>
-                                        <div className="flex gap-2.5 mt-0.5 text-[9.5px] text-slate-500">
-                                            <span>{t("view.ai.confidence")} <b className="text-slate-700">{Math.round(f.confidence * 100)}%</b></span>
-                                            <span className="uppercase tracking-wider">{plane}</span>
-                                            {f.ao !== "—" && <span>{f.ao}</span>}
-                                        </div>
-                                    </div>
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    <div className="mt-3 p-2.5 rounded-md ring-1 ring-slate-200 bg-slate-50">
-                        <div className="text-[10px] font-bold text-slate-700 mb-0.5">{t("view.ai.findingDetail")}</div>
-                        <p className="text-[10.5px] text-slate-600 leading-relaxed">{activeFinding.note}</p>
-                    </div>
-
-                    <div className="mt-2 p-2.5 rounded-md bg-indigo-50 ring-1 ring-indigo-200">
-                        <div className="text-[10px] font-bold text-indigo-800 mb-0.5">{t("view.ai.signsSummary")}</div>
-                        <p className="text-[10.5px] text-indigo-900/85 leading-relaxed">
-                            {report.summary_advice}
-                        </p>
-                    </div>
-                </div>
-                <div className="shrink-0 px-4 h-11 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-                    <div className="text-[9.5px] text-slate-500">{t("view.ai.footerNote")}</div>
-                    <button className="px-3 h-7 rounded text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow">
-                        {t("view.ai.generateReport")}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const SummaryStat = ({ label, value, tone }: { label: string; value: string; tone: "primary" | "danger" | "ok" }) => {
-    const styles = {
-        primary: "from-indigo-500 to-blue-500",
-        danger: "from-rose-500 to-red-600",
-        ok: "from-emerald-500 to-teal-600",
-    }[tone];
-    return (
-        <div className={`rounded-lg p-3 bg-gradient-to-br ${styles} text-white shadow-sm`}>
-            <div className="text-[10px] uppercase tracking-wider opacity-85">{label}</div>
-            <div className="text-[22px] font-black leading-tight mt-0.5">{value}</div>
-        </div>
-    );
-};
 
 const Param = ({ label, value }: { label: string; value: string }) => (
     <div className="p-2 bg-white border border-[#B0C4DE]/30 rounded-md flex flex-col items-center justify-center shadow-sm min-h-[56px]">
@@ -3148,12 +2498,252 @@ const Param = ({ label, value }: { label: string; value: string }) => (
     </div>
 );
 
-const PanelSection = ({ title, children }: { title: string; children: ReactNode }) => (
+const PanelSection = ({ title, children }: { title?: string; children: ReactNode }) => (
     <div className="flex flex-col gap-2 border-t border-[#DCE6F2] pt-2 first:border-t-0 first:pt-0">
-        <div className="text-[10px] font-black uppercase tracking-wide text-[#78909C]">{title}</div>
+        {title ? <div className="text-[10px] font-black uppercase tracking-wide text-[#78909C]">{title}</div> : null}
         {children}
     </div>
 );
+
+type OfflineReconParams = {
+    thickness: string;
+    spacing: string;
+    kernel: string;
+    fov: string;
+    centerX: string;
+    centerY: string;
+    zStart: string;
+    zEnd: string;
+    matrix: "512" | "1024";
+    metalArtifact: boolean;
+    reconMode: string;
+};
+
+type OfflineReconPanelProps = {
+    params: OfflineReconParams;
+    setParams: (updater: (prev: OfflineReconParams) => OfflineReconParams) => void;
+    isHelical: boolean;
+    ww: number;
+    wl: number;
+    status: "idle" | "running" | "done";
+    isMatrixOpen: boolean;
+    setIsMatrixOpen: (value: boolean) => void;
+    onApply: () => void;
+    t: (key: TranslationKey, values?: Record<string, string | number>) => string;
+};
+
+const RECON_INPUT_CLASS =
+    "h-[28px] w-full bg-white border border-[#DCE6F2] rounded-md px-2 text-[12px] font-medium text-[#37474F] focus:outline-none focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/20 disabled:bg-[#F1F5F9] disabled:text-[#94A3B8] disabled:cursor-not-allowed";
+const RECON_FIELD_LABEL_CLASS = "text-[10px] font-bold text-[#546E7A]";
+
+const OfflineReconField = ({
+    label,
+    children,
+    hint,
+}: {
+    label: string;
+    children: ReactNode;
+    hint?: string;
+}) => (
+    <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between">
+            <span className={RECON_FIELD_LABEL_CLASS}>{label}</span>
+            {hint ? <span className="text-[9px] text-[#94A3B8] italic">{hint}</span> : null}
+        </div>
+        {children}
+    </div>
+);
+
+const OfflineReconPanel = ({
+    params,
+    setParams,
+    isHelical,
+    ww,
+    wl,
+    status,
+    isMatrixOpen,
+    setIsMatrixOpen,
+    onApply,
+    t,
+}: OfflineReconPanelProps) => {
+    const update = <K extends keyof OfflineReconParams>(key: K, value: OfflineReconParams[K]) =>
+        setParams((prev) => ({ ...prev, [key]: value }));
+
+    return (
+        <div className="col-span-2 flex flex-col gap-2">
+            <PanelSection>
+                <OfflineReconField label={t("view.offlineRecon.thickness")}>
+                    <input
+                        type="text"
+                        value={params.thickness}
+                        onChange={(e) => update("thickness", e.target.value)}
+                        className={RECON_INPUT_CLASS}
+                    />
+                </OfflineReconField>
+
+                <OfflineReconField
+                    label={t("view.offlineRecon.spacing")}
+                    hint={isHelical ? undefined : t("view.offlineRecon.spacingHelicalOnly")}
+                >
+                    <input
+                        type="text"
+                        value={params.spacing}
+                        onChange={(e) => update("spacing", e.target.value)}
+                        disabled={!isHelical}
+                        className={RECON_INPUT_CLASS}
+                    />
+                </OfflineReconField>
+
+                <OfflineReconField label={t("view.offlineRecon.kernel")}>
+                    <input
+                        type="text"
+                        value={params.kernel}
+                        onChange={(e) => update("kernel", e.target.value)}
+                        className={RECON_INPUT_CLASS}
+                    />
+                </OfflineReconField>
+
+                <OfflineReconField label={t("view.offlineRecon.fov")}>
+                    <input
+                        type="text"
+                        value={params.fov}
+                        onChange={(e) => update("fov", e.target.value)}
+                        className={RECON_INPUT_CLASS}
+                    />
+                </OfflineReconField>
+
+                <OfflineReconField label={t("view.offlineRecon.center")}>
+                    <div className="grid grid-cols-2 gap-2">
+                        <input
+                            type="text"
+                            value={params.centerX}
+                            onChange={(e) => update("centerX", e.target.value)}
+                            placeholder="X"
+                            className={RECON_INPUT_CLASS}
+                        />
+                        <input
+                            type="text"
+                            value={params.centerY}
+                            onChange={(e) => update("centerY", e.target.value)}
+                            placeholder="Y"
+                            className={RECON_INPUT_CLASS}
+                        />
+                    </div>
+                </OfflineReconField>
+
+                <div className="grid grid-cols-2 gap-2">
+                    <OfflineReconField label={t("view.offlineRecon.zStart")}>
+                        <input
+                            type="text"
+                            value={params.zStart}
+                            onChange={(e) => update("zStart", e.target.value)}
+                            className={RECON_INPUT_CLASS}
+                        />
+                    </OfflineReconField>
+                    <OfflineReconField label={t("view.offlineRecon.zEnd")}>
+                        <input
+                            type="text"
+                            value={params.zEnd}
+                            onChange={(e) => update("zEnd", e.target.value)}
+                            className={RECON_INPUT_CLASS}
+                        />
+                    </OfflineReconField>
+                </div>
+
+                <OfflineReconField label={t("view.offlineRecon.matrix")}>
+                    <div className="relative">
+                        <div
+                            onClick={() => setIsMatrixOpen(!isMatrixOpen)}
+                            className={`${RECON_INPUT_CLASS} flex items-center justify-between cursor-pointer`}
+                        >
+                            <span>{params.matrix}</span>
+                            <ChevronDown
+                                size={13}
+                                className={`text-[#94A3B8] transition-transform ${isMatrixOpen ? "rotate-180 text-[#4D94FF]" : ""}`}
+                            />
+                        </div>
+                        {isMatrixOpen && (
+                            <div className="absolute top-[calc(100%+3px)] left-0 right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                {(["512", "1024"] as const).map((opt) => (
+                                    <div
+                                        key={opt}
+                                        onClick={() => {
+                                            update("matrix", opt);
+                                            setIsMatrixOpen(false);
+                                        }}
+                                        className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${
+                                            params.matrix === opt
+                                                ? "bg-[#EBF3FF] text-[#4D94FF]"
+                                                : "text-[#37474F] hover:bg-[#F5F5F5]"
+                                        }`}
+                                    >
+                                        {opt}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </OfflineReconField>
+
+                <label className="flex items-center justify-between gap-2 cursor-pointer pt-1">
+                    <span className={RECON_FIELD_LABEL_CLASS}>{t("view.offlineRecon.metalArtifact")}</span>
+                    <input
+                        type="checkbox"
+                        checked={params.metalArtifact}
+                        onChange={(e) => update("metalArtifact", e.target.checked)}
+                        className="h-4 w-4 accent-[#4D94FF]"
+                    />
+                </label>
+
+                <OfflineReconField label={t("view.offlineRecon.mode")}>
+                    <input
+                        type="text"
+                        value={params.reconMode}
+                        onChange={(e) => update("reconMode", e.target.value)}
+                        placeholder={t("view.offlineRecon.modeTbd")}
+                        className={RECON_INPUT_CLASS}
+                    />
+                </OfflineReconField>
+
+                <OfflineReconField label={t("view.offlineRecon.windowValue")}>
+                    <div className="rounded-md border border-[#DCE6F2] bg-white px-2.5 py-2 shadow-sm">
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-baseline gap-1.5">
+                                <span className="text-[9px] font-black uppercase text-[#90A4AE]">WW</span>
+                                <span className="text-[13px] font-black tabular-nums text-[#37474F]">{ww}</span>
+                            </div>
+                            <div className="h-5 w-px bg-[#E2E8F0]" />
+                            <div className="flex items-baseline gap-1.5">
+                                <span className="text-[9px] font-black uppercase text-[#90A4AE]">WL</span>
+                                <span className="text-[13px] font-black tabular-nums text-[#37474F]">{wl}</span>
+                            </div>
+                        </div>
+                    </div>
+                </OfflineReconField>
+
+                <button
+                    type="button"
+                    onClick={onApply}
+                    disabled={status === "running"}
+                    className={`mt-2 h-[36px] rounded-md font-bold text-[12px] uppercase tracking-wider transition-all shadow-sm active:scale-[0.98] ${
+                        status === "running"
+                            ? "bg-[#CBD5E1] text-white cursor-not-allowed"
+                            : status === "done"
+                            ? "bg-[#43A047] text-white hover:bg-[#388E3C]"
+                            : "bg-[#4D94FF] text-white hover:bg-blue-600"
+                    }`}
+                    title={t("view.offlineRecon.applyHint")}
+                >
+                    {status === "running"
+                        ? t("view.offlineRecon.applyRunning")
+                        : status === "done"
+                        ? t("view.offlineRecon.applyDone")
+                        : t("view.offlineRecon.apply")}
+                </button>
+            </PanelSection>
+        </div>
+    );
+};
 
 const VIEW_CONTROL_LABEL_CLASS = "w-[72px] shrink-0 text-[10px] font-semibold leading-[1.1] text-[#546E7A]";
 
