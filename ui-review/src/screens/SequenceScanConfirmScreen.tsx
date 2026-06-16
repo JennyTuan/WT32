@@ -355,15 +355,18 @@ export function TomographicScoutViewport({
         const loadTopogramViaCornerstone = async (
             override: Extract<TomographicScoutSeriesOverride, { kind: "topogram" }>,
         ): Promise<{ output: Uint8ClampedArray; meta: ProjectionMeta; hu: ScoutHuData }> => {
-            // We deliberately bypass cornerstone here and parse the DICOM
-            // ourselves. The cornerstone path was finicky about whether
-            // RescaleSlope/Intercept were exposed on the image object versus
-            // the modalityLutModule (varies by loader version), which made
-            // datasets like the LIHVR limbs topogram (RescaleIntercept=-1024)
-            // render solid black under a HU-domain WW/WL. Reading the header
-            // directly is unambiguous and matches how loadAxialStackViaCornerstone
-            // handles its slices.
-            const response = await fetch(override.url);
+            // Pixel data goes through cornerstone so compressed transfer
+            // syntaxes (e.g. JPEG Lossless on the Head Stroke Demo topogram)
+            // are properly decoded. Header fields (RescaleSlope/Intercept,
+            // PixelSpacing, WW/WL, Photometric) are parsed directly from the
+            // DICOM bytes — cornerstone has historically been inconsistent
+            // about exposing RescaleIntercept (the LIHVR limbs topogram with
+            // intercept=-1024 rendered solid black via cornerstone alone).
+            await initCornerstone();
+            const [response, image] = await Promise.all([
+                fetch(override.url),
+                imageLoader.loadAndCacheImage(buildWadoImageId(override.url)),
+            ]);
             if (!response.ok) {
                 throw new Error(`Failed to fetch topogram (${response.status})`);
             }
@@ -371,10 +374,8 @@ export function TomographicScoutViewport({
             const byteArray = new Uint8Array(arrayBuffer);
             const dataSet = dicomParser.parseDicom(byteArray);
 
-            const rows = dataSet.uint16("x00280010") ?? 0;
-            const cols = dataSet.uint16("x00280011") ?? 0;
-            const bitsAllocated = dataSet.uint16("x00280100") ?? 16;
-            const pixelRepresentation = dataSet.uint16("x00280103") ?? 0;
+            const rows = (dataSet.uint16("x00280010") ?? 0) || image.rows;
+            const cols = (dataSet.uint16("x00280011") ?? 0) || image.columns;
             const intercept = Number(dataSet.string("x00281052") ?? "0");
             const slope = Number(dataSet.string("x00281053") ?? "1");
             const pixelSpacingPair = (dataSet.string("x00280030") ?? "1\\1").split("\\").map(Number);
@@ -384,20 +385,10 @@ export function TomographicScoutViewport({
             const invert = photometric === "MONOCHROME1";
             const dicomWw = Number(dataSet.string("x00281051") ?? NaN);
             const dicomWl = Number(dataSet.string("x00281050") ?? NaN);
-            const pixelDataElement = dataSet.elements.x7fe00010;
-            if (!pixelDataElement || rows === 0 || cols === 0) {
+            if (rows === 0 || cols === 0) {
                 throw new Error("Topogram DICOM is missing pixel data");
             }
-            const pixelBuffer = byteArray.buffer.slice(
-                pixelDataElement.dataOffset,
-                pixelDataElement.dataOffset + pixelDataElement.length,
-            );
-            const pixelData =
-                bitsAllocated === 16
-                    ? pixelRepresentation === 1
-                        ? new Int16Array(pixelBuffer)
-                        : new Uint16Array(pixelBuffer)
-                    : new Uint8Array(pixelBuffer);
+            const pixelData = image.getPixelData() as Int16Array | Uint16Array | Uint8Array;
 
             // Apply rescale to get HU, then choose a window. Override wins; if
             // none provided, prefer the DICOM-embedded window over the lung-CT
