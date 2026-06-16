@@ -219,7 +219,9 @@
       "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://github.com\" -UseBasicParsing -TimeoutSec 10; \"OK status=$\\($r.StatusCode\\)\" } catch { \"FAIL $\\($_.Exception.Message\\)\" })",
       "PowerShell($env:FILTER_BRANCH_SQUELCH_WARNING = \"1\"; git filter-branch -f --index-filter \"git rm --cached --ignore-unmatch backend/data/data.7z\" -- '@{u}..HEAD' 2>&1 | Select-Object -Last 20)",
       "Bash(python tmp_gen_acceptance.py)",
-      "Bash(python tmp_fix2.py)"
+      "Bash(python tmp_fix2.py)",
+      "Bash(git --no-pager diff ui-review/src/lib/i18n.ts)",
+      "Bash(git --no-pager diff --stat ui-review/src/)"
     ]
   }
 }

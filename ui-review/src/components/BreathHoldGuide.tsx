@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { useI18n } from "../lib/i18nContext";
+
 export type BreathHoldStage = "idle" | "countdown" | "holding" | "stable" | "scanning" | "release" | "aborted";
 
 /**
@@ -109,6 +111,7 @@ export default function BreathHoldGuide({
     onStableHold,
     onAbort,
 }: BreathHoldGuideProps) {
+    const { t } = useI18n();
     const { stage, countdown, holdElapsed } = useBreathHoldStateMachine({
         armed,
         timeoutSeconds,
@@ -126,18 +129,19 @@ export default function BreathHoldGuide({
 
     const big =
         stage === "countdown" ? String(countdown) :
-        stage === "holding" ? "屏住呼吸" :
-        stage === "stable" ? "保持" :
-        stage === "scanning" ? "扫描中" :
-        stage === "aborted" ? "请正常呼吸" :
-        "等待";
+        stage === "holding" ? t("scanFlow.dibh.holdBreath") :
+        stage === "stable" ? t("scanFlow.dibh.maintain") :
+        stage === "scanning" ? t("scanFlow.dibh.scanning") :
+        stage === "aborted" ? t("scanFlow.dibh.breatheNormally") :
+        t("scanFlow.dibh.idle");
 
+    const elapsedStr = holdElapsed.toFixed(1);
     const sub =
-        stage === "countdown" ? "深吸气准备" :
-        stage === "holding" ? `${holdElapsed.toFixed(1)} s · 等待稳定` :
-        stage === "stable" ? `${holdElapsed.toFixed(1)} s · 稳定，开始触发` :
-        stage === "scanning" ? `${holdElapsed.toFixed(1)} s` :
-        stage === "aborted" ? "屏息超时已中止" :
+        stage === "countdown" ? t("scanFlow.dibh.countdownLabel") :
+        stage === "holding" ? t("scanFlow.dibh.holdingSub", { seconds: elapsedStr }) :
+        stage === "stable" ? t("scanFlow.dibh.stableSub", { seconds: elapsedStr }) :
+        stage === "scanning" ? `${elapsedStr} s` :
+        stage === "aborted" ? t("scanFlow.dibh.timeoutAborted") :
         "";
 
     return (
@@ -163,11 +167,11 @@ export default function BreathHoldGuide({
                 {big}
             </div>
             <div style={{ flex: 1, fontSize: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>深吸气屏息引导</div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{t("scanFlow.dibh.guideTitle")}</div>
                 <div style={{ color: "#94a3b8", marginBottom: 6 }}>{sub || "—"}</div>
                 <div style={{ display: "flex", gap: 12, color: "#94a3b8" }}>
-                    <span>超时 {timeoutSeconds}s</span>
-                    <span>振幅容差 ±{amplitudeToleranceMm}mm</span>
+                    <span>{t("scanFlow.dibh.timeoutLabel", { timeout: timeoutSeconds })}</span>
+                    <span>{t("scanFlow.dibh.toleranceLabel", { tolerance: amplitudeToleranceMm })}</span>
                 </div>
                 <div style={{ marginTop: 8, height: 4, background: "#1e293b", borderRadius: 2, overflow: "hidden" }}>
                     <div style={{

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useI18n } from "../lib/i18nContext";
+
 export type GatingBreathingMode = "breath_hold_inspiration" | "breath_hold_expiration" | "free_breathing";
 export type StabilityState = "stable" | "unstable" | "warming_up";
 export type TriggerDirection = "rising" | "falling";
@@ -37,8 +39,8 @@ interface GatingWaveformPanelProps {
     /** Optional bed-position strip rendered as a footer inside the same panel. */
     bedStrip?: { total: number; completed?: number };
     /**
-     * Bed-coverage strip footer (helical version of 4D-CT's 床位进度 bar).
-     * Divides the scan length into discrete `床位` segments of `bedTravelMm`
+     * Bed-coverage strip footer (helical version of 4D-CT's bed-progress bar).
+     * Divides the scan length into discrete bed segments of `bedTravelMm`
      * (default 19.2 mm, matching the 4D / gated-axial system convention) and
      * renders each as a numbered cell. All cells appear in the "planned"
      * state on the confirm screen since no scan is in progress.
@@ -151,13 +153,14 @@ export default function GatingWaveformPanel({
     readOnly = false,
     bare = false,
 }: GatingWaveformPanelProps) {
+    const { t } = useI18n();
     const svgRef = useRef<SVGSVGElement | null>(null);
     const [tick, setTick] = useState(0);
     const [draggingThreshold, setDraggingThreshold] = useState(false);
     const prevValueRef = useRef<number>(0);
     const prevCrossingTickRef = useRef<number>(-9999);
     // Snapshot the sample index where the exposure gate opened so we can
-    // render the "曝光中" band across the waveform as time advances. Reset
+    // render the "exposing" band across the waveform as time advances. Reset
     // when `exposing` flips back to false.
     const exposureStartTickRef = useRef<number | null>(null);
     // Measure the SVG's actual rendered pixel size so the viewBox matches 1:1
@@ -296,7 +299,7 @@ export default function GatingWaveformPanel({
 
     const stepX = width / (SAMPLES - 1);
     const stabilityColor = stability === "stable" ? "#22c55e" : stability === "unstable" ? "#ef4444" : "#facc15";
-    const stabilityText = stability === "stable" ? "稳定" : stability === "unstable" ? "不稳定" : "采样中…";
+    const stabilityText = stability === "stable" ? t("scanFlow.gating.stable") : stability === "unstable" ? t("scanFlow.gating.unstable") : t("scanFlow.gating.sampling");
 
     const thresholdY = yToPx(threshold);
     const yPlus1 = yToPx(1);
@@ -327,9 +330,9 @@ export default function GatingWaveformPanel({
         <div style={containerStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: headerMarginBottom }}>
                 <div style={{ fontSize: headerTitleSize, fontWeight: 600 }}>
-                    呼吸波形
+                    {t("scanFlow.gating.waveformTitle")}
                     <span style={{ marginLeft: 8, color: "#94a3b8", fontWeight: 400 }}>
-                        {mode === "free_breathing" ? "自由呼吸 · 阈值穿越触发" : "屏息监测"}
+                        {mode === "free_breathing" ? t("scanFlow.gating.freeBreathingHint") : t("scanFlow.gating.breathHoldMonitoring")}
                     </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -349,8 +352,8 @@ export default function GatingWaveformPanel({
                 <line x1={0} x2={width} y1={yPlus1} y2={yPlus1} stroke="#475569" strokeWidth={1} strokeDasharray="3 3" />
                 <line x1={0} x2={width} y1={yZero} y2={yZero} stroke="#1e293b" strokeWidth={1} />
                 <line x1={0} x2={width} y1={yMinus1} y2={yMinus1} stroke="#475569" strokeWidth={1} strokeDasharray="3 3" />
-                <text x={4} y={yPlus1 - 2} fill="#64748b" fontSize={9}>+1 平均最大吸气</text>
-                <text x={4} y={yMinus1 + 10} fill="#64748b" fontSize={9}>-1 平均最大呼气</text>
+                <text x={4} y={yPlus1 - 2} fill="#64748b" fontSize={9}>{t("scanFlow.gating.refMaxInspiration")}</text>
+                <text x={4} y={yMinus1 + 10} fill="#64748b" fontSize={9}>{t("scanFlow.gating.refMaxExpiration")}</text>
 
                 {/* DIBH hold tolerance band */}
                 {holdTolerance && (() => {
@@ -367,7 +370,7 @@ export default function GatingWaveformPanel({
                                 x={width - 6} y={yTop - 3}
                                 fill="#22c55e" fontSize={9} fontWeight={600} textAnchor="end"
                             >
-                                屏息容差带 {holdTolerance.label ?? `±${holdTolerance.halfWidth.toFixed(1)}`}
+                                {t("scanFlow.gating.holdToleranceBand", { label: holdTolerance.label ?? `±${holdTolerance.halfWidth.toFixed(1)}` })}
                             </text>
                         </g>
                     );
@@ -469,7 +472,7 @@ export default function GatingWaveformPanel({
                                 x={x0 + 6} y={16}
                                 fill="#22c55e" fontSize={9} fontWeight={700}
                             >
-                                Gate · 曝光中
+                                {t("scanFlow.gating.gateExposing")}
                             </text>
                         </g>
                     );
@@ -481,7 +484,7 @@ export default function GatingWaveformPanel({
                         <line x1={0} x2={width} y1={thresholdY} y2={thresholdY}
                             stroke="#22c55e" strokeWidth={2} />
                         <text x={width - 60} y={thresholdY - 4} fill="#22c55e" fontSize={10} fontWeight={600}>
-                            阈值 {threshold.toFixed(1)} ↑{direction === "rising" ? "上行" : "下行"}
+                            {t("scanFlow.gating.thresholdValue", { value: threshold.toFixed(1) })} ↑{direction === "rising" ? t("scanFlow.gating.up") : t("scanFlow.gating.down")}
                         </text>
                         {/* drag hit area */}
                         <rect x={0} y={thresholdY - 8} width={width} height={16} fill="transparent"
@@ -522,17 +525,17 @@ export default function GatingWaveformPanel({
 
             {mode === "free_breathing" && !readOnly && (
                 <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
-                    <span style={{ color: "#94a3b8" }}>阈值</span>
+                    <span style={{ color: "#94a3b8" }}>{t("scanFlow.gating.threshold")}</span>
                     <input
                         type="number" min={-2} max={2} step={0.1} value={threshold}
                         onChange={(e) => onThresholdChange?.(Number(e.target.value))}
                         style={{ width: 64, padding: "2px 6px", background: "#0b1220", color: "#e2e8f0", border: "1px solid #334155", borderRadius: 4 }}
                     />
-                    <span style={{ color: "#94a3b8" }}>(归一化 −2 到 +2)</span>
+                    <span style={{ color: "#94a3b8" }}>{t("scanFlow.gating.normalizedRange")}</span>
                     <div style={{ flex: 1 }} />
-                    <span style={{ color: "#94a3b8" }}>方向</span>
+                    <span style={{ color: "#94a3b8" }}>{t("scanFlow.gating.direction")}</span>
                     <span style={{ color: "#e2e8f0", fontWeight: 600 }}>
-                        {direction === "rising" ? "上行穿越" : "下行穿越"}
+                        {direction === "rising" ? t("scanFlow.triggerDirection.rising") : t("scanFlow.triggerDirection.falling")}
                     </span>
                 </div>
             )}
@@ -550,7 +553,7 @@ export default function GatingWaveformPanel({
                         marginTop: 10, paddingTop: 8, borderTop: "1px solid #1e293b",
                     }}>
                         <span style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", whiteSpace: "nowrap" }}>
-                            床位进度
+                            {t("scanFlow.gating.bedProgress")}
                         </span>
                         {startLabel && (
                             <span style={{
@@ -600,7 +603,7 @@ export default function GatingWaveformPanel({
                         <span style={{
                             color: "#e2e8f0", fontFamily: "monospace", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
                         }}>
-                            {bedCount} 床位
+                            {t("scanFlow.gating.bedCount", { count: bedCount })}
                         </span>
                     </div>
                 );
@@ -612,7 +615,7 @@ export default function GatingWaveformPanel({
                     marginTop: 10, paddingTop: 8, borderTop: "1px solid #1e293b",
                 }}>
                     <span style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", whiteSpace: "nowrap" }}>
-                        床位示意
+                        {t("scanFlow.gating.bedIndicator")}
                     </span>
                     <div style={{ display: "flex", flex: 1, gap: 2, alignItems: "flex-end", height: 12 }}>
                         {Array.from({ length: bedStrip.total }).map((_, i) => {
@@ -620,7 +623,7 @@ export default function GatingWaveformPanel({
                             return (
                                 <div
                                     key={i}
-                                    title={`床位 ${i + 1}`}
+                                    title={t("scanFlow.gating.bedTooltip", { bed: i + 1 })}
                                     style={{
                                         flex: 1, height: 6, borderRadius: 2,
                                         background: done ? "#3b82f6" : "#1e293b",

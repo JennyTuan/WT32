@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useI18n } from "../lib/i18nContext";
+
 type TriggerDirection = "rising" | "falling";
 type StabilityState = "stable" | "unstable" | "warming_up";
 
@@ -115,6 +117,7 @@ export default function GatingMonitorPanel({
     showScanMarkers = true,
     readOnly = false,
 }: GatingMonitorPanelProps) {
+    const { t } = useI18n();
     const svgRef = useRef<SVGSVGElement | null>(null);
     const [tick, setTick] = useState(0);
     const [draggingThreshold, setDraggingThreshold] = useState(false);
@@ -217,12 +220,12 @@ export default function GatingMonitorPanel({
     const handlePointerUp = () => setDraggingThreshold(false);
 
     const stabilityLabel = waitingForStableBreath
-        ? "呼吸不稳"
+        ? t("scanFlow.gating.unstableLong")
         : stability === "stable"
-            ? "稳定"
+            ? t("scanFlow.gating.stable")
             : stability === "unstable"
-                ? "呼吸不稳"
-                : "采样中…";
+                ? t("scanFlow.gating.unstableLong")
+                : t("scanFlow.gating.sampling");
     const stabilityOk = !waitingForStableBreath && stability === "stable";
 
     return (
@@ -285,7 +288,7 @@ export default function GatingMonitorPanel({
                             fontSize="10"
                             fontWeight="800"
                         >
-                            阈值 {threshold.toFixed(1)} · {direction === "rising" ? "↑ 上行触发" : "↓ 下行触发"}
+                            {t("scanFlow.gating.thresholdValue", { value: threshold.toFixed(1) })} · {direction === "rising" ? t("scanFlow.gating.upTrigger") : t("scanFlow.gating.downTrigger")}
                         </text>
 
                         {/* waveform fill + path */}
@@ -389,7 +392,7 @@ export default function GatingMonitorPanel({
             {bedStrip && bedStrip.total > 0 && (
                 <div className="border-t border-[#EEF2F9] bg-white px-3 py-1.5 flex items-center gap-2 shrink-0">
                     <span className="text-[8px] font-black uppercase tracking-[0.18em] text-[#475569] opacity-80 shrink-0">
-                        床位进度
+                        {t("scanFlow.gating.bedProgress")}
                     </span>
                     <div className="flex flex-1 gap-1 items-end h-3">
                         {Array.from({ length: bedStrip.total }).map((_, i) => {
@@ -401,12 +404,18 @@ export default function GatingMonitorPanel({
                                 ? scanActive && bedStrip.currentIndex === bedNumber
                                 : scanActive && !done && i === (bedStrip.completed ?? 0);
                             const pendingSupplemental = stripHasExplicitState && pendingIndexSet.has(bedNumber) && !done && !current;
-                            const currentTitle = waitingForStableBreath ? " · 等待呼吸稳定" : " · 补采中";
+                            const tooltipKey = done
+                                ? "scanFlow.gating.bedTooltipDone"
+                                : current
+                                    ? (waitingForStableBreath ? "scanFlow.gating.bedTooltipWaiting" : "scanFlow.gating.bedTooltipExtra")
+                                    : pendingSupplemental
+                                        ? "scanFlow.gating.bedTooltipPending"
+                                        : "scanFlow.gating.bedTooltip";
                             return (
                                 <div
                                     key={i}
                                     className="flex-1 flex flex-col gap-0.5"
-                                    title={`床位 ${bedNumber}${done ? " · 已扫" : current ? currentTitle : pendingSupplemental ? " · 待补采" : ""}`}
+                                    title={t(tooltipKey, { bed: bedNumber })}
                                 >
                                     <div
                                         className={`h-1.5 w-full rounded-sm ${

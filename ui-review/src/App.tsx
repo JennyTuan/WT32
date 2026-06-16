@@ -33,6 +33,7 @@ import BatteryManagementScreen from "./screens/BatteryManagementScreen";
 import DiskManagementScreen from "./screens/DiskManagementScreen";
 import PerformanceEvaluationScreen from "./screens/PerformanceEvaluationScreen";
 import ServicePlaceholderScreen from "./screens/ServicePlaceholderScreen";
+import RuntimeStatsPage from "./features/service/runtimeStats/RuntimeStatsPage";
 import QAReportPage from "./features/service/qaReport/QAReportPage";
 import ServiceSystemLogPage from "./features/service/reports/ServiceSystemLogPage";
 import ServiceAuditLogPage from "./features/service/reports/ServiceAuditLogPage";
@@ -166,7 +167,7 @@ export default function App() {
               <Route path="/service/settings/organization-info" element={<OrganizationInfoPage />} />
               <Route path="/service/reports/qa-report" element={<QAReportPage />} />
               <Route path="/service/reports/system-log" element={<ServiceSystemLogPage />} />
-              <Route path="/service/reports/runtime-stats" element={<ServicePlaceholderScreen currentRoute="/service/reports/runtime-stats" title={t("service.item.runtimeStats")} description={t("service.placeholder.runtimeStats.description")} />} />
+              <Route path="/service/reports/runtime-stats" element={<RuntimeStatsPage />} />
               <Route path="/service/reports/audit-log" element={<ServiceAuditLogPage />} />
               <Route path="/service/dose/settings" element={<ServiceDoseSettingsPage />} />
               <Route path="/service/dose/logs" element={<ServiceDoseLogsPage />} />

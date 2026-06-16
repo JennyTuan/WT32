@@ -2,6 +2,8 @@ import { AlertTriangle, ShieldAlert } from "lucide-react";
 
 import type { ThresholdAction } from "../lib/doseSettingsApi";
 import type { ThresholdMatch } from "../lib/doseThreshold";
+import { useI18n } from "../lib/i18nContext";
+import type { TranslationKey } from "../lib/i18n";
 
 type Props = {
   open: boolean;
@@ -25,6 +27,7 @@ export default function ThresholdGuardModal({
   onContinue,
   onCancel,
 }: Props) {
+  const { t } = useI18n();
   if (!open || !match.drl) return null;
 
   const isRequireConfirm = action === "require_confirm";
@@ -35,19 +38,28 @@ export default function ThresholdGuardModal({
         bg: "bg-[#FFEBEE]",
         text: "text-[#C62828]",
         button: "bg-[#C62828] hover:bg-[#B71C1C]",
-        title: "扫描剂量将超过参考阈值，请确认风险",
+        title: t("scanFlow.thresholdGuard.titleRequire"),
         Icon: ShieldAlert,
-        continueLabel: "确认风险并继续",
+        continueLabel: t("scanFlow.thresholdGuard.continueRequire"),
       }
     : {
         ring: "border-[#F9A825]",
         bg: "bg-[#FFF8E1]",
         text: "text-[#E65100]",
         button: "bg-[#F9A825] hover:bg-[#F57F17]",
-        title: "扫描剂量将达到或超过参考阈值",
+        title: t("scanFlow.thresholdGuard.titleWarn"),
         Icon: AlertTriangle,
-        continueLabel: "知悉风险并继续",
+        continueLabel: t("scanFlow.thresholdGuard.continueWarn"),
       };
+
+  const ageGroupKey = (a: string): TranslationKey | null => {
+    if (a === "adult") return "service.doseSettings.age.adult";
+    if (a === "pediatric" || a === "child") return "service.doseSettings.age.pediatric";
+    if (a === "infant") return "service.doseSettings.age.infant";
+    return null;
+  };
+  const ageKey = ageGroupKey(match.drl.age_group);
+  const ageLabel = ageKey ? t(ageKey) : match.drl.age_group;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40">
@@ -60,9 +72,9 @@ export default function ThresholdGuardModal({
         </div>
         <div className="px-5 py-4 text-[13px] text-[#37474F] space-y-3">
           <div>
-            匹配阈值：
+            {t("scanFlow.thresholdGuard.matchLabel")}
             <span className="font-bold">
-              {match.drl.body_part} / {ageGroupLabel(match.drl.age_group)}
+              {match.drl.body_part} / {ageLabel}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -72,7 +84,7 @@ export default function ThresholdGuardModal({
                 <span className={match.ctdiExceeded ? "text-[#C62828] font-bold" : ""}>
                   {fmt(ctdiVol)}
                 </span>
-                <span className="text-[11px] text-[#90A4AE]">/ 阈值 {fmt(match.drl.ctdi_ref)}</span>
+                <span className="text-[11px] text-[#90A4AE]">{t("scanFlow.thresholdGuard.refValue", { value: fmt(match.drl.ctdi_ref) })}</span>
               </div>
             </div>
             <div className="border border-[#E2EBF5] rounded-lg p-3">
@@ -81,13 +93,13 @@ export default function ThresholdGuardModal({
                 <span className={match.dlpExceeded ? "text-[#C62828] font-bold" : ""}>
                   {fmt(dlp)}
                 </span>
-                <span className="text-[11px] text-[#90A4AE]">/ 阈值 {fmt(match.drl.dlp_ref)}</span>
+                <span className="text-[11px] text-[#90A4AE]">{t("scanFlow.thresholdGuard.refValue", { value: fmt(match.drl.dlp_ref) })}</span>
               </div>
             </div>
           </div>
           {isRequireConfirm && (
             <div className="text-[12px] text-[#C62828] leading-relaxed">
-              系统已配置为「强制二次确认」。请确认本次扫描确有必要后再继续。
+              {t("scanFlow.thresholdGuard.confirmExplain")}
             </div>
           )}
         </div>
@@ -96,7 +108,7 @@ export default function ThresholdGuardModal({
             onClick={onCancel}
             className="px-4 h-9 border border-[#D6E2EF] rounded-lg text-[13px] font-bold text-[#37474F] hover:bg-[#F5F8FC]"
           >
-            返回参数调整
+            {t("scanFlow.thresholdGuard.back")}
           </button>
           <button
             onClick={onContinue}
@@ -109,10 +121,3 @@ export default function ThresholdGuardModal({
     </div>
   );
 }
-
-const ageGroupLabel = (a: string): string => {
-  if (a === "adult") return "成人";
-  if (a === "pediatric" || a === "child") return "儿童";
-  if (a === "infant") return "婴幼儿";
-  return a;
-};

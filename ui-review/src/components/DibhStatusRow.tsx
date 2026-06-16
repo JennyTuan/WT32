@@ -1,4 +1,5 @@
 import type { BreathHoldStage } from "./BreathHoldGuide";
+import { useI18n } from "../lib/i18nContext";
 
 /**
  * Compact breath-hold status indicator. Two layout modes:
@@ -26,6 +27,7 @@ export default function DibhStatusRow({
     amplitudeToleranceMm?: number;
     vertical?: boolean;
 }) {
+    const { t } = useI18n();
     const ringColor =
         stage === "stable" || stage === "scanning" ? "#22c55e" :
         stage === "holding" ? "#facc15" :
@@ -33,12 +35,12 @@ export default function DibhStatusRow({
         "#38bdf8";
 
     const label =
-        stage === "countdown" ? "深吸气准备" :
-        stage === "holding" ? "屏住呼吸 · 等待稳定" :
-        stage === "stable" ? "屏息稳定，触发曝光" :
-        stage === "scanning" ? "门控曝光中" :
-        stage === "aborted" ? "屏息超时" :
-        "等待物理按键";
+        stage === "countdown" ? t("scanFlow.dibh.countdownLabel") :
+        stage === "holding" ? t("scanFlow.dibh.statusHolding") :
+        stage === "stable" ? t("scanFlow.dibh.statusStable") :
+        stage === "scanning" ? t("scanFlow.dibh.statusGatedExposing") :
+        stage === "aborted" ? t("scanFlow.dibh.statusTimeout") :
+        t("scanFlow.live.waitingPhysical");
 
     const progressPct = Math.min(100, (holdElapsedSec / Math.max(timeoutSec, 0.001)) * 100);
     const showCountdown = stage === "countdown";
@@ -73,10 +75,10 @@ export default function DibhStatusRow({
                     <div className="mt-1 text-[10px] leading-tight text-slate-400">
                         {showElapsed
                             ? `${holdElapsedSec.toFixed(1)} / ${timeoutSec.toFixed(0)} s`
-                            : `超时 ${timeoutSec.toFixed(0)} s`}
+                            : t("scanFlow.dibh.timeoutShort", { timeout: timeoutSec.toFixed(0) })}
                     </div>
                     <div className="text-[10px] leading-tight text-slate-400">
-                        容差 ±{amplitudeToleranceMm.toFixed(1)} mm
+                        {t("scanFlow.dibh.toleranceShort", { tolerance: amplitudeToleranceMm.toFixed(1) })}
                     </div>
                 </div>
             </div>
@@ -103,8 +105,8 @@ export default function DibhStatusRow({
                 <div className="text-[12px] font-bold" style={{ color: ringColor }}>{label}</div>
                 <div className="text-[10px] text-slate-400">
                     {showElapsed
-                        ? `${holdElapsedSec.toFixed(1)} s · 超时 ${timeoutSec}s · 容差 ±${amplitudeToleranceMm.toFixed(1)} mm`
-                        : `超时 ${timeoutSec}s · 容差 ±${amplitudeToleranceMm.toFixed(1)} mm`}
+                        ? t("scanFlow.dibh.statusInline", { elapsed: holdElapsedSec.toFixed(1), timeout: timeoutSec, tolerance: amplitudeToleranceMm.toFixed(1) })
+                        : t("scanFlow.dibh.statusInlineNoElapsed", { timeout: timeoutSec, tolerance: amplitudeToleranceMm.toFixed(1) })}
                 </div>
             </div>
             <div className="w-[140px] shrink-0">
