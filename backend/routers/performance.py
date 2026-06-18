@@ -26,6 +26,7 @@ from . import logs as logs_router
 router = APIRouter(prefix="/performance", tags=["performance"])
 
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
+PREFERRED_DATASET_IDS = ("MTF",)
 
 
 def _classify_dicom_failure(path: Path, exc: Exception) -> tuple[str, str]:
@@ -44,18 +45,37 @@ def _classify_dicom_failure(path: Path, exc: Exception) -> tuple[str, str]:
 
 # ---------- Dataset discovery ----------
 
+def _series_dir_for_entry(entry: Path) -> Optional[Path]:
+    """Return the folder that contains DICOM files for a dataset entry."""
+    dicom_dir = entry / "DICOM"
+    if dicom_dir.is_dir():
+        return dicom_dir
+    if entry.is_dir():
+        return entry
+    return None
+
+
+def _dataset_sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
+    preferred = {name.casefold(): index for index, name in enumerate(PREFERRED_DATASET_IDS)}
+    dataset_id = str(item.get("id", ""))
+    key = dataset_id.casefold()
+    if key in preferred:
+        return (0, preferred[key], key)
+    return (1, len(preferred), key)
+
+
 def _list_datasets() -> list[dict[str, Any]]:
-    """Find candidate phantom datasets under backend/data/<id>/DICOM."""
+    """Find candidate phantom datasets under backend/data/<id>/DICOM or backend/data/<id>."""
     items: list[dict[str, Any]] = []
     if not DATA_ROOT.exists():
         return items
     for entry in sorted(DATA_ROOT.iterdir()):
         if not entry.is_dir():
             continue
-        dicom_dir = entry / "DICOM"
-        if not dicom_dir.exists():
+        series_dir = _series_dir_for_entry(entry)
+        if series_dir is None:
             continue
-        files = [f for f in dicom_dir.iterdir() if f.is_file()]
+        files = [f for f in series_dir.iterdir() if f.is_file()]
         if not files:
             continue
         items.append({
@@ -63,13 +83,14 @@ def _list_datasets() -> list[dict[str, Any]]:
             "name": entry.name,
             "slice_count": len(files),
         })
-    return items
+    return sorted(items, key=_dataset_sort_key)
 
 
 def _dataset_dir(dataset_id: str) -> Path:
     safe = dataset_id.strip().replace("..", "").replace("/", "").replace("\\", "")
-    d = DATA_ROOT / safe / "DICOM"
-    if not d.exists():
+    entry = DATA_ROOT / safe
+    d = _series_dir_for_entry(entry)
+    if d is None or not any(f.is_file() for f in d.iterdir()):
         raise HTTPException(status_code=404, detail="Dataset not found")
     return d
 
