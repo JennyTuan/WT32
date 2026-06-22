@@ -221,7 +221,9 @@
       "Bash(python tmp_gen_acceptance.py)",
       "Bash(python tmp_fix2.py)",
       "Bash(git --no-pager diff ui-review/src/lib/i18n.ts)",
-      "Bash(git --no-pager diff --stat ui-review/src/)"
+      "Bash(git --no-pager diff --stat ui-review/src/)",
+      "Bash(python -c \"import sys; sys.path.insert\\(0,'.'\\); from scripts import extract_text\")",
+      "Bash(python _build_terms.py)"
     ]
   }
 }
