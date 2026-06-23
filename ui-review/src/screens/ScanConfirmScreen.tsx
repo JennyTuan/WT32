@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
 import {
@@ -25,9 +25,12 @@ import {
     clearSelectedScanSessionId,
     fetchSelectedScanSession,
     loadSelectedScanSessionId,
+    updateSelectedScanSessionTopogramParam,
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { isHeadDualScoutWorkflow, mergeDualScoutPlanSequences } from "../lib/headDualScoutDemo";
+import { estimateDose } from "../lib/doseEstimate";
 import AppHeader from "../components/AppHeader";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
@@ -427,11 +430,20 @@ const ScanConfirmScreen = ({
     const { t } = useI18n();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
+    const isHeadDualScoutFlow = useMemo(() => isHeadDualScoutWorkflow(workflowPlans), [workflowPlans]);
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [bedMode, setBedMode] = useState<"in" | "out">("in");
     const [patientPosition, setPatientPosition] = useState("HFS");
     const [activeParamTab, setActiveParamTab] = useState<"main" | "extra">("main");
+    const [dualScoutApAngle, setDualScoutApAngle] = useState<number>(0);
+    const [dualScoutLatAngle, setDualScoutLatAngle] = useState<number>(90);
+    const [editingDualAngle, setEditingDualAngle] = useState<"ap" | "lat" | null>(null);
+    const [dualScoutMa, setDualScoutMa] = useState<number | null>(null);
+    const [dualScoutKv, setDualScoutKv] = useState<number | null>(null);
+    const [dualScoutScanLength, setDualScoutScanLength] = useState<number | null>(null);
+    const [editingDualField, setEditingDualField] = useState<"ma" | "kv" | "scanLength" | null>(null);
+    const dualScoutSeedRef = useRef<{ refMa: number; refKv: number; refLength: number; refCtdi: number | null } | null>(null);
 
     // Data structure with sequences at the same level
     const [groups, setGroups] = useState<ProtocolGroup[]>([
@@ -470,16 +482,19 @@ const ScanConfirmScreen = ({
             ];
         }
 
-        return workflowPlans.map((plan) => ({
-            id: `group-${plan.id}`,
-            name: plan.title,
-            sequences: plan.sequences.map((sequence) => ({
-                id: `group-${plan.id}-seq-${sequence.id}`,
-                name: sequence.name,
-                type: sequence.type,
-                steps: buildSequenceSteps(sequence.type, isFourDScoutWorkflow, t),
-            })),
-        }));
+        return workflowPlans.map((plan) => {
+            const effectivePlan = mergeDualScoutPlanSequences(plan);
+            return {
+                id: `group-${plan.id}`,
+                name: plan.title,
+                sequences: effectivePlan.sequences.map((sequence) => ({
+                    id: `group-${plan.id}-seq-${sequence.id}`,
+                    name: sequence.name,
+                    type: sequence.type,
+                    steps: buildSequenceSteps(sequence.type, isFourDScoutWorkflow, t),
+                })),
+            };
+        });
     }, [isFourDScoutWorkflow, t, workflowPlans]);
 
     useEffect(() => {
@@ -527,6 +542,66 @@ const ScanConfirmScreen = ({
             cancelled = true;
         };
     }, []);
+
+    const dualScoutTopogramIds = useMemo(() => {
+        if (!isHeadDualScoutFlow || !scanSession) return null;
+        const topos = scanSession.series
+            .filter((s) => s.series_type === "topogram" && s.topogram_param)
+            .map((s) => s.topogram_param!);
+        if (topos.length === 0) return null;
+        return {
+            apId: topos[0].id,
+            latId: topos[1]?.id ?? null,
+            apAngle: topos[0].tube_angle,
+            latAngle: topos[1]?.tube_angle ?? 90,
+            ma: topos[0].ma,
+            kv: topos[0].kv,
+            scanLength: topos[0].scan_length,
+            ctdiVol: topos[0].ctdi_vol ?? null,
+        };
+    }, [isHeadDualScoutFlow, scanSession]);
+
+    // Seed editable dual-scout fields from session once it loads.
+    useEffect(() => {
+        if (!dualScoutTopogramIds) return;
+        dualScoutSeedRef.current = {
+            refMa: dualScoutTopogramIds.ma,
+            refKv: dualScoutTopogramIds.kv,
+            refLength: dualScoutTopogramIds.scanLength,
+            refCtdi: dualScoutTopogramIds.ctdiVol,
+        };
+        setDualScoutMa((prev) => prev ?? dualScoutTopogramIds.ma);
+        setDualScoutKv((prev) => prev ?? dualScoutTopogramIds.kv);
+        setDualScoutScanLength((prev) => prev ?? dualScoutTopogramIds.scanLength);
+        setDualScoutApAngle((prev) => (prev === 0 && dualScoutTopogramIds.apAngle !== 0 ? dualScoutTopogramIds.apAngle : prev));
+        setDualScoutLatAngle((prev) => (prev === 90 && dualScoutTopogramIds.latAngle !== 90 ? dualScoutTopogramIds.latAngle : prev));
+    }, [dualScoutTopogramIds]);
+
+    const dualScoutComputedDose = useMemo(() => {
+        if (!isHeadDualScoutFlow || !dualScoutSeedRef.current || dualScoutMa == null || dualScoutKv == null || dualScoutScanLength == null) {
+            return null;
+        }
+        const seed = dualScoutSeedRef.current;
+        return estimateDose({
+            current: { ma: dualScoutMa, kv: dualScoutKv, scan_length: dualScoutScanLength },
+            reference: { ma: seed.refMa, kv: seed.refKv, scan_length: seed.refLength, ctdi_vol: seed.refCtdi },
+        });
+    }, [isHeadDualScoutFlow, dualScoutMa, dualScoutKv, dualScoutScanLength]);
+
+    const persistDualScoutPatch = useCallback(
+        (patch: Partial<{ ma: number; kv: number; scan_length: number; tube_angle: number }>, target: "shared" | "ap" | "lat") => {
+            if (!dualScoutTopogramIds) return;
+            const writes: Promise<unknown>[] = [];
+            if (target !== "lat") {
+                writes.push(updateSelectedScanSessionTopogramParam(dualScoutTopogramIds.apId, patch));
+            }
+            if (target !== "ap" && dualScoutTopogramIds.latId != null) {
+                writes.push(updateSelectedScanSessionTopogramParam(dualScoutTopogramIds.latId, patch));
+            }
+            Promise.all(writes).catch((error) => console.error("Failed to persist dual scout param.", error));
+        },
+        [dualScoutTopogramIds],
+    );
 
     useEffect(() => {
         let isMounted = true;
@@ -1205,43 +1280,143 @@ const ScanConfirmScreen = ({
                                         </div>
                                     </label>
 
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.scanLength")}</span>
-                                        <span className="text-[13px] font-black text-[#B0BEC5] mt-[1px]">{scoutDisplayParams.scanLength}</span>
-                                    </div>
+                                    {(["scanLength", "ma", "kv"] as const).map((field) => {
+                                        const isDual = isHeadDualScoutFlow;
+                                        const labelMap = { scanLength: t("scanFlow.scanLength"), ma: "mA", kv: "KV" };
+                                        const dualValueMap = {
+                                            scanLength: dualScoutScanLength,
+                                            ma: dualScoutMa,
+                                            kv: dualScoutKv,
+                                        };
+                                        const dualSetterMap = {
+                                            scanLength: setDualScoutScanLength,
+                                            ma: setDualScoutMa,
+                                            kv: setDualScoutKv,
+                                        };
+                                        const fallbackMap = {
+                                            scanLength: scoutDisplayParams.scanLength,
+                                            ma: scoutDisplayParams.mA,
+                                            kv: scoutDisplayParams.kV,
+                                        };
+                                        const persistKeyMap = {
+                                            scanLength: "scan_length" as const,
+                                            ma: "ma" as const,
+                                            kv: "kv" as const,
+                                        };
+                                        const dualValue = dualValueMap[field];
+                                        const setDualValue = dualSetterMap[field];
+                                        const isEditing = isDual && editingDualField === field;
+                                        const editable = isDual && !readOnlyMode;
+                                        return (
+                                            <div
+                                                key={field}
+                                                onClick={() => editable && setEditingDualField(field)}
+                                                className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm ${editable ? "group hover:border-[#4D94FF] cursor-pointer" : ""} ${isEditing ? "border-[#4D94FF] bg-[#EAF3FF]" : ""}`}
+                                            >
+                                                <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{labelMap[field]}</span>
+                                                <div className="flex items-center gap-1 mt-[1px]">
+                                                    {isDual ? (
+                                                        isEditing ? (
+                                                            <input
+                                                                autoFocus
+                                                                type="number"
+                                                                value={dualValue ?? ""}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                onChange={(e) => {
+                                                                    const v = Number(e.target.value);
+                                                                    if (Number.isFinite(v)) setDualValue(v);
+                                                                }}
+                                                                onBlur={() => {
+                                                                    setEditingDualField(null);
+                                                                    if (dualValue != null) persistDualScoutPatch({ [persistKeyMap[field]]: dualValue }, "shared");
+                                                                }}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === "Enter" || e.key === "Escape") (e.currentTarget as HTMLInputElement).blur();
+                                                                }}
+                                                                className="w-[44px] text-[13px] font-black text-[#37474F] bg-transparent outline-none text-center"
+                                                            />
+                                                        ) : (
+                                                            <>
+                                                                <span className="text-[13px] font-black text-[#37474F]">{dualValue ?? "--"}</span>
+                                                                <ChevronDown size={9} className="text-[#90A4AE] group-hover:text-[#4D94FF]" />
+                                                            </>
+                                                        )
+                                                    ) : (
+                                                        <>
+                                                            <span className={`text-[13px] font-black ${field === "scanLength" ? "text-[#B0BEC5]" : "text-[#37474F]"}`}>{fallbackMap[field]}</span>
+                                                            {field !== "scanLength" && <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />}
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
 
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">mA</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{scoutDisplayParams.mA}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                    {isHeadDualScoutFlow ? (
+                                        <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
+                                            <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.flatScanAngle")}</span>
+                                            <div className="flex items-center gap-1 mt-[1px]">
+                                                {(["ap", "lat"] as const).map((side, idx) => {
+                                                    const value = side === "ap" ? dualScoutApAngle : dualScoutLatAngle;
+                                                    const setValue = side === "ap" ? setDualScoutApAngle : setDualScoutLatAngle;
+                                                    const isEditing = editingDualAngle === side;
+                                                    return (
+                                                        <div key={side} className="flex items-center">
+                                                            {idx > 0 && <span className="text-[#B0BEC5] mx-1 text-[11px]">/</span>}
+                                                            <div
+                                                                onClick={() => !readOnlyMode && setEditingDualAngle(side)}
+                                                                className={`flex items-center gap-0.5 px-1 py-[1px] rounded border ${isEditing ? "border-[#4D94FF] bg-[#EAF3FF]" : "border-transparent hover:border-[#4D94FF]"} ${readOnlyMode ? "cursor-default" : "cursor-pointer"}`}
+                                                            >
+                                                                <span className="text-[8px] font-bold text-[#90A4AE] uppercase">{side === "ap" ? "AP" : "LAT"}</span>
+                                                                {isEditing ? (
+                                                                    <input
+                                                                        autoFocus
+                                                                        type="number"
+                                                                        value={value}
+                                                                        onChange={(e) => {
+                                                                            const v = Number(e.target.value);
+                                                                            if (Number.isFinite(v)) setValue(v);
+                                                                        }}
+                                                                        onBlur={() => {
+                                                                            setEditingDualAngle(null);
+                                                                            persistDualScoutPatch({ tube_angle: value }, side);
+                                                                        }}
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === "Enter" || e.key === "Escape") (e.currentTarget as HTMLInputElement).blur();
+                                                                        }}
+                                                                        className="w-[28px] text-[12px] font-black text-[#37474F] bg-transparent outline-none text-center"
+                                                                    />
+                                                                ) : (
+                                                                    <span className="text-[12px] font-black text-[#37474F]">{value}°</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
-                                    </div>
-
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">KV</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{scoutDisplayParams.kV}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                    ) : (
+                                        <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
+                                            <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.flatScanAngle")}</span>
+                                            <div className="flex items-center gap-1 mt-[1px]">
+                                                <span className="text-[13px] font-black text-[#37474F]">{scoutDisplayParams.angle}</span>
+                                                <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+                                            </div>
                                         </div>
-                                    </div>
-
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.flatScanAngle")}</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{scoutDisplayParams.angle}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
+                                    )}
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">CTDIvol</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{scoutDoseDisplayParams.doseCtdiVol}</span>
+                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">
+                                            {isHeadDualScoutFlow && dualScoutComputedDose ? dualScoutComputedDose.ctdi_vol.toFixed(2) : scoutDoseDisplayParams.doseCtdiVol}
+                                        </span>
                                     </div>
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">DLP</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{scoutDoseDisplayParams.doseDlp}</span>
+                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">
+                                            {isHeadDualScoutFlow && dualScoutComputedDose ? dualScoutComputedDose.dlp.toFixed(2) : scoutDoseDisplayParams.doseDlp}
+                                        </span>
                                     </div>
 
                                     <div className="hidden">

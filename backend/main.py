@@ -393,6 +393,91 @@ def serve_head_stroke_plain(file_path: str, request: Request):
     return _serve_validated_dicom(HEAD_STROKE_DEMO_PLAIN_DIR, file_path, request)
 
 
+HEAD_DUAL_SCOUT_DEMO_DIR = DICOM_PUBLIC_DIR / "head-dual-scout"
+HEAD_DUAL_SCOUT_SERIES = {
+    "scout-ap": "scout-ap.dcm",
+    "scout-lat": "scout-lat.dcm",
+}
+
+
+def _build_head_dual_scout_series(key: str, filename: str):
+    file_path = HEAD_DUAL_SCOUT_DEMO_DIR / filename
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Missing DICOM file: {file_path}")
+
+    ds = _read_demo_dicom_header(file_path)
+    rel = file_path.relative_to(DICOM_PUBLIC_DIR).as_posix()
+    url = f"/dicom/{quote(rel, safe='/')}"
+
+    iop = list(getattr(ds, "ImageOrientationPatient", []) or [])
+    if len(iop) == 6 and float(iop[5]) == -1.0:
+        view = "AP"
+        tube_angle = 0.0
+    elif len(iop) == 6 and float(iop[0]) == 0.0:
+        view = "LAT"
+        tube_angle = 90.0
+    else:
+        view = key.upper().replace("SCOUT-", "")
+        tube_angle = 0.0 if view == "AP" else 90.0
+
+    window_center = getattr(ds, "WindowCenter", None)
+    window_width = getattr(ds, "WindowWidth", None)
+    if isinstance(window_center, (list, tuple)):
+        window_center = window_center[0] if window_center else None
+    if isinstance(window_width, (list, tuple)):
+        window_width = window_width[0] if window_width else None
+
+    return {
+        "key": key,
+        "view": view,
+        "tubeAngle": tube_angle,
+        "seriesInstanceUid": _demo_dicom_text(getattr(ds, "SeriesInstanceUID", None), key),
+        "seriesDescription": _demo_dicom_text(getattr(ds, "SeriesDescription", None), view),
+        "protocolName": _demo_dicom_text(getattr(ds, "ProtocolName", None), "Head Dual Scout"),
+        "bodyPart": _demo_dicom_text(getattr(ds, "BodyPartExamined", None), "HEAD"),
+        "imageType": [str(item) for item in getattr(ds, "ImageType", [])],
+        "rows": int(getattr(ds, "Rows", 0) or 0),
+        "cols": int(getattr(ds, "Columns", 0) or 0),
+        "pixelSpacing": [_demo_dicom_text(item) for item in getattr(ds, "PixelSpacing", [])],
+        "sliceThickness": _demo_dicom_text(getattr(ds, "SliceThickness", None)),
+        "kv": _demo_dicom_text(getattr(ds, "KVP", None)),
+        "mAs": _demo_dicom_text(getattr(ds, "XRayTubeCurrent", None)),
+        "fov": _demo_dicom_text(getattr(ds, "ReconstructionDiameter", None), "500"),
+        "imageOrientationPatient": [str(item) for item in iop],
+        "imagePositionPatient": [str(item) for item in (getattr(ds, "ImagePositionPatient", []) or [])],
+        "windowCenter": float(window_center) if window_center is not None else None,
+        "windowWidth": float(window_width) if window_width is not None else None,
+        "url": url,
+    }
+
+
+@lru_cache(maxsize=1)
+def _build_head_dual_scout_manifest():
+    if not HEAD_DUAL_SCOUT_DEMO_DIR.is_dir():
+        raise FileNotFoundError(f"Missing DICOM directory: {HEAD_DUAL_SCOUT_DEMO_DIR}")
+
+    series = [
+        _build_head_dual_scout_series(key, filename)
+        for key, filename in HEAD_DUAL_SCOUT_SERIES.items()
+    ]
+    return {
+        "studyId": "study-head-dual-scout",
+        "studyName": "Head Dual Scout (AP+LAT)",
+        "sourcePath": str(HEAD_DUAL_SCOUT_DEMO_DIR),
+        "defaultWindowWidth": 350,
+        "defaultWindowLevel": 45,
+        "series": series,
+    }
+
+
+@app.get("/api/demo-dicom/head-dual-scout")
+def get_head_dual_scout_manifest():
+    try:
+        return _build_head_dual_scout_manifest()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 DICOM_OUT_DIR = DATA_DIR / "dicom_out"
 DICOM_OUT_DIR.mkdir(parents=True, exist_ok=True)
 HEAD_STROKE_DEMO_PLAIN_DIR = DATA_DIR / "Head Stroke Demo [Plain]"

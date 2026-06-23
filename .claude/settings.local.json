@@ -223,7 +223,10 @@
       "Bash(git --no-pager diff ui-review/src/lib/i18n.ts)",
       "Bash(git --no-pager diff --stat ui-review/src/)",
       "Bash(python -c \"import sys; sys.path.insert\\(0,'.'\\); from scripts import extract_text\")",
-      "Bash(python _build_terms.py)"
+      "Bash(python _build_terms.py)",
+      "Bash(cp \"C:/STN/projects/WT32/backend/data/20160504 192137 [ - CT Acute Stroke]/Series 001 [CT - 2 0]/1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.6.0.dcm\" \"C:/STN/projects/WT32/ui-review/public/dicom/head-dual-scout/scout-ap.dcm\")",
+      "Bash(cp \"C:/STN/projects/WT32/backend/data/20160504 192137 [ - CT Acute Stroke]/Series 001 [CT - 2 0]/1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.2.0.dcm\" \"C:/STN/projects/WT32/ui-review/public/dicom/head-dual-scout/scout-lat.dcm\")",
+      "Bash(python)"
     ]
   }
 }

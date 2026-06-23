@@ -13,6 +13,13 @@ import {
     loadLimbsDicomDemoManifest,
     type LimbsDicomDemoManifest,
 } from "../lib/limbsDicomDemo";
+import {
+    getHeadDualScoutSeries,
+    isHeadDualScoutSession,
+    isHeadDualScoutWorkflow,
+    loadHeadDualScoutManifest,
+    type HeadDualScoutManifest,
+} from "../lib/headDualScoutDemo";
 import DicomViewer from "../components/DicomViewer";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import ScanConfirmScreen from "./ScanConfirmScreen";
@@ -22,7 +29,9 @@ import type { TranslationKey } from "../lib/i18n";
 const HOLD_DURATION_MS = 3000;
 const EXPOSURE_DURATION_MS = 1200;
 const RENDER_DURATION_MS = 2200;
+const GANTRY_ROTATION_DURATION_MS = 1500;
 const FOUR_D_AUTO_NEXT_STEP_DELAY_MS = 700;
+type DualScoutPhase = "ap_exposing" | "ap_rendering" | "rotating" | "lat_exposing" | "lat_rendering" | "done" | null;
 const SCOUT_SERIES = {
     basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
     count: 118,
@@ -140,6 +149,28 @@ const loadCachedBrainHelicalSession = () => {
 
 const hasBrainHelicalWorkflow = () => isBrainHelicalWorkflow(loadSelectedScanWorkflowPlans());
 const hasLimbsHelicalWorkflow = () => isLimbsHelicalWorkflow(loadSelectedScanWorkflowPlans());
+const hasHeadDualScoutWorkflow = () => isHeadDualScoutWorkflow(loadSelectedScanWorkflowPlans());
+
+const buildHeadDualScoutSeries = (manifest: HeadDualScoutManifest, key: "scout-ap" | "scout-lat"): ScoutDicomSeries | null => {
+    const series = getHeadDualScoutSeries(manifest, key);
+    if (!series) return null;
+    const url = series.url;
+    const lastSlash = url.lastIndexOf("/");
+    const basePath = lastSlash >= 0 ? url.slice(0, lastSlash) : url;
+    const fileName = lastSlash >= 0 ? url.slice(lastSlash + 1) : url;
+    return {
+        basePath,
+        count: 1,
+        firstImageNumber: 1,
+        fileNamePrefix: "",
+        fileNamePadding: 0,
+        fileNames: [fileName],
+        directImage: true,
+        useCornerstoneViewer: true,
+        fallbackWindowWidth: series.windowWidth ?? manifest.defaultWindowWidth,
+        fallbackWindowLevel: series.windowCenter ?? manifest.defaultWindowLevel,
+    };
+};
 
 const buildLimbsScoutExecuteSeries = (manifest: LimbsDicomDemoManifest): ScoutDicomSeries | null => {
     const topogram = getLimbsDicomSeries(manifest, "topogram");
@@ -524,12 +555,16 @@ export default function ScoutExecuteScanScreen() {
     const [holdProgress, setHoldProgress] = useState(0);
     const [guideVisible, setGuideVisible] = useState(true);
     const [renderProgress, setRenderProgress] = useState(0);
+    const [dualPhase, setDualPhase] = useState<DualScoutPhase>(null);
+    const [apRenderProgress, setApRenderProgress] = useState(0);
+    const [latRenderProgress, setLatRenderProgress] = useState(0);
     const [postScoutScanType, setPostScoutScanType] = useState<PostScoutScanType>(
         () => resolvePostScoutScanTypeFromWorkflowPlans() ?? DEFAULT_POST_SCOUT_SCAN_TYPE
     );
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(() => loadCachedBrainHelicalSession());
     const [gatingBreathingMode, setGatingBreathingMode] = useState<string | null>(null);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
+    const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
     const thresholdGuard = useDoseThresholdGuard();
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
@@ -588,9 +623,18 @@ export default function ScoutExecuteScanScreen() {
     const isFourDScoutWorkflow = postScoutScanType === "4d";
     const isBrainHelicalScoutWorkflow = hasBrainHelicalWorkflow() || isBrainHelicalScanSession(scanSession);
     const isLimbsHelicalScoutWorkflow = hasLimbsHelicalWorkflow() || isLimbsHelicalScanSession(scanSession);
+    const isHeadDualScoutFlow = hasHeadDualScoutWorkflow() || isHeadDualScoutSession(scanSession);
     const limbsScoutExecuteSeries = useMemo<ScoutDicomSeries | null>(
         () => (limbsDicomManifest ? buildLimbsScoutExecuteSeries(limbsDicomManifest) : null),
         [limbsDicomManifest],
+    );
+    const headDualApSeries = useMemo<ScoutDicomSeries | null>(
+        () => (headDualScoutManifest ? buildHeadDualScoutSeries(headDualScoutManifest, "scout-ap") : null),
+        [headDualScoutManifest],
+    );
+    const headDualLatSeries = useMemo<ScoutDicomSeries | null>(
+        () => (headDualScoutManifest ? buildHeadDualScoutSeries(headDualScoutManifest, "scout-lat") : null),
+        [headDualScoutManifest],
     );
     const scoutResultSeries = isFourDScoutWorkflow
         ? FOUR_D_SCOUT_SERIES
@@ -598,7 +642,9 @@ export default function ScoutExecuteScanScreen() {
             ? BRAIN_HELICAL_SCOUT_EXECUTE_SERIES
             : (isLimbsHelicalScoutWorkflow && limbsScoutExecuteSeries)
                 ? limbsScoutExecuteSeries
-                : SCOUT_SERIES;
+                : (isHeadDualScoutFlow && headDualApSeries)
+                    ? headDualApSeries
+                    : SCOUT_SERIES;
 
     useEffect(() => {
         if (!isLimbsHelicalScoutWorkflow) return;
@@ -612,6 +658,19 @@ export default function ScoutExecuteScanScreen() {
             });
         return () => { cancelled = true; };
     }, [isLimbsHelicalScoutWorkflow]);
+
+    useEffect(() => {
+        if (!isHeadDualScoutFlow) return;
+        let cancelled = false;
+        loadHeadDualScoutManifest()
+            .then((manifest) => {
+                if (!cancelled) setHeadDualScoutManifest(manifest);
+            })
+            .catch((error) => {
+                console.error("Failed to load head dual scout manifest.", error);
+            });
+        return () => { cancelled = true; };
+    }, [isHeadDualScoutFlow]);
 
     const postScoutRoute = useMemo(() => {
         if ((postScoutScanType === "gated_helical" || postScoutScanType === "gated_axial") && gatingBreathingMode) {
@@ -676,7 +735,65 @@ export default function ScoutExecuteScanScreen() {
         rafRef.current = requestAnimationFrame(tick);
     };
 
+    const runRampAnimation = (setter: (v: number) => void, durationMs: number, onDone: () => void) => {
+        progressStartRef.current = performance.now();
+        const tick = (timestamp: number) => {
+            const startedAt = progressStartRef.current ?? timestamp;
+            const next = Math.min((timestamp - startedAt) / durationMs, 1);
+            setter(next);
+            if (next < 1) {
+                rafRef.current = requestAnimationFrame(tick);
+                return;
+            }
+            rafRef.current = null;
+            onDone();
+        };
+        rafRef.current = requestAnimationFrame(tick);
+    };
+
+    const performTriggerScanDual = () => {
+        const sessionId = loadSelectedScanSessionId();
+        if (sessionId) void startScanSession(sessionId);
+        clearHoldRaf();
+        setHoldProgress(1);
+        setStage("enabled");
+        setApRenderProgress(0);
+        setLatRenderProgress(0);
+        setDualPhase(null);
+
+        window.setTimeout(() => {
+            setStage("exposing");
+            setGuideVisible(false);
+            setDualPhase("ap_exposing");
+        }, 180);
+
+        exposureTimerRef.current = window.setTimeout(() => {
+            setStage("rendering");
+            setDualPhase("ap_rendering");
+            runRampAnimation(setApRenderProgress, RENDER_DURATION_MS, () => {
+                // AP done → rotate gantry → LAT
+                setDualPhase("rotating");
+                window.setTimeout(() => {
+                    setStage("exposing");
+                    setDualPhase("lat_exposing");
+                    exposureTimerRef.current = window.setTimeout(() => {
+                        setStage("rendering");
+                        setDualPhase("lat_rendering");
+                        runRampAnimation(setLatRenderProgress, RENDER_DURATION_MS, () => {
+                            setDualPhase("done");
+                            setStage("completed");
+                        });
+                    }, EXPOSURE_DURATION_MS);
+                }, GANTRY_ROTATION_DURATION_MS);
+            });
+        }, EXPOSURE_DURATION_MS);
+    };
+
     const performTriggerScan = () => {
+        if (isHeadDualScoutFlow) {
+            performTriggerScanDual();
+            return;
+        }
         const sessionId = loadSelectedScanSessionId();
         if (sessionId) void startScanSession(sessionId);
         clearHoldRaf();
@@ -813,12 +930,50 @@ export default function ScoutExecuteScanScreen() {
                             </div>
                         </div>
 
-                        <div className={`absolute inset-0 transition-opacity duration-500 ${stage === "rendering" || stage === "completed" ? "opacity-100" : "opacity-0"}`}>
-                            <ScoutProjectionViewport
-                                renderProgress={renderProgress}
-                                active={stage === "rendering" || stage === "completed"}
-                                series={scoutResultSeries}
-                            />
+                        <div className={`absolute inset-0 transition-opacity duration-500 ${(isHeadDualScoutFlow ? dualPhase !== null && dualPhase !== "ap_exposing" : (stage === "rendering" || stage === "completed")) ? "opacity-100" : "opacity-0"}`}>
+                            {isHeadDualScoutFlow && headDualApSeries && headDualLatSeries ? (
+                                <div className="grid h-full grid-cols-2 gap-[2px] bg-[#0A0F14]">
+                                    <div className="relative overflow-hidden bg-black">
+                                        <ScoutProjectionViewport
+                                            renderProgress={apRenderProgress}
+                                            active={dualPhase === "ap_rendering" || dualPhase === "rotating" || dualPhase === "lat_exposing" || dualPhase === "lat_rendering" || dualPhase === "done"}
+                                            series={headDualApSeries}
+                                        />
+                                        <div className="pointer-events-none absolute left-3 bottom-3 z-10 rounded border border-[#4D94FF]/40 bg-[#08111f]/85 px-2 py-1 text-[10px] font-black tracking-[0.12em] text-[#DBEAFE]">
+                                            AP · 正位 0°{dualPhase === "ap_rendering" ? " · 采集中" : (dualPhase === "rotating" || dualPhase === "lat_exposing" || dualPhase === "lat_rendering" || dualPhase === "done") ? " · ✓" : ""}
+                                        </div>
+                                    </div>
+                                    <div className="relative overflow-hidden bg-black">
+                                        {dualPhase === "rotating" ? (
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#05080C] text-[#9FB2C5]">
+                                                <div className="h-12 w-12 animate-spin rounded-full border-2 border-[#4D94FF]/30 border-t-[#4D94FF]" />
+                                                <div className="text-[12px] font-bold tracking-[0.18em]">机架旋转 90°</div>
+                                                <div className="text-[10px] text-[#6B7E91] tracking-[0.12em]">准备侧位采集 →</div>
+                                            </div>
+                                        ) : dualPhase === "lat_exposing" ? (
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#05080C] text-[#FFD600]">
+                                                <div className="text-[14px] font-black tracking-[0.18em]">LAT 曝光中</div>
+                                                <div className="text-[10px] text-[#9FB2C5] tracking-[0.12em]">侧位采集 · 请勿移动患者</div>
+                                            </div>
+                                        ) : dualPhase === "lat_rendering" || dualPhase === "done" ? (
+                                            <ScoutProjectionViewport
+                                                renderProgress={latRenderProgress}
+                                                active={true}
+                                                series={headDualLatSeries}
+                                            />
+                                        ) : null}
+                                        <div className="pointer-events-none absolute left-3 bottom-3 z-10 rounded border border-[#4D94FF]/40 bg-[#08111f]/85 px-2 py-1 text-[10px] font-black tracking-[0.12em] text-[#DBEAFE]">
+                                            LAT · 侧位 90°{dualPhase === "lat_rendering" ? " · 采集中" : dualPhase === "done" ? " · ✓" : (dualPhase === "ap_rendering" || dualPhase === null) ? " · 等待" : ""}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <ScoutProjectionViewport
+                                    renderProgress={renderProgress}
+                                    active={stage === "rendering" || stage === "completed"}
+                                    series={scoutResultSeries}
+                                />
+                            )}
                         </div>
                     </div>
                 </div>

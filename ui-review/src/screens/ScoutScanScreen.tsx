@@ -19,6 +19,7 @@ import { loadSelectedPatient } from "../lib/patientSession";
 import { saveScoutPositioningRange } from "../lib/scoutPositioningSession";
 import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { mergeDualScoutPlanSequences } from "../lib/headDualScoutDemo";
 import { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
 import { useI18n } from "../lib/i18nContext";
@@ -914,16 +915,19 @@ const ScoutScanScreen = ({
             ];
         }
 
-        return workflowPlans.map((plan) => ({
-            id: `group-${plan.id}`,
-            name: plan.title,
-            sequences: plan.sequences.map((sequence) => ({
-                id: `group-${plan.id}-seq-${sequence.id}`,
-                name: sequence.name,
-                type: sequence.type,
-                steps: buildSequenceSteps(sequence.type),
-            })),
-        }));
+        return workflowPlans.map((plan) => {
+            const effectivePlan = mergeDualScoutPlanSequences(plan);
+            return {
+                id: `group-${plan.id}`,
+                name: plan.title,
+                sequences: effectivePlan.sequences.map((sequence) => ({
+                    id: `group-${plan.id}-seq-${sequence.id}`,
+                    name: sequence.name,
+                    type: sequence.type,
+                    steps: buildSequenceSteps(sequence.type),
+                })),
+            };
+        });
     }, [buildSequenceSteps, workflowPlans]);
 
     const [groups, setGroups] = useState<ProtocolGroup[]>(() => buildGroupsFromWorkflowPlans());

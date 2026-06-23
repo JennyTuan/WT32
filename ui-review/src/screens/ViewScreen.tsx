@@ -29,6 +29,14 @@ import {
     type LimbsDicomDemoManifest,
     type LimbsDicomDemoSeries,
 } from "../lib/limbsDicomDemo";
+import {
+    getHeadDualScoutSeries,
+    isHeadDualScoutSession,
+    isHeadDualScoutWorkflow,
+    loadHeadDualScoutManifest,
+    type HeadDualScoutManifest,
+    type HeadDualScoutSeries,
+} from "../lib/headDualScoutDemo";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import AppHeader from "../components/AppHeader";
 import CornerstoneMPRViewport, {
@@ -434,10 +442,15 @@ const ViewScreen = () => {
         if (isFourDEntry) return false;
         return isLimbsHelicalWorkflow(loadSelectedScanWorkflowPlans());
     }, [isFourDEntry]);
+    const isHeadDualScoutWorkflowActive = useMemo(() => {
+        if (isFourDEntry) return false;
+        return isHeadDualScoutWorkflow(loadSelectedScanWorkflowPlans());
+    }, [isFourDEntry]);
     // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const isBrainHelicalDemo = isBrainHelicalWorkflowActive || (!isFourDEntry && isBrainHelicalScanSession(scanSession));
     const isLimbsDicomDemo = isLimbsHelicalWorkflowActive || (!isFourDEntry && isLimbsHelicalScanSession(scanSession));
+    const isHeadDualScoutDemo = isHeadDualScoutWorkflowActive || (!isFourDEntry && isHeadDualScoutSession(scanSession));
     const effectiveLungSeries = isBrainHelicalDemo ? BRAIN_HELICAL_VIEW_SERIES : REAL_LUNG_SERIES;
     /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
     const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";
@@ -482,6 +495,8 @@ const ViewScreen = () => {
     const [fourDManifestError, setFourDManifestError] = useState<string | null>(null);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const [limbsDicomManifestError, setLimbsDicomManifestError] = useState<string | null>(null);
+    const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
+    const [headDualScoutManifestError, setHeadDualScoutManifestError] = useState<string | null>(null);
 
     // ─── Live clock ───────────────────────────────────────────────────────────
     const buildClock = useCallback(() => {
@@ -702,6 +717,49 @@ const ViewScreen = () => {
                 dicomUrls: series.urls,
             };
         };
+        const resolveHeadDualScoutKey = (series: ApiScanSessionDetail["series"][number]) => {
+            const tubeAngle = Number(series.topogram_param?.tube_angle);
+            const label = (series.series_label ?? "").toLowerCase();
+            if (
+                (Number.isFinite(tubeAngle) && Math.abs(tubeAngle - 90) < 1) ||
+                label.includes("lat") ||
+                label.includes("侧")
+            ) {
+                return "scout-lat" as const;
+            }
+            return "scout-ap" as const;
+        };
+        const makeHeadDualScoutViewSeries = (
+            series: HeadDualScoutSeries,
+            sessionSeries: ApiScanSessionDetail["series"][number],
+            seriesType: SeriesType,
+            prefix: string,
+        ): Series => {
+            const p = sessionSeries.topogram_param;
+            const windowWidth = series.windowWidth ?? headDualScoutManifest?.defaultWindowWidth;
+            const windowLevel = series.windowCenter ?? headDualScoutManifest?.defaultWindowLevel;
+            const fovLabel = p
+                ? `${p.fov} mm`
+                : series.fov
+                    ? `${series.fov} mm`
+                    : "N/A";
+            return {
+                id: `${prefix}-${series.key}`,
+                name: sessionSeries.series_label || `定位像 ${series.view}`,
+                count: 1,
+                kernel: "LOCALIZER",
+                thickness: series.sliceThickness ? `${series.sliceThickness} mm` : "N/A",
+                kV: p ? String(p.kv) : series.kv,
+                mAs: p ? String(p.ma) : series.mAs,
+                fov: fovLabel,
+                matrix: `${series.cols || 512}`,
+                seriesType,
+                images: makeImages(1, `${prefix}-${series.key}`),
+                defaultWw: windowWidth ?? undefined,
+                defaultWl: windowLevel ?? undefined,
+                dicomUrls: [series.url],
+            };
+        };
 
         if (isLimbsDicomDemo && limbsDicomManifest) {
             const topogram = limbsDicomManifest.series.find((series) => series.key === "topogram");
@@ -803,25 +861,30 @@ const ViewScreen = () => {
 
             if (s.series_type === "topogram") {
                 const p = s.topogram_param;
+                const headDualSeries = isHeadDualScoutDemo && headDualScoutManifest
+                    ? getHeadDualScoutSeries(headDualScoutManifest, resolveHeadDualScoutKey(s))
+                    : null;
                 scanGroups.push({
                     id: `group-${s.id}`,
                     label: s.series_label || t("view.fallback.topogram"),
                     type,
-                    series: [{
-                        id: `${prefix}-topo`,
-                        name: s.series_label || t("view.fallback.topogram"),
-                        count: REALISTIC_SCOUT_SERIES.count,
-                        kernel: REALISTIC_SCOUT_SERIES.kernel,
-                        thickness: REALISTIC_SCOUT_SERIES.thickness,
-                        kV: p ? String(p.kv) : "—",
-                        mAs: p ? String(p.ma) : "—",
-                        fov: p ? `${p.fov} mm` : "—",
-                        matrix: REALISTIC_SCOUT_SERIES.matrix,
-                        seriesType: type,
-                        images: makeImages(REALISTIC_SCOUT_SERIES.count, `${prefix}-topo`),
-                        defaultWw: 500,
-                        defaultWl: 50,
-                    }],
+                    series: [headDualSeries
+                        ? makeHeadDualScoutViewSeries(headDualSeries, s, type, prefix)
+                        : {
+                            id: `${prefix}-topo`,
+                            name: s.series_label || t("view.fallback.topogram"),
+                            count: REALISTIC_SCOUT_SERIES.count,
+                            kernel: REALISTIC_SCOUT_SERIES.kernel,
+                            thickness: REALISTIC_SCOUT_SERIES.thickness,
+                            kV: p ? String(p.kv) : "—",
+                            mAs: p ? String(p.ma) : "—",
+                            fov: p ? `${p.fov} mm` : "—",
+                            matrix: REALISTIC_SCOUT_SERIES.matrix,
+                            seriesType: type,
+                            images: makeImages(REALISTIC_SCOUT_SERIES.count, `${prefix}-topo`),
+                            defaultWw: 500,
+                            defaultWl: 50,
+                        }],
                 });
             } else {
                 // helical / axial / 4d — leaf items are the recon series
@@ -906,7 +969,17 @@ const ViewScreen = () => {
             name: scanSession.name || t("view.fallback.scanSequence"),
             scanGroups,
         }];
-    }, [scanSession, isFourDEntry, isBrainHelicalDemo, effectiveLungSeries, isLimbsDicomDemo, limbsDicomManifest, t]);
+    }, [
+        scanSession,
+        isFourDEntry,
+        isBrainHelicalDemo,
+        effectiveLungSeries,
+        isLimbsDicomDemo,
+        limbsDicomManifest,
+        isHeadDualScoutDemo,
+        headDualScoutManifest,
+        t,
+    ]);
 
     const seriesList = studyTree.flatMap((study) => study.scanGroups.flatMap((g) => g.series));
     // Guard: if seriesList is somehow still empty, always fall back to the static series
@@ -1013,9 +1086,10 @@ const ViewScreen = () => {
         };
     }, [imageMode, selectedSeriesId]);
 
-    // ─── 离线重建参数同步：当选中序列变化时,用该序列当前值回填表单 ──────────
+    // ─── 重建参数同步：当选中序列变化时,用该序列当前值回填表单 ──────────
+    // 同时服务于「离线重建」入口和「扫描后浏览」入口，两条路径展示一致的参数面板。
     useEffect(() => {
-        if (!isOfflineRecon || !selectedSeries) return;
+        if (!selectedSeries) return;
         const stripMm = (v?: string) => (v ? v.replace(/\s*mm\s*$/i, "").trim() : "");
         setReconParams({
             thickness: stripMm(selectedSeries.thickness),
@@ -1031,7 +1105,7 @@ const ViewScreen = () => {
             reconMode: "",
         });
         setReconStatus("idle");
-    }, [isOfflineRecon, selectedSeriesId, selectedSeries]);
+    }, [selectedSeriesId, selectedSeries]);
 
     useEffect(() => {
         setSelectedPhaseIndex(0);
@@ -1126,6 +1200,23 @@ const ViewScreen = () => {
         };
     }, [isLimbsDicomDemo, limbsDicomManifest, limbsDicomManifestError]);
 
+    useEffect(() => {
+        if (!isHeadDualScoutDemo) return;
+        if (headDualScoutManifest || headDualScoutManifestError) return;
+        let cancelled = false;
+        loadHeadDualScoutManifest()
+            .then((manifest) => {
+                if (cancelled) return;
+                setHeadDualScoutManifest(manifest);
+            })
+            .catch((err: Error) => {
+                if (!cancelled) setHeadDualScoutManifestError(err.message);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isHeadDualScoutDemo, headDualScoutManifest, headDualScoutManifestError]);
+
     // Phase cine: advances selectedPhaseIndex while playing. Slice position is intentionally NOT touched
     // (clinical convention: cine cycles phases at a locked anatomical slice).
     useEffect(() => {
@@ -1193,7 +1284,16 @@ const ViewScreen = () => {
             defaultWindowRef.current = { ww: target.defaultWw, wl: target.defaultWl };
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [scanSession, isFourDEntry, isBrainHelicalDemo, preferredSeriesForFourDEntry, isLimbsDicomDemo, limbsDicomManifest]);
+    }, [
+        scanSession,
+        isFourDEntry,
+        isBrainHelicalDemo,
+        preferredSeriesForFourDEntry,
+        isLimbsDicomDemo,
+        limbsDicomManifest,
+        isHeadDualScoutDemo,
+        headDualScoutManifest,
+    ]);
 
     const seriesImageUrls = useMemo(
         () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index, selectedSeries.seriesType, isBrainHelicalDemo, selectedSeries)),
@@ -1487,7 +1587,7 @@ const ViewScreen = () => {
                         <div className="flex items-center gap-2">
                             <SlidersHorizontal size={14} className="text-[#4D94FF]" />
                             <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">
-                                {isOfflineRecon ? t("view.offlineRecon.title") : t("view.params")}
+                                {(isOfflineRecon || !isTopogramSeries) ? t("view.offlineRecon.title") : t("view.params")}
                             </span>
                         </div>
                         {!isFourDLungReconSeries && !isTopogramSeries ? (
@@ -1514,22 +1614,81 @@ const ViewScreen = () => {
                     <div className="flex-1 bg-[#F8FAFC] overflow-hidden flex flex-col">
                         <div className="flex-1 p-3 grid grid-cols-2 gap-2 overflow-y-auto">
                             {imageMode === "2D" || isTopogramSeries ? (
-                                isOfflineRecon && !isTopogramSeries ? (
-                                    <OfflineReconPanel
-                                        params={reconParams}
-                                        setParams={setReconParams}
-                                        isHelical={selectedSeries.seriesType === "helical"}
-                                        ww={Math.round(displayWw)}
-                                        wl={Math.round(displayWl)}
-                                        status={reconStatus}
-                                        isMatrixOpen={isReconMatrixOpen}
-                                        setIsMatrixOpen={setIsReconMatrixOpen}
-                                        onApply={() => {
-                                            setReconStatus("running");
-                                            window.setTimeout(() => setReconStatus("done"), 1200);
-                                        }}
-                                        t={t}
-                                    />
+                                !isTopogramSeries ? (
+                                    <div className="col-span-2 flex flex-col gap-2">
+                                        {/* 顶部窗值 + 窗模板 — 平板设备使用频率最高，置顶便于一键调整 */}
+                                        <div className="rounded-md border border-[#DCE6F2] bg-white px-2.5 py-2 shadow-sm flex flex-col gap-2">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="flex items-baseline gap-1.5">
+                                                    <span className="text-[9px] font-black uppercase text-[#90A4AE]">WW</span>
+                                                    <span className="text-[13px] font-black tabular-nums text-[#37474F]">{Math.round(displayWw)}</span>
+                                                </div>
+                                                <div className="h-5 w-px bg-[#E2E8F0]" />
+                                                <div className="flex items-baseline gap-1.5">
+                                                    <span className="text-[9px] font-black uppercase text-[#90A4AE]">WL</span>
+                                                    <span className="text-[13px] font-black tabular-nums text-[#37474F]">{Math.round(displayWl)}</span>
+                                                </div>
+                                            </div>
+                                            <div className="relative">
+                                                <div
+                                                    onClick={() => {
+                                                        setIsWindowPresetOpen(!isWindowPresetOpen);
+                                                        setIsVoiLutOpen(false);
+                                                        setIsInterpolationOpen(false);
+                                                        setIsVolumePresetOpen(false);
+                                                        setIsRenderModeOpen(false);
+                                                        setIsVolumeQualityOpen(false);
+                                                    }}
+                                                    className={`h-[30px] w-full bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isWindowPresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                                >
+                                                    <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                        {activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}
+                                                    </span>
+                                                    <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                                </div>
+                                                {isWindowPresetOpen && (
+                                                    <div className="absolute top-[calc(100%+3px)] left-0 right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                        {WINDOW_PRESETS.map((preset) => {
+                                                            const active = activeWindowPreset?.key === preset.key;
+                                                            return (
+                                                                <div
+                                                                    key={preset.key}
+                                                                    onClick={() => {
+                                                                        applyWindowPreset(preset);
+                                                                        setIsWindowPresetOpen(false);
+                                                                    }}
+                                                                    className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${active ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                                >
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <span>{preset.label}</span>
+                                                                        <span className="text-[10px] font-black tabular-nums opacity-60">
+                                                                            {preset.ww}/{preset.wl}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <OfflineReconPanel
+                                            params={reconParams}
+                                            setParams={setReconParams}
+                                            isHelical={selectedSeries.seriesType === "helical"}
+                                            ww={Math.round(displayWw)}
+                                            wl={Math.round(displayWl)}
+                                            status={reconStatus}
+                                            isMatrixOpen={isReconMatrixOpen}
+                                            setIsMatrixOpen={setIsReconMatrixOpen}
+                                            onApply={() => {
+                                                setReconStatus("running");
+                                                window.setTimeout(() => setReconStatus("done"), 1200);
+                                            }}
+                                            t={t}
+                                            hideWindowValue
+                                        />
+                                    </div>
                                 ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
                                     <PanelSection title={t("view.display")}>
@@ -1546,71 +1705,6 @@ const ViewScreen = () => {
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-2 relative">
-                                        <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.windowPreset")}</span>
-                                        <div
-                                            onClick={() => {
-                                                setIsWindowPresetOpen(!isWindowPresetOpen);
-                                                setIsVoiLutOpen(false);
-                                                setIsInterpolationOpen(false);
-                                                setIsVolumePresetOpen(false);
-                                                setIsRenderModeOpen(false);
-                                                setIsVolumeQualityOpen(false);
-                                            }}
-                                            className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isWindowPresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
-                                        >
-                                            <span className="text-[12px] font-medium text-[#37474F] truncate">
-                                                {activeWindowPreset ? activeWindowPreset.label : "Custom"}
-                                            </span>
-                                            <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
-                                        </div>
-                                        {isWindowPresetOpen && (
-                                            <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                                                {WINDOW_PRESETS.map((preset) => {
-                                                    const active = activeWindowPreset?.key === preset.key;
-                                                    return (
-                                                        <div
-                                                            key={preset.key}
-                                                            onClick={() => {
-                                                                applyWindowPreset(preset);
-                                                                setIsWindowPresetOpen(false);
-                                                            }}
-                                                            className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${active ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
-                                                        >
-                                                            <div className="flex items-center justify-between gap-2">
-                                                                <span>{preset.label}</span>
-                                                                <span className="text-[10px] font-black tabular-nums opacity-60">
-                                                                    {preset.ww}/{preset.wl}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <DisplayControls
-                                        selectedVoiLutMode={selectedVoiLutMode}
-                                        setSelectedVoiLutMode={setSelectedVoiLutMode}
-                                        selectedInterpolationMode={selectedInterpolationMode}
-                                        setSelectedInterpolationMode={setSelectedInterpolationMode}
-                                        isImageInverted={isImageInverted}
-                                        setIsImageInverted={setIsImageInverted}
-                                        imageSmoothing={imageSmoothing}
-                                        setImageSmoothing={setImageSmoothing}
-                                        imageSharpening={imageSharpening}
-                                        setImageSharpening={setImageSharpening}
-                                        isVoiLutOpen={isVoiLutOpen}
-                                        setIsVoiLutOpen={setIsVoiLutOpen}
-                                        isInterpolationOpen={isInterpolationOpen}
-                                        setIsInterpolationOpen={setIsInterpolationOpen}
-                                        closeOtherMenus={() => {
-                                            setIsWindowPresetOpen(false);
-                                            setIsVolumePresetOpen(false);
-                                            setIsRenderModeOpen(false);
-                                            setIsVolumeQualityOpen(false);
-                                        }}
-                                    />
                                     </PanelSection>
                                 </div>
                                 )
@@ -2530,6 +2624,7 @@ type OfflineReconPanelProps = {
     setIsMatrixOpen: (value: boolean) => void;
     onApply: () => void;
     t: (key: TranslationKey, values?: Record<string, string | number>) => string;
+    hideWindowValue?: boolean;
 };
 
 const RECON_INPUT_CLASS =
@@ -2565,6 +2660,7 @@ const OfflineReconPanel = ({
     setIsMatrixOpen,
     onApply,
     t,
+    hideWindowValue = false,
 }: OfflineReconPanelProps) => {
     const update = <K extends keyof OfflineReconParams>(key: K, value: OfflineReconParams[K]) =>
         setParams((prev) => ({ ...prev, [key]: value }));
@@ -2705,21 +2801,23 @@ const OfflineReconPanel = ({
                     />
                 </OfflineReconField>
 
-                <OfflineReconField label={t("view.offlineRecon.windowValue")}>
-                    <div className="rounded-md border border-[#DCE6F2] bg-white px-2.5 py-2 shadow-sm">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-baseline gap-1.5">
-                                <span className="text-[9px] font-black uppercase text-[#90A4AE]">WW</span>
-                                <span className="text-[13px] font-black tabular-nums text-[#37474F]">{ww}</span>
-                            </div>
-                            <div className="h-5 w-px bg-[#E2E8F0]" />
-                            <div className="flex items-baseline gap-1.5">
-                                <span className="text-[9px] font-black uppercase text-[#90A4AE]">WL</span>
-                                <span className="text-[13px] font-black tabular-nums text-[#37474F]">{wl}</span>
+                {!hideWindowValue && (
+                    <OfflineReconField label={t("view.offlineRecon.windowValue")}>
+                        <div className="rounded-md border border-[#DCE6F2] bg-white px-2.5 py-2 shadow-sm">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-baseline gap-1.5">
+                                    <span className="text-[9px] font-black uppercase text-[#90A4AE]">WW</span>
+                                    <span className="text-[13px] font-black tabular-nums text-[#37474F]">{ww}</span>
+                                </div>
+                                <div className="h-5 w-px bg-[#E2E8F0]" />
+                                <div className="flex items-baseline gap-1.5">
+                                    <span className="text-[9px] font-black uppercase text-[#90A4AE]">WL</span>
+                                    <span className="text-[13px] font-black tabular-nums text-[#37474F]">{wl}</span>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </OfflineReconField>
+                    </OfflineReconField>
+                )}
 
                 <button
                     type="button"

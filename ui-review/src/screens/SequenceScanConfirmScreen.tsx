@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
 import { imageLoader, metaData } from "@cornerstonejs/core";
-import { Hand, Move, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { Crosshair, Hand, Move, RotateCcw, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { fetchSelectedScanSession, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
 import type { ApiScanSessionAxialParam } from "../lib/scanSession";
 import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
@@ -127,6 +127,37 @@ type CropBox = {
 
 type DragHandle = "move" | "top" | "bottom" | "left" | "right";
 
+// 重建中心偏移：按公司《重建中心坐标计算方法 REV A》计算。
+// 公式核心：偏移 = (定位框水平像素 − 图像中心像素) × 每像素物理距离。
+// 不同球管角度决定输出轴（X 或 Y）与正负号。
+//   180° (球管 6 点)：输出 ΔX，右正左负
+//    90° (球管 3 点)：输出 ΔY，右正左负
+//     0° (球管 12 点)：与 180° 反号
+//   270° (球管 9 点)：与 90° 反号
+type ReconCenterDelta = { axis: "x" | "y"; valueMm: number };
+
+function computeReconCenterDelta(
+    centerXRatio: number,
+    tubeAngle: number,
+    physicalWidthMm: number,
+): ReconCenterDelta {
+    const offsetMm = (centerXRatio - 0.5) * physicalWidthMm;
+    const normalizedAngle = ((Math.round(tubeAngle) % 360) + 360) % 360;
+    switch (normalizedAngle) {
+        case 180:
+            return { axis: "x", valueMm: offsetMm };
+        case 0:
+            return { axis: "x", valueMm: -offsetMm };
+        case 90:
+            return { axis: "y", valueMm: offsetMm };
+        case 270:
+            return { axis: "y", valueMm: -offsetMm };
+        default:
+            // 非标准角度按 180° 处理（保底，不抛错）
+            return { axis: "x", valueMm: offsetMm };
+    }
+}
+
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
 }
@@ -151,6 +182,9 @@ export function TomographicScoutViewport({
     seriesOverride,
     onScoutHuChange,
     onCropBoxChange,
+    cropBoxOverride,
+    tubeAngle = 180,
+    onReconCenterChange,
 }: {
     onMeasurementChange: (values: { scanLength: string; scoutFov: string }) => void;
     initialMeasurements?: { scanLength?: string; scoutFov?: string };
@@ -160,6 +194,9 @@ export function TomographicScoutViewport({
     seriesOverride?: TomographicScoutSeriesOverride;
     onScoutHuChange?: (data: ScoutHuData | null) => void;
     onCropBoxChange?: (cropBox: { x: number; y: number; width: number; height: number }) => void;
+    cropBoxOverride?: { x: number; y: number; width: number; height: number };
+    tubeAngle?: number;
+    onReconCenterChange?: (delta: ReconCenterDelta) => void;
 }) {
     const { t } = useI18n();
     const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -187,6 +224,13 @@ export function TomographicScoutViewport({
         height: 0.46,
     });
     const positionDragRef = useRef<{ pointerId: number } | null>(null);
+    // 重建中心十字：水平拖动，0-1 视口横向比例，垂直锁死在 0.5
+    const reconCenterDragRef = useRef<{ pointerId: number; startX: number; startRatio: number } | null>(null);
+    const [reconCenterX, setReconCenterX] = useState(0.5);
+    const reconCenterXRef = useRef(reconCenterX);
+    useEffect(() => { reconCenterXRef.current = reconCenterX; }, [reconCenterX]);
+    const onReconCenterChangeRef = useRef(onReconCenterChange);
+    useEffect(() => { onReconCenterChangeRef.current = onReconCenterChange; }, [onReconCenterChange]);
     const panStateRef = useRef<{
         pointerId: number;
         startX: number;
@@ -601,6 +645,26 @@ export function TomographicScoutViewport({
         onCropBoxChangeRef.current?.(cropBox);
     }, [cropBox, onMeasurementChange]);
 
+    // When a controlled cropBoxOverride is provided, sync internal state to it
+    // whenever it changes from the outside. Skip if the override matches the
+    // current state (e.g. our own onCropBoxChange just bubbled back up), or if
+    // the user is actively dragging — the drag would otherwise be clobbered by
+    // a round-trip through the parent's controlled state.
+    useEffect(() => {
+        if (!cropBoxOverride) return;
+        if (dragStateRef.current) return;
+        const current = cropBoxRef.current;
+        if (
+            Math.abs(current.x - cropBoxOverride.x) < 1e-4 &&
+            Math.abs(current.y - cropBoxOverride.y) < 1e-4 &&
+            Math.abs(current.width - cropBoxOverride.width) < 1e-4 &&
+            Math.abs(current.height - cropBoxOverride.height) < 1e-4
+        ) {
+            return;
+        }
+        setCropBox(cropBoxOverride);
+    }, [cropBoxOverride]);
+
     useEffect(() => {
         const updateScanPositionFromPointer = (clientY: number) => {
             const viewport = viewportRef.current;
@@ -615,6 +679,16 @@ export function TomographicScoutViewport({
         const handleMove = (event: PointerEvent) => {
             if (positionDragRef.current?.pointerId === event.pointerId) {
                 updateScanPositionFromPointer(event.clientY);
+                return;
+            }
+
+            const reconDrag = reconCenterDragRef.current;
+            if (reconDrag && reconDrag.pointerId === event.pointerId) {
+                const viewport = viewportRef.current;
+                if (!viewport) return;
+                const rect = viewport.getBoundingClientRect();
+                const dx = (event.clientX - reconDrag.startX) / Math.max(1, rect.width);
+                setReconCenterX(clamp01(reconDrag.startRatio + dx));
                 return;
             }
 
@@ -677,6 +751,9 @@ export function TomographicScoutViewport({
             if (panStateRef.current?.pointerId === event.pointerId) {
                 panStateRef.current = null;
             }
+            if (reconCenterDragRef.current?.pointerId === event.pointerId) {
+                reconCenterDragRef.current = null;
+            }
         };
 
         window.addEventListener("pointermove", handleMove);
@@ -688,6 +765,31 @@ export function TomographicScoutViewport({
             window.removeEventListener("pointercancel", handleUp);
         };
     }, [onScanPositionRatioChange]);
+
+    const reconCenterDelta = useMemo<ReconCenterDelta | null>(() => {
+        const meta = metaRef.current;
+        if (!meta) return null;
+        const physW = meta.width * meta.pixelSpacingX;
+        return computeReconCenterDelta(reconCenterX, tubeAngle, physW);
+    }, [reconCenterX, tubeAngle, loadState]);
+
+    useEffect(() => {
+        if (reconCenterDelta) onReconCenterChangeRef.current?.(reconCenterDelta);
+    }, [reconCenterDelta]);
+
+    const resetReconCenter = () => setReconCenterX(0.5);
+
+    const startReconCenterDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (toolMode === "pan") return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        reconCenterDragRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startRatio: reconCenterXRef.current,
+        };
+    };
 
     const measurementLabels = useMemo(() => {
         const meta = metaRef.current;
@@ -840,6 +942,45 @@ export function TomographicScoutViewport({
                             <div>FOV {measurementLabels.scoutFov} mm</div>
                             <div>Zoom {zoom.toFixed(2)}x</div>
                         </div>
+
+                        {/* 重建中心十字（水平拖动，垂直锁死在视口中线） */}
+                        <div
+                            className="absolute z-30 -translate-x-1/2 -translate-y-1/2 pointer-events-auto"
+                            style={{
+                                left: `${reconCenterX * 100}%`,
+                                top: "50%",
+                                cursor: toolMode === "pan" ? "default" : "ew-resize",
+                                touchAction: "none",
+                            }}
+                            onPointerDown={startReconCenterDrag}
+                            title="重建中心 - 水平拖动"
+                        >
+                            <div className="relative w-12 h-12 flex items-center justify-center">
+                                <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-[#FF6B6B] shadow-[0_0_6px_rgba(255,107,107,0.7)]" />
+                                <div className="absolute top-1/2 left-0 w-full h-px -translate-y-1/2 bg-[#FF6B6B] shadow-[0_0_6px_rgba(255,107,107,0.7)]" />
+                                <div className="w-3 h-3 rounded-full border-2 border-[#FF6B6B] bg-[#0F172A]/60" />
+                            </div>
+                        </div>
+
+                        {/* 重建中心读数 + 复位 */}
+                        <div className="absolute top-2 right-2 z-40 flex items-center gap-1 rounded-md bg-[#0F172A]/85 px-2 py-1 ring-1 ring-[#FF6B6B]/40 backdrop-blur-sm">
+                            <Crosshair size={12} className="text-[#FF6B6B]" />
+                            <span className="text-[10px] font-mono font-bold text-white tabular-nums">
+                                {reconCenterDelta
+                                    ? `Δ${reconCenterDelta.axis.toUpperCase()} ${reconCenterDelta.valueMm >= 0 ? "+" : ""}${reconCenterDelta.valueMm.toFixed(1)} mm`
+                                    : "Δ-- mm"}
+                            </span>
+                            <span className="text-[9px] font-mono text-[#94A3B8]">@{Math.round(((Math.round(tubeAngle) % 360) + 360) % 360)}°</span>
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); resetReconCenter(); }}
+                                disabled={Math.abs(reconCenterX - 0.5) < 1e-4}
+                                className="ml-1 flex h-[18px] w-[18px] items-center justify-center rounded text-[#CBD5E1] hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title="复位到等中心 (ISO)"
+                            >
+                                <Undo2 size={11} />
+                            </button>
+                        </div>
                     </>
                 )}
             </section>
@@ -901,6 +1042,9 @@ const SequenceScanConfirmScreen = () => {
     const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
     const [scoutHu, setScoutHu] = useState<ScoutHuData | null>(null);
     const [scoutCropBox, setScoutCropBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+    // 暂存重建中心偏移，后续接入扫描协议持久化时使用
+    const [, setReconCenterDelta] = useState<ReconCenterDelta | null>(null);
+    const [topogramTubeAngle, setTopogramTubeAngle] = useState<number>(180);
     const axialParamId = axialParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
 
@@ -911,6 +1055,10 @@ const SequenceScanConfirmScreen = () => {
             try {
                 const scanSession = await fetchSelectedScanSession();
                 const loaded = scanSession?.series.find((series) => series.series_type === "axial")?.axial_param as ApiScanSessionAxialParam | null | undefined;
+                const topogram = scanSession?.series.find((series) => series.series_type === "topogram")?.topogram_param;
+                if (topogram && !cancelled) {
+                    setTopogramTubeAngle(topogram.tube_angle ?? 180);
+                }
                 if (!loaded || cancelled) return;
 
                 setAxialParam(loaded);
@@ -1019,6 +1167,8 @@ const SequenceScanConfirmScreen = () => {
                         seriesOverride={HEAD_STROKE_DEMO_SCOUT_OVERRIDE}
                         onScoutHuChange={setScoutHu}
                         onCropBoxChange={setScoutCropBox}
+                        tubeAngle={topogramTubeAngle}
+                        onReconCenterChange={setReconCenterDelta}
                     />
                     {axialParam && showAutoMaPanel && (
                         <AutoMaPanel
