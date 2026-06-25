@@ -5,6 +5,7 @@ This directory holds project notes that are too detailed for the root README.
 ## Core References
 
 - [CT_DOMAIN_CONTEXT.md](CT_DOMAIN_CONTEXT.md): CT terminology, safety boundaries, and copywriting constraints for implementation work.
+- [常规扫描模块测试用例.md](常规扫描模块测试用例.md): Smoke, P0/P1/P2 test cases for the regular scan module, excluding gating, 4D, and DOM.
 - [4D-image-viewer-plan.md](4D-image-viewer-plan.md): 4D-Lung preprocessing and `/image-viewer` data integration plan.
 - [系统测试报告.md](系统测试报告.md): System test notes.
 

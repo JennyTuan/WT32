@@ -122,13 +122,27 @@ type PhaseCineSpeed = 0.5 | 1 | 2;
 type PhaseCineMode = "forward" | "bounce";
 const PHASE_CINE_SPEED_OPTIONS: readonly PhaseCineSpeed[] = [0.5, 1, 2] as const;
 const FOUR_D_LUNG_DEFAULT_WINDOW = { ww: 1600, wl: -600 } as const;
+const HEAD_BRAIN_DEFAULT_WINDOW = { ww: 100, wl: 35 } as const;
+type WindowPreset = {
+    key: string;
+    label: string;
+    ww: number;
+    wl: number;
+};
 const WINDOW_PRESETS = [
     { key: "lung", label: "Lung", ww: 1500, wl: -600 },
     { key: "bone", label: "Bone", ww: 2000, wl: 300 },
     { key: "tissue", label: "Tissue", ww: 400, wl: 40 },
     { key: "mediastinum", label: "Mediastinum", ww: 350, wl: 50 },
     { key: "brain", label: "Brain", ww: 80, wl: 40 },
-] as const;
+] as const satisfies readonly WindowPreset[];
+const HEAD_WINDOW_PRESETS = [
+    { key: "head-brain", label: "脑窗", ww: HEAD_BRAIN_DEFAULT_WINDOW.ww, wl: HEAD_BRAIN_DEFAULT_WINDOW.wl },
+    { key: "head-brain-standard", label: "脑实质窗", ww: 80, wl: 40 },
+    { key: "head-subdural", label: "硬膜下窗", ww: 200, wl: 80 },
+    { key: "head-bone", label: "骨窗", ww: 2800, wl: 600 },
+    { key: "head-narrow", label: "窄脑窗", ww: 40, wl: 40 },
+] as const satisfies readonly WindowPreset[];
 
 const VOLUME_PRESETS = [
     "CT-AAA",
@@ -317,8 +331,8 @@ const BRAIN_HELICAL_VIEW_SERIES = {
 const BRAIN_HELICAL_RECON_SERIES = [
     {
         ...BRAIN_HELICAL_VIEW_SERIES,
-        defaultWw: 100,
-        defaultWl: 35,
+        defaultWw: HEAD_BRAIN_DEFAULT_WINDOW.ww,
+        defaultWl: HEAD_BRAIN_DEFAULT_WINDOW.wl,
     },
     {
         studyName: "Head Stroke Demo",
@@ -335,8 +349,8 @@ const BRAIN_HELICAL_RECON_SERIES = [
         matrix: "512",
         kernel: "FC21",
         basePath: "/dicom-out/HeadStrokeDemo/ThinBrain",
-        defaultWw: 100,
-        defaultWl: 35,
+        defaultWw: HEAD_BRAIN_DEFAULT_WINDOW.ww,
+        defaultWl: HEAD_BRAIN_DEFAULT_WINDOW.wl,
     },
 ] as const;
 const BRAIN_HELICAL_VIEW_TOPOGRAM = {
@@ -652,23 +666,13 @@ const ViewScreen = () => {
         }),
         [obliqueAngleDeg, obliqueAxis, obliqueEnabled, obliquePanel]
     );
-    const applyWindowPreset = useCallback((preset: typeof WINDOW_PRESETS[number]) => {
+    const applyWindowPreset = useCallback((preset: WindowPreset) => {
         setWw(preset.ww);
         setWl(preset.wl);
         setDisplayWw(preset.ww);
         setDisplayWl(preset.wl);
         defaultWindowRef.current = { ww: preset.ww, wl: preset.wl };
     }, []);
-    const activeWindowPreset = useMemo(
-        () =>
-            WINDOW_PRESETS.find(
-                (preset) =>
-                    Math.round(displayWw) === preset.ww &&
-                    Math.round(displayWl) === preset.wl
-            ),
-        [displayWw, displayWl]
-    );
-
     // ─── Build study tree from scan session (falls back to static DICOM data) ──
     const studyTree = useMemo<Study[]>(() => {
         // ── Helper: build an ImageItem array using the static DICOM dataset ──────
@@ -1005,6 +1009,18 @@ const ViewScreen = () => {
         safeSeriesList[0];
     const isTopogramSeries = selectedSeries.seriesType === "topogram";
     const isFourDLungReconSeries = selectedSeries.seriesType === "4d";
+    const windowPresetsForSelectedSeries = isBrainHelicalDemo && !isTopogramSeries
+        ? HEAD_WINDOW_PRESETS
+        : WINDOW_PRESETS;
+    const activeWindowPreset = useMemo(
+        () =>
+            windowPresetsForSelectedSeries.find(
+                (preset) =>
+                    Math.round(displayWw) === preset.ww &&
+                    Math.round(displayWl) === preset.wl
+            ),
+        [displayWw, displayWl, windowPresetsForSelectedSeries]
+    );
     const totalSlices = selectedSeries.count;
     // Single flex container for both 2D and 3D; CornerstoneMPRViewport does its own 2×2 panel grid internally.
     // (`currentLayoutSpec` retained for backward-compatible dropdown but no longer drives the outer layout —
@@ -1648,7 +1664,7 @@ const ViewScreen = () => {
                                                 </div>
                                                 {isWindowPresetOpen && (
                                                     <div className="absolute top-[calc(100%+3px)] left-0 right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                                                        {WINDOW_PRESETS.map((preset) => {
+                                                        {windowPresetsForSelectedSeries.map((preset) => {
                                                             const active = activeWindowPreset?.key === preset.key;
                                                             return (
                                                                 <div

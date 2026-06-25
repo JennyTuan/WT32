@@ -170,8 +170,11 @@ const parseFiniteNumber = (value: unknown): number | null => {
 const sameXRange = (a: HeadDualScoutXRange, b: HeadDualScoutXRange) =>
     Math.abs(a.x - b.x) < 1e-4 && Math.abs(a.width - b.width) < 1e-4;
 
+// sharedZ is stored as physical millimeters along the patient Z axis so that
+// AP (vertical) and LAT (horizontal) coupling stays correct even if the two
+// scouts have different pixel scales. Tolerance below is in mm.
 const sameZRange = (a: HeadDualScoutZRange, b: HeadDualScoutZRange) =>
-    Math.abs(a.y - b.y) < 1e-4 && Math.abs(a.height - b.height) < 1e-4;
+    Math.abs(a.y - b.y) < 1e-2 && Math.abs(a.height - b.height) < 1e-2;
 
 const buildHeadDualScoutMeta = (
     series: HeadDualScoutSeries,
@@ -199,6 +202,78 @@ const getHeadDualHandleCursor = (handle: HeadDualScoutDragHandle) => {
     if (handle === "left" || handle === "right") return "ew-resize";
     return "move";
 };
+
+/**
+ * Aspect-locked stage that sizes itself to the largest rect of the given aspect
+ * that fits inside the outer panel. Refs/overlay coordinates can then use the
+ * stage as their reference, so a "20% of stage width" overlay actually lines up
+ * with "20% of the rendered DICOM image" — the DicomViewer fits-to-contain
+ * inside the same stage, so they share the exact same rect.
+ */
+function ScoutPanelStage({
+    view,
+    aspect,
+    stageRef,
+    rounded,
+    label,
+    children,
+}: {
+    view: HeadDualScoutView;
+    aspect: number;
+    stageRef: React.MutableRefObject<HTMLDivElement | null>;
+    rounded: string;
+    label: string;
+    children: React.ReactNode;
+}) {
+    const panelRef = useRef<HTMLDivElement | null>(null);
+    const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
+
+    useEffect(() => {
+        const el = panelRef.current;
+        if (!el) return;
+        const compute = () => {
+            const w = el.clientWidth;
+            const h = el.clientHeight;
+            if (w <= 0 || h <= 0) return;
+            const safeAspect = aspect > 0 ? aspect : 1;
+            // Largest rect of `safeAspect` (= width/height) that fits in w×h.
+            let stageW = w;
+            let stageH = w / safeAspect;
+            if (stageH > h) {
+                stageH = h;
+                stageW = h * safeAspect;
+            }
+            setStageSize((prev) =>
+                prev && Math.abs(prev.width - stageW) < 0.5 && Math.abs(prev.height - stageH) < 0.5
+                    ? prev
+                    : { width: stageW, height: stageH },
+            );
+        };
+        compute();
+        const ro = new ResizeObserver(compute);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, [aspect]);
+
+    return (
+        <div
+            ref={panelRef}
+            className={`relative h-full min-w-0 overflow-hidden bg-black flex items-center justify-center ${rounded}`}
+            data-scout-view={view}
+        >
+            <div
+                ref={stageRef}
+                className="relative"
+                style={stageSize ? { width: stageSize.width, height: stageSize.height } : { visibility: "hidden", width: 0, height: 0 }}
+            >
+                {children}
+                <div className="pointer-events-none absolute bottom-3 left-3 z-30 rounded border border-[#4D94FF]/40 bg-[#08111f]/85 px-2 py-1 text-[10px] font-black tracking-[0.12em] text-[#DBEAFE]">
+                    {label}
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function HeadDualScoutConfirmViewport({
     apSeries,
@@ -259,26 +334,47 @@ function HeadDualScoutConfirmViewport({
         });
     }, [apMeta, initialMeasurements?.scanLength, initialMeasurements?.scoutFov]);
 
+    // Each scout's Z axis maps to a different image axis (AP vertical, LAT
+    // horizontal); store Z extent in patient-mm so the two views stay coupled
+    // regardless of pixel-scale differences between the DICOMs.
+    const apZSpanMm = apMeta.height * apMeta.pixelSpacingY;
+    const latZSpanMm = latMeta.width * latMeta.pixelSpacingX;
+    const sharedZSpanMm = Math.max(1, Math.min(apZSpanMm, latZSpanMm));
+    const minZMm = Math.max(20, sharedZSpanMm * 0.08);
+
     const [sharedZ, setSharedZ] = useState<HeadDualScoutZRange>(() => ({
-        y: initialCropBox.y,
-        height: initialCropBox.height,
+        y: initialCropBox.y * apZSpanMm,
+        height: initialCropBox.height * apZSpanMm,
     }));
     const [apX, setApX] = useState<HeadDualScoutXRange>(() => ({
         x: initialCropBox.x,
         width: initialCropBox.width,
     }));
+    // LAT cross-axis is patient A-P (front-back depth of head), a different
+    // anatomical dimension from AP's L-R width — give it its own default
+    // centered on the head profile rather than copying AP's L-R range.
     const [latX, setLatX] = useState<HeadDualScoutXRange>(() => ({
-        x: initialCropBox.x,
-        width: initialCropBox.width,
+        x: 0.18,
+        width: 0.62,
     }));
 
     const apCropBox = useMemo<HeadDualScoutCropBox>(
-        () => ({ x: apX.x, width: apX.width, y: sharedZ.y, height: sharedZ.height }),
-        [apX, sharedZ],
+        () => ({
+            x: apX.x,
+            width: apX.width,
+            y: sharedZ.y / apZSpanMm,
+            height: sharedZ.height / apZSpanMm,
+        }),
+        [apX, sharedZ, apZSpanMm],
     );
     const latCropBox = useMemo<HeadDualScoutCropBox>(
-        () => ({ x: sharedZ.y, width: sharedZ.height, y: latX.x, height: latX.width }),
-        [latX, sharedZ],
+        () => ({
+            x: sharedZ.y / latZSpanMm,
+            width: sharedZ.height / latZSpanMm,
+            y: latX.x,
+            height: latX.width,
+        }),
+        [latX, sharedZ, latZSpanMm],
     );
 
     useEffect(() => {
@@ -286,13 +382,13 @@ function HeadDualScoutConfirmViewport({
     }, [apCropBox, latCropBox]);
 
     const apMeasurements = useMemo(() => ({
-        scanLength: (apCropBox.height * apMeta.height * apMeta.pixelSpacingY).toFixed(1),
+        scanLength: sharedZ.height.toFixed(1),
         scoutFov: (apCropBox.width * apMeta.width * apMeta.pixelSpacingX).toFixed(1),
-    }), [apCropBox, apMeta]);
+    }), [apCropBox, apMeta, sharedZ.height]);
     const latMeasurements = useMemo(() => ({
-        scanLength: (latCropBox.width * latMeta.width * latMeta.pixelSpacingX).toFixed(1),
+        scanLength: sharedZ.height.toFixed(1),
         scoutFov: (latCropBox.height * latMeta.height * latMeta.pixelSpacingY).toFixed(1),
-    }), [latCropBox, latMeta]);
+    }), [latCropBox, latMeta, sharedZ.height]);
     const scanPositionMm = Number(apMeasurements.scanLength);
 
     useEffect(() => {
@@ -346,7 +442,12 @@ function HeadDualScoutConfirmViewport({
             const dy = (event.clientY - cropDrag.startY) / Math.max(1, rect.height);
             const minSize = 0.08;
             const isLat = cropDrag.view === "lat";
-            const zDelta = isLat ? dx : dy;
+            // Z axis maps to AP-vertical (dy) or LAT-horizontal (dx); convert
+            // the normalized delta of the active viewport into patient mm using
+            // that viewport's own Z span so the two views drag at the same
+            // physical rate.
+            const activeZSpanMm = isLat ? latZSpanMm : apZSpanMm;
+            const zDeltaMm = (isLat ? dx : dy) * activeZSpanMm;
             const crossDelta = isLat ? dy : dx;
 
             if (cropDrag.handle === "move") {
@@ -355,7 +456,7 @@ function HeadDualScoutConfirmViewport({
                     width: cropDrag.initialX.width,
                 };
                 const nextZ = {
-                    y: clamp(cropDrag.initialZ.y + zDelta, 0, 1 - cropDrag.initialZ.height),
+                    y: clamp(cropDrag.initialZ.y + zDeltaMm, 0, sharedZSpanMm - cropDrag.initialZ.height),
                     height: cropDrag.initialZ.height,
                 };
                 setIndependentRange(cropDrag.view, nextX);
@@ -378,9 +479,9 @@ function HeadDualScoutConfirmViewport({
                     return;
                 }
                 const nextY = clamp(
-                    cropDrag.initialZ.y + dy,
+                    cropDrag.initialZ.y + zDeltaMm,
                     0,
-                    cropDrag.initialZ.y + cropDrag.initialZ.height - minSize,
+                    cropDrag.initialZ.y + cropDrag.initialZ.height - minZMm,
                 );
                 const nextZ = {
                     y: nextY,
@@ -401,7 +502,7 @@ function HeadDualScoutConfirmViewport({
                 }
                 const nextZ = {
                     y: cropDrag.initialZ.y,
-                    height: clamp(cropDrag.initialZ.height + dy, minSize, 1 - cropDrag.initialZ.y),
+                    height: clamp(cropDrag.initialZ.height + zDeltaMm, minZMm, sharedZSpanMm - cropDrag.initialZ.y),
                 };
                 setSharedZ((prev) => (sameZRange(prev, nextZ) ? prev : nextZ));
                 return;
@@ -410,9 +511,9 @@ function HeadDualScoutConfirmViewport({
             if (cropDrag.handle === "left") {
                 if (isLat) {
                     const nextY = clamp(
-                        cropDrag.initialZ.y + dx,
+                        cropDrag.initialZ.y + zDeltaMm,
                         0,
-                        cropDrag.initialZ.y + cropDrag.initialZ.height - minSize,
+                        cropDrag.initialZ.y + cropDrag.initialZ.height - minZMm,
                     );
                     const nextZ = {
                         y: nextY,
@@ -437,7 +538,7 @@ function HeadDualScoutConfirmViewport({
             if (isLat) {
                 const nextZ = {
                     y: cropDrag.initialZ.y,
-                    height: clamp(cropDrag.initialZ.height + dx, minSize, 1 - cropDrag.initialZ.y),
+                    height: clamp(cropDrag.initialZ.height + zDeltaMm, minZMm, sharedZSpanMm - cropDrag.initialZ.y),
                 };
                 setSharedZ((prev) => (sameZRange(prev, nextZ) ? prev : nextZ));
                 return;
@@ -467,7 +568,10 @@ function HeadDualScoutConfirmViewport({
             window.removeEventListener("pointerup", handleUp);
             window.removeEventListener("pointercancel", handleUp);
         };
-    }, [setIndependentRange, updateScanPositionFromPointer]);
+    }, [setIndependentRange, updateScanPositionFromPointer, apZSpanMm, latZSpanMm, sharedZSpanMm, minZMm]);
+
+    const sharedZRef = useRef(sharedZ);
+    useEffect(() => { sharedZRef.current = sharedZ; }, [sharedZ]);
 
     const startCropDrag = (view: HeadDualScoutView, handle: HeadDualScoutDragHandle) =>
         (event: React.PointerEvent<HTMLDivElement>) => {
@@ -475,6 +579,7 @@ function HeadDualScoutConfirmViewport({
             event.stopPropagation();
             event.currentTarget.setPointerCapture?.(event.pointerId);
             const cropBox = cropBoxRef.current[view];
+            const currentZ = sharedZRef.current;
             cropDragRef.current = {
                 view,
                 handle,
@@ -484,9 +589,8 @@ function HeadDualScoutConfirmViewport({
                 initialX: view === "lat"
                     ? { x: cropBox.y, width: cropBox.height }
                     : { x: cropBox.x, width: cropBox.width },
-                initialZ: view === "lat"
-                    ? { y: cropBox.x, height: cropBox.width }
-                    : { y: cropBox.y, height: cropBox.height },
+                // initialZ is now in patient mm (sharedZ), not normalized.
+                initialZ: { y: currentZ.y, height: currentZ.height },
             };
         };
 
@@ -499,7 +603,7 @@ function HeadDualScoutConfirmViewport({
             updateScanPositionFromPointer(view, event.clientX, event.clientY);
         };
 
-    const renderCropOverlay = (view: HeadDualScoutView, cropBox: HeadDualScoutCropBox, measurements: { scanLength: string; scoutFov: string }) => {
+    const renderCropOverlay = (view: HeadDualScoutView, cropBox: HeadDualScoutCropBox) => {
         const isLat = view === "lat";
         const positionPercent = clamp01(scanPositionRatio) * 100;
         const positionLabel = `Z ${Number.isFinite(scanPositionMm) ? (clamp01(scanPositionRatio) * scanPositionMm).toFixed(1) : "--"} mm`;
@@ -568,10 +672,6 @@ function HeadDualScoutConfirmViewport({
                         onPointerDown={startCropDrag(view, "right")}
                     />
                 </div>
-                <div className="pointer-events-none absolute left-3 top-3 rounded border border-white/10 bg-[#07111f]/80 px-2 py-1 font-mono text-[10px] leading-[1.4] text-[#CFD8DC]">
-                    <div>Scan Length {measurements.scanLength} mm</div>
-                    <div>FOV {measurements.scoutFov} mm</div>
-                </div>
             </div>
         );
     };
@@ -581,34 +681,36 @@ function HeadDualScoutConfirmViewport({
         series: HeadDualScoutSeries,
         meta: HeadDualScoutMeta,
         cropBox: HeadDualScoutCropBox,
-        measurements: { scanLength: string; scoutFov: string },
-    ) => (
-        <div
-            ref={view === "ap" ? apViewportRef : latViewportRef}
-            className={`relative h-full min-w-0 overflow-hidden bg-black ${view === "ap" ? "rounded-l-md" : "rounded-r-md"}`}
-        >
-            <DicomViewer
-                key={series.url}
-                imageUrls={[series.url]}
-                currentImageIndex={0}
-                activeTool="pan"
-                windowCenter={meta.windowCenter}
-                windowWidth={meta.windowWidth}
-                interpolationMode="LINEAR"
-            />
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-black/60 to-transparent" />
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-gradient-to-t from-black/65 to-transparent" />
-            {renderCropOverlay(view, cropBox, measurements)}
-            <div className="pointer-events-none absolute bottom-3 left-3 z-30 rounded border border-[#4D94FF]/40 bg-[#08111f]/85 px-2 py-1 text-[10px] font-black tracking-[0.12em] text-[#DBEAFE]">
-                {view === "ap" ? "AP · 正位 0°" : "LAT · 侧位 90°"}
-            </div>
-        </div>
-    );
+    ) => {
+        const aspect = meta.width > 0 && meta.height > 0 ? meta.width / meta.height : 1;
+        return (
+            <ScoutPanelStage
+                view={view}
+                aspect={aspect}
+                stageRef={view === "ap" ? apViewportRef : latViewportRef}
+                rounded={view === "ap" ? "rounded-l-md" : "rounded-r-md"}
+                label={view === "ap" ? "AP · 正位 0°" : "LAT · 侧位 90°"}
+            >
+                <DicomViewer
+                    key={series.url}
+                    imageUrls={[series.url]}
+                    currentImageIndex={0}
+                    activeTool="pan"
+                    windowCenter={meta.windowCenter}
+                    windowWidth={meta.windowWidth}
+                    interpolationMode="LINEAR"
+                />
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-black/60 to-transparent" />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-gradient-to-t from-black/65 to-transparent" />
+                {renderCropOverlay(view, cropBox)}
+            </ScoutPanelStage>
+        );
+    };
 
     return (
         <div className="grid h-full flex-1 grid-cols-2 gap-[3px] bg-[#0A0F14]">
-            {renderScoutPanel("ap", apSeries, apMeta, apCropBox, apMeasurements)}
-            {renderScoutPanel("lat", latSeries, latMeta, latCropBox, latMeasurements)}
+            {renderScoutPanel("ap", apSeries, apMeta, apCropBox)}
+            {renderScoutPanel("lat", latSeries, latMeta, latCropBox)}
         </div>
     );
 }
