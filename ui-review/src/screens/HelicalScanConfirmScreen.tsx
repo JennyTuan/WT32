@@ -2069,6 +2069,24 @@ const HelicalScanConfirmScreen = () => {
         const topo = scanSession?.series.find((s) => s.series_type === "topogram")?.topogram_param;
         return topo?.tube_angle ?? 180;
     }, [scanSession]);
+    const handleScoutAngleChange = useCallback((angle: number) => {
+        setScanSession((current) => {
+            if (!current) return current;
+            return {
+                ...current,
+                series: current.series.map((series) => {
+                    if (series.series_type !== "topogram" || !series.topogram_param) return series;
+                    return {
+                        ...series,
+                        topogram_param: {
+                            ...series.topogram_param,
+                            tube_angle: angle,
+                        },
+                    };
+                }),
+            };
+        });
+    }, []);
     const [sessionResolved, setSessionResolved] = useState(false);
     const [protocolHelicalSeed, setProtocolHelicalSeed] = useState<ProtocolSeedHelicalParam | null>(null);
     const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>(NOISE_SLIDER_DEFAULT);
@@ -2163,7 +2181,7 @@ const HelicalScanConfirmScreen = () => {
 
         const loadSessionDefaults = async () => {
             try {
-                const scanSession = await fetchSelectedScanSession();
+                const scanSession = await fetchSelectedScanSession({ preferCache: false });
                 if (cancelled) return;
                 if (scanSession) {
                     setScanSession(scanSession);
@@ -2327,6 +2345,7 @@ const HelicalScanConfirmScreen = () => {
             activeSequenceStepIndex={0}
             parameterPanelMode="helicalScan"
             helicalParamOverrides={measurements}
+            onScoutAngleChange={handleScoutAngleChange}
             autoMaEnabled={showAutoMaPanel}
             onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
             onExecuteScan={handleExecuteScan}

@@ -309,6 +309,7 @@ const getModeLabel = (seriesType: ApiSeriesDetail["series_type"]): string => {
 };
 
 const scanParamOrder = ["mA", "kV", "scanLength", "scanningDirection", "angle", "rotationTime", "collimation", "scoutFOV", "dom", "pitch", "scanIncrement", "cycleCount"];
+const TUBE_ANGLE_PARAM_OPTIONS = ["0\u00b0", "90\u00b0", "180\u00b0", "270\u00b0"];
 
 type ScanParamKey = (typeof scanParamOrder)[number];
 
@@ -812,7 +813,13 @@ const toUiPlan = (entry: RawProtocolCase, options?: { sourceSessionId?: number; 
             .map((k) => ({
                 label: scanParamLabelMap[k] || k.toUpperCase(),
                 value: formatValue(k, seq.scanParams[k]),
-                options: k === "mA" ? ["50", "100", "150", "200", "215"] : k === "kV" ? ["80", "100", "120", "140"] : undefined,
+                options: k === "mA"
+                    ? ["50", "100", "150", "200", "215"]
+                    : k === "kV"
+                        ? ["80", "100", "120", "140"]
+                        : k === "angle"
+                            ? TUBE_ANGLE_PARAM_OPTIONS
+                            : undefined,
             })),
         reconPlans: (seq.reconstructionParams || []).map((rp: RawRecon) => ({
             sourceReconId: Number.isFinite(Number(rp.id)) ? Number(rp.id) : undefined,

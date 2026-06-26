@@ -64,6 +64,7 @@ type ScanConfirmScreenProps = {
     onAutoMaEnabledChange?: (value: boolean) => void;
     readOnlyMode?: boolean;
     onExecuteScan?: () => void;
+    onScoutAngleChange?: (angle: number) => void;
     patientConfirmBeforeExecute?: boolean;
     executeButtonLabel?: string;
     executeButtonCompact?: boolean;
@@ -199,6 +200,40 @@ const buildSequenceSteps = (
 };
 
 const DETAIL_TARGET_STORAGE_KEY = "scanConfirmDetailTarget";
+const TUBE_ANGLE_OPTIONS = [0, 90, 180, 270] as const;
+
+type TubeAngleOption = (typeof TUBE_ANGLE_OPTIONS)[number];
+
+const isTubeAngleOption = (value: number): value is TubeAngleOption =>
+    TUBE_ANGLE_OPTIONS.some((option) => option === value);
+
+const parseTubeAngleOption = (value: unknown): TubeAngleOption | null => {
+    const numeric = typeof value === "number" ? value : Number(String(value).replace(/[^\d.-]/g, ""));
+    if (!Number.isFinite(numeric)) return null;
+    const normalized = ((Math.round(numeric) % 360) + 360) % 360;
+    return isTubeAngleOption(normalized) ? normalized : null;
+};
+
+const toTubeAngleOption = (value: unknown, fallback: TubeAngleOption): TubeAngleOption =>
+    parseTubeAngleOption(value) ?? fallback;
+
+const patchTopogramAngleInScanSession = (
+    scanSession: ApiScanSessionDetail,
+    paramIds: number[],
+    tubeAngle: TubeAngleOption,
+): ApiScanSessionDetail => ({
+    ...scanSession,
+    series: scanSession.series.map((series) => {
+        if (!series.topogram_param || !paramIds.includes(series.topogram_param.id)) return series;
+        return {
+            ...series,
+            topogram_param: {
+                ...series.topogram_param,
+                tube_angle: tubeAngle,
+            },
+        };
+    }),
+});
 
 const inferSequenceType = (sequence: Sequence): WorkflowSequenceType => {
     if (sequence.type) return sequence.type;
@@ -420,6 +455,7 @@ const ScanConfirmScreen = ({
     onAutoMaEnabledChange,
     readOnlyMode = false,
     onExecuteScan,
+    onScoutAngleChange,
     patientConfirmBeforeExecute = false,
     executeButtonLabel,
     executeButtonCompact = false,
@@ -438,7 +474,6 @@ const ScanConfirmScreen = ({
     const [activeParamTab, setActiveParamTab] = useState<"main" | "extra">("main");
     const [dualScoutApAngle, setDualScoutApAngle] = useState<number>(0);
     const [dualScoutLatAngle, setDualScoutLatAngle] = useState<number>(90);
-    const [editingDualAngle, setEditingDualAngle] = useState<"ap" | "lat" | null>(null);
     const [dualScoutMa, setDualScoutMa] = useState<number | null>(null);
     const [dualScoutKv, setDualScoutKv] = useState<number | null>(null);
     const [dualScoutScanLength, setDualScoutScanLength] = useState<number | null>(null);
@@ -527,7 +562,7 @@ const ScanConfirmScreen = ({
 
         const loadScanSession = async () => {
             try {
-                const currentScanSession = await fetchSelectedScanSession();
+                const currentScanSession = await fetchSelectedScanSession({ preferCache: false });
                 if (!cancelled) {
                     setScanSession(currentScanSession);
                 }
@@ -592,11 +627,20 @@ const ScanConfirmScreen = ({
         (patch: Partial<{ ma: number; kv: number; scan_length: number; tube_angle: number }>, target: "shared" | "ap" | "lat") => {
             if (!dualScoutTopogramIds) return;
             const writes: Promise<unknown>[] = [];
+            const targetParamIds: number[] = [];
             if (target !== "lat") {
                 writes.push(updateSelectedScanSessionTopogramParam(dualScoutTopogramIds.apId, patch));
+                targetParamIds.push(dualScoutTopogramIds.apId);
             }
             if (target !== "ap" && dualScoutTopogramIds.latId != null) {
                 writes.push(updateSelectedScanSessionTopogramParam(dualScoutTopogramIds.latId, patch));
+                targetParamIds.push(dualScoutTopogramIds.latId);
+            }
+            const tubeAngle = parseTubeAngleOption(patch.tube_angle);
+            if (tubeAngle !== null && targetParamIds.length > 0) {
+                setScanSession((current) =>
+                    current ? patchTopogramAngleInScanSession(current, targetParamIds, tubeAngle) : current
+                );
             }
             Promise.all(writes).catch((error) => console.error("Failed to persist dual scout param.", error));
         },
@@ -647,6 +691,13 @@ const ScanConfirmScreen = ({
     const tomographicScanDisplayParams = getTomographicScanDisplayParams(effectiveProtocolCases);
     const helicalScanDisplayParams = getHelicalScanDisplayParams(effectiveProtocolCases);
     const scoutDoseFromSession = useMemo(() => getScoutDoseDisplayParamsFromSession(scanSession), [scanSession]);
+    const singleScoutTopogramParam = useMemo(
+        () =>
+            scanSession?.series.find((series) => series.series_type === "topogram" && series.topogram_param)
+                ?.topogram_param ?? null,
+        [scanSession],
+    );
+    const scoutAngleValue = toTubeAngleOption(scoutDisplayParams.angle, 270);
     const resolvedTomographicScanDisplayParams = {
         ...tomographicScanDisplayParams,
         ...tomographicParamOverrides,
@@ -668,6 +719,48 @@ const ScanConfirmScreen = ({
         dlp: scoutDoseDisplayParams.doseDlp,
         protocol: currentProtocolLabel,
     };
+    const handleScoutAngleChange = useCallback((nextAngle: TubeAngleOption) => {
+        if (!singleScoutTopogramParam) return;
+        const previousAngle = toTubeAngleOption(singleScoutTopogramParam.tube_angle, scoutAngleValue);
+        const paramId = singleScoutTopogramParam.id;
+
+        setScanSession((current) =>
+            current ? patchTopogramAngleInScanSession(current, [paramId], nextAngle) : current
+        );
+        onScoutAngleChange?.(nextAngle);
+
+        updateSelectedScanSessionTopogramParam(paramId, { tube_angle: nextAngle })
+            .then(() => fetchSelectedScanSession({ preferCache: false }))
+            .then((updatedSession) => {
+                if (updatedSession) setScanSession(updatedSession);
+            })
+            .catch((error) => {
+                console.error("Failed to persist scout angle.", error);
+                setScanSession((current) =>
+                    current ? patchTopogramAngleInScanSession(current, [paramId], previousAngle) : current
+                );
+                onScoutAngleChange?.(previousAngle);
+            });
+    }, [onScoutAngleChange, scoutAngleValue, singleScoutTopogramParam]);
+
+    const renderScoutAngleSelectCard = (label: string) => (
+        <label className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode || !singleScoutTopogramParam ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
+            <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</span>
+            <div className="relative mt-[1px] w-full">
+                <select
+                    value={String(scoutAngleValue)}
+                    disabled={readOnlyMode || !singleScoutTopogramParam}
+                    onChange={(event) => handleScoutAngleChange(toTubeAngleOption(event.target.value, scoutAngleValue))}
+                    className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none disabled:cursor-default"
+                >
+                    {TUBE_ANGLE_OPTIONS.map((angle) => (
+                        <option key={angle} value={String(angle)}>{`${angle}\u00b0`}</option>
+                    ))}
+                </select>
+                <ChevronDown size={9} className={`pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
+            </div>
+        </label>
+    );
     const handleOpenDetails = () => {
         const detailTarget = parameterPanelMode === "helicalScan"
             ? "helical"
@@ -1086,13 +1179,7 @@ const ScanConfirmScreen = ({
                                         </div>
                                     </div>
 
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.tableTilt")}</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.angle}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
+                                    {renderScoutAngleSelectCard(t("scanFlow.flatScanAngle"))}
 
 
 
@@ -1222,13 +1309,7 @@ const ScanConfirmScreen = ({
                                         </div>
                                     </div>
 
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.tableTilt")}</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedHelicalScanDisplayParams.angle}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
+                                    {renderScoutAngleSelectCard(t("scanFlow.flatScanAngle"))}
 
                                     <div className="col-span-2 mt-1 rounded-md border border-[#FDE68A]/80 bg-[#FFFBEB] px-3 py-2 flex items-center justify-around">
                                         <div className="flex flex-col items-center">
@@ -1359,50 +1440,39 @@ const ScanConfirmScreen = ({
                                                 {(["ap", "lat"] as const).map((side, idx) => {
                                                     const value = side === "ap" ? dualScoutApAngle : dualScoutLatAngle;
                                                     const setValue = side === "ap" ? setDualScoutApAngle : setDualScoutLatAngle;
-                                                    const isEditing = editingDualAngle === side;
+                                                    const angleValue = toTubeAngleOption(value, side === "ap" ? 0 : 90);
                                                     return (
                                                         <div key={side} className="flex items-center">
                                                             {idx > 0 && <span className="text-[#B0BEC5] mx-1 text-[11px]">/</span>}
-                                                            <div
-                                                                onClick={() => !readOnlyMode && setEditingDualAngle(side)}
-                                                                className={`flex items-center gap-0.5 px-1 py-[1px] rounded border ${isEditing ? "border-[#4D94FF] bg-[#EAF3FF]" : "border-transparent hover:border-[#4D94FF]"} ${readOnlyMode ? "cursor-default" : "cursor-pointer"}`}
+                                                            <label
+                                                                className={`flex items-center gap-0.5 px-1 py-[1px] rounded border border-transparent ${readOnlyMode ? "cursor-default" : "cursor-pointer hover:border-[#4D94FF]"}`}
                                                             >
                                                                 <span className="text-[8px] font-bold text-[#90A4AE] uppercase">{side === "ap" ? "AP" : "LAT"}</span>
-                                                                {isEditing ? (
-                                                                    <input
-                                                                        autoFocus
-                                                                        type="number"
-                                                                        value={value}
-                                                                        onChange={(e) => {
-                                                                            const v = Number(e.target.value);
-                                                                            if (Number.isFinite(v)) setValue(v);
+                                                                <div className="relative flex items-center">
+                                                                    <select
+                                                                        value={String(angleValue)}
+                                                                        disabled={readOnlyMode}
+                                                                        onChange={(event) => {
+                                                                            const nextAngle = toTubeAngleOption(event.target.value, angleValue);
+                                                                            setValue(nextAngle);
+                                                                            persistDualScoutPatch({ tube_angle: nextAngle }, side);
                                                                         }}
-                                                                        onBlur={() => {
-                                                                            setEditingDualAngle(null);
-                                                                            persistDualScoutPatch({ tube_angle: value }, side);
-                                                                        }}
-                                                                        onKeyDown={(e) => {
-                                                                            if (e.key === "Enter" || e.key === "Escape") (e.currentTarget as HTMLInputElement).blur();
-                                                                        }}
-                                                                        className="w-[28px] text-[12px] font-black text-[#37474F] bg-transparent outline-none text-center"
-                                                                    />
-                                                                ) : (
-                                                                    <span className="text-[12px] font-black text-[#37474F]">{value}°</span>
-                                                                )}
-                                                            </div>
+                                                                        className="h-[18px] w-[40px] appearance-none bg-transparent pr-2 text-center text-[12px] font-black text-[#37474F] outline-none disabled:cursor-default"
+                                                                    >
+                                                                        {TUBE_ANGLE_OPTIONS.map((angle) => (
+                                                                            <option key={angle} value={String(angle)}>{`${angle}\u00b0`}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                    <ChevronDown size={8} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
+                                                                </div>
+                                                            </label>
                                                         </div>
                                                     );
                                                 })}
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                            <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.flatScanAngle")}</span>
-                                            <div className="flex items-center gap-1 mt-[1px]">
-                                                <span className="text-[13px] font-black text-[#37474F]">{scoutDisplayParams.angle}</span>
-                                                <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                            </div>
-                                        </div>
+                                        renderScoutAngleSelectCard(t("scanFlow.flatScanAngle"))
                                     )}
 
                                     <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">

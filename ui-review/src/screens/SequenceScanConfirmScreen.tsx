@@ -127,35 +127,15 @@ type CropBox = {
 
 type DragHandle = "move" | "top" | "bottom" | "left" | "right";
 
-// 重建中心偏移：按公司《重建中心坐标计算方法 REV A》计算。
-// 公式核心：偏移 = (定位框水平像素 − 图像中心像素) × 每像素物理距离。
-// 不同球管角度决定输出轴（X 或 Y）与正负号。
-//   180° (球管 6 点)：输出 ΔX，右正左负
-//    90° (球管 3 点)：输出 ΔY，右正左负
-//     0° (球管 12 点)：与 180° 反号
-//   270° (球管 9 点)：与 90° 反号
+// AP scout convention follows LPS: patient left is X+, back/posterior is Y+,
+// and head is Z+. The reconstruction-center marker follows the crop box center.
 type ReconCenterDelta = { axis: "x" | "y"; valueMm: number };
 
 function computeReconCenterDelta(
     centerXRatio: number,
-    tubeAngle: number,
     physicalWidthMm: number,
 ): ReconCenterDelta {
-    const offsetMm = (centerXRatio - 0.5) * physicalWidthMm;
-    const normalizedAngle = ((Math.round(tubeAngle) % 360) + 360) % 360;
-    switch (normalizedAngle) {
-        case 180:
-            return { axis: "x", valueMm: offsetMm };
-        case 0:
-            return { axis: "x", valueMm: -offsetMm };
-        case 90:
-            return { axis: "y", valueMm: offsetMm };
-        case 270:
-            return { axis: "y", valueMm: -offsetMm };
-        default:
-            // 非标准角度按 180° 处理（保底，不抛错）
-            return { axis: "x", valueMm: offsetMm };
-    }
+    return { axis: "x", valueMm: (0.5 - centerXRatio) * physicalWidthMm };
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -226,11 +206,6 @@ export function TomographicScoutViewport({
         height: 0.46,
     });
     const positionDragRef = useRef<{ pointerId: number } | null>(null);
-    // 重建中心十字：水平拖动，0-1 视口横向比例，垂直锁死在 0.5
-    const reconCenterDragRef = useRef<{ pointerId: number; startX: number; startRatio: number } | null>(null);
-    const [reconCenterX, setReconCenterX] = useState(0.5);
-    const reconCenterXRef = useRef(reconCenterX);
-    useEffect(() => { reconCenterXRef.current = reconCenterX; }, [reconCenterX]);
     const onReconCenterChangeRef = useRef(onReconCenterChange);
     useEffect(() => { onReconCenterChangeRef.current = onReconCenterChange; }, [onReconCenterChange]);
     const panStateRef = useRef<{
@@ -684,16 +659,6 @@ export function TomographicScoutViewport({
                 return;
             }
 
-            const reconDrag = reconCenterDragRef.current;
-            if (reconDrag && reconDrag.pointerId === event.pointerId) {
-                const viewport = viewportRef.current;
-                if (!viewport) return;
-                const rect = viewport.getBoundingClientRect();
-                const dx = (event.clientX - reconDrag.startX) / Math.max(1, rect.width);
-                setReconCenterX(clamp01(reconDrag.startRatio + dx));
-                return;
-            }
-
             const viewport = viewportRef.current;
             if (!viewport) return;
 
@@ -753,9 +718,6 @@ export function TomographicScoutViewport({
             if (panStateRef.current?.pointerId === event.pointerId) {
                 panStateRef.current = null;
             }
-            if (reconCenterDragRef.current?.pointerId === event.pointerId) {
-                reconCenterDragRef.current = null;
-            }
         };
 
         window.addEventListener("pointermove", handleMove);
@@ -768,29 +730,32 @@ export function TomographicScoutViewport({
         };
     }, [onScanPositionRatioChange]);
 
+    const reconCenterRatio = useMemo(
+        () => ({
+            x: cropBox.x + cropBox.width / 2,
+            y: cropBox.y + cropBox.height / 2,
+        }),
+        [cropBox],
+    );
+    const isReconCenterAtIso = Math.abs(reconCenterRatio.x - 0.5) < 1e-4 && Math.abs(reconCenterRatio.y - 0.5) < 1e-4;
+
     const reconCenterDelta = useMemo<ReconCenterDelta | null>(() => {
         const meta = metaRef.current;
         if (!meta) return null;
         const physW = meta.width * meta.pixelSpacingX;
-        return computeReconCenterDelta(reconCenterX, tubeAngle, physW);
-    }, [reconCenterX, tubeAngle, loadState]);
+        return computeReconCenterDelta(reconCenterRatio.x, physW);
+    }, [reconCenterRatio.x, loadState]);
 
     useEffect(() => {
         if (reconCenterDelta) onReconCenterChangeRef.current?.(reconCenterDelta);
     }, [reconCenterDelta]);
 
-    const resetReconCenter = () => setReconCenterX(0.5);
-
-    const startReconCenterDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-        if (toolMode === "pan") return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-        reconCenterDragRef.current = {
-            pointerId: event.pointerId,
-            startX: event.clientX,
-            startRatio: reconCenterXRef.current,
-        };
+    const resetReconCenter = () => {
+        setCropBox((current) => ({
+            ...current,
+            x: clamp(0.5 - current.width / 2, 0, 1 - current.width),
+            y: clamp(0.5 - current.height / 2, 0, 1 - current.height),
+        }));
     };
 
     const measurementLabels = useMemo(() => {
@@ -947,17 +912,14 @@ export function TomographicScoutViewport({
                             <div>Zoom {zoom.toFixed(2)}x</div>
                         </div>
 
-                        {/* 重建中心十字（水平拖动，垂直锁死在视口中线） */}
+                        {/* Reconstruction center marker follows the crop box center; AP scout updates LPS X. */}
                         <div
-                            className="absolute z-30 -translate-x-1/2 -translate-y-1/2 pointer-events-auto"
+                            className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-1/2"
                             style={{
-                                left: `${reconCenterX * 100}%`,
-                                top: "50%",
-                                cursor: toolMode === "pan" ? "default" : "ew-resize",
-                                touchAction: "none",
+                                left: `${reconCenterRatio.x * 100}%`,
+                                top: `${reconCenterRatio.y * 100}%`,
                             }}
-                            onPointerDown={startReconCenterDrag}
-                            title="重建中心 - 水平拖动"
+                            title="重建中心 - 跟随扫描框中心"
                         >
                             <div className="relative w-12 h-12 flex items-center justify-center">
                                 <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-[#FF6B6B] shadow-[0_0_6px_rgba(255,107,107,0.7)]" />
@@ -978,7 +940,7 @@ export function TomographicScoutViewport({
                             <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); resetReconCenter(); }}
-                                disabled={Math.abs(reconCenterX - 0.5) < 1e-4}
+                                disabled={isReconCenterAtIso}
                                 className="ml-1 flex h-[18px] w-[18px] items-center justify-center rounded text-[#CBD5E1] hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
                                 title="复位到等中心 (ISO)"
                             >
@@ -1057,7 +1019,7 @@ const SequenceScanConfirmScreen = () => {
 
         const loadSessionDefaults = async () => {
             try {
-                const scanSession = await fetchSelectedScanSession();
+                const scanSession = await fetchSelectedScanSession({ preferCache: false });
                 const loaded = scanSession?.series.find((series) => series.series_type === "axial")?.axial_param as ApiScanSessionAxialParam | null | undefined;
                 const topogram = scanSession?.series.find((series) => series.series_type === "topogram")?.topogram_param;
                 if (topogram && !cancelled) {
@@ -1159,6 +1121,7 @@ const SequenceScanConfirmScreen = () => {
             activeSequenceStepIndex={0}
             parameterPanelMode="tomographicScan"
             tomographicParamOverrides={measurements}
+            onScoutAngleChange={setTopogramTubeAngle}
             autoMaEnabled={showAutoMaPanel}
             onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
             rightViewportContent={

@@ -15,6 +15,8 @@ import {
 import { FieldInput, FieldSelect, FieldSpinner, Divider } from "./SharedUI";
 import { useI18n } from "../../../lib/i18nContext";
 
+const TUBE_ANGLE_OPTIONS = ["0", "90", "180", "270"];
+
 export function BasicInfoPanel({ protocol, draft, selectedPos, bodyPartOptions, ageGroupOptions, onPosChange, onDraftChange }: {
     protocol: ApiProtocolDetail | null;
     draft: BasicDraft;
@@ -118,7 +120,7 @@ export function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, o
                     <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
                     <FieldInput label="FOV" value={draft.fov} required onChange={(value) => onDraftChange({ fov: value })} />
                     <FieldInput label="DOM" value={draft.dom} placeholder={language === "en-US" ? "0 or 1" : "0 或 1"} onChange={(value) => onDraftChange({ dom: value })} />
-                    <FieldInput label={t("protocolDetail.fieldTableAngle")} value={draft.tubeAngle} required onChange={(value) => onDraftChange({ tubeAngle: value })} />
+                    <FieldSelect label={t("protocolDetail.fieldTableAngle")} value={draft.tubeAngle} options={TUBE_ANGLE_OPTIONS} required onChange={(value) => onDraftChange({ tubeAngle: value })} />
                 </div>
             </div>
         </>
