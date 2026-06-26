@@ -160,11 +160,25 @@ type HeadDualScoutMeta = {
     pixelSpacingY: number;
     windowWidth: number;
     windowCenter: number;
+    rowDirection: [number, number, number];
+    columnDirection: [number, number, number];
+    imagePosition: [number, number, number];
 };
 
 const parseFiniteNumber = (value: unknown): number | null => {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;
+};
+
+const parseDicomVector3 = (
+    values: Array<string | number | null | undefined> | undefined,
+    start: number,
+    fallback: [number, number, number],
+): [number, number, number] => {
+    const parsed = [0, 1, 2].map((offset) => parseFiniteNumber(values?.[start + offset]));
+    return parsed.every((value): value is number => value !== null)
+        ? [parsed[0], parsed[1], parsed[2]]
+        : fallback;
 };
 
 const sameXRange = (a: HeadDualScoutXRange, b: HeadDualScoutXRange) =>
@@ -194,6 +208,26 @@ const buildHeadDualScoutMeta = (
         pixelSpacingY: rowSpacing ?? 1,
         windowWidth: series.windowWidth ?? defaultWindowWidth,
         windowCenter: series.windowCenter ?? defaultWindowLevel,
+        rowDirection: parseDicomVector3(series.imageOrientationPatient, 0, [1, 0, 0]),
+        columnDirection: parseDicomVector3(series.imageOrientationPatient, 3, [0, 1, 0]),
+        imagePosition: parseDicomVector3(series.imagePositionPatient, 0, [0, 0, 0]),
+    };
+};
+
+const mapHeadDualImagePointToLps = (
+    meta: HeadDualScoutMeta,
+    normalizedX: number,
+    normalizedY: number,
+) => {
+    const column = clamp01(normalizedX) * Math.max(0, meta.width - 1);
+    const row = clamp01(normalizedY) * Math.max(0, meta.height - 1);
+    const columnOffset = column * meta.pixelSpacingX;
+    const rowOffset = row * meta.pixelSpacingY;
+
+    return {
+        x: meta.imagePosition[0] + meta.rowDirection[0] * columnOffset + meta.columnDirection[0] * rowOffset,
+        y: meta.imagePosition[1] + meta.rowDirection[1] * columnOffset + meta.columnDirection[1] * rowOffset,
+        z: meta.imagePosition[2] + meta.rowDirection[2] * columnOffset + meta.columnDirection[2] * rowOffset,
     };
 };
 
@@ -216,6 +250,7 @@ function ScoutPanelStage({
     stageRef,
     rounded,
     label,
+    paneOverlay,
     children,
 }: {
     view: HeadDualScoutView;
@@ -223,6 +258,7 @@ function ScoutPanelStage({
     stageRef: React.MutableRefObject<HTMLDivElement | null>;
     rounded: string;
     label: string;
+    paneOverlay?: React.ReactNode;
     children: React.ReactNode;
 }) {
     const panelRef = useRef<HTMLDivElement | null>(null);
@@ -271,6 +307,7 @@ function ScoutPanelStage({
                     {label}
                 </div>
             </div>
+            {paneOverlay ? <div className="pointer-events-none absolute right-3 top-3 z-40">{paneOverlay}</div> : null}
         </div>
     );
 }
@@ -282,6 +319,7 @@ function HeadDualScoutConfirmViewport({
     defaultWindowLevel,
     initialMeasurements,
     scanPositionRatio,
+    showScanPositionGuide,
     onScanPositionRatioChange,
     onMeasurementChange,
     onCropBoxChange,
@@ -292,6 +330,7 @@ function HeadDualScoutConfirmViewport({
     defaultWindowLevel: number;
     initialMeasurements?: { scanLength?: string; scoutFov?: string };
     scanPositionRatio: number;
+    showScanPositionGuide: boolean;
     onScanPositionRatioChange: (ratio: number) => void;
     onMeasurementChange: (values: { scanLength: string; scoutFov: string }) => void;
     onCropBoxChange: (cropBox: HeadDualScoutCropBox) => void;
@@ -308,6 +347,7 @@ function HeadDualScoutConfirmViewport({
         initialZ: HeadDualScoutZRange;
     } | null>(null);
     const positionDragRef = useRef<{ view: HeadDualScoutView; pointerId: number } | null>(null);
+    const centerDragRef = useRef<{ view: HeadDualScoutView; pointerId: number } | null>(null);
     const cropBoxRef = useRef<Record<HeadDualScoutView, HeadDualScoutCropBox>>({
         ap: DEFAULT_SCOUT_CROP_BOX,
         lat: DEFAULT_SCOUT_CROP_BOX,
@@ -357,6 +397,7 @@ function HeadDualScoutConfirmViewport({
         x: 0.18,
         width: 0.62,
     }));
+    const [reconCenterRatio, setReconCenterRatio] = useState({ x: 0.5, y: 0.5 });
 
     const apCropBox = useMemo<HeadDualScoutCropBox>(
         () => ({
@@ -385,11 +426,24 @@ function HeadDualScoutConfirmViewport({
         scanLength: sharedZ.height.toFixed(1),
         scoutFov: (apCropBox.width * apMeta.width * apMeta.pixelSpacingX).toFixed(1),
     }), [apCropBox, apMeta, sharedZ.height]);
-    const latMeasurements = useMemo(() => ({
-        scanLength: sharedZ.height.toFixed(1),
-        scoutFov: (latCropBox.height * latMeta.height * latMeta.pixelSpacingY).toFixed(1),
-    }), [latCropBox, latMeta, sharedZ.height]);
     const scanPositionMm = Number(apMeasurements.scanLength);
+    const zPositionRatio = clamp01(scanPositionRatio);
+    const apReconPoint = mapHeadDualImagePointToLps(
+        apMeta,
+        apCropBox.x + reconCenterRatio.x * apCropBox.width,
+        apCropBox.y + zPositionRatio * apCropBox.height,
+    );
+    const latReconPoint = mapHeadDualImagePointToLps(
+        latMeta,
+        latCropBox.x + zPositionRatio * latCropBox.width,
+        latCropBox.y + reconCenterRatio.y * latCropBox.height,
+    );
+    const reconCenterXMm = apReconPoint.x;
+    const reconCenterYMm = latReconPoint.y;
+    const reconCenterLabel = {
+        x: Number.isFinite(reconCenterXMm) ? reconCenterXMm.toFixed(1) : "--",
+        y: Number.isFinite(reconCenterYMm) ? reconCenterYMm.toFixed(1) : "--",
+    };
 
     useEffect(() => {
         onMeasurementChange(apMeasurements);
@@ -422,8 +476,37 @@ function HeadDualScoutConfirmViewport({
         onScanPositionRatioChange(clamp01(ratio));
     }, [onScanPositionRatioChange]);
 
+    const updateReconCenterFromPointer = useCallback((view: HeadDualScoutView, clientX: number, clientY: number) => {
+        const viewport = getViewportElement(view);
+        if (!viewport) return;
+        const rect = viewport.getBoundingClientRect();
+        const cropBox = cropBoxRef.current[view];
+        const cropLeft = rect.left + cropBox.x * rect.width;
+        const cropTop = rect.top + cropBox.y * rect.height;
+        const cropWidth = Math.max(1, cropBox.width * rect.width);
+        const cropHeight = Math.max(1, cropBox.height * rect.height);
+        const xRatio = clamp01((clientX - cropLeft) / cropWidth);
+        const yRatio = clamp01((clientY - cropTop) / cropHeight);
+
+        if (view === "lat") {
+            setReconCenterRatio((prev) => (Math.abs(prev.y - yRatio) < 1e-4 ? prev : { ...prev, y: yRatio }));
+            onScanPositionRatioChange(xRatio);
+            return;
+        }
+
+        setReconCenterRatio((prev) => (Math.abs(prev.x - xRatio) < 1e-4 ? prev : { ...prev, x: xRatio }));
+        onScanPositionRatioChange(yRatio);
+    }, [onScanPositionRatioChange]);
+
     useEffect(() => {
         const handleMove = (event: PointerEvent) => {
+            const centerDrag = centerDragRef.current;
+            if (centerDrag && centerDrag.pointerId === event.pointerId) {
+                event.preventDefault();
+                updateReconCenterFromPointer(centerDrag.view, event.clientX, event.clientY);
+                return;
+            }
+
             const positionDrag = positionDragRef.current;
             if (positionDrag && positionDrag.pointerId === event.pointerId) {
                 event.preventDefault();
@@ -552,6 +635,9 @@ function HeadDualScoutConfirmViewport({
         };
 
         const handleUp = (event: PointerEvent) => {
+            if (centerDragRef.current?.pointerId === event.pointerId) {
+                centerDragRef.current = null;
+            }
             if (positionDragRef.current?.pointerId === event.pointerId) {
                 positionDragRef.current = null;
             }
@@ -568,7 +654,7 @@ function HeadDualScoutConfirmViewport({
             window.removeEventListener("pointerup", handleUp);
             window.removeEventListener("pointercancel", handleUp);
         };
-    }, [setIndependentRange, updateScanPositionFromPointer, apZSpanMm, latZSpanMm, sharedZSpanMm, minZMm]);
+    }, [setIndependentRange, updateReconCenterFromPointer, updateScanPositionFromPointer, apZSpanMm, latZSpanMm, sharedZSpanMm, minZMm]);
 
     const sharedZRef = useRef(sharedZ);
     useEffect(() => { sharedZRef.current = sharedZ; }, [sharedZ]);
@@ -603,10 +689,29 @@ function HeadDualScoutConfirmViewport({
             updateScanPositionFromPointer(view, event.clientX, event.clientY);
         };
 
+    const startCenterDrag = (view: HeadDualScoutView) =>
+        (event: React.PointerEvent<HTMLDivElement>) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            centerDragRef.current = { view, pointerId: event.pointerId };
+            updateReconCenterFromPointer(view, event.clientX, event.clientY);
+        };
+
+    const renderReconCenterBadge = () => (
+        <div className="min-w-[116px] rounded border border-[#FF2D2D]/55 bg-[#111827]/90 px-2 py-1.5 text-right shadow-[0_0_14px_rgba(255,45,45,0.22)]">
+            <div className="mb-0.5 text-[8px] font-black uppercase tracking-[0.16em] text-[#FCA5A5]">重建中心 LPS</div>
+            <div className="font-mono text-[10px] font-black leading-tight text-[#FEE2E2]">X(L) {reconCenterLabel.x} mm</div>
+            <div className="font-mono text-[10px] font-black leading-tight text-[#FEE2E2]">Y(P) {reconCenterLabel.y} mm</div>
+        </div>
+    );
+
     const renderCropOverlay = (view: HeadDualScoutView, cropBox: HeadDualScoutCropBox) => {
         const isLat = view === "lat";
         const positionPercent = clamp01(scanPositionRatio) * 100;
         const positionLabel = `Z ${Number.isFinite(scanPositionMm) ? (clamp01(scanPositionRatio) * scanPositionMm).toFixed(1) : "--"} mm`;
+        const centerLeftPercent = isLat ? positionPercent : reconCenterRatio.x * 100;
+        const centerTopPercent = isLat ? reconCenterRatio.y * 100 : positionPercent;
 
         return (
             <div className="pointer-events-none absolute inset-0 z-20">
@@ -626,7 +731,18 @@ function HeadDualScoutConfirmViewport({
                         <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/20" />
                         <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-white/20" />
                     </div>
-                    {isLat ? (
+                    <div
+                        className="pointer-events-auto absolute z-40 h-10 w-10 -translate-x-1/2 -translate-y-1/2 cursor-move touch-none"
+                        style={{ left: `${centerLeftPercent}%`, top: `${centerTopPercent}%` }}
+                        onPointerDown={startCenterDrag(view)}
+                        aria-label="Move reconstruction center"
+                        title="Move reconstruction center"
+                    >
+                        <div className="absolute bottom-1 left-1/2 top-1 w-[2px] -translate-x-1/2 bg-[#FF2D2D] shadow-[0_0_8px_rgba(255,45,45,0.9)]" />
+                        <div className="absolute left-1 right-1 top-1/2 h-[2px] -translate-y-1/2 bg-[#FF2D2D] shadow-[0_0_8px_rgba(255,45,45,0.9)]" />
+                        <div className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 bg-[#FF2D2D] shadow-[0_0_10px_rgba(255,45,45,0.95)]" />
+                    </div>
+                    {showScanPositionGuide && isLat ? (
                         <div
                             className="absolute top-0 bottom-0 z-30 w-10 -translate-x-1/2 cursor-ew-resize touch-none"
                             style={{ left: `${positionPercent}%` }}
@@ -638,7 +754,7 @@ function HeadDualScoutConfirmViewport({
                                 {positionLabel}
                             </div>
                         </div>
-                    ) : (
+                    ) : showScanPositionGuide ? (
                         <div
                             className="absolute left-0 right-0 z-30 h-10 -translate-y-1/2 cursor-ns-resize touch-none"
                             style={{ top: `${positionPercent}%` }}
@@ -650,7 +766,7 @@ function HeadDualScoutConfirmViewport({
                                 {positionLabel}
                             </div>
                         </div>
-                    )}
+                    ) : null}
                     <div
                         className="absolute -top-4 left-1/2 h-8 w-16 -translate-x-1/2 bg-transparent"
                         style={{ cursor: getHeadDualHandleCursor("top"), touchAction: "none" }}
@@ -690,6 +806,7 @@ function HeadDualScoutConfirmViewport({
                 stageRef={view === "ap" ? apViewportRef : latViewportRef}
                 rounded={view === "ap" ? "rounded-l-md" : "rounded-r-md"}
                 label={view === "ap" ? "AP · 正位 0°" : "LAT · 侧位 90°"}
+                paneOverlay={renderReconCenterBadge()}
             >
                 <DicomViewer
                     key={series.url}
@@ -2224,6 +2341,7 @@ const HelicalScanConfirmScreen = () => {
                                 defaultWindowLevel={headDualScoutManifest.defaultWindowLevel}
                                 initialMeasurements={measurements}
                                 scanPositionRatio={scanPositionRatio}
+                                showScanPositionGuide={showAutoMaPanel}
                                 onScanPositionRatioChange={setScanPositionRatio}
                                 onMeasurementChange={handleMeasurementChangeIdem}
                                 onCropBoxChange={setScoutCropBox}
@@ -2233,6 +2351,7 @@ const HelicalScanConfirmScreen = () => {
                                 onMeasurementChange={setMeasurements}
                                 initialMeasurements={measurements}
                                 scanPositionRatio={scanPositionRatio}
+                                showScanPositionGuide={showAutoMaPanel}
                                 onScanPositionRatioChange={setScanPositionRatio}
                                 seriesOverride={scoutSeriesOverride}
                                 onScoutHuChange={setScoutHu}

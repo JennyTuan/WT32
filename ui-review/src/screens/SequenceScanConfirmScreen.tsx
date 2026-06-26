@@ -178,6 +178,7 @@ export function TomographicScoutViewport({
     initialMeasurements,
     scanPositionRatio = 0.5,
     onScanPositionRatioChange,
+    showScanPositionGuide = false,
     hideTools = false,
     seriesOverride,
     onScoutHuChange,
@@ -190,6 +191,7 @@ export function TomographicScoutViewport({
     initialMeasurements?: { scanLength?: string; scoutFov?: string };
     scanPositionRatio?: number;
     onScanPositionRatioChange?: (ratio: number) => void;
+    showScanPositionGuide?: boolean;
     hideTools?: boolean;
     seriesOverride?: TomographicScoutSeriesOverride;
     onScoutHuChange?: (data: ScoutHuData | null) => void;
@@ -898,18 +900,20 @@ export function TomographicScoutViewport({
                                 <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-white/20" />
                             </div>
 
-                            <div
-                                className="absolute left-0 right-0 z-40 h-10 -translate-y-1/2 cursor-ns-resize touch-none"
-                                style={{ top: `${clamp01(scanPositionRatio) * 100}%`, pointerEvents: "auto" }}
-                                title={t("scanFlow.scanPosition")}
-                                onPointerDown={startPositionDrag}
-                                onPointerDownCapture={startPositionDrag}
-                            >
-                                <div className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[#FBBF24] shadow-[0_0_10px_rgba(251,191,36,0.8)]" />
-                                <div className="absolute left-2 top-1/2 -translate-y-1/2 rounded bg-[#0F172A]/90 px-1.5 py-0.5 text-[9px] font-mono font-bold text-[#FBBF24] ring-1 ring-[#FBBF24]/40">
-                                    Z {scanPositionMm !== null ? scanPositionMm.toFixed(1) : "--"} mm
+                            {showScanPositionGuide && (
+                                <div
+                                    className="absolute left-0 right-0 z-40 h-10 -translate-y-1/2 cursor-ns-resize touch-none"
+                                    style={{ top: `${clamp01(scanPositionRatio) * 100}%`, pointerEvents: "auto" }}
+                                    title={t("scanFlow.scanPosition")}
+                                    onPointerDown={startPositionDrag}
+                                    onPointerDownCapture={startPositionDrag}
+                                >
+                                    <div className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[#FBBF24] shadow-[0_0_10px_rgba(251,191,36,0.8)]" />
+                                    <div className="absolute left-2 top-1/2 -translate-y-1/2 rounded bg-[#0F172A]/90 px-1.5 py-0.5 text-[9px] font-mono font-bold text-[#FBBF24] ring-1 ring-[#FBBF24]/40">
+                                        Z {scanPositionMm !== null ? scanPositionMm.toFixed(1) : "--"} mm
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
                             <div
                                 className="absolute -top-4 left-1/2 h-8 w-16 -translate-x-1/2 bg-transparent"
@@ -1163,6 +1167,7 @@ const SequenceScanConfirmScreen = () => {
                         onMeasurementChange={setMeasurements}
                         initialMeasurements={measurements}
                         scanPositionRatio={scanPositionRatio}
+                        showScanPositionGuide={showAutoMaPanel}
                         onScanPositionRatioChange={setAxialScanPositionRatio}
                         seriesOverride={HEAD_STROKE_DEMO_SCOUT_OVERRIDE}
                         onScoutHuChange={setScoutHu}
