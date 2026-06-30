@@ -14,6 +14,99 @@ router = APIRouter(prefix="/scan-sessions", tags=["scan-sessions"])
 
 SESSION_STATUS_SEQUENCE = ["draft", "in_progress", "completed", "cancelled"]
 
+TOPOGRAM_PARAM_FIELDS = (
+    "kv",
+    "ma",
+    "scan_length",
+    "tube_angle",
+    "fov",
+    "collimator",
+    "scan_direction",
+    "dom",
+    "ctdi_vol",
+    "dlp",
+)
+HELICAL_PARAM_FIELDS = (
+    "kv",
+    "ma",
+    "slice_thickness",
+    "pitch",
+    "rotation_time",
+    "scan_length",
+    "fov",
+    "collimator",
+    "scan_direction",
+    "dom",
+    "ctdi_vol",
+    "dlp",
+    "auto_ma",
+    "ma_min",
+    "ma_max",
+)
+AXIAL_PARAM_FIELDS = (
+    "kv",
+    "ma",
+    "slice_thickness",
+    "slice_interval",
+    "rotation_time",
+    "scan_length",
+    "fov",
+    "collimator",
+    "scan_direction",
+    "dom",
+    "ctdi_vol",
+    "dlp",
+    "auto_ma",
+    "ma_min",
+    "ma_max",
+    "step_count",
+)
+RECON_SERIES_FIELDS = (
+    "recon_name",
+    "recon_type",
+    "kernel",
+    "matrix",
+    "window_width",
+    "window_level",
+    "slice_thickness",
+    "increment",
+    "recon_fov",
+    "center_x",
+    "center_y",
+)
+
+
+def _copy_fields(source, fields: tuple[str, ...]) -> dict:
+    return {field: getattr(source, field) for field in fields}
+
+
+def _clone_topogram_param(source, *, template_param_id: int | None) -> models.ScanSessionTopogramParam:
+    return models.ScanSessionTopogramParam(
+        template_param_id=template_param_id,
+        **_copy_fields(source, TOPOGRAM_PARAM_FIELDS),
+    )
+
+
+def _clone_helical_param(source, *, template_param_id: int | None) -> models.ScanSessionHelicalParam:
+    return models.ScanSessionHelicalParam(
+        template_param_id=template_param_id,
+        **_copy_fields(source, HELICAL_PARAM_FIELDS),
+    )
+
+
+def _clone_axial_param(source, *, template_param_id: int | None) -> models.ScanSessionAxialParam:
+    return models.ScanSessionAxialParam(
+        template_param_id=template_param_id,
+        **_copy_fields(source, AXIAL_PARAM_FIELDS),
+    )
+
+
+def _clone_recon_series(source, *, template_recon_series_id: int | None) -> models.ScanSessionReconSeries:
+    return models.ScanSessionReconSeries(
+        template_recon_series_id=template_recon_series_id,
+        **_copy_fields(source, RECON_SERIES_FIELDS),
+    )
+
 
 def _scan_session_query(db: Session):
     return db.query(models.ScanSession).options(
@@ -112,65 +205,26 @@ def _clone_session_from_protocol(patient: models.Patient, protocol: models.Proto
         )
 
         if series.topogram_param:
-            session_series.topogram_param = models.ScanSessionTopogramParam(
+            session_series.topogram_param = _clone_topogram_param(
+                series.topogram_param,
                 template_param_id=series.topogram_param.id,
-                kv=series.topogram_param.kv,
-                ma=series.topogram_param.ma,
-                scan_length=series.topogram_param.scan_length,
-                tube_angle=series.topogram_param.tube_angle,
-                fov=series.topogram_param.fov,
-                ctdi_vol=series.topogram_param.ctdi_vol,
-                dlp=series.topogram_param.dlp,
             )
 
         if series.helical_param:
-            session_series.helical_param = models.ScanSessionHelicalParam(
+            session_series.helical_param = _clone_helical_param(
+                series.helical_param,
                 template_param_id=series.helical_param.id,
-                kv=series.helical_param.kv,
-                ma=series.helical_param.ma,
-                slice_thickness=series.helical_param.slice_thickness,
-                pitch=series.helical_param.pitch,
-                rotation_time=series.helical_param.rotation_time,
-                scan_length=series.helical_param.scan_length,
-                fov=series.helical_param.fov,
-                ctdi_vol=series.helical_param.ctdi_vol,
-                dlp=series.helical_param.dlp,
-                auto_ma=series.helical_param.auto_ma,
-                ma_min=series.helical_param.ma_min,
-                ma_max=series.helical_param.ma_max,
             )
 
         if series.axial_param:
-            session_series.axial_param = models.ScanSessionAxialParam(
+            session_series.axial_param = _clone_axial_param(
+                series.axial_param,
                 template_param_id=series.axial_param.id,
-                kv=series.axial_param.kv,
-                ma=series.axial_param.ma,
-                slice_thickness=series.axial_param.slice_thickness,
-                slice_interval=series.axial_param.slice_interval,
-                rotation_time=series.axial_param.rotation_time,
-                scan_length=series.axial_param.scan_length,
-                fov=series.axial_param.fov,
-                ctdi_vol=series.axial_param.ctdi_vol,
-                dlp=series.axial_param.dlp,
-                auto_ma=series.axial_param.auto_ma,
-                ma_min=series.axial_param.ma_min,
-                ma_max=series.axial_param.ma_max,
-                step_count=series.axial_param.step_count,
             )
 
         for recon in series.recon_series:
             session_series.recon_series.append(
-                models.ScanSessionReconSeries(
-                    template_recon_series_id=recon.id,
-                    recon_name=recon.recon_name,
-                    recon_type=recon.recon_type,
-                    kernel=recon.kernel,
-                    matrix=recon.matrix,
-                    window_width=recon.window_width,
-                    window_level=recon.window_level,
-                    slice_thickness=recon.slice_thickness,
-                    increment=recon.increment,
-                )
+                _clone_recon_series(recon, template_recon_series_id=recon.id)
             )
 
         if series.fourd_config:
@@ -265,64 +319,28 @@ def _clone_session_series(source: models.ScanSessionSeries) -> models.ScanSessio
     )
 
     if source.topogram_param:
-        cloned.topogram_param = models.ScanSessionTopogramParam(
+        cloned.topogram_param = _clone_topogram_param(
+            source.topogram_param,
             template_param_id=source.topogram_param.template_param_id,
-            kv=source.topogram_param.kv,
-            ma=source.topogram_param.ma,
-            scan_length=source.topogram_param.scan_length,
-            tube_angle=source.topogram_param.tube_angle,
-            fov=source.topogram_param.fov,
-            ctdi_vol=source.topogram_param.ctdi_vol,
-            dlp=source.topogram_param.dlp,
         )
 
     if source.helical_param:
-        cloned.helical_param = models.ScanSessionHelicalParam(
+        cloned.helical_param = _clone_helical_param(
+            source.helical_param,
             template_param_id=source.helical_param.template_param_id,
-            kv=source.helical_param.kv,
-            ma=source.helical_param.ma,
-            slice_thickness=source.helical_param.slice_thickness,
-            pitch=source.helical_param.pitch,
-            rotation_time=source.helical_param.rotation_time,
-            scan_length=source.helical_param.scan_length,
-            fov=source.helical_param.fov,
-            ctdi_vol=source.helical_param.ctdi_vol,
-            dlp=source.helical_param.dlp,
-            auto_ma=source.helical_param.auto_ma,
-            ma_min=source.helical_param.ma_min,
-            ma_max=source.helical_param.ma_max,
         )
 
     if source.axial_param:
-        cloned.axial_param = models.ScanSessionAxialParam(
+        cloned.axial_param = _clone_axial_param(
+            source.axial_param,
             template_param_id=source.axial_param.template_param_id,
-            kv=source.axial_param.kv,
-            ma=source.axial_param.ma,
-            slice_thickness=source.axial_param.slice_thickness,
-            slice_interval=source.axial_param.slice_interval,
-            rotation_time=source.axial_param.rotation_time,
-            scan_length=source.axial_param.scan_length,
-            fov=source.axial_param.fov,
-            ctdi_vol=source.axial_param.ctdi_vol,
-            dlp=source.axial_param.dlp,
-            auto_ma=source.axial_param.auto_ma,
-            ma_min=source.axial_param.ma_min,
-            ma_max=source.axial_param.ma_max,
-            step_count=source.axial_param.step_count,
         )
 
     for recon in source.recon_series:
         cloned.recon_series.append(
-            models.ScanSessionReconSeries(
+            _clone_recon_series(
+                recon,
                 template_recon_series_id=recon.template_recon_series_id,
-                recon_name=recon.recon_name,
-                recon_type=recon.recon_type,
-                kernel=recon.kernel,
-                matrix=recon.matrix,
-                window_width=recon.window_width,
-                window_level=recon.window_level,
-                slice_thickness=recon.slice_thickness,
-                increment=recon.increment,
             )
         )
 
@@ -596,14 +614,7 @@ def create_scan_session_recon_series(session_series_id: int, payload: schemas.Sc
     series = _get_entity_or_404(models.ScanSessionSeries, session_series_id, "Scan session series not found", db)
     recon = models.ScanSessionReconSeries(
         scan_session_series_id=series.id,
-        recon_name=payload.recon_name,
-        recon_type=payload.recon_type,
-        kernel=payload.kernel,
-        matrix=payload.matrix,
-        window_width=payload.window_width,
-        window_level=payload.window_level,
-        slice_thickness=payload.slice_thickness,
-        increment=payload.increment,
+        **payload.model_dump(),
     )
     db.add(recon)
     db.commit()

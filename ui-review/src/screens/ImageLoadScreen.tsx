@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -14,6 +14,13 @@ import {
   getFourDPreviewUrls,
   type FourDDicomMpId,
 } from "../lib/fourDDicomSource";
+import {
+  buildEngineerLoadPlan,
+  buildEngineerScanResult,
+  loadFourDEngineerManifest,
+  type FourDEngineerManifest,
+  type FourDEngineerVolume,
+} from "../lib/fourDEngineerImageSource";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
 import { useI18n } from "../lib/i18nContext";
 
@@ -26,8 +33,11 @@ type LoadStatus = "waiting" | "loading" | "done" | "error";
 interface PhaseLoadState {
   phaseIndex: number;
   completedBeds: number;
+  totalTargets: number;
   activeBedNumber: number | null;
+  activeCandidateNumber: number | null;
   activeFileCount: number;
+  activeFileTotal: number;
   previewUrl: string | null;
   latestSourceBedNumber: number | null;
   status: LoadStatus;
@@ -85,6 +95,39 @@ async function loadBedPhaseSeries(
   };
 }
 
+async function loadEngineerVolumeSeries(
+  volume: FourDEngineerVolume,
+  signal: AbortSignal,
+  onProgress: (loadedFileCount: number) => void,
+) {
+  const urls = volume.urls.axialSlices.length > 0 ? volume.urls.axialSlices : [volume.urls.axialPreview];
+  let loadedFileCount = 0;
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (nextIndex < urls.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      await fetchArrayBuffer(urls[currentIndex], signal);
+      loadedFileCount += 1;
+      if (loadedFileCount === 1 || loadedFileCount === urls.length || loadedFileCount % 4 === 0) {
+        onProgress(loadedFileCount);
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(REQUEST_CONCURRENCY, urls.length) }, () => worker()),
+  );
+
+  return {
+    previewUrl: volume.urls.axialPreview,
+    fileCount: urls.length,
+  };
+}
+
+const resultFileTotal = (volume: FourDEngineerVolume) => volume.urls.axialSlices.length || volume.sliceCount;
+
 function PhaseThumbnail({
   phase,
   totalBeds,
@@ -96,10 +139,11 @@ function PhaseThumbnail({
 }) {
   const { t } = useI18n();
   const phaseLabel = PHASE_LABELS[phase.phaseIndex];
+  const phaseTargetCount = phase.totalTargets || totalBeds;
   const partialBedProgress =
-    phase.activeBedNumber === null ? 0 : phase.activeFileCount / FOUR_D_DICOM_SLICES_PER_PHASE;
+    phase.activeBedNumber === null ? 0 : phase.activeFileCount / Math.max(phase.activeFileTotal, 1);
   const progressPercent = Math.round(
-    ((phase.completedBeds + partialBedProgress) / Math.max(totalBeds, 1)) * 100,
+    ((phase.completedBeds + partialBedProgress) / Math.max(phaseTargetCount, 1)) * 100,
   );
   const canOpenFullscreen = !!phase.previewUrl;
   const statusConfig = {
@@ -184,10 +228,10 @@ function PhaseThumbnail({
             <span className={`truncate text-[10px] font-bold ${statusConfig.text}`}>{statusConfig.label}</span>
             {phase.status === "loading" ? (
               <span className="font-mono text-[10px] font-bold text-slate-200">
-                {phase.activeFileCount}/{FOUR_D_DICOM_SLICES_PER_PHASE}
+                {phase.activeFileCount}/{phase.activeFileTotal || FOUR_D_DICOM_SLICES_PER_PHASE}
               </span>
             ) : (
-              <span className="font-mono text-[10px] font-bold text-slate-300">{phase.completedBeds}/{totalBeds}</span>
+              <span className="font-mono text-[10px] font-bold text-slate-300">{phase.completedBeds}/{phaseTargetCount}</span>
             )}
           </div>
           {phase.status === "error" && (
@@ -213,15 +257,19 @@ export default function ImageLoadScreen() {
   const location = useLocation();
   const { t } = useI18n();
   const routeState = location.state as FourDPostScanState | null;
+  const [engineerManifest, setEngineerManifest] = useState<FourDEngineerManifest | null | undefined>(undefined);
+  const autoNavigatedRef = useRef(false);
 
   const phaseFilterState = useMemo<FourDPostScanState>(
     () => ({
-      ...(routeState?.scanResult
+      ...(engineerManifest
+        ? { scanResult: buildEngineerScanResult(engineerManifest, routeState?.scanResult) }
+        : routeState?.scanResult
         ? routeState
         : { scanResult: generateMockScanResult(FOUR_D_DICOM_MP_IDS.length, 10, 165.0) }),
       showSliceLoadingBeforeImageLoad: false,
     }),
-    [routeState],
+    [engineerManifest, routeState],
   );
 
   const [fullscreenImage, setFullscreenImage] = useState<FullscreenImageState | null>(null);
@@ -231,8 +279,11 @@ export default function ImageLoadScreen() {
       PHASE_LABELS.map((_, phaseIndex) => ({
         phaseIndex,
         completedBeds: 0,
+        totalTargets: FOUR_D_DICOM_MP_IDS.length,
         activeBedNumber: null,
+        activeCandidateNumber: null,
         activeFileCount: 0,
+        activeFileTotal: FOUR_D_DICOM_SLICES_PER_PHASE,
         previewUrl: null,
         latestSourceBedNumber: null,
         status: "waiting",
@@ -241,11 +292,138 @@ export default function ImageLoadScreen() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+    loadFourDEngineerManifest().then((manifest) => {
+      if (!cancelled) setEngineerManifest(manifest);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (engineerManifest === undefined) return;
+
     const controller = new AbortController();
     let cancelled = false;
 
     const run = async () => {
       setGlobalError(null);
+      const phaseTargetCounts = engineerManifest
+        ? PHASE_LABELS.map((_, phaseIndex) =>
+            engineerManifest.volumes.filter((volume) => volume.phaseIndex === phaseIndex).length,
+          )
+        : PHASE_LABELS.map(() => FOUR_D_DICOM_MP_IDS.length);
+      setPhaseLoads(
+        PHASE_LABELS.map((_, phaseIndex) => ({
+          phaseIndex,
+          completedBeds: 0,
+          totalTargets: phaseTargetCounts[phaseIndex] ?? FOUR_D_DICOM_MP_IDS.length,
+          activeBedNumber: null,
+          activeCandidateNumber: null,
+          activeFileCount: 0,
+          activeFileTotal: engineerManifest?.sliceCountPerVolume ?? FOUR_D_DICOM_SLICES_PER_PHASE,
+          previewUrl: null,
+          latestSourceBedNumber: null,
+          status: "waiting",
+          errorMessage: null,
+        })),
+      );
+
+      if (engineerManifest) {
+        const loadPlan = buildEngineerLoadPlan(engineerManifest);
+
+        for (const volume of loadPlan) {
+          if (cancelled) return;
+          const phaseIndex = volume.phaseIndex;
+          const bedNumber = volume.bedNumber;
+
+          setPhaseLoads((prev) =>
+            prev.map((phase) =>
+              phase.phaseIndex !== phaseIndex
+                ? phase
+                : {
+                    ...phase,
+                    activeBedNumber: bedNumber,
+                    activeCandidateNumber: volume.candidateIndex + 1,
+                    activeFileCount: 0,
+                    activeFileTotal: volume.urls.axialSlices.length || volume.sliceCount,
+                    status: "loading",
+                    errorMessage: null,
+                  },
+            ),
+          );
+
+          try {
+            const result = await loadEngineerVolumeSeries(
+              volume,
+              controller.signal,
+              (loadedFileCount) => {
+                if (cancelled) return;
+                setPhaseLoads((prev) =>
+                  prev.map((phase) =>
+                    phase.phaseIndex !== phaseIndex
+                      ? phase
+                      : {
+                          ...phase,
+                          activeBedNumber: bedNumber,
+                          activeCandidateNumber: volume.candidateIndex + 1,
+                          activeFileCount: loadedFileCount,
+                          activeFileTotal: resultFileTotal(volume),
+                          status: "loading",
+                        },
+                  ),
+                );
+              },
+            );
+
+            if (cancelled) return;
+
+            setPhaseLoads((prev) =>
+              prev.map((phase) =>
+                phase.phaseIndex !== phaseIndex
+                  ? phase
+                  : {
+                      ...phase,
+                      completedBeds: phase.completedBeds + 1,
+                      activeBedNumber: null,
+                      activeCandidateNumber: null,
+                      activeFileCount: 0,
+                      activeFileTotal: result.fileCount,
+                      previewUrl: result.previewUrl ?? phase.previewUrl,
+                      latestSourceBedNumber: bedNumber,
+                      status: phase.completedBeds + 1 >= phase.totalTargets ? "done" : "waiting",
+                      errorMessage: null,
+                    },
+              ),
+            );
+          } catch (error) {
+            if (controller.signal.aborted) return;
+            const message = error instanceof Error ? error.message : String(error);
+            setGlobalError(t("scanFlow.imageLoad.globalError", {
+              bed: bedNumber,
+              phase: PHASE_LABELS[phaseIndex],
+              message,
+            }));
+            setPhaseLoads((prev) =>
+              prev.map((phase) =>
+                phase.phaseIndex !== phaseIndex
+                  ? phase
+                  : {
+                      ...phase,
+                      activeBedNumber: null,
+                      activeCandidateNumber: null,
+                      activeFileCount: 0,
+                      status: "error",
+                      errorMessage: message,
+                    },
+              ),
+            );
+            return;
+          }
+        }
+        return;
+      }
 
       for (let bedIndex = 0; bedIndex < FOUR_D_DICOM_MP_IDS.length; bedIndex += 1) {
         const mpId = FOUR_D_DICOM_MP_IDS[bedIndex];
@@ -261,7 +439,9 @@ export default function ImageLoadScreen() {
                 : {
                     ...phase,
                     activeBedNumber: bedNumber,
+                    activeCandidateNumber: null,
                     activeFileCount: 0,
+                    activeFileTotal: FOUR_D_DICOM_SLICES_PER_PHASE,
                     status: "loading",
                     errorMessage: null,
                   },
@@ -282,7 +462,9 @@ export default function ImageLoadScreen() {
                       : {
                           ...phase,
                           activeBedNumber: bedNumber,
+                          activeCandidateNumber: null,
                           activeFileCount: loadedFileCount,
+                          activeFileTotal: FOUR_D_DICOM_SLICES_PER_PHASE,
                           status: "loading",
                         },
                   ),
@@ -300,7 +482,9 @@ export default function ImageLoadScreen() {
                       ...phase,
                       completedBeds: phase.completedBeds + 1,
                       activeBedNumber: null,
+                      activeCandidateNumber: null,
                       activeFileCount: 0,
+                      activeFileTotal: result.fileCount,
                       previewUrl: result.previewUrl ?? phase.previewUrl,
                       latestSourceBedNumber: bedNumber,
                       status: phase.completedBeds + 1 >= FOUR_D_DICOM_MP_IDS.length ? "done" : "waiting",
@@ -323,6 +507,7 @@ export default function ImageLoadScreen() {
                   : {
                       ...phase,
                       activeBedNumber: null,
+                      activeCandidateNumber: null,
                       activeFileCount: 0,
                       status: "error",
                       errorMessage: message,
@@ -341,14 +526,23 @@ export default function ImageLoadScreen() {
       cancelled = true;
       controller.abort();
     };
-  }, []);
+  }, [engineerManifest, t]);
 
-  const totalBeds = FOUR_D_DICOM_MP_IDS.length;
+  const totalBeds = engineerManifest?.bedCount ?? FOUR_D_DICOM_MP_IDS.length;
   const completedTaskCount = phaseLoads.reduce((sum, phase) => sum + phase.completedBeds, 0);
-  const totalTaskCount = totalBeds * PHASE_LABELS.length;
+  const totalTaskCount = phaseLoads.reduce((sum, phase) => sum + phase.totalTargets, 0);
   const allLoaded = completedTaskCount === totalTaskCount && !globalError;
   const overallProgress = Math.round((completedTaskCount / Math.max(totalTaskCount, 1)) * 100);
   const donePhaseCount = phaseLoads.filter((phase) => phase.status === "done").length;
+
+  useEffect(() => {
+    if (!allLoaded || autoNavigatedRef.current) return;
+    autoNavigatedRef.current = true;
+    const timer = window.setTimeout(() => {
+      navigate("/phase-filter", { state: phaseFilterState });
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [allLoaded, navigate, phaseFilterState]);
 
   return (
     <div className="relative flex h-full select-none flex-col bg-[#E5E7EB] text-slate-700">

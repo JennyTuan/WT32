@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
 import {
@@ -47,6 +47,13 @@ interface ProtocolGroup {
     name: string;
     sequences: Sequence[];
 }
+
+type DualScoutDoseSeed = {
+    refMa: number;
+    refKv: number;
+    refLength: number;
+    refCtdi: number | null;
+};
 
 type ScanConfirmScreenProps = {
     activeScoutStepIndex?: number;
@@ -478,7 +485,7 @@ const ScanConfirmScreen = ({
     const [dualScoutKv, setDualScoutKv] = useState<number | null>(null);
     const [dualScoutScanLength, setDualScoutScanLength] = useState<number | null>(null);
     const [editingDualField, setEditingDualField] = useState<"ma" | "kv" | "scanLength" | null>(null);
-    const dualScoutSeedRef = useRef<{ refMa: number; refKv: number; refLength: number; refCtdi: number | null } | null>(null);
+    const [dualScoutDoseSeed, setDualScoutDoseSeed] = useState<DualScoutDoseSeed | null>(null);
 
     // Data structure with sequences at the same level
     const [groups, setGroups] = useState<ProtocolGroup[]>([
@@ -599,12 +606,12 @@ const ScanConfirmScreen = ({
     // Seed editable dual-scout fields from session once it loads.
     useEffect(() => {
         if (!dualScoutTopogramIds) return;
-        dualScoutSeedRef.current = {
+        setDualScoutDoseSeed({
             refMa: dualScoutTopogramIds.ma,
             refKv: dualScoutTopogramIds.kv,
             refLength: dualScoutTopogramIds.scanLength,
             refCtdi: dualScoutTopogramIds.ctdiVol,
-        };
+        });
         setDualScoutMa((prev) => prev ?? dualScoutTopogramIds.ma);
         setDualScoutKv((prev) => prev ?? dualScoutTopogramIds.kv);
         setDualScoutScanLength((prev) => prev ?? dualScoutTopogramIds.scanLength);
@@ -613,15 +620,19 @@ const ScanConfirmScreen = ({
     }, [dualScoutTopogramIds]);
 
     const dualScoutComputedDose = useMemo(() => {
-        if (!isHeadDualScoutFlow || !dualScoutSeedRef.current || dualScoutMa == null || dualScoutKv == null || dualScoutScanLength == null) {
+        if (!isHeadDualScoutFlow || !dualScoutDoseSeed || dualScoutMa == null || dualScoutKv == null || dualScoutScanLength == null) {
             return null;
         }
-        const seed = dualScoutSeedRef.current;
         return estimateDose({
             current: { ma: dualScoutMa, kv: dualScoutKv, scan_length: dualScoutScanLength },
-            reference: { ma: seed.refMa, kv: seed.refKv, scan_length: seed.refLength, ctdi_vol: seed.refCtdi },
+            reference: {
+                ma: dualScoutDoseSeed.refMa,
+                kv: dualScoutDoseSeed.refKv,
+                scan_length: dualScoutDoseSeed.refLength,
+                ctdi_vol: dualScoutDoseSeed.refCtdi,
+            },
         });
-    }, [isHeadDualScoutFlow, dualScoutMa, dualScoutKv, dualScoutScanLength]);
+    }, [isHeadDualScoutFlow, dualScoutDoseSeed, dualScoutMa, dualScoutKv, dualScoutScanLength]);
 
     const persistDualScoutPatch = useCallback(
         (patch: Partial<{ ma: number; kv: number; scan_length: number; tube_angle: number }>, target: "shared" | "ap" | "lat") => {

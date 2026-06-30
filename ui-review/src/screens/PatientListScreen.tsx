@@ -101,6 +101,8 @@ const PatientListScreen = () => {
     }, [locale, t]);
 
     useEffect(() => {
+        // Route-key refresh intentionally reloads server data into local table state.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         void refreshPatients();
     }, [location.key, refreshPatients]);
 

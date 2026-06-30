@@ -15,6 +15,8 @@ import {
     RefreshCw,
     Play,
     Pause,
+    PanelLeftClose,
+    PanelLeftOpen,
 } from "lucide-react";
 import type { ChangeEvent, ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -48,6 +50,11 @@ import {
     loadFourDManifest,
     type FourDManifest,
 } from "../lib/fourDImageSource";
+import {
+    getSelectedEngineerVolume,
+    loadFourDEngineerManifest,
+    type FourDEngineerManifest,
+} from "../lib/fourDEngineerImageSource";
 import {
     FOUR_D_DICOM_PHASE_COUNT,
     getFourDDicomSeriesUrls,
@@ -122,6 +129,7 @@ type PhaseCineSpeed = 0.5 | 1 | 2;
 type PhaseCineMode = "forward" | "bounce";
 const PHASE_CINE_SPEED_OPTIONS: readonly PhaseCineSpeed[] = [0.5, 1, 2] as const;
 const FOUR_D_LUNG_DEFAULT_WINDOW = { ww: 1600, wl: -600 } as const;
+const FOUR_D_ENGINEER_DEFAULT_WINDOW = { ww: 1600, wl: -600 } as const;
 const HEAD_BRAIN_DEFAULT_WINDOW = { ww: 100, wl: 35 } as const;
 type WindowPreset = {
     key: string;
@@ -392,6 +400,7 @@ const getSeriesDicomUrl = (
 };
 
 type ViewerToolMode = "pan" | "wl" | "measure" | "annotate" | "eraser" | "rotate";
+type DisplayQualityMode = "standard" | "detail";
 
 const mapCornerstoneTool = (toolMode: ViewerToolMode) => {
     if (toolMode === "pan") return "pan";
@@ -507,6 +516,7 @@ const ViewScreen = () => {
     // ─── 4D manifest (pre-rendered WebP dataset) ───────────────────────────
     const [fourDManifest, setFourDManifest] = useState<FourDManifest | null>(null);
     const [fourDManifestError, setFourDManifestError] = useState<string | null>(null);
+    const [fourDEngineerManifest, setFourDEngineerManifest] = useState<FourDEngineerManifest | null>(null);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const [limbsDicomManifestError, setLimbsDicomManifestError] = useState<string | null>(null);
     const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
@@ -588,6 +598,8 @@ const ViewScreen = () => {
     const [isImageInverted, setIsImageInverted] = useState(false);
     const [imageSmoothing, setImageSmoothing] = useState(0);
     const [imageSharpening, setImageSharpening] = useState(0);
+    const [displayQualityMode, setDisplayQualityMode] = useState<DisplayQualityMode>("standard");
+    const [readerMode, setReaderMode] = useState(false);
     const [volumeQuality, setVolumeQuality] = useState<"performance" | "standard" | "fine">("standard");
     const [obliqueEnabled, setObliqueEnabled] = useState(false);
     const [obliquePanel, setObliquePanel] = useState<ObliqueConfig["panel"]>("axial");
@@ -601,6 +613,20 @@ const ViewScreen = () => {
     const [isVoiLutOpen, setIsVoiLutOpen] = useState(false);
     const [isInterpolationOpen, setIsInterpolationOpen] = useState(false);
     const [isVolumeQualityOpen, setIsVolumeQualityOpen] = useState(false);
+    const applyDisplayQualityMode = useCallback((mode: DisplayQualityMode) => {
+        setDisplayQualityMode(mode);
+        if (mode === "detail") {
+            setSelectedVoiLutMode("LINEAR_EXACT");
+            setSelectedInterpolationMode("FAST_LINEAR");
+            setImageSmoothing(0);
+            setImageSharpening(0.16);
+            return;
+        }
+        setSelectedVoiLutMode("LINEAR");
+        setSelectedInterpolationMode("LINEAR");
+        setImageSmoothing(0);
+        setImageSharpening(0);
+    }, []);
 
     // ─── 离线重建参数状态 (仅 isOfflineRecon 模式使用) ──────────────────────────
     type ReconParams = {
@@ -794,6 +820,9 @@ const ViewScreen = () => {
 
         if (!scanSession) {
             if (isFourDEntry) {
+                const fourDCount = fourDEngineerManifest
+                    ? fourDEngineerManifest.bedCount * fourDEngineerManifest.sliceCountPerVolume
+                    : REAL_LUNG_SERIES.count;
                 return [{
                     id: "study-4d-preview",
                     name: "4D CT",
@@ -803,18 +832,18 @@ const ViewScreen = () => {
                         type: "4d" as SeriesType,
                         series: [{
                             id: "4d-preview-recon",
-                            name: "4D Lung Reconstruction",
-                            count: REAL_LUNG_SERIES.count,
-                            kernel: "B41 Soft Tissue",
-                            thickness: "3.0 mm",
+                            name: fourDEngineerManifest ? "4D Respiratory Reconstruction" : "4D Lung Reconstruction",
+                            count: fourDCount,
+                            kernel: fourDEngineerManifest ? "4D Reference" : "B41 Soft Tissue",
+                            thickness: fourDEngineerManifest ? "0.6 mm" : "3.0 mm",
                             kV: "120",
                             mAs: "Auto",
-                            fov: "402.0 mm",
+                            fov: fourDEngineerManifest ? "500.0 mm" : "402.0 mm",
                             matrix: "512",
                             seriesType: "4d" as SeriesType,
-                            images: makeImages(REAL_LUNG_SERIES.count, "4d-preview"),
-                            defaultWw: 400,
-                            defaultWl: 40,
+                            images: makeImages(fourDCount, "4d-preview"),
+                            defaultWw: fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.ww : 400,
+                            defaultWl: fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : 40,
                         }],
                     }],
                 }];
@@ -893,12 +922,15 @@ const ViewScreen = () => {
             } else {
                 // helical / axial / 4d — leaf items are the recon series
                 const p = s.helical_param ?? s.axial_param;
+                const seriesCount = type === "4d" && fourDEngineerManifest
+                    ? fourDEngineerManifest.bedCount * fourDEngineerManifest.sliceCountPerVolume
+                    : effectiveLungSeries.count;
                 const leafSeries: Series[] = isBrainHelicalDemo && type !== "4d"
                     ? makeBrainHelicalSeries(type)
                     : s.recon_series.map((r) => ({
                     id: `${prefix}-recon${r.id}`,
                     name: r.recon_name,
-                    count: effectiveLungSeries.count,
+                    count: seriesCount,
                     kernel: r.kernel,
                     thickness: `${r.slice_thickness} mm`,
                     kV: p ? String(p.kv) : "—",
@@ -906,9 +938,9 @@ const ViewScreen = () => {
                     fov: p ? `${p.fov} mm` : "—",
                     matrix: String(r.matrix),
                     seriesType: type,
-                    images: makeImages(effectiveLungSeries.count, `${prefix}-recon${r.id}`),
-                    defaultWw: r.window_width,
-                    defaultWl: r.window_level,
+                    images: makeImages(seriesCount, `${prefix}-recon${r.id}`),
+                    defaultWw: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.ww : r.window_width,
+                    defaultWl: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : r.window_level,
                     }));
 
                 // Fallback if protocol has no recon series configured
@@ -916,7 +948,7 @@ const ViewScreen = () => {
                     leafSeries.push({
                         id: `${prefix}-scan`,
                         name: s.series_label,
-                        count: effectiveLungSeries.count,
+                        count: seriesCount,
                         kernel: "—",
                         thickness: p ? `${(p as { slice_thickness?: number }).slice_thickness ?? "—"} mm` : "—",
                         kV: p ? String(p.kv) : "—",
@@ -924,7 +956,9 @@ const ViewScreen = () => {
                         fov: p ? `${p.fov} mm` : "—",
                         matrix: "512",
                         seriesType: type,
-                        images: makeImages(effectiveLungSeries.count, `${prefix}-scan`),
+                        images: makeImages(seriesCount, `${prefix}-scan`),
+                        defaultWw: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.ww : undefined,
+                        defaultWl: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : undefined,
                     });
                 }
 
@@ -976,6 +1010,7 @@ const ViewScreen = () => {
     }, [
         scanSession,
         isFourDEntry,
+        fourDEngineerManifest,
         isBrainHelicalDemo,
         effectiveLungSeries,
         isLimbsDicomDemo,
@@ -1029,15 +1064,34 @@ const ViewScreen = () => {
     const viewportContainerClassName =
         "flex-1 min-w-0 flex overflow-hidden bg-[#0F172A]";
     const isMprViewActive = !isTopogramSeries && imageMode === "3D";
+    const isReaderModeSupported = imageMode === "2D" || isTopogramSeries;
+    const isReaderModeActive = readerMode && isReaderModeSupported;
     const isFourDMprViewActive = isMprViewActive && isFourDLungReconSeries;
     const isFourDPlaybackBlockedByReview = isFourDLungReconSeries && isFourDEntry && fourDStage !== "done";
+    const getFourDEngineerMhaUrlsForPhase = useCallback(
+        (phaseIndex: number) => {
+            if (!fourDEngineerManifest) return null;
+            const urls: string[] = [];
+            for (let bedIndex = 0; bedIndex < fourDEngineerManifest.bedCount; bedIndex += 1) {
+                const volume = getSelectedEngineerVolume(
+                    fourDEngineerManifest,
+                    bedIndex,
+                    phaseIndex,
+                    fourDState?.phaseSelections,
+                );
+                if (volume) urls.push(volume.urls.mha);
+            }
+            return urls.length > 0 ? urls : null;
+        },
+        [fourDEngineerManifest, fourDState?.phaseSelections],
+    );
     const fourDDicomImageUrls = useMemo(
         () => (
             isFourDLungReconSeries
-                ? getFourDDicomSeriesUrls(selectedPhaseIndex, selectedFourDMpId)
+                ? getFourDEngineerMhaUrlsForPhase(selectedPhaseIndex) ?? getFourDDicomSeriesUrls(selectedPhaseIndex, selectedFourDMpId)
                 : []
         ),
-        [isFourDLungReconSeries, selectedFourDMpId, selectedPhaseIndex]
+        [getFourDEngineerMhaUrlsForPhase, isFourDLungReconSeries, selectedFourDMpId, selectedPhaseIndex]
     );
     // Full list of DICOM URL-sets (one per phase) so the MPR viewport can
     // warm every phase's cornerstone volume in the background — makes the
@@ -1046,13 +1100,18 @@ const ViewScreen = () => {
     const fourDAllPhaseDicomUrls = useMemo(
         () => (
             isFourDLungReconSeries
-                ? Array.from(
-                    { length: FOUR_D_DICOM_PHASE_COUNT },
-                    (_, phase) => getFourDDicomSeriesUrls(phase, selectedFourDMpId),
-                )
+                ? fourDEngineerManifest
+                    ? Array.from(
+                        { length: fourDEngineerManifest.phaseCount },
+                        (_, phase) => getFourDEngineerMhaUrlsForPhase(phase) ?? [],
+                    )
+                    : Array.from(
+                        { length: FOUR_D_DICOM_PHASE_COUNT },
+                        (_, phase) => getFourDDicomSeriesUrls(phase, selectedFourDMpId),
+                    )
                 : undefined
         ),
-        [isFourDLungReconSeries, selectedFourDMpId],
+        [fourDEngineerManifest, getFourDEngineerMhaUrlsForPhase, isFourDLungReconSeries, selectedFourDMpId],
     );
     const fourDPhaseOptions = useMemo(
         () => FOUR_D_PHASE_LABELS.map((label, index) => ({
@@ -1071,8 +1130,6 @@ const ViewScreen = () => {
         }
         return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser" || mode === "rotate";
     };
-
-
 
     const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
     const currentSliceIndex = clampSliceIndex(sliceIndex);
@@ -1146,14 +1203,26 @@ const ViewScreen = () => {
 
     useEffect(() => {
         if (!isFourDLungReconSeries) return;
+        const defaultWindow = fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW : FOUR_D_LUNG_DEFAULT_WINDOW;
         setSelectedLayout("mpr");
         setPhaseMipMode("Avg");
-        setWw(FOUR_D_LUNG_DEFAULT_WINDOW.ww);
-        setWl(FOUR_D_LUNG_DEFAULT_WINDOW.wl);
-        setDisplayWw(FOUR_D_LUNG_DEFAULT_WINDOW.ww);
-        setDisplayWl(FOUR_D_LUNG_DEFAULT_WINDOW.wl);
-        defaultWindowRef.current = FOUR_D_LUNG_DEFAULT_WINDOW;
-    }, [isFourDLungReconSeries]);
+        setWw(defaultWindow.ww);
+        setWl(defaultWindow.wl);
+        setDisplayWw(defaultWindow.ww);
+        setDisplayWl(defaultWindow.wl);
+        defaultWindowRef.current = defaultWindow;
+    }, [fourDEngineerManifest, isFourDLungReconSeries]);
+
+    useEffect(() => {
+        if (!isFourDEntry) return;
+        let cancelled = false;
+        loadFourDEngineerManifest().then((manifest) => {
+            if (!cancelled && manifest) setFourDEngineerManifest(manifest);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [isFourDEntry]);
 
     useEffect(() => {
         if (!isLimbsDicomDemo || !limbsDicomManifest) return;
@@ -1478,6 +1547,12 @@ const ViewScreen = () => {
         if (isPlaybackEnabled) return;
         setIsPlaying(false);
     }, [isPlaybackEnabled]);
+
+    useEffect(() => {
+        if (isReaderModeSupported) return;
+        setReaderMode(false);
+    }, [isReaderModeSupported]);
+
     useEffect(() => {
         const onMove = (e: MouseEvent) => {
             if (toolMode !== "measure" || !measureStartRef.current) return;
@@ -1512,8 +1587,13 @@ const ViewScreen = () => {
                 clockOverride={{ time: clockStr, date: dateStr }}
             />
 
-            <main className="flex-1 flex overflow-hidden p-2 gap-2">
-                <aside className="w-[240px] bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden shrink-0">
+            <main className={`flex-1 flex overflow-hidden p-2 ${isReaderModeActive ? "gap-0" : "gap-2"}`}>
+                <aside
+                    aria-hidden={isReaderModeActive}
+                    className={`bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden shrink-0 transition-all duration-200 ${
+                        isReaderModeActive ? "w-0 border-0 opacity-0 pointer-events-none" : "w-[240px] opacity-100"
+                    }`}
+                >
                     <div className="h-[44px] bg-[#F8FAFC] border-b border-[#EEF2F9] px-3 flex items-center gap-2">
                         <Layers3 size={14} className="text-[#4D94FF]" />
                         <span className="text-[11px] font-black uppercase tracking-wider text-[#37474F]">{t("view.series.title")}</span>
@@ -1633,18 +1713,8 @@ const ViewScreen = () => {
                                 !isTopogramSeries ? (
                                     <div className="col-span-2 flex flex-col gap-2">
                                         {/* 顶部窗值 + 窗模板 — 平板设备使用频率最高，置顶便于一键调整 */}
-                                        <div className="rounded-md border border-[#DCE6F2] bg-white px-2.5 py-2 shadow-sm flex flex-col gap-2">
-                                            <div className="flex items-center justify-between gap-3">
-                                                <div className="flex items-baseline gap-1.5">
-                                                    <span className="text-[9px] font-black uppercase text-[#90A4AE]">WW</span>
-                                                    <span className="text-[13px] font-black tabular-nums text-[#37474F]">{Math.round(displayWw)}</span>
-                                                </div>
-                                                <div className="h-5 w-px bg-[#E2E8F0]" />
-                                                <div className="flex items-baseline gap-1.5">
-                                                    <span className="text-[9px] font-black uppercase text-[#90A4AE]">WL</span>
-                                                    <span className="text-[13px] font-black tabular-nums text-[#37474F]">{Math.round(displayWl)}</span>
-                                                </div>
-                                            </div>
+                                        <div className="rounded-md border border-[#B7D5FF] bg-[linear-gradient(135deg,#F0F7FF_0%,#F4FFFB_100%)] px-2.5 py-2 shadow-[0_8px_18px_-16px_rgba(37,99,235,0.75)] flex flex-col gap-2">
+                                            <WindowValueStrip ww={Math.round(displayWw)} wl={Math.round(displayWl)} />
                                             <div className="relative">
                                                 <div
                                                     onClick={() => {
@@ -1655,12 +1725,12 @@ const ViewScreen = () => {
                                                         setIsRenderModeOpen(false);
                                                         setIsVolumeQualityOpen(false);
                                                     }}
-                                                    className={`h-[30px] w-full bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isWindowPresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                                    className={`h-[30px] w-full bg-white/90 border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isWindowPresetOpen ? 'border-[#2563EB] ring-2 ring-[#60A5FA]/20' : 'border-[#BFDBFE] hover:border-[#60A5FA]'}`}
                                                 >
-                                                    <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                    <span className="text-[12px] font-semibold text-[#1E3A8A] truncate">
                                                         {activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}
                                                     </span>
-                                                    <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                                    <ChevronDown size={13} className={`text-[#60A5FA] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#2563EB]' : ''}`} />
                                                 </div>
                                                 {isWindowPresetOpen && (
                                                     <div className="absolute top-[calc(100%+3px)] left-0 right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
@@ -1687,6 +1757,33 @@ const ViewScreen = () => {
                                                     </div>
                                                 )}
                                             </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-[58px] shrink-0 text-[10px] font-black uppercase tracking-tight text-[#475569]">
+                                                    {t("view.controls.displayQuality")}
+                                                </span>
+                                                <div className="grid flex-1 grid-cols-2 gap-1 rounded-md border border-[#BFDBFE] bg-white/80 p-1">
+                                                    {([
+                                                        { value: "standard" as const, label: t("view.quality.standard") },
+                                                        { value: "detail" as const, label: t("view.quality.detailEnhanced") },
+                                                    ]).map((option) => {
+                                                        const active = displayQualityMode === option.value;
+                                                        return (
+                                                            <button
+                                                                key={option.value}
+                                                                type="button"
+                                                                onClick={() => applyDisplayQualityMode(option.value)}
+                                                                className={`h-[26px] rounded text-[11px] font-black transition-all ${
+                                                                    active
+                                                                        ? "bg-[#2563EB] text-white shadow-sm"
+                                                                        : "text-[#64748B] hover:bg-[#EFF6FF] hover:text-[#2563EB]"
+                                                                }`}
+                                                            >
+                                                                {option.label}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
                                         </div>
                                         <OfflineReconPanel
                                             params={reconParams}
@@ -1708,18 +1805,8 @@ const ViewScreen = () => {
                                 ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
                                     <PanelSection title={t("view.display")}>
-                                    <div className="rounded-md border border-[#DCE6F2] bg-white px-2.5 py-2 shadow-sm">
-                                        <div className="flex items-center justify-between gap-3">
-                                            <div className="flex items-baseline gap-1.5">
-                                                <span className="text-[9px] font-black uppercase text-[#90A4AE]">WW</span>
-                                                <span className="text-[13px] font-black tabular-nums text-[#37474F]">{Math.round(displayWw)}</span>
-                                            </div>
-                                            <div className="h-5 w-px bg-[#E2E8F0]" />
-                                            <div className="flex items-baseline gap-1.5">
-                                                <span className="text-[9px] font-black uppercase text-[#90A4AE]">WL</span>
-                                                <span className="text-[13px] font-black tabular-nums text-[#37474F]">{Math.round(displayWl)}</span>
-                                            </div>
-                                        </div>
+                                    <div className="rounded-md border border-[#B7D5FF] bg-[linear-gradient(135deg,#F0F7FF_0%,#F4FFFB_100%)] px-2.5 py-2 shadow-[0_8px_18px_-16px_rgba(37,99,235,0.75)]">
+                                        <WindowValueStrip ww={Math.round(displayWw)} wl={Math.round(displayWl)} />
                                     </div>
                                     </PanelSection>
                                 </div>
@@ -2429,6 +2516,14 @@ const ViewScreen = () => {
 
                             {[
                                 {
+                                    key: "reader",
+                                    title: isReaderModeActive ? t("view.tool.exitReaderMode") : t("view.tool.readerMode"),
+                                    icon: isReaderModeActive ? <PanelLeftOpen size={20} strokeWidth={1.5} /> : <PanelLeftClose size={20} strokeWidth={1.5} />,
+                                    action: () => setReaderMode((prev) => !prev),
+                                    active: isReaderModeActive,
+                                    disabled: !isReaderModeSupported,
+                                },
+                                {
                                     key: "zoom-in",
                                     title: t("view.tool.zoomIn"),
                                     icon: <ZoomIn size={20} strokeWidth={1.5} />,
@@ -2499,8 +2594,8 @@ const ViewScreen = () => {
                                     action: () => setIsPlaying((prev) => !prev),
                                     active: isPlaying,
                                 },
-                            ].map(({ key, title, icon, action, active }) => {
-                                const disabled = key === "play" && !isPlaybackEnabled;
+                            ].map(({ key, title, icon, action, active, disabled: toolDisabled }) => {
+                                const disabled = Boolean(toolDisabled) || (key === "play" && !isPlaybackEnabled);
                                 return (
                                 <button
                                     key={key}
@@ -2572,29 +2667,31 @@ const ViewScreen = () => {
                 </div>
             </main>
 
-            <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
-                <div className="flex-1" />
-                <div className="flex-1" />
-                <div className="flex-1 flex justify-end">
-                    <button
-                        onClick={async () => {
-                            const sessionId = loadSelectedScanSessionId();
-                            if (sessionId) {
-                                try {
-                                    await completeScanSession(sessionId);
-                                } catch (error) {
-                                    console.error("Failed to mark scan session completed.", error);
+            {!isReaderModeActive && (
+                <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
+                    <div className="flex-1" />
+                    <div className="flex-1" />
+                    <div className="flex-1 flex justify-end">
+                        <button
+                            onClick={async () => {
+                                const sessionId = loadSelectedScanSessionId();
+                                if (sessionId) {
+                                    try {
+                                        await completeScanSession(sessionId);
+                                    } catch (error) {
+                                        console.error("Failed to mark scan session completed.", error);
+                                    }
+                                    clearSelectedScanSessionId();
                                 }
-                                clearSelectedScanSessionId();
-                            }
-                            navigate("/patients", { replace: true, state: { backRoute: "/" } });
-                        }}
-                        className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
-                    >
-                        {t("view.endExam")} <ChevronRight size={20} />
-                    </button>
-                </div>
-            </footer>
+                                navigate("/patients", { replace: true, state: { backRoute: "/" } });
+                            }}
+                            className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"
+                        >
+                            {t("view.endExam")} <ChevronRight size={20} />
+                        </button>
+                    </div>
+                </footer>
+            )}
 
         </div>
     );
@@ -2605,6 +2702,19 @@ const Param = ({ label, value }: { label: string; value: string }) => (
     <div className="p-2 bg-white border border-[#B0C4DE]/30 rounded-md flex flex-col items-center justify-center shadow-sm min-h-[56px]">
         <span className="text-[8px] font-black uppercase text-[#90A4AE] tracking-tighter">{label}</span>
         <span className="text-[13px] font-black text-[#37474F] mt-1">{value}</span>
+    </div>
+);
+
+const WindowValueStrip = ({ ww, wl }: { ww: number | string; wl: number | string }) => (
+    <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-md border border-[#BFDBFE] bg-[#EFF6FF] px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+            <div className="text-[8px] font-black uppercase tracking-[0.12em] text-[#2563EB]">WW</div>
+            <div className="mt-0.5 text-[14px] font-black tabular-nums text-[#1E3A8A]">{ww}</div>
+        </div>
+        <div className="rounded-md border border-[#A7F3D0] bg-[#ECFDF5] px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+            <div className="text-[8px] font-black uppercase tracking-[0.12em] text-[#059669]">WL</div>
+            <div className="mt-0.5 text-[14px] font-black tabular-nums text-[#064E3B]">{wl}</div>
+        </div>
     </div>
 );
 
@@ -2819,18 +2929,8 @@ const OfflineReconPanel = ({
 
                 {!hideWindowValue && (
                     <OfflineReconField label={t("view.offlineRecon.windowValue")}>
-                        <div className="rounded-md border border-[#DCE6F2] bg-white px-2.5 py-2 shadow-sm">
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-baseline gap-1.5">
-                                    <span className="text-[9px] font-black uppercase text-[#90A4AE]">WW</span>
-                                    <span className="text-[13px] font-black tabular-nums text-[#37474F]">{ww}</span>
-                                </div>
-                                <div className="h-5 w-px bg-[#E2E8F0]" />
-                                <div className="flex items-baseline gap-1.5">
-                                    <span className="text-[9px] font-black uppercase text-[#90A4AE]">WL</span>
-                                    <span className="text-[13px] font-black tabular-nums text-[#37474F]">{wl}</span>
-                                </div>
-                            </div>
+                        <div className="rounded-md border border-[#B7D5FF] bg-[linear-gradient(135deg,#F0F7FF_0%,#F4FFFB_100%)] px-2.5 py-2 shadow-[0_8px_18px_-16px_rgba(37,99,235,0.75)]">
+                            <WindowValueStrip ww={ww} wl={wl} />
                         </div>
                     </OfflineReconField>
                 )}
@@ -2860,127 +2960,5 @@ const OfflineReconPanel = ({
 };
 
 const VIEW_CONTROL_LABEL_CLASS = "w-[72px] shrink-0 text-[10px] font-semibold leading-[1.1] text-[#546E7A]";
-
-type DisplayControlsProps = {
-    selectedVoiLutMode: "LINEAR" | "LINEAR_EXACT" | "SIGMOID";
-    setSelectedVoiLutMode: (value: "LINEAR" | "LINEAR_EXACT" | "SIGMOID") => void;
-    selectedInterpolationMode: "LINEAR" | "NEAREST" | "FAST_LINEAR";
-    setSelectedInterpolationMode: (value: "LINEAR" | "NEAREST" | "FAST_LINEAR") => void;
-    isImageInverted: boolean;
-    setIsImageInverted: (value: boolean) => void;
-    imageSmoothing: number;
-    setImageSmoothing: (value: number) => void;
-    imageSharpening: number;
-    setImageSharpening: (value: number) => void;
-    isVoiLutOpen: boolean;
-    setIsVoiLutOpen: (value: boolean) => void;
-    isInterpolationOpen: boolean;
-    setIsInterpolationOpen: (value: boolean) => void;
-    closeOtherMenus: () => void;
-};
-
-const DisplayControls = ({
-    selectedVoiLutMode,
-    setSelectedVoiLutMode,
-    selectedInterpolationMode,
-    setSelectedInterpolationMode,
-    isImageInverted,
-    setIsImageInverted,
-    imageSmoothing,
-    setImageSmoothing,
-    imageSharpening,
-    setImageSharpening,
-    isVoiLutOpen,
-    setIsVoiLutOpen,
-    isInterpolationOpen,
-    setIsInterpolationOpen,
-    closeOtherMenus,
-}: DisplayControlsProps) => {
-    const { t } = useI18n();
-    return (
-    <>
-        <div className="flex items-center gap-2 relative">
-            <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.voiCurve")}</span>
-            <div
-                onClick={() => {
-                    setIsVoiLutOpen(!isVoiLutOpen);
-                    setIsInterpolationOpen(false);
-                    closeOtherMenus();
-                }}
-                className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVoiLutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
-            >
-                <span className="text-[12px] font-medium text-[#37474F] truncate">
-                    {selectedVoiLutMode === "SIGMOID" ? "Sigmoid" : selectedVoiLutMode === "LINEAR_EXACT" ? "Linear Exact" : "Linear"}
-                </span>
-                <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVoiLutOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
-            </div>
-            {isVoiLutOpen && (
-                <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                    {([
-                        { value: "LINEAR" as const, label: "Linear" },
-                        { value: "LINEAR_EXACT" as const, label: "Linear Exact" },
-                        { value: "SIGMOID" as const, label: "Sigmoid" },
-                    ]).map((opt) => (
-                        <div key={opt.value} onClick={() => { setSelectedVoiLutMode(opt.value); setIsVoiLutOpen(false); }} className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedVoiLutMode === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}>
-                            {opt.label}
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-        <div className="flex items-center gap-2 relative">
-            <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.interpolation")}</span>
-            <div
-                onClick={() => {
-                    setIsInterpolationOpen(!isInterpolationOpen);
-                    setIsVoiLutOpen(false);
-                    closeOtherMenus();
-                }}
-                className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isInterpolationOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
-            >
-                <span className="text-[12px] font-medium text-[#37474F] truncate">
-                    {selectedInterpolationMode === "FAST_LINEAR" ? "Fast Linear" : selectedInterpolationMode === "NEAREST" ? "Nearest" : "Linear"}
-                </span>
-                <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isInterpolationOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
-            </div>
-            {isInterpolationOpen && (
-                <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                    {([
-                        { value: "LINEAR" as const, label: "Linear" },
-                        { value: "NEAREST" as const, label: "Nearest" },
-                        { value: "FAST_LINEAR" as const, label: "Fast Linear" },
-                    ]).map((opt) => (
-                        <div key={opt.value} onClick={() => { setSelectedInterpolationMode(opt.value); setIsInterpolationOpen(false); }} className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedInterpolationMode === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}>
-                            {opt.label}
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-        <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
-            <span className="text-[11px] font-semibold text-[#546E7A]">{t("view.controls.invert")}</span>
-            <input type="checkbox" checked={isImageInverted} onChange={(event) => setIsImageInverted(event.target.checked)} className="h-4 w-4 accent-[#4D94FF]" />
-        </div>
-        <div className="flex items-start gap-2">
-            <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.smoothing")}</span>
-            <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
-                <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
-                    <input type="range" min={0} max={1} step={0.05} value={imageSmoothing} onChange={(event) => setImageSmoothing(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
-                    <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSmoothing.toFixed(2)}</span>
-                </div>
-            </div>
-        </div>
-        <div className="flex items-start gap-2">
-            <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.sharpening")}</span>
-            <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
-                <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
-                    <input type="range" min={0} max={1} step={0.05} value={imageSharpening} onChange={(event) => setImageSharpening(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
-                    <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSharpening.toFixed(2)}</span>
-                </div>
-            </div>
-        </div>
-    </>
-    );
-};
 
 export default ViewScreen;

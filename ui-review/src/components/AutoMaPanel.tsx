@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import { useI18n } from "../lib/i18nContext";
 
 // Opaque "noise level" used by the auto-mA slider. Concrete physical meaning
@@ -187,8 +187,12 @@ export default function AutoMaPanel({
     realMaCurve,
 }: AutoMaPanelProps) {
     const { t } = useI18n();
-    const [draftMin, setDraftMin] = useState(maMin);
-    const [draftMax, setDraftMax] = useState(maMax);
+    const [draftRange, setDraftRange] = useState(() => ({
+        sourceMin: maMin,
+        sourceMax: maMax,
+        min: maMin,
+        max: maMax,
+    }));
     const [internalPositionRatio, setInternalPositionRatio] = useState(0.5);
     const [viewStartMm, setViewStartMm] = useState(0);
     // 0 means "auto: full scan range". Any positive value is a user-chosen
@@ -202,8 +206,20 @@ export default function AutoMaPanel({
         mode: "idle" | "pan";
     } | null>(null);
 
-    useEffect(() => setDraftMin(maMin), [maMin]);
-    useEffect(() => setDraftMax(maMax), [maMax]);
+    const syncedDraftRange =
+        draftRange.sourceMin === maMin && draftRange.sourceMax === maMax
+            ? draftRange
+            : {
+                sourceMin: maMin,
+                sourceMax: maMax,
+                min: draftRange.sourceMin === maMin ? draftRange.min : maMin,
+                max: draftRange.sourceMax === maMax ? draftRange.max : maMax,
+            };
+    if (syncedDraftRange !== draftRange) {
+        setDraftRange(syncedDraftRange);
+    }
+    const draftMin = syncedDraftRange.min;
+    const draftMax = syncedDraftRange.max;
 
     const isHelical = mode === "helical";
     const effectiveSliceInterval = sliceInterval ?? 0;
@@ -283,7 +299,7 @@ export default function AutoMaPanel({
     const yViewMin = Math.max(0, draftMin - (draftMax - draftMin) * 0.05);
     const yViewMax = draftMax + (draftMax - draftMin) * 0.05;
     const yViewSpan = Math.max(1, yViewMax - yViewMin);
-    const yOf = (ma: number) => VIEW_H - ((ma - yViewMin) / yViewSpan) * VIEW_H;
+    const yOf = useCallback((ma: number) => VIEW_H - ((ma - yViewMin) / yViewSpan) * VIEW_H, [yViewMin, yViewSpan]);
     const yLineMin = yOf(draftMin);
     const yLineMax = yOf(draftMax);
 
@@ -296,7 +312,7 @@ export default function AutoMaPanel({
     const effViewStartMm = clamp(snapBed(viewStartMm), 0, maxStart);
     const effViewEndMm = effViewStartMm + effViewWidthMm;
     const totalBedCount = Math.max(1, Math.round(totalSnapped / BED_MM));
-    const zToX = (zMm: number) => ((zMm - effViewStartMm) / effViewWidthMm) * VIEW_W;
+    const zToX = useCallback((zMm: number) => ((zMm - effViewStartMm) / effViewWidthMm) * VIEW_W, [effViewStartMm, effViewWidthMm]);
     const isZoomedOrPanned = effViewWidthMm < totalSnapped - 1e-6 || effViewStartMm > 1e-6;
 
     const timeWavePath = useMemo(() => {
@@ -307,7 +323,7 @@ export default function AutoMaPanel({
                 return `${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${yOf(sample.ma).toFixed(2)}`;
             })
             .join(" ");
-    }, [timeWaveform, yViewMin, yViewSpan, effViewStartMm, effViewWidthMm]);
+    }, [timeWaveform, yOf, zToX]);
 
     const axialBedWidthMm = effectiveSteps > 0 && scanLength > 0 ? scanLength / effectiveSteps : BED_MM;
     const axialTimePaths = useMemo(() => {
@@ -324,7 +340,7 @@ export default function AutoMaPanel({
                 })
                 .join(" ");
         });
-    }, [axialTimeWaveform, effectiveSteps, rotationTime, yViewMin, yViewSpan, effViewStartMm, effViewWidthMm, axialBedWidthMm]);
+    }, [axialTimeWaveform, axialBedWidthMm, effectiveSteps, rotationTime, yOf, zToX]);
 
     const cursorIdx = isHelical
         ? timeWaveform.length > 0
@@ -416,7 +432,7 @@ export default function AutoMaPanel({
         const value = Number(raw);
         if (!Number.isFinite(value)) return;
         const clamped = clamp(value, HARD_MIN, draftMax - 5);
-        setDraftMin(clamped);
+        setDraftRange((current) => ({ ...current, min: clamped }));
         flush({ ma_min: clamped });
     };
 
@@ -424,7 +440,7 @@ export default function AutoMaPanel({
         const value = Number(raw);
         if (!Number.isFinite(value)) return;
         const clamped = clamp(value, draftMin + 5, HARD_MAX);
-        setDraftMax(clamped);
+        setDraftRange((current) => ({ ...current, max: clamped }));
         flush({ ma_max: clamped });
     };
 

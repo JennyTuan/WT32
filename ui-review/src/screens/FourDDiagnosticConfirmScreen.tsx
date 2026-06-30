@@ -12,7 +12,6 @@ import {
     FilePlus,
     Info,
     Trash2,
-    Zap,
 } from "lucide-react";
 
 import { loadSelectedPatient } from "../lib/patientSession";
@@ -20,9 +19,11 @@ import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
+import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
 import { useI18n } from "../lib/i18nContext";
 
 const HOLD_DURATION_MS = 3000;
+const POSITIONING_DURATION_MS = 1000;
 const SCAN_DURATION_MS = 16000;
 const BED_TRAVEL_MM = 19.2;
 
@@ -44,7 +45,8 @@ const FOURD_PARAMS = {
     dlp: "1334.97",
 };
 
-type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "paused" | "completed";
+type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "paused" | "completed";
+type PhysicalTriggerAction = "position" | "exposure";
 
 interface Sequence {
     id: string;
@@ -73,7 +75,7 @@ export default function FourDDiagnosticConfirmScreen() {
     const [guideVisible, setGuideVisible] = useState(false);
 
     const [scanStage, setScanStage] = useState<ScanStage>("idle");
-    const [holdProgress, setHoldProgress] = useState(0);
+    const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
     const [scanStarted, setScanStarted] = useState(false);
     const [scanPaused, setScanPaused] = useState(false);
     const [scanCompleted, setScanCompleted] = useState(false);
@@ -98,6 +100,7 @@ export default function FourDDiagnosticConfirmScreen() {
 
     const holdRafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
+    const positioningTimerRef = useRef<number | null>(null);
     const scanRafRef = useRef<number | null>(null);
     const scanProgressRef = useRef(0);
     const waveRafRef = useRef<number | null>(null);
@@ -250,10 +253,25 @@ export default function FourDDiagnosticConfirmScreen() {
         };
     }, [breathingDemoElapsedSec, filteredWaveData, t]);
 
+    const triggerPositioningSequence = useCallback(() => {
+        if (!breathingStability.stable) return;
+        clearHoldRaf();
+        holdStartRef.current = null;
+        setScanStage("positioning");
+
+        if (positioningTimerRef.current !== null) {
+            window.clearTimeout(positioningTimerRef.current);
+        }
+        positioningTimerRef.current = window.setTimeout(() => {
+            positioningTimerRef.current = null;
+            setPhysicalTriggerAction("exposure");
+            setScanStage("positioned");
+        }, POSITIONING_DURATION_MS);
+    }, [breathingStability.stable]);
+
     const triggerScanSequence = useCallback(() => {
         if (!breathingStability.stable) return;
         clearHoldRaf();
-        setHoldProgress(1);
         setScanStage("enabled");
 
         window.setTimeout(() => {
@@ -272,7 +290,12 @@ export default function FourDDiagnosticConfirmScreen() {
     }, [breathingStability.stable]);
 
     const startHold = () => {
-        if (!guideVisible || !breathingStability.stable || scanStage === "exposing" || scanStage === "completed") return;
+        if (!guideVisible || !breathingStability.stable || scanStage === "positioning" || scanStage === "enabled" || scanStage === "exposing" || scanStage === "completed") return;
+
+        if (physicalTriggerAction === "exposure") {
+            triggerScanSequence();
+            return;
+        }
 
         clearHoldRaf();
         holdStartRef.current = performance.now();
@@ -281,10 +304,9 @@ export default function FourDDiagnosticConfirmScreen() {
         const tick = (timestamp: number) => {
             const startedAt = holdStartRef.current ?? timestamp;
             const progress = Math.min((timestamp - startedAt) / HOLD_DURATION_MS, 1);
-            setHoldProgress(progress);
 
             if (progress >= 1) {
-                triggerScanSequence();
+                triggerPositioningSequence();
                 return;
             }
 
@@ -298,8 +320,7 @@ export default function FourDDiagnosticConfirmScreen() {
         if (scanStage !== "arming") return;
         clearHoldRaf();
         holdStartRef.current = null;
-        setHoldProgress(0);
-        setScanStage("idle");
+        setScanStage(physicalTriggerAction === "position" ? "idle" : "positioned");
     };
 
     const toggleScanPause = () => {
@@ -370,22 +391,39 @@ export default function FourDDiagnosticConfirmScreen() {
     useEffect(() => () => {
         clearHoldRaf();
         clearScanRaf();
+        if (positioningTimerRef.current !== null) {
+            window.clearTimeout(positioningTimerRef.current);
+        }
     }, []);
 
-    const statusText =
-        scanStage === "arming" ? t("scanFlow.physicalGuide.holdToTrigger", { seconds: Math.max(0, (1 - holdProgress) * 3).toFixed(1) })
-        : scanStage === "enabled" ? t("scanFlow.physicalGuide.enabled")
-        : scanStage === "exposing" ? t("scanFlow.fourD.acquiring")
-        : scanStage === "paused" ? t("scanFlow.fourD.paused")
-        : scanStage === "completed" ? t("scanFlow.fourD.completed")
-        : t("scanFlow.fourD.waitExecute");
-
     const guideTitle =
-        scanStage === "arming" ? t("scanFlow.physicalGuide.keepHolding")
+        scanStage === "arming" ? t("scanFlow.physicalGuide.keepHoldingPosition")
+        : scanStage === "positioning" ? t("scanFlow.physicalGuide.moveToStart")
+        : scanStage === "positioned" ? t("scanFlow.physicalGuide.pressAgainForExposure")
         : scanStage === "enabled" ? t("scanFlow.physicalGuide.enabled")
         : scanStage === "exposing" ? t("scanFlow.fourD.running")
         : scanStage === "paused" ? t("scanFlow.fourD.paused")
         : t("scanFlow.physicalGuide.holdGreenButton");
+
+    const physicalTriggerSteps: PhysicalTriggerStep[] = [
+        {
+            id: "position",
+            label: t("scanFlow.physicalGuide.stepPosition"),
+            detail: t("scanFlow.physicalGuide.stepPositionDetail"),
+            state: physicalTriggerAction === "position" && scanStage !== "completed" ? "active" : "done",
+        },
+        {
+            id: "exposure",
+            label: t("scanFlow.physicalGuide.stepExposure"),
+            detail: t("scanFlow.physicalGuide.stepExposureDetail"),
+            state:
+                scanStage === "completed"
+                    ? "done"
+                    : physicalTriggerAction === "exposure" || scanStage === "enabled" || scanStage === "exposing" || scanStage === "paused"
+                        ? "active"
+                        : "pending",
+        },
+    ];
 
     const sidebarParams = [
         { label: t("scanFlow.inOutTable"), value: FOURD_PARAMS.bedMode, accent: false },
@@ -589,12 +627,12 @@ export default function FourDDiagnosticConfirmScreen() {
                                     <div
                                         key={label}
                                         className={`min-h-[38px] p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm ${
-                                            dose ? "border-[#F59E0B]/30 bg-[#FFF7ED]" : "border-[#B0C4DE]/40"
+                                            dose ? "border-[#FB923C]/70 bg-[#FFF7ED] ring-1 ring-[#FED7AA] shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_6px_14px_rgba(251,146,60,0.16)]" : "border-[#B0C4DE]/40"
                                         } ${
                                             accent ? "group hover:border-[#4D94FF] cursor-pointer" : ""
                                         }`}
                                     >
-                                        <span className={`text-[9px] font-black uppercase tracking-tighter ${dose ? "text-[#B45309]/70" : "text-[#90A4AE]"}`}>{label}</span>
+                                        <span className={`text-[9px] font-black uppercase tracking-tighter ${dose ? "text-[#C2410C]/80" : "text-[#90A4AE]"}`}>{label}</span>
                                         {accent ? (
                                             <div className="flex items-center gap-1 mt-[1px]">
                                                 <span className="text-[13px] font-black text-[#37474F]">{value}</span>
@@ -602,8 +640,8 @@ export default function FourDDiagnosticConfirmScreen() {
                                             </div>
                                         ) : (
                                             <div className="mt-[1px] flex items-baseline gap-1">
-                                                <span className={`text-[13px] font-black ${dose ? "text-[#B45309]" : "text-[#37474F]"}`}>{value}</span>
-                                                {unit && <span className={`text-[8px] font-bold ${dose ? "text-[#B45309]/65" : "text-[#90A4AE]"}`}>{unit}</span>}
+                                                <span className={`font-black ${dose ? "text-[14px] text-[#EA580C]" : "text-[13px] text-[#37474F]"}`}>{value}</span>
+                                                {unit && <span className={`text-[8px] font-bold ${dose ? "text-[#C2410C]/70" : "text-[#90A4AE]"}`}>{unit}</span>}
                                             </div>
                                         )}
                                     </div>
@@ -836,66 +874,19 @@ export default function FourDDiagnosticConfirmScreen() {
             </footer>
 
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
-                <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
-                    <div className="border-b border-slate-200 px-5 py-4">
-                        <div className="text-[14px] font-black text-slate-700">{t("scanFlow.physicalGuide.title")}</div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">{t("scanFlow.fourD.guideDescription")}</div>
-                    </div>
-
-                    <div className="flex flex-1 flex-col">
-                        <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-6">
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="rounded-full border border-[#B9C7D6] bg-white/75 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">
-                                    Physical Trigger
-                                </div>
-                                <div className="text-center">
-                                    <div className="text-[16px] font-black text-slate-700">{guideTitle}</div>
-                                    <div className="mt-1 text-[11px] font-medium text-slate-400">{statusText}</div>
-                                </div>
-                            </div>
-
-                            <button
-                                type="button"
-                                onMouseDown={startHold}
-                                onMouseUp={stopHold}
-                                onMouseLeave={stopHold}
-                                onTouchStart={startHold}
-                                onTouchEnd={stopHold}
-                                disabled={!breathingStability.stable || scanStage === "exposing" || scanStage === "completed"}
-                                className={`group flex h-[132px] w-[132px] items-center justify-center rounded-full border-[10px] shadow-[0_22px_40px_rgba(15,23,42,0.28)] transition-all duration-200 ${
-                                    !breathingStability.stable
-                                        ? "border-slate-400 bg-[radial-gradient(circle_at_35%_30%,#CBD5E1_0%,#94A3B8_45%,#64748B_100%)] cursor-not-allowed opacity-70"
-                                        : scanStage === "arming" || scanStage === "enabled" || scanStage === "exposing"
-                                        ? "border-[#14532D] bg-[radial-gradient(circle_at_35%_30%,#7EF29C_0%,#22C55E_45%,#15803D_100%)] scale-[0.97]"
-                                        : "border-[#1F6E44] bg-[radial-gradient(circle_at_35%_30%,#90F8AE_0%,#22C55E_40%,#166534_100%)] hover:scale-[1.02]"
-                                }`}
-                            >
-                                <div className="flex h-[88px] w-[88px] items-center justify-center rounded-full border border-white/35 bg-white/10 shadow-[inset_0_10px_18px_rgba(255,255,255,0.2)]">
-                                    <Zap size={30} className="text-white drop-shadow-[0_4px_10px_rgba(255,255,255,0.2)]" />
-                                </div>
-                            </button>
-
-                            <div className="w-full rounded-2xl border border-[#D6E0EA] bg-white/70 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
-                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                                    <span>{t("scanFlow.holdProgress")}</span>
-                                    <span>{Math.round(holdProgress * 100)}%</span>
-                                </div>
-                                <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#DCE6F1]">
-                                    <div
-                                        className="h-full rounded-full bg-[linear-gradient(90deg,#22C55E,#86EFAC)] transition-[width] duration-75"
-                                        style={{ width: `${holdProgress * 100}%` }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex shrink-0 justify-end px-6 pb-5 pt-2">
-                            <div className="min-w-[108px] rounded-full border border-slate-300/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(233,239,247,0.96)_100%)] px-6 py-2.5 text-center text-[11px] font-black uppercase tracking-[0.22em] text-slate-400 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.3),inset_0_1px_0_rgba(255,255,255,0.95)]">
-                                {statusText}
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <PhysicalTriggerGuide
+                    title={t("scanFlow.physicalGuide.title")}
+                    description={t("scanFlow.physicalGuide.fourDTwoStepDescription")}
+                    guideTitle={guideTitle}
+                    triggerLabel={t("scanFlow.physicalGuide.triggerLabel")}
+                    emergencyLabel={t("scanFlow.physicalGuide.referenceEmergency")}
+                    simulatedLabel={t("scanFlow.physicalGuide.referenceSimulated")}
+                    steps={physicalTriggerSteps}
+                    onHoldStart={startHold}
+                    onHoldEnd={stopHold}
+                    disabled={!breathingStability.stable || scanStage === "exposing" || scanStage === "completed"}
+                    buttonActive={scanStage === "arming" || scanStage === "positioning" || scanStage === "enabled" || scanStage === "exposing"}
+                />
             </div>
 
             {showBreathingConfirm && (
@@ -954,6 +945,8 @@ export default function FourDDiagnosticConfirmScreen() {
                         return;
                     }
                     setShowPatientConfirm(false);
+                    setPhysicalTriggerAction("position");
+                    setScanStage("idle");
                     setGuideVisible(true);
                 }}
                 patientData={selectedPatient ? {

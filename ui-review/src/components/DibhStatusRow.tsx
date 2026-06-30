@@ -1,4 +1,4 @@
-import type { BreathHoldStage } from "./BreathHoldGuide";
+import type { BreathHoldStage } from "./useBreathHoldStateMachine";
 import { useI18n } from "../lib/i18nContext";
 
 /**

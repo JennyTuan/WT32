@@ -655,6 +655,9 @@ class ScanSessionReconSeriesCreate(BaseModel):
     window_level: int = 40
     slice_thickness: float = 1.0
     increment: Optional[float] = None
+    recon_fov: Optional[float] = None
+    center_x: Optional[float] = None
+    center_y: Optional[float] = None
 
 
 class ScanSessionReconSeriesUpdate(BaseModel):

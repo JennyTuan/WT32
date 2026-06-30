@@ -2,6 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, ChevronRight, Info } from "lucide-react";
 import { getFourDImageUrl } from "../lib/fourDImageSource";
+import {
+  buildEngineerScanResult,
+  getEngineerVolumesForBedPhase,
+  loadFourDEngineerManifest,
+  type FourDEngineerManifest,
+  type FourDEngineerVolume,
+} from "../lib/fourDEngineerImageSource";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
 import { useI18n } from "../lib/i18nContext";
 
@@ -9,6 +16,7 @@ type PhaseStatus = "ok" | "duplicate" | "missing";
 
 interface DataSegment {
   id: string;
+  volumeId?: string;
   time: string;
   quality: "excellent" | "good" | "fair";
   candidateIndex: number;
@@ -18,6 +26,13 @@ interface DataSegment {
   clarity: number;
   noise: number;
   motion: number;
+  previewUrls?: {
+    axial: string;
+    coronal: string;
+    coronalStrip?: string;
+    sagittal: string;
+    sagittalStrip?: string;
+  };
 }
 
 interface BedPhaseData {
@@ -92,6 +107,59 @@ function buildMockPhases(): PhaseData[] {
     });
 
     return { label, status, beds };
+  });
+}
+
+function formatRangeMm(range: [number, number]) {
+  return `${range[0].toFixed(1)} - ${range[1].toFixed(1)} mm`;
+}
+
+function segmentFromVolume(volume: FourDEngineerVolume): DataSegment {
+  const quality: DataSegment["quality"] = volume.candidateIndex === 0 ? "excellent" : "good";
+  return {
+    id: volume.id,
+    volumeId: volume.id,
+    time: volume.acquisitionTime || "--",
+    quality,
+    candidateIndex: volume.candidateIndex + 1,
+    range: formatRangeMm(volume.rangeMm),
+    sliceCount: volume.sliceCount,
+    avgDose: "reference",
+    clarity: volume.candidateIndex === 0 ? 9 : 8,
+    noise: volume.candidateIndex === 0 ? 8 : 7,
+    motion: volume.candidateIndex === 0 ? 9 : 8,
+    previewUrls: {
+      axial: volume.urls.axialPreview,
+      coronal: volume.urls.coronalPreview,
+      coronalStrip: volume.urls.coronalStrip,
+      sagittal: volume.urls.sagittalPreview,
+      sagittalStrip: volume.urls.sagittalStrip,
+    },
+  };
+}
+
+function buildEngineerPhases(manifest: FourDEngineerManifest): PhaseData[] {
+  return manifest.phaseLabels.map((label, phaseIndex) => {
+    const beds: BedPhaseData[] = [];
+
+    for (let bedIndex = 0; bedIndex < manifest.bedCount; bedIndex += 1) {
+      const volumes = getEngineerVolumesForBedPhase(manifest, bedIndex, phaseIndex);
+      if (volumes.length <= 1) continue;
+      const first = volumes[0];
+      beds.push({
+        id: `bed-${phaseIndex}-${String(bedIndex + 1).padStart(2, "0")}`,
+        bedNo: bedIndex + 1,
+        range: first ? formatRangeMm(first.rangeMm) : "--",
+        segments: volumes.map(segmentFromVolume),
+        selectedSegmentId: undefined,
+      });
+    }
+
+    return {
+      label,
+      status: beds.length > 0 ? "duplicate" : "ok",
+      beds,
+    };
   });
 }
 
@@ -215,33 +283,135 @@ function PreviewFrame({
   );
 }
 
+interface StitchedPreviewRow {
+  bedNumber: number;
+  src: string;
+}
+
+function StitchedPreviewFrame({
+  rows,
+  bedCount,
+  activeBedNumber,
+  side,
+  horizontalClass,
+  verticalClass,
+}: {
+  rows: StitchedPreviewRow[];
+  bedCount: number;
+  activeBedNumber: number | null;
+  side: "left" | "right";
+  horizontalClass: string;
+  verticalClass: string;
+}) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [frameSize, setFrameSize] = useState(0);
+
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      const { clientWidth, clientHeight } = el;
+      setFrameSize(Math.max(0, Math.min(clientWidth, clientHeight)));
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={hostRef} className="relative h-full w-full bg-black">
+      <div
+        className="absolute left-1/2 top-1/2"
+        style={{
+          width: `${frameSize}px`,
+          height: `${frameSize}px`,
+          transform: "translate(-50%, -50%)",
+        }}
+      >
+        <div className="grid h-full w-full bg-black" style={{ gridTemplateRows: `repeat(${bedCount}, minmax(0, 1fr))` }}>
+          {Array.from({ length: bedCount }).map((_, idx) => {
+            const bedNumber = idx + 1;
+            const row = rows.find((item) => item.bedNumber === bedNumber);
+
+            return (
+              <div key={bedNumber} className="min-h-0 overflow-hidden bg-black">
+                {row && <img src={row.src} alt="" draggable={false} className="h-full w-full object-fill" />}
+              </div>
+            );
+          })}
+        </div>
+        <BedCodeRail bedCount={bedCount} activeBedNumber={activeBedNumber} side={side} />
+        <CrossHair horizontalClass={horizontalClass} verticalClass={verticalClass} />
+      </div>
+    </div>
+  );
+}
+
 export default function PhaseFilterScreen() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useI18n();
   const routeState = location.state as FourDPostScanState | null;
+  const [engineerManifest, setEngineerManifest] = useState<FourDEngineerManifest | null | undefined>(undefined);
   const fourDViewerState = useMemo<FourDPostScanState & { initialBrowseMode: "phase" }>(
     () => ({
-      ...(routeState?.scanResult ? routeState : { scanResult: generateMockScanResult(9, 10, 165.0) }),
+      ...(engineerManifest
+        ? { scanResult: buildEngineerScanResult(engineerManifest, routeState?.scanResult) }
+        : routeState?.scanResult
+        ? routeState
+        : { scanResult: generateMockScanResult(9, 10, 165.0) }),
       showSliceLoadingBeforeImageLoad: false,
       initialBrowseMode: "phase",
     }),
-    [routeState],
+    [engineerManifest, routeState],
   );
 
   const [phases, setPhases] = useState<PhaseData[]>(() => buildMockPhases());
   const [selectedPhaseIdx, setSelectedPhaseIdx] = useState(0);
   const [selectedBedId, setSelectedBedId] = useState("bed-0-03");
-  const previewUrls = useMemo(
-    () => ({
-      coronal: getFourDImageUrl(selectedPhaseIdx, "coronal", PREVIEW_SLICES.coronal),
-      sagittal: getFourDImageUrl(selectedPhaseIdx, "sagittal", PREVIEW_SLICES.sagittal),
-    }),
-    [selectedPhaseIdx],
-  );
 
   const currentPhase = phases[selectedPhaseIdx] ?? null;
   const selectedBed = currentPhase?.beds.find((bed) => bed.id === selectedBedId) ?? currentPhase?.beds[0] ?? null;
+  const selectedSegment = selectedBed
+    ? selectedBed.segments.find((segment) => segment.id === selectedBed.selectedSegmentId) ?? selectedBed.segments[0] ?? null
+    : null;
+  const previewUrls = useMemo(
+    () => ({
+      axial: selectedSegment?.previewUrls?.axial ?? getFourDImageUrl(selectedPhaseIdx, "axial", 50),
+      coronal: selectedSegment?.previewUrls?.coronal ?? getFourDImageUrl(selectedPhaseIdx, "coronal", PREVIEW_SLICES.coronal),
+      sagittal: selectedSegment?.previewUrls?.sagittal ?? getFourDImageUrl(selectedPhaseIdx, "sagittal", PREVIEW_SLICES.sagittal),
+    }),
+    [selectedPhaseIdx, selectedSegment],
+  );
+  const engineerStitchedPreviewRows = useMemo(() => {
+    if (!engineerManifest) return null;
+
+    const selectedVolumeIdsByBed = new Map<number, string>();
+    currentPhase?.beds.forEach((bed) => {
+      if (bed.selectedSegmentId) selectedVolumeIdsByBed.set(bed.bedNo, bed.selectedSegmentId);
+    });
+    if (selectedBed && selectedSegment?.volumeId) {
+      selectedVolumeIdsByBed.set(selectedBed.bedNo, selectedSegment.volumeId);
+    }
+
+    const rows = Array.from({ length: engineerManifest.bedCount }, (_, bedIndex) => {
+      const volumes = getEngineerVolumesForBedPhase(engineerManifest, bedIndex, selectedPhaseIdx);
+      const selectedVolumeId = selectedVolumeIdsByBed.get(bedIndex + 1);
+      const volume = volumes.find((item) => item.id === selectedVolumeId) ?? volumes[0];
+      if (!volume) return null;
+
+      return {
+        bedNumber: bedIndex + 1,
+        coronal: volume.urls.coronalStrip ?? volume.urls.coronalPreview,
+        sagittal: volume.urls.sagittalStrip ?? volume.urls.sagittalPreview,
+      };
+    });
+
+    return rows.every((row) => !!row) ? rows : null;
+  }, [currentPhase, engineerManifest, selectedBed, selectedPhaseIdx, selectedSegment]);
   const activeBedNumber = selectedBed?.bedNo ?? null;
   const bedCodeCount = Math.max(1, fourDViewerState.scanResult.bedCount);
   const allDuplicatesResolved = phases
@@ -259,6 +429,41 @@ export default function PhaseFilterScreen() {
           : phase,
       ),
     );
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    loadFourDEngineerManifest().then((manifest) => {
+      if (!cancelled) setEngineerManifest(manifest);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Manifest load seeds the editable phase/bed selection model.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (engineerManifest === undefined) return;
+    const nextPhases = engineerManifest ? buildEngineerPhases(engineerManifest) : buildMockPhases();
+    setPhases(nextPhases);
+    const firstDuplicateIndex = nextPhases.findIndex((phase) => phase.status !== "ok" && phase.beds.length > 0);
+    const nextPhaseIndex = firstDuplicateIndex >= 0 ? firstDuplicateIndex : 0;
+    setSelectedPhaseIdx(nextPhaseIndex);
+    setSelectedBedId(nextPhases[nextPhaseIndex]?.beds[0]?.id ?? "");
+  }, [engineerManifest]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const buildPhaseSelections = () => {
+    const selections: Record<string, number> = {};
+    phases.forEach((phase, phaseIndex) => {
+      phase.beds.forEach((bed) => {
+        const selected = bed.segments.find((segment) => segment.id === bed.selectedSegmentId);
+        if (!selected) return;
+        selections[`${bed.bedNo - 1}-${phaseIndex}`] = Math.max(0, selected.candidateIndex - 1);
+      });
+    });
+    return selections;
   };
 
   return (
@@ -392,14 +597,25 @@ export default function PhaseFilterScreen() {
               <div className="min-h-0 bg-black">
                 <MprTile label="CORONAL" phaseLabel={currentPhase?.label ?? "0%"}>
                   <div className="relative h-full w-full bg-black">
-                    <PreviewFrame
-                      src={previewUrls.coronal}
-                      bedCount={bedCodeCount}
-                      activeBedNumber={activeBedNumber}
-                      side="left"
-                      horizontalClass="bg-red-500/85"
-                      verticalClass="bg-yellow-300/85"
-                    />
+                    {engineerStitchedPreviewRows ? (
+                      <StitchedPreviewFrame
+                        rows={engineerStitchedPreviewRows.map((row) => ({ bedNumber: row.bedNumber, src: row.coronal }))}
+                        bedCount={bedCodeCount}
+                        activeBedNumber={activeBedNumber}
+                        side="left"
+                        horizontalClass="bg-red-500/85"
+                        verticalClass="bg-yellow-300/85"
+                      />
+                    ) : (
+                      <PreviewFrame
+                        src={previewUrls.coronal}
+                        bedCount={bedCodeCount}
+                        activeBedNumber={activeBedNumber}
+                        side="left"
+                        horizontalClass="bg-red-500/85"
+                        verticalClass="bg-yellow-300/85"
+                      />
+                    )}
                   </div>
                 </MprTile>
               </div>
@@ -407,14 +623,25 @@ export default function PhaseFilterScreen() {
               <div className="min-h-0 bg-black">
                 <MprTile label="SAGITTAL" phaseLabel={currentPhase?.label ?? "0%"}>
                   <div className="relative h-full w-full bg-black">
-                    <PreviewFrame
-                      src={previewUrls.sagittal}
-                      bedCount={bedCodeCount}
-                      activeBedNumber={activeBedNumber}
-                      side="right"
-                      horizontalClass="bg-red-500/85"
-                      verticalClass="bg-emerald-400/85"
-                    />
+                    {engineerStitchedPreviewRows ? (
+                      <StitchedPreviewFrame
+                        rows={engineerStitchedPreviewRows.map((row) => ({ bedNumber: row.bedNumber, src: row.sagittal }))}
+                        bedCount={bedCodeCount}
+                        activeBedNumber={activeBedNumber}
+                        side="right"
+                        horizontalClass="bg-red-500/85"
+                        verticalClass="bg-emerald-400/85"
+                      />
+                    ) : (
+                      <PreviewFrame
+                        src={previewUrls.sagittal}
+                        bedCount={bedCodeCount}
+                        activeBedNumber={activeBedNumber}
+                        side="right"
+                        horizontalClass="bg-red-500/85"
+                        verticalClass="bg-emerald-400/85"
+                      />
+                    )}
                   </div>
                 </MprTile>
               </div>
@@ -436,7 +663,17 @@ export default function PhaseFilterScreen() {
           </div>
         </div>
         <button
-          onClick={() => navigate("/image-viewer", { state: fourDViewerState })}
+          onClick={() =>
+            navigate("/image-viewer", {
+              state: {
+                ...fourDViewerState,
+                phaseSelections: {
+                  ...fourDViewerState.phaseSelections,
+                  ...buildPhaseSelections(),
+                },
+              },
+            })
+          }
           disabled={!allDuplicatesResolved}
           title={allDuplicatesResolved ? undefined : t("scanFlow.phaseFilter.disabledTitle")}
           className={`flex items-center gap-1.5 rounded-md px-6 py-2 text-[12px] font-bold shadow-sm transition-colors ${

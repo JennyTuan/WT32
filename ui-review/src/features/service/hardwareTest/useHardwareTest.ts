@@ -240,6 +240,8 @@ export function useHardwareTest() {
     };
   }, []);
 
+  // Reset localized demo state when language resources change.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     Object.values(timersRef.current).forEach((timerId) => window.clearTimeout(timerId));
     timersRef.current = {};
@@ -248,6 +250,7 @@ export function useHardwareTest() {
     setActionsByTab(cloneActions(initialActions));
     setLogs(initialLogs);
   }, [initialActions, initialLogs]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const rows = actionsByTab[activeTab];
   const editingFieldKey = buildFieldKey(editingField);

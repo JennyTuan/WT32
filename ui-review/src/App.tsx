@@ -32,7 +32,6 @@ import HardwareTestScreen from "./screens/HardwareTestScreen";
 import BatteryManagementScreen from "./screens/BatteryManagementScreen";
 import DiskManagementScreen from "./screens/DiskManagementScreen";
 import PerformanceEvaluationScreen from "./screens/PerformanceEvaluationScreen";
-import ServicePlaceholderScreen from "./screens/ServicePlaceholderScreen";
 import RuntimeStatsPage from "./features/service/runtimeStats/RuntimeStatsPage";
 import QAReportPage from "./features/service/qaReport/QAReportPage";
 import ServiceSystemLogPage from "./features/service/reports/ServiceSystemLogPage";
@@ -50,7 +49,6 @@ import ChangePasswordScreen from "./screens/ChangePasswordScreen";
 import RequireAuth from "./components/RequireAuth";
 import EmergencyModeBanner from "./components/EmergencyModeBanner";
 import { AuthProvider } from "./lib/authContext";
-import { useI18n } from "./lib/i18nContext";
 
 const HomeRoute = HomeScreen ?? (() => <Navigate to="/patients" replace />);
 const TABLET_WIDTH = 1024;
@@ -85,7 +83,6 @@ function useTabletScale() {
 
 export default function App() {
   const scale = useTabletScale();
-  const { t } = useI18n();
   const shellWidth = TABLET_WIDTH * scale + 40;
   const shellHeight = TABLET_HEIGHT * scale + 40;
 

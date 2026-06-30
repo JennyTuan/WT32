@@ -8,7 +8,6 @@ import { useI18n } from "../../../lib/i18nContext";
 const POWER_ON_HOURS = 4126.5;
 const TUBE_EXPOSURE_HOURS = 612.8;
 const TOTAL_SCANS = 18342;
-const TOTAL_PATIENTS = 9874;
 const FAULT_COUNT_30D = 7;
 const WARNING_COUNT_30D = 23;
 
@@ -98,14 +97,17 @@ export default function RuntimeStatsPage() {
     // SVG ring chart geometry
     const ringRadius = 56;
     const ringCircumference = 2 * Math.PI * ringRadius;
-    let ringOffset = 0;
-    const ringSegments = SCAN_MIX.map((item) => {
+    const { segments: ringSegments } = SCAN_MIX.reduce<{
+        offset: number;
+        segments: Array<(typeof SCAN_MIX)[number] & { fraction: number; length: number; offset: number }>;
+    }>((acc, item) => {
         const fraction = item.value / totalScanMix;
         const length = fraction * ringCircumference;
-        const seg = { ...item, fraction, length, offset: ringOffset };
-        ringOffset += length;
-        return seg;
-    });
+        return {
+            offset: acc.offset + length,
+            segments: [...acc.segments, { ...item, fraction, length, offset: acc.offset }],
+        };
+    }, { offset: 0, segments: [] });
 
     return (
         <ServiceModeShell currentRoute="/service/reports/runtime-stats">

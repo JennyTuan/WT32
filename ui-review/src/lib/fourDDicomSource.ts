@@ -21,8 +21,9 @@ const FOUR_D_DICOM_BASE_URL = import.meta.env.DEV
 // WebP preview URLs for the 4D loading screen (lightweight, deploy-friendly).
 export function getFourDPreviewUrls(
   phaseIndex: number,
-  _mpId: FourDDicomMpId = "MP1",
+  mpId: FourDDicomMpId = "MP1",
 ) {
+  void mpId;
   const safePhase = Math.max(0, Math.min(FOUR_D_DICOM_PHASE_COUNT - 1, Math.round(phaseIndex)));
   return Array.from({ length: FOUR_D_DICOM_SLICES_PER_PHASE }, (_, sliceIndex) => {
     const imageNumber = String(sliceIndex + 1).padStart(3, "0");

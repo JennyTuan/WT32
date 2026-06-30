@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "../lib/i18nContext";
 
@@ -97,6 +97,14 @@ interface GatingWaveformPanelProps {
 const SAMPLES = 240;
 const CYCLE_SAMPLES = 48;
 
+type WaveRuntimeState = {
+    tick: number;
+    previousValue: number;
+    lastCrossingTick: number;
+    crossingNow: boolean;
+    exposureStartTick: number | null;
+};
+
 /**
  * Mock waveform: returns normalized amplitudes around 0, where +1 ≈ avg max inspiration,
  * -1 ≈ avg max expiration. Range roughly [-1.2, +1.2].
@@ -155,14 +163,17 @@ export default function GatingWaveformPanel({
 }: GatingWaveformPanelProps) {
     const { t } = useI18n();
     const svgRef = useRef<SVGSVGElement | null>(null);
-    const [tick, setTick] = useState(0);
+    const [waveState, setWaveState] = useState<WaveRuntimeState>(() => ({
+        tick: 0,
+        previousValue: 0,
+        lastCrossingTick: -9999,
+        crossingNow: false,
+        exposureStartTick: exposing ? 0 : null,
+    }));
     const [draggingThreshold, setDraggingThreshold] = useState(false);
-    const prevValueRef = useRef<number>(0);
-    const prevCrossingTickRef = useRef<number>(-9999);
-    // Snapshot the sample index where the exposure gate opened so we can
-    // render the "exposing" band across the waveform as time advances. Reset
-    // when `exposing` flips back to false.
-    const exposureStartTickRef = useRef<number | null>(null);
+    const tick = waveState.tick;
+    const crossingNow = waveState.crossingNow;
+    const exposureStartTick = waveState.exposureStartTick;
     // Measure the SVG's actual rendered pixel size so the viewBox matches 1:1
     // and the waveform fills the container width. Without this, the default
     // `preserveAspectRatio="xMidYMid meet"` would letter-box the 520-wide
@@ -189,9 +200,33 @@ export default function GatingWaveformPanel({
     const drift = noisePhase === 2 ? 1.2 : 0.2;
 
     useEffect(() => {
-        const id = window.setInterval(() => setTick((t) => t + 2), 50);
+        const id = window.setInterval(() => {
+            setWaveState((state) => {
+                const nextTick = state.tick + 2;
+                const nextNoisePhase = Math.floor(nextTick / 600) % 3;
+                const nextJitter = nextNoisePhase === 1 ? 1.6 : 0.6;
+                const nextDrift = nextNoisePhase === 2 ? 1.2 : 0.2;
+                const nextSamples = generateWaveform(nextTick, nextJitter, nextDrift);
+                const nextValue = nextSamples[nextSamples.length - 1] ?? state.previousValue;
+                const debounceTicks = CYCLE_SAMPLES / 2;
+                const canCross = nextTick - state.lastCrossingTick >= debounceTicks;
+                const nextCrossingNow = canCross && (
+                    direction === "rising"
+                        ? state.previousValue < threshold && nextValue >= threshold
+                        : state.previousValue > threshold && nextValue <= threshold
+                );
+
+                return {
+                    tick: nextTick,
+                    previousValue: nextValue,
+                    lastCrossingTick: nextCrossingNow ? nextTick : state.lastCrossingTick,
+                    crossingNow: nextCrossingNow,
+                    exposureStartTick: exposing ? state.exposureStartTick ?? nextTick : null,
+                };
+            });
+        }, 50);
         return () => window.clearInterval(id);
-    }, []);
+    }, [direction, exposing, threshold]);
 
     const samples = useMemo(() => generateWaveform(tick, jitter, drift), [tick, jitter, drift]);
 
@@ -206,32 +241,6 @@ export default function GatingWaveformPanel({
     }, [samples, stabilityCvThreshold, baselineDriftThresholdMm, tick]);
 
     const currentValue = samples[samples.length - 1];
-    const prevValue = prevValueRef.current;
-
-    // Detect threshold crossing in configured direction (debounced ~one cycle)
-    const crossingNow = useMemo(() => {
-        const debounceTicks = CYCLE_SAMPLES / 2;
-        if (tick - prevCrossingTickRef.current < debounceTicks) return false;
-        if (direction === "rising") {
-            return prevValue < threshold && currentValue >= threshold;
-        }
-        return prevValue > threshold && currentValue <= threshold;
-    }, [currentValue, prevValue, threshold, direction, tick]);
-
-    useEffect(() => {
-        prevValueRef.current = currentValue;
-        if (crossingNow) prevCrossingTickRef.current = tick;
-    }, [currentValue, crossingNow, tick]);
-
-    useEffect(() => {
-        if (exposing) {
-            if (exposureStartTickRef.current === null) {
-                exposureStartTickRef.current = tick;
-            }
-        } else {
-            exposureStartTickRef.current = null;
-        }
-    }, [exposing, tick]);
 
     useEffect(() => {
         if (!onTelemetry) return;
@@ -262,10 +271,10 @@ export default function GatingWaveformPanel({
     const analogBottom = gateTrack ? height - GATE_TRACK_HEIGHT : height;
     const yMin = -1.5;
     const yMax = 1.5;
-    const yToPx = (v: number) => {
+    const yToPx = useCallback((v: number) => {
         const clamped = Math.max(yMin, Math.min(yMax, v));
         return 12 + ((yMax - clamped) / (yMax - yMin)) * (analogBottom - 24);
-    };
+    }, [analogBottom, yMin]);
     const pxToY = (px: number) => {
         const clamped = Math.max(12, Math.min(analogBottom - 12, px));
         return yMax - ((clamped - 12) / (analogBottom - 24)) * (yMax - yMin);
@@ -279,7 +288,7 @@ export default function GatingWaveformPanel({
         return samples
             .map((v, i) => `${i === 0 ? "M" : "L"}${(i * stepX).toFixed(1)},${yToPx(v).toFixed(1)}`)
             .join(" ");
-    }, [samples]);
+    }, [samples, width, yToPx]);
     const extrema = useMemo(() => findWaveExtrema(samples), [samples]);
 
     const handlePointerDown = (e: React.PointerEvent<SVGRectElement>) => {
@@ -380,8 +389,8 @@ export default function GatingWaveformPanel({
                     window — paired with the prominent gate-signal step below.
                     Only shown when the dedicated gate track is reserved; the
                     track itself is the primary 0/1 indicator. */}
-                {gateTrack && exposing && exposureStartTickRef.current !== null && (() => {
-                    const elapsed = Math.max(0, tick - exposureStartTickRef.current);
+                {gateTrack && exposing && exposureStartTick !== null && (() => {
+                    const elapsed = Math.max(0, tick - exposureStartTick);
                     const startVisibleIdx = Math.max(0, SAMPLES - 1 - elapsed);
                     const x0 = startVisibleIdx * stepX;
                     const w = Math.max(2, width - x0);
@@ -398,7 +407,7 @@ export default function GatingWaveformPanel({
                     gate-open tick, then steps up to high and stays high
                     until the right edge. */}
                 {gateTrack && (() => {
-                    const startTick = exposureStartTickRef.current;
+                    const startTick = exposureStartTick;
                     // Compute the rising-edge visible index. If gate is closed
                     // (startTick === null), the whole track stays at "low".
                     const isOpen = exposing && startTick !== null;
@@ -453,8 +462,8 @@ export default function GatingWaveformPanel({
                 {/* Legacy exposing highlight when no dedicated gate track is
                     reserved (kept for any caller that opts not to use the
                     track; current execute screen uses the track instead). */}
-                {!gateTrack && exposing && exposureStartTickRef.current !== null && (() => {
-                    const elapsed = Math.max(0, tick - exposureStartTickRef.current);
+                {!gateTrack && exposing && exposureStartTick !== null && (() => {
+                    const elapsed = Math.max(0, tick - exposureStartTick);
                     const startVisibleIdx = Math.max(0, SAMPLES - 1 - elapsed);
                     const x0 = startVisibleIdx * stepX;
                     const w = Math.max(2, width - x0);

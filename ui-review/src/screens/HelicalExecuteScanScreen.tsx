@@ -1,11 +1,11 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { Zap } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import DicomViewer from "../components/DicomViewer";
+import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
 import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import DibhStatusRow from "../components/DibhStatusRow";
-import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/BreathHoldGuide";
+import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/useBreathHoldStateMachine";
 import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession } from "../lib/scanSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { getLimbsDicomSeries, isLimbsHelicalScanSession, loadLimbsDicomDemoManifest } from "../lib/limbsDicomDemo";
@@ -32,10 +32,12 @@ const BRAIN_HELICAL_RESULT_SERIES: HelicalResultSeriesConfig = {
 
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
-type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "paused" | "rendering" | "completed";
+type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "paused" | "rendering" | "completed";
 type ExecuteMode = "helical" | "gated_helical" | "gated_axial";
+type PhysicalTriggerAction = "position" | "exposure";
 
 const HOLD_DURATION_MS = 3000;
+const POSITIONING_DURATION_MS = 1000;
 const EXPOSURE_DURATION_MS = 1500;
 const RENDER_DURATION_MS = 1600;
 const LIVE_FRAME_INTERVAL_MS = 85;
@@ -296,7 +298,7 @@ export default function HelicalExecuteScanScreen() {
         return BRAIN_HELICAL_RESULT_SERIES;
     }, [executeMode, limbsHelicalResultSeries]);
     const [stage, setStage] = useState<ScanStage>("idle");
-    const [holdProgress, setHoldProgress] = useState(0);
+    const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
     const [guideVisible, setGuideVisible] = useState(true);
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [completedBeds, setCompletedBeds] = useState(0);
@@ -322,6 +324,7 @@ export default function HelicalExecuteScanScreen() {
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
     const exposureTimerRef = useRef<number | null>(null);
+    const positioningTimerRef = useRef<number | null>(null);
     const dibhMidScanPauseTimerRef = useRef<number | null>(null);
     const axialProgressTimerRef = useRef<number | null>(null);
     const axialWaitTimerRef = useRef<number | null>(null);
@@ -455,6 +458,9 @@ export default function HelicalExecuteScanScreen() {
             }
             if (autoNavigateTimerRef.current !== null) {
                 window.clearTimeout(autoNavigateTimerRef.current);
+            }
+            if (positioningTimerRef.current !== null) {
+                window.clearTimeout(positioningTimerRef.current);
             }
             if (bedWaitTickRef.current !== null) {
                 window.clearInterval(bedWaitTickRef.current);
@@ -612,16 +618,31 @@ export default function HelicalExecuteScanScreen() {
         setAxialWaitingForBreath(false);
         setPendingBedIndex(null);
         setStage("idle");
+        setPhysicalTriggerAction("position");
         const sessionId = loadSelectedScanSessionId();
         if (sessionId) void cancelScanSession(sessionId);
         navigate("/gated-axial-confirm");
+    };
+
+    const triggerPositioningSequence = () => {
+        clearHoldRaf();
+        holdStartRef.current = null;
+        setStage("positioning");
+
+        if (positioningTimerRef.current !== null) {
+            window.clearTimeout(positioningTimerRef.current);
+        }
+        positioningTimerRef.current = window.setTimeout(() => {
+            positioningTimerRef.current = null;
+            setPhysicalTriggerAction("exposure");
+            setStage("positioned");
+        }, POSITIONING_DURATION_MS);
     };
 
     const triggerScanSequence = () => {
         const sessionId = loadSelectedScanSessionId();
         if (sessionId) void startScanSession(sessionId);
         clearHoldRaf();
-        setHoldProgress(1);
         setStage("enabled");
         setCompletedBeds(0);
         setCurrentSlice(0);
@@ -737,7 +758,7 @@ export default function HelicalExecuteScanScreen() {
         setDibhMidScanPaused(false);
         setDibhStage("idle");
         setStage("idle");
-        setHoldProgress(0);
+        setPhysicalTriggerAction("position");
         setDibhExposureProgress(0);
         setGuideVisible(true);
         const sessionId = loadSelectedScanSessionId();
@@ -761,7 +782,7 @@ export default function HelicalExecuteScanScreen() {
         setDibhMidScanPaused(false);
         setDibhStage("idle");
         setStage("idle");
-        setHoldProgress(0);
+        setPhysicalTriggerAction("position");
         setDibhExposureProgress(0);
         setGuideVisible(true);
         const sessionId = loadSelectedScanSessionId();
@@ -789,13 +810,18 @@ export default function HelicalExecuteScanScreen() {
             return;
         }
 
-        if (stage === "idle" || stage === "arming") {
+        if (stage === "idle" || stage === "arming" || stage === "positioned") {
             setGuideVisible(true);
         }
     };
 
     const startHold = () => {
-        if (!guideVisible || stage === "exposing" || stage === "paused" || stage === "rendering" || stage === "completed") {
+        if (!guideVisible || stage === "positioning" || stage === "enabled" || stage === "exposing" || stage === "paused" || stage === "rendering" || stage === "completed") {
+            return;
+        }
+
+        if (physicalTriggerAction === "exposure") {
+            triggerScanSequence();
             return;
         }
 
@@ -806,10 +832,9 @@ export default function HelicalExecuteScanScreen() {
         const tick = (timestamp: number) => {
             const startedAt = holdStartRef.current ?? timestamp;
             const nextProgress = Math.min((timestamp - startedAt) / HOLD_DURATION_MS, 1);
-            setHoldProgress(nextProgress);
 
             if (nextProgress >= 1) {
-                triggerScanSequence();
+                triggerPositioningSequence();
                 return;
             }
 
@@ -823,34 +848,16 @@ export default function HelicalExecuteScanScreen() {
         if (stage !== "arming") return;
         clearHoldRaf();
         holdStartRef.current = null;
-        setHoldProgress(0);
-        setStage("idle");
+        setStage(physicalTriggerAction === "position" ? "idle" : "positioned");
     };
-
-    const statusText =
-        stage === "arming"
-            ? t("scanFlow.physicalGuide.holdToTrigger", { seconds: Math.max(0, ((1 - holdProgress) * 3)).toFixed(1) })
-            : stage === "enabled"
-                ? axialWaitingForBreath
-                    ? t("scanFlow.live.waitingBreath")
-                    : t("scanFlow.physicalGuide.enabledStatus")
-                : stage === "exposing"
-                    ? isGated
-                        ? t("scanFlow.physicalGuide.gatedExposure")
-                        : t("scanFlow.physicalGuide.scanning")
-                    : stage === "paused"
-                        ? t("scanFlow.live.scanPaused")
-                    : stage === "rendering"
-                        ? t("scanFlow.imageReconstructing")
-                        : stage === "completed"
-                            ? isGated
-                                ? t("scanFlow.live.gatedCompleted")
-                                : t("scanFlow.live.helicalCompleted")
-                            : t("scanFlow.live.waiting");
 
     const guideTitle =
         stage === "arming"
-            ? t("scanFlow.physicalGuide.keepHolding")
+            ? t("scanFlow.physicalGuide.keepHoldingPosition")
+            : stage === "positioning"
+                ? t("scanFlow.physicalGuide.moveToStart")
+                : stage === "positioned"
+                    ? t("scanFlow.physicalGuide.pressAgainForExposure")
             : stage === "enabled"
                 ? axialWaitingForBreath
                     ? t("scanFlow.live.waitingBreath")
@@ -874,6 +881,8 @@ export default function HelicalExecuteScanScreen() {
         if (dibhMidScanPaused) return t("scanFlow.scanPausedWaiting");
         if (stage === "rendering") return t("scanFlow.imageReconstructing");
         if (stage === "exposing") return isGated ? t("scanFlow.physicalGuide.gatedExposure") : t("scanFlow.physicalGuide.scanning");
+        if (stage === "positioning") return t("scanFlow.physicalGuide.moveToStart");
+        if (stage === "positioned") return t("scanFlow.physicalGuide.pressAgainForExposure");
         if (stage === "enabled") {
             if (isGatedAxial && axialWaitingForBreath) return t("scanFlow.live.waitingStableRespiration");
             if (isHelicalDIBH) {
@@ -895,7 +904,26 @@ export default function HelicalExecuteScanScreen() {
         !bedWaitTimedOut &&
         !dibhTimedOut &&
         !dibhMidScanPaused &&
-        (stage === "idle" || stage === "arming" || stage === "completed");
+        (stage === "idle" || stage === "arming" || stage === "positioned" || stage === "completed");
+    const physicalTriggerSteps: PhysicalTriggerStep[] = [
+        {
+            id: "position",
+            label: t("scanFlow.physicalGuide.stepPosition"),
+            detail: t("scanFlow.physicalGuide.stepPositionDetail"),
+            state: physicalTriggerAction === "position" && stage !== "completed" ? "active" : "done",
+        },
+        {
+            id: "exposure",
+            label: t("scanFlow.physicalGuide.stepExposure"),
+            detail: t("scanFlow.physicalGuide.stepExposureDetail"),
+            state:
+                stage === "rendering" || stage === "completed"
+                    ? "done"
+                    : physicalTriggerAction === "exposure" || stage === "enabled" || stage === "exposing" || stage === "paused"
+                        ? "active"
+                        : "pending",
+        },
+    ];
     const timeoutDirectionLabel = direction === "rising"
         ? t("scanFlow.gatingTimeout.directionRising")
         : t("scanFlow.gatingTimeout.directionFalling");
@@ -986,66 +1014,18 @@ export default function HelicalExecuteScanScreen() {
             />
 
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
-                <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
-                    <div className="border-b border-slate-200 px-5 py-4">
-                        <div className="text-[14px] font-black text-slate-700">{t("scanFlow.physicalGuide.title")}</div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">
-                            {isGated
-                                ? t("scanFlow.physicalGuide.gatedDescription")
-                                : t("scanFlow.physicalGuide.helicalDescription")}
-                        </div>
-                    </div>
-
-                    <div className="flex flex-1 flex-col">
-                        <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-6">
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="rounded-full border border-[#B9C7D6] bg-white/75 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">
-                                    Physical Trigger
-                                </div>
-                                <div className="text-center">
-                                    <div className="text-[16px] font-black text-slate-700">{guideTitle}</div>
-                                    <div className="mt-1 text-[11px] font-medium text-slate-400">{statusText}</div>
-                                </div>
-                            </div>
-
-                            <button
-                                type="button"
-                                onMouseDown={startHold}
-                                onMouseUp={stopHold}
-                                onMouseLeave={stopHold}
-                                onTouchStart={startHold}
-                                onTouchEnd={stopHold}
-                                className={`group flex h-[132px] w-[132px] items-center justify-center rounded-full border-[10px] shadow-[0_22px_40px_rgba(15,23,42,0.28)] transition-all duration-200 ${stage === "arming" || stage === "enabled" || stage === "exposing"
-                                    ? "border-[#14532D] bg-[radial-gradient(circle_at_35%_30%,#7EF29C_0%,#22C55E_45%,#15803D_100%)] scale-[0.97]"
-                                    : "border-[#1F6E44] bg-[radial-gradient(circle_at_35%_30%,#90F8AE_0%,#22C55E_40%,#166534_100%)] hover:scale-[1.02]"
-                                    }`}
-                            >
-                                <div className="flex h-[88px] w-[88px] items-center justify-center rounded-full border border-white/35 bg-white/10 shadow-[inset_0_10px_18px_rgba(255,255,255,0.2)]">
-                                    <Zap size={30} className="text-white drop-shadow-[0_4px_10px_rgba(255,255,255,0.2)]" />
-                                </div>
-                            </button>
-
-                            <div className="w-full rounded-2xl border border-[#D6E0EA] bg-white/70 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
-                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                                    <span>{t("scanFlow.holdProgress")}</span>
-                                    <span>{Math.round(holdProgress * 100)}%</span>
-                                </div>
-                                <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#DCE6F1]">
-                                    <div
-                                        className="h-full rounded-full bg-[linear-gradient(90deg,#22C55E,#86EFAC)] transition-[width] duration-75"
-                                        style={{ width: `${holdProgress * 100}%` }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex shrink-0 justify-end px-6 pb-5 pt-2">
-                            <div className="min-w-[108px] rounded-full border border-slate-300/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(233,239,247,0.96)_100%)] px-6 py-2.5 text-center text-[11px] font-black uppercase tracking-[0.22em] text-slate-400 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.3),inset_0_1px_0_rgba(255,255,255,0.95)]">
-                                {statusText}
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <PhysicalTriggerGuide
+                    title={t("scanFlow.physicalGuide.title")}
+                    description={isGated ? t("scanFlow.physicalGuide.gatedTwoStepDescription") : t("scanFlow.physicalGuide.helicalTwoStepDescription")}
+                    guideTitle={guideTitle}
+                    triggerLabel={t("scanFlow.physicalGuide.triggerLabel")}
+                    emergencyLabel={t("scanFlow.physicalGuide.referenceEmergency")}
+                    simulatedLabel={t("scanFlow.physicalGuide.referenceSimulated")}
+                    steps={physicalTriggerSteps}
+                    onHoldStart={startHold}
+                    onHoldEnd={stopHold}
+                    buttonActive={stage === "arming" || stage === "positioning" || stage === "enabled" || stage === "exposing"}
+                />
             </div>
 
             {isGatedAxial && bedWaitTimedOut && (

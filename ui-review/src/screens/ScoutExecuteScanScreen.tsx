@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
-import { Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
@@ -21,12 +20,14 @@ import {
     type HeadDualScoutManifest,
 } from "../lib/headDualScoutDemo";
 import DicomViewer from "../components/DicomViewer";
+import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
 
 const HOLD_DURATION_MS = 3000;
+const POSITIONING_DURATION_MS = 1000;
 const EXPOSURE_DURATION_MS = 1200;
 const RENDER_DURATION_MS = 2200;
 const GANTRY_ROTATION_DURATION_MS = 1500;
@@ -70,7 +71,8 @@ type ScoutDicomSeries = typeof SCOUT_SERIES & {
     useCornerstoneViewer?: boolean;
 };
 
-type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "rendering" | "completed";
+type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "rendering" | "completed";
+type PhysicalTriggerAction = "position" | "exposure";
 
 type ProjectionMeta = {
     width: number;
@@ -552,7 +554,7 @@ export default function ScoutExecuteScanScreen() {
     const navigate = useNavigate();
     const { t } = useI18n();
     const [stage, setStage] = useState<ScanStage>("idle");
-    const [holdProgress, setHoldProgress] = useState(0);
+    const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
     const [guideVisible, setGuideVisible] = useState(true);
     const [renderProgress, setRenderProgress] = useState(0);
     const [dualPhase, setDualPhase] = useState<DualScoutPhase>(null);
@@ -570,6 +572,7 @@ export default function ScoutExecuteScanScreen() {
     const holdStartRef = useRef<number | null>(null);
     const progressStartRef = useRef<number | null>(null);
     const exposureTimerRef = useRef<number | null>(null);
+    const positioningTimerRef = useRef<number | null>(null);
     const autoNextTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -709,6 +712,9 @@ export default function ScoutExecuteScanScreen() {
             if (exposureTimerRef.current !== null) {
                 window.clearTimeout(exposureTimerRef.current);
             }
+            if (positioningTimerRef.current !== null) {
+                window.clearTimeout(positioningTimerRef.current);
+            }
             if (autoNextTimerRef.current !== null) {
                 window.clearTimeout(autoNextTimerRef.current);
             }
@@ -755,7 +761,6 @@ export default function ScoutExecuteScanScreen() {
         const sessionId = loadSelectedScanSessionId();
         if (sessionId) void startScanSession(sessionId);
         clearHoldRaf();
-        setHoldProgress(1);
         setStage("enabled");
         setApRenderProgress(0);
         setLatRenderProgress(0);
@@ -797,7 +802,6 @@ export default function ScoutExecuteScanScreen() {
         const sessionId = loadSelectedScanSessionId();
         if (sessionId) void startScanSession(sessionId);
         clearHoldRaf();
-        setHoldProgress(1);
         setStage("enabled");
 
         window.setTimeout(() => {
@@ -826,13 +830,25 @@ export default function ScoutExecuteScanScreen() {
         };
     };
 
-    const triggerScanSequence = () => {
-        // Reset hold UI immediately so we don't leave the green ring stuck at
-        // 100% while the warning modal is up.
+    const triggerPositioningSequence = () => {
         clearHoldRaf();
         holdStartRef.current = null;
-        setHoldProgress(0);
-        setStage("idle");
+        setStage("positioning");
+
+        if (positioningTimerRef.current !== null) {
+            window.clearTimeout(positioningTimerRef.current);
+        }
+        positioningTimerRef.current = window.setTimeout(() => {
+            positioningTimerRef.current = null;
+            setPhysicalTriggerAction("exposure");
+            setStage("positioned");
+        }, POSITIONING_DURATION_MS);
+    };
+
+    const triggerScanSequence = () => {
+        clearHoldRaf();
+        holdStartRef.current = null;
+        setStage("positioned");
         thresholdGuard.guard(buildThresholdInput(), performTriggerScan);
     };
 
@@ -842,13 +858,18 @@ export default function ScoutExecuteScanScreen() {
             return;
         }
 
-        if (stage === "idle" || stage === "arming") {
-            triggerScanSequence();
+        if (stage === "idle" || stage === "arming" || stage === "positioned") {
+            setGuideVisible(true);
         }
     };
 
     const startHold = () => {
-        if (!guideVisible || stage === "exposing" || stage === "rendering" || stage === "completed") {
+        if (!guideVisible || stage === "positioning" || stage === "enabled" || stage === "exposing" || stage === "rendering" || stage === "completed") {
+            return;
+        }
+
+        if (physicalTriggerAction === "exposure") {
+            triggerScanSequence();
             return;
         }
 
@@ -859,10 +880,9 @@ export default function ScoutExecuteScanScreen() {
         const tick = (timestamp: number) => {
             const startedAt = holdStartRef.current ?? timestamp;
             const nextProgress = Math.min((timestamp - startedAt) / HOLD_DURATION_MS, 1);
-            setHoldProgress(nextProgress);
 
             if (nextProgress >= 1) {
-                triggerScanSequence();
+                triggerPositioningSequence();
                 return;
             }
 
@@ -879,31 +899,41 @@ export default function ScoutExecuteScanScreen() {
 
         clearHoldRaf();
         holdStartRef.current = null;
-        setHoldProgress(0);
-        setStage("idle");
+        setStage(physicalTriggerAction === "position" ? "idle" : "positioned");
     };
-
-    const statusText =
-        stage === "arming"
-            ? t("scanFlow.physicalGuide.holdToTrigger", { seconds: Math.max(0, ((1 - holdProgress) * 3)).toFixed(1) })
-            : stage === "enabled"
-                ? t("scanFlow.physicalGuide.enabledStatus")
-                : stage === "exposing"
-                    ? t("scanFlow.physicalGuide.exposingStatus")
-                    : stage === "rendering"
-                        ? t("scanFlow.scoutGenerating")
-                        : stage === "completed"
-                            ? t("scanFlow.scoutGenerated")
-                            : t("scanFlow.physicalGuide.ready");
 
     const guideTitle =
         stage === "arming"
-            ? t("scanFlow.physicalGuide.keepHolding")
+            ? t("scanFlow.physicalGuide.keepHoldingPosition")
+            : stage === "positioning"
+                ? t("scanFlow.physicalGuide.moveToStart")
+                : stage === "positioned"
+                    ? t("scanFlow.physicalGuide.pressAgainForExposure")
             : stage === "enabled"
                 ? t("scanFlow.physicalGuide.enabled")
                 : stage === "exposing"
                     ? t("scanFlow.physicalGuide.exposing")
                     : t("scanFlow.physicalGuide.holdGreenButton");
+
+    const physicalTriggerSteps: PhysicalTriggerStep[] = [
+        {
+            id: "position",
+            label: t("scanFlow.physicalGuide.stepPosition"),
+            detail: t("scanFlow.physicalGuide.stepPositionDetail"),
+            state: physicalTriggerAction === "position" && stage !== "completed" ? "active" : "done",
+        },
+        {
+            id: "exposure",
+            label: t("scanFlow.physicalGuide.stepExposure"),
+            detail: t("scanFlow.physicalGuide.stepExposureDetail"),
+            state:
+                stage === "exposing" || stage === "rendering" || stage === "completed"
+                    ? "done"
+                    : physicalTriggerAction === "exposure"
+                        ? "active"
+                        : "pending",
+        },
+    ];
 
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
@@ -924,7 +954,7 @@ export default function ScoutExecuteScanScreen() {
             <div className="pointer-events-none absolute bottom-[80px] left-[246px] right-0 top-[82px] z-20 overflow-hidden rounded-lg">
                 <div className="flex h-full flex-col border border-white/5 bg-[#1A222B]">
                     <div className="relative flex-1 overflow-hidden bg-[#05080C]">
-                        <div className={`absolute inset-0 transition-opacity duration-500 ${stage === "idle" || stage === "arming" || stage === "enabled" ? "opacity-100" : "opacity-0"}`}>
+                        <div className={`absolute inset-0 transition-opacity duration-500 ${stage === "idle" || stage === "arming" || stage === "positioning" || stage === "positioned" || stage === "enabled" ? "opacity-100" : "opacity-0"}`}>
                             <div className="flex h-full items-center justify-center text-[42px] font-thin uppercase tracking-[8px] text-[#44515F]/55">
                                 Viewport
                             </div>
@@ -980,62 +1010,18 @@ export default function ScoutExecuteScanScreen() {
             </div>
 
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
-                <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
-                    <div className="border-b border-slate-200 px-5 py-4">
-                        <div className="text-[14px] font-black text-slate-700">{t("scanFlow.physicalGuide.title")}</div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">{t("scanFlow.physicalGuide.description")}</div>
-                    </div>
-
-                    <div className="flex flex-1 flex-col">
-                        <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-6">
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="rounded-full border border-[#B9C7D6] bg-white/75 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">
-                                    Physical Trigger
-                                </div>
-                                <div className="text-center">
-                                    <div className="text-[16px] font-black text-slate-700">{guideTitle}</div>
-                                    <div className="mt-1 text-[11px] font-medium text-slate-400">{statusText}</div>
-                                </div>
-                            </div>
-
-                            <button
-                                type="button"
-                                onMouseDown={startHold}
-                                onMouseUp={stopHold}
-                                onMouseLeave={stopHold}
-                                onTouchStart={startHold}
-                                onTouchEnd={stopHold}
-                                className={`group flex h-[132px] w-[132px] items-center justify-center rounded-full border-[10px] shadow-[0_22px_40px_rgba(15,23,42,0.28)] transition-all duration-200 ${stage === "arming" || stage === "enabled" || stage === "exposing"
-                                    ? "border-[#14532D] bg-[radial-gradient(circle_at_35%_30%,#7EF29C_0%,#22C55E_45%,#15803D_100%)] scale-[0.97]"
-                                    : "border-[#1F6E44] bg-[radial-gradient(circle_at_35%_30%,#90F8AE_0%,#22C55E_40%,#166534_100%)] hover:scale-[1.02]"
-                                    }`}
-                            >
-                                <div className="flex h-[88px] w-[88px] items-center justify-center rounded-full border border-white/35 bg-white/10 shadow-[inset_0_10px_18px_rgba(255,255,255,0.2)]">
-                                    <Zap size={30} className="text-white drop-shadow-[0_4px_10px_rgba(255,255,255,0.2)]" />
-                                </div>
-                            </button>
-
-                            <div className="w-full rounded-2xl border border-[#D6E0EA] bg-white/70 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
-                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                                    <span>{t("scanFlow.holdProgress")}</span>
-                                    <span>{Math.round(holdProgress * 100)}%</span>
-                                </div>
-                                <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#DCE6F1]">
-                                    <div
-                                        className="h-full rounded-full bg-[linear-gradient(90deg,#22C55E,#86EFAC)] transition-[width] duration-75"
-                                        style={{ width: `${holdProgress * 100}%` }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex shrink-0 justify-end px-6 pb-5 pt-2">
-                            <div className="min-w-[108px] rounded-full border border-slate-300/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(233,239,247,0.96)_100%)] px-6 py-2.5 text-center text-[11px] font-black uppercase tracking-[0.22em] text-slate-400 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.3),inset_0_1px_0_rgba(255,255,255,0.95)]">
-                                {statusText}
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <PhysicalTriggerGuide
+                    title={t("scanFlow.physicalGuide.title")}
+                    description={t("scanFlow.physicalGuide.twoStepDescription")}
+                    guideTitle={guideTitle}
+                    triggerLabel={t("scanFlow.physicalGuide.triggerLabel")}
+                    emergencyLabel={t("scanFlow.physicalGuide.referenceEmergency")}
+                    simulatedLabel={t("scanFlow.physicalGuide.referenceSimulated")}
+                    steps={physicalTriggerSteps}
+                    onHoldStart={startHold}
+                    onHoldEnd={stopHold}
+                    buttonActive={stage === "arming" || stage === "positioning" || stage === "enabled" || stage === "exposing"}
+                />
             </div>
         </div>
     );

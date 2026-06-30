@@ -469,6 +469,9 @@ class ScanSessionReconSeries(Base):
     window_level = Column(Integer, nullable=False)
     slice_thickness = Column(Float, nullable=False)
     increment = Column(Float, nullable=True)
+    recon_fov = Column(Float, nullable=True)
+    center_x = Column(Float, nullable=True)
+    center_y = Column(Float, nullable=True)
 
     session_series = relationship("ScanSessionSeries", back_populates="recon_series")
 

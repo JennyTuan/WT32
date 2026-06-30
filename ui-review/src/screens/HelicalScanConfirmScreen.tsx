@@ -11,7 +11,6 @@ import {
     Trash2,
     Check,
     Info,
-    Zap,
     Hand,
     ZoomIn,
     ZoomOut,
@@ -27,6 +26,7 @@ import { estimateDose } from "../lib/doseEstimate";
 import { buildApiUrl } from "../lib/apiClient";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
+import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import DicomViewer from "../components/DicomViewer";
 import { TomographicScoutViewport, type TomographicScoutSeriesOverride } from "./SequenceScanConfirmScreen";
@@ -124,8 +124,10 @@ interface Sequence {
     steps?: string[];
 }
 
-type ScanStage = "idle" | "arming" | "enabled" | "exposing" | "completed";
+type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "completed";
+type PhysicalTriggerAction = "position" | "exposure";
 const HOLD_DURATION_MS = 3000;
+const POSITIONING_DURATION_MS = 1000;
 
 interface ProtocolGroup {
     id: string;
@@ -372,7 +374,7 @@ function HeadDualScoutConfirmViewport({
             pixelSpacingX: apMeta.pixelSpacingX,
             sliceThickness: apMeta.pixelSpacingY,
         });
-    }, [apMeta, initialMeasurements?.scanLength, initialMeasurements?.scoutFov]);
+    }, [apMeta.height, apMeta.pixelSpacingX, apMeta.pixelSpacingY, apMeta.width, initialMeasurements]);
 
     // Each scout's Z axis maps to a different image axis (AP vertical, LAT
     // horizontal); store Z extent in patient-mm so the two views stay coupled
@@ -1455,6 +1457,7 @@ const buildSequenceSteps = (type: WorkflowSequenceType, isGatingWorkflow: boolea
 // Gating Confirm Screen (rendered only for gating protocols)
 // ---------------------------------------------------------------------------
 const GatingHelicalConfirmScreen = () => {
+    const { t } = useI18n();
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
@@ -1511,11 +1514,12 @@ const GatingHelicalConfirmScreen = () => {
     // Physical Button states
     const [showPhysicalButton, setShowPhysicalButton] = useState(false);
     const [scanStage, setScanStage] = useState<ScanStage>("idle");
-    const [holdProgress, setHoldProgress] = useState(0);
+    const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
     const [scanProgress, setScanProgress] = useState(1); // 1 when idle/complete, 0-1 when scanning
 
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
+    const positioningTimerRef = useRef<number | null>(null);
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -1524,9 +1528,23 @@ const GatingHelicalConfirmScreen = () => {
         }
     };
 
+    const triggerPositioningSequence = () => {
+        clearHoldRaf();
+        holdStartRef.current = null;
+        setScanStage("positioning");
+
+        if (positioningTimerRef.current !== null) {
+            window.clearTimeout(positioningTimerRef.current);
+        }
+        positioningTimerRef.current = window.setTimeout(() => {
+            positioningTimerRef.current = null;
+            setPhysicalTriggerAction("exposure");
+            setScanStage("positioned");
+        }, POSITIONING_DURATION_MS);
+    };
+
     const triggerScanSequence = () => {
         clearHoldRaf();
-        setHoldProgress(1);
         setScanStage("enabled");
 
         window.setTimeout(() => {
@@ -1573,7 +1591,12 @@ const GatingHelicalConfirmScreen = () => {
     }, [scanStarted]);
 
     const startHold = () => {
-        if (scanStage === "exposing" || scanStage === "completed") return;
+        if (scanStage === "positioning" || scanStage === "enabled" || scanStage === "exposing" || scanStage === "completed") return;
+
+        if (physicalTriggerAction === "exposure") {
+            triggerScanSequence();
+            return;
+        }
 
         clearHoldRaf();
         holdStartRef.current = performance.now();
@@ -1582,10 +1605,9 @@ const GatingHelicalConfirmScreen = () => {
         const tick = (timestamp: number) => {
             const startedAt = holdStartRef.current ?? timestamp;
             const nextProgress = Math.min((timestamp - startedAt) / HOLD_DURATION_MS, 1);
-            setHoldProgress(nextProgress);
 
             if (nextProgress >= 1) {
-                triggerScanSequence();
+                triggerPositioningSequence();
                 return;
             }
 
@@ -1599,29 +1621,41 @@ const GatingHelicalConfirmScreen = () => {
         if (scanStage !== "arming") return;
         clearHoldRaf();
         holdStartRef.current = null;
-        setHoldProgress(0);
-        setScanStage("idle");
+        setScanStage(physicalTriggerAction === "position" ? "idle" : "positioned");
     };
-
-    const statusText =
-        scanStage === "arming"
-            ? `长按触发 ${Math.max(0, ((1 - holdProgress) * 3)).toFixed(1)}s`
-            : scanStage === "enabled"
-                ? "使能已建立"
-                : scanStage === "exposing"
-                    ? "正在扫描..."
-                    : scanStage === "completed"
-                        ? "扫描完成"
-                        : "按住触发";
 
     const guideTitle =
         scanStage === "arming"
-            ? "持续按住绿色按钮"
+            ? t("scanFlow.physicalGuide.keepHoldingPosition")
+            : scanStage === "positioning"
+                ? t("scanFlow.physicalGuide.moveToStart")
+                : scanStage === "positioned"
+                    ? t("scanFlow.physicalGuide.pressAgainForExposure")
             : scanStage === "enabled"
-                ? "系统已使能"
+                ? t("scanFlow.physicalGuide.enabled")
                 : scanStage === "exposing"
-                    ? "正在曝光"
-                    : "按住绿色按钮";
+                    ? t("scanFlow.physicalGuide.exposing")
+                    : t("scanFlow.physicalGuide.holdGreenButton");
+
+    const physicalTriggerSteps: PhysicalTriggerStep[] = [
+        {
+            id: "position",
+            label: t("scanFlow.physicalGuide.stepPosition"),
+            detail: t("scanFlow.physicalGuide.stepPositionDetail"),
+            state: physicalTriggerAction === "position" && scanStage !== "completed" ? "active" : "done",
+        },
+        {
+            id: "exposure",
+            label: t("scanFlow.physicalGuide.stepExposure"),
+            detail: t("scanFlow.physicalGuide.stepExposureDetail"),
+            state:
+                scanStage === "completed"
+                    ? "done"
+                    : physicalTriggerAction === "exposure" || scanStage === "enabled" || scanStage === "exposing"
+                        ? "active"
+                        : "pending",
+        },
+    ];
 
     // Dynamic scan params linked to crop box
     const [dynamicParams, setDynamicParams] = useState({
@@ -1638,6 +1672,9 @@ const GatingHelicalConfirmScreen = () => {
     useEffect(() => {
         return () => {
             clearHoldRaf();
+            if (positioningTimerRef.current !== null) {
+                window.clearTimeout(positioningTimerRef.current);
+            }
         };
     }, []);
 
@@ -1969,62 +2006,18 @@ const GatingHelicalConfirmScreen = () => {
 
             {/* Simulated Physical Button Overlay (Sidebar) */}
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-[200] flex items-stretch transition-all duration-500 ${showPhysicalButton ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
-                <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#EDF1F7] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
-                    <div className="border-b border-slate-200 px-5 py-4">
-                        <div className="text-[14px] font-black text-slate-700">实体按键操作引导</div>
-                        <div className="mt-1 text-[11px] font-medium text-slate-400">长按三秒后触发曝光，并在左侧进行断层扫描。</div>
-                    </div>
-
-                    <div className="flex flex-1 flex-col">
-                        <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6 py-6">
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="rounded-full border border-[#B9C7D6] bg-white/75 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">
-                                    Physical Trigger
-                                </div>
-                                <div className="text-center">
-                                    <div className="text-[16px] font-black text-slate-700">{guideTitle}</div>
-                                    <div className="mt-1 text-[11px] font-medium text-slate-400">{statusText}</div>
-                                </div>
-                            </div>
-
-                            <button
-                                type="button"
-                                onMouseDown={startHold}
-                                onMouseUp={stopHold}
-                                onMouseLeave={stopHold}
-                                onTouchStart={startHold}
-                                onTouchEnd={stopHold}
-                                className={`group flex h-[132px] w-[132px] items-center justify-center rounded-full border-[10px] shadow-[0_22px_40px_rgba(15,23,42,0.28)] transition-all duration-200 ${scanStage === "arming" || scanStage === "enabled" || scanStage === "exposing"
-                                    ? "border-[#14532D] bg-[radial-gradient(circle_at_35%_30%,#7EF29C_0%,#22C55E_45%,#15803D_100%)] scale-[0.97]"
-                                    : "border-[#1F6E44] bg-[radial-gradient(circle_at_35%_30%,#90F8AE_0%,#22C55E_40%,#166534_100%)] hover:scale-[1.02]"
-                                    }`}
-                            >
-                                <div className="flex h-[88px] w-[88px] items-center justify-center rounded-full border border-white/35 bg-white/10 shadow-[inset_0_10px_18px_rgba(255,255,255,0.2)]">
-                                    <Zap size={30} className="text-white drop-shadow-[0_4px_10px_rgba(255,255,255,0.2)]" />
-                                </div>
-                            </button>
-
-                            <div className="w-full rounded-2xl border border-[#D6E0EA] bg-white/70 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
-                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
-                                    <span>长按进度</span>
-                                    <span>{Math.round(holdProgress * 100)}%</span>
-                                </div>
-                                <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#DCE6F1]">
-                                    <div
-                                        className="h-full rounded-full bg-[linear-gradient(90deg,#22C55E,#86EFAC)] transition-[width] duration-75"
-                                        style={{ width: `${holdProgress * 100}%` }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex shrink-0 justify-end px-6 pb-5 pt-2">
-                            <div className="min-w-[108px] rounded-full border border-slate-300/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(233,239,247,0.96)_100%)] px-6 py-2.5 text-center text-[11px] font-black uppercase tracking-[0.22em] text-slate-400 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.3),inset_0_1px_0_rgba(255,255,255,0.95)]">
-                                {statusText}
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <PhysicalTriggerGuide
+                    title={t("scanFlow.physicalGuide.title")}
+                    description={t("scanFlow.physicalGuide.helicalTwoStepDescription")}
+                    guideTitle={guideTitle}
+                    triggerLabel={t("scanFlow.physicalGuide.triggerLabel")}
+                    emergencyLabel={t("scanFlow.physicalGuide.referenceEmergency")}
+                    simulatedLabel={t("scanFlow.physicalGuide.referenceSimulated")}
+                    steps={physicalTriggerSteps}
+                    onHoldStart={startHold}
+                    onHoldEnd={stopHold}
+                    buttonActive={scanStage === "arming" || scanStage === "positioning" || scanStage === "enabled" || scanStage === "exposing"}
+                />
             </div>
 
             {/* High-Fidelity Patient Confirmation Modal */}
@@ -2034,8 +2027,8 @@ const GatingHelicalConfirmScreen = () => {
                 onConfirm={() => {
                     setShowPatientConfirm(false);
                     setShowPhysicalButton(true);
+                    setPhysicalTriggerAction("position");
                     setScanStage("idle");
-                    setHoldProgress(0);
                 }}
                 patientData={selectedPatient ? {
                     name: selectedPatient.name,
@@ -2268,11 +2261,6 @@ const HelicalScanConfirmScreen = () => {
         return () => { window.removeEventListener("popstate", preventBackNavigation); };
     }, []);
 
-    // 4D gets a completely different layout
-    if (isGatingWorkflow) {
-        return <GatingHelicalConfirmScreen />;
-    }
-
     const handleAutoMaChange = (patch: { auto_ma?: boolean; ma_min?: number; ma_max?: number; noise_level?: NoiseLevel }) => {
         const { noise_level, ...rest } = patch;
         if (noise_level !== undefined) setNoiseLevel(noise_level);
@@ -2337,6 +2325,12 @@ const HelicalScanConfirmScreen = () => {
             () => navigate("/helical-execute"),
         );
     }, [thresholdGuard, scanSession, helicalParam, protocolHelicalSeed, measurements.scanLength, navigate]);
+
+    // 4D gets a completely different layout. Keep this after all hooks so
+    // React sees the same hook order for gated and non-gated workflows.
+    if (isGatingWorkflow) {
+        return <GatingHelicalConfirmScreen />;
+    }
 
     return (
         <>
