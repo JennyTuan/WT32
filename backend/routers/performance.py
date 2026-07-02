@@ -18,7 +18,7 @@ import pydicom
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from PIL import Image
-from scipy import ndimage
+from scipy import ndimage, signal
 
 from ..database import SessionLocal
 from . import logs as logs_router
@@ -26,7 +26,27 @@ from . import logs as logs_router
 router = APIRouter(prefix="/performance", tags=["performance"])
 
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
-PREFERRED_DATASET_IDS = ("MTF",)
+PREFERRED_DATASET_IDS = ("CatPhan604", "MTF")
+CATPHAN604_CTP528_OFFSET_MM = 40.0
+CATPHAN604_LINE_PAIR_RADIUS_MM = 47.0
+CATPHAN604_CTP528_COMBINE_SLICES = 3
+CATPHAN604_CTP528_WIDTH_RATIO = 0.04
+CATPHAN604_CTP528_SAMPLING_RATIO = 2.0
+CATPHAN604_ROLL_AIR_THRESHOLD_HU = -500.0
+CATPHAN604_ROLL_SEARCH_RADIUS_MM = 85.0
+CATPHAN604_ROLL_IGNORE_CENTER_MM = 20.0
+CATPHAN604_ROLL_MIN_AREA_MM2 = 40.0
+CATPHAN604_ROLL_MAX_AREA_MM2 = 400.0
+CATPHAN604_CTP528_SETTINGS = (
+    {"start": 0.000, "end": 0.107, "peaks": 2, "valleys": 1, "spacing": 0.021, "lp_mm": 0.1},
+    {"start": 0.107, "end": 0.173, "peaks": 3, "valleys": 2, "spacing": 0.010, "lp_mm": 0.2},
+    {"start": 0.173, "end": 0.236, "peaks": 4, "valleys": 3, "spacing": 0.006, "lp_mm": 0.3},
+    {"start": 0.236, "end": 0.286, "peaks": 4, "valleys": 3, "spacing": 0.00557, "lp_mm": 0.4},
+    {"start": 0.286, "end": 0.335, "peaks": 4, "valleys": 3, "spacing": 0.004777, "lp_mm": 0.5},
+    {"start": 0.335, "end": 0.387, "peaks": 5, "valleys": 4, "spacing": 0.00398, "lp_mm": 0.6},
+    {"start": 0.387, "end": 0.434, "peaks": 5, "valleys": 4, "spacing": 0.00358, "lp_mm": 0.7},
+    {"start": 0.434, "end": 0.479, "peaks": 5, "valleys": 4, "spacing": 0.0027866, "lp_mm": 0.8},
+)
 
 
 def _classify_dicom_failure(path: Path, exc: Exception) -> tuple[str, str]:
@@ -204,6 +224,291 @@ def _extract_roi(slice_img: np.ndarray, cy: int, cx: int, size: int) -> np.ndarr
     cy = max(half, min(int(cy), h - half))
     cx = max(half, min(int(cx), w - half))
     return slice_img[cy - half:cy + half, cx - half:cx + half]
+
+
+def _slice_spacing_mm(datasets: list[pydicom.Dataset]) -> float:
+    """Estimate z spacing from DICOM positions, falling back to SliceThickness."""
+    positions: list[float] = []
+    for ds in datasets:
+        pos = getattr(ds, "ImagePositionPatient", None)
+        if pos is not None and len(pos) >= 3:
+            try:
+                positions.append(float(pos[2]))
+                continue
+            except (TypeError, ValueError):
+                pass
+        location = getattr(ds, "SliceLocation", None)
+        if location is not None:
+            try:
+                positions.append(float(location))
+            except (TypeError, ValueError):
+                pass
+    if len(positions) > 1:
+        diffs = np.diff(np.array(positions, dtype=np.float64))
+        diffs = np.abs(diffs[np.abs(diffs) > 1e-6])
+        if diffs.size:
+            return float(np.median(diffs))
+    thickness = getattr(datasets[0], "SliceThickness", 1.0) if datasets else 1.0
+    try:
+        return max(float(thickness), 1e-6)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _find_phantom_center(slice_img: np.ndarray) -> tuple[float, float]:
+    """Find the center of the largest non-air component in a CatPhan slice."""
+    mask = slice_img > -500.0
+    labels, count = ndimage.label(mask)
+    if count < 1:
+        h, w = slice_img.shape
+        return (w - 1) / 2.0, (h - 1) / 2.0
+    sizes = ndimage.sum(mask, labels, range(1, count + 1))
+    label = int(np.argmax(sizes)) + 1
+    cy, cx = ndimage.center_of_mass(mask, labels, label)
+    if not np.isfinite(cx) or not np.isfinite(cy):
+        h, w = slice_img.shape
+        return (w - 1) / 2.0, (h - 1) / 2.0
+    return float(cx), float(cy)
+
+
+def _combine_surrounding_slices(volume: np.ndarray, index: int, plusminus: int) -> np.ndarray:
+    """Combine a target slice with neighboring slices using CatPhan CTP528 max projection."""
+    start = max(0, int(index) - int(plusminus))
+    end = min(volume.shape[0], int(index) + int(plusminus) + 1)
+    return np.max(volume[start:end], axis=0)
+
+
+def _collapsed_circle_profile(
+    image: np.ndarray,
+    center_x: float,
+    center_y: float,
+    radius_px: float,
+    start_angle: float = np.pi,
+    width_ratio: float = CATPHAN604_CTP528_WIDTH_RATIO,
+    sampling_ratio: float = CATPHAN604_CTP528_SAMPLING_RATIO,
+) -> np.ndarray:
+    """Sample and average a thick circular CatPhan line-pair profile."""
+    outer_radius = radius_px * (1.0 + width_ratio)
+    size = np.pi * outer_radius * 2.0 * sampling_ratio
+    interval = (2.0 * np.pi) / max(size, 1.0)
+    radians = np.arange(start_angle, (2.0 * np.pi) + start_angle - interval, interval)
+    radians = radians[::-1]
+    values = np.zeros(len(radians), dtype=np.float64)
+    radii = np.linspace(
+        radius_px * (1.0 - width_ratio),
+        radius_px * (1.0 + width_ratio),
+        num=20,
+    )
+    for radius in radii:
+        xs = np.cos(radians) * radius + center_x
+        ys = np.sin(radians) * radius + center_y
+        values += ndimage.map_coordinates(image, [ys, xs], order=0, mode="nearest")
+    values /= float(len(radii))
+    sigma = max(int(round(0.001 * len(values))), 1)
+    values = ndimage.gaussian_filter1d(values, sigma=sigma)
+    values -= float(values.min())
+    return values
+
+
+def _profile_peaks(
+    values: np.ndarray,
+    min_distance: float,
+    max_number: int,
+    search_region: tuple[float, float],
+    threshold: float = 0.3,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Find the strongest peaks in a fractional profile region."""
+    value_range = float(values.max() - values.min())
+    min_height = float(values.min() + threshold * value_range)
+    distance = max(int(min_distance * len(values)), 1)
+    if max(search_region) <= 1:
+        start = int(search_region[0] * len(values))
+        end = int(search_region[1] * len(values))
+    else:
+        start = int(search_region[0])
+        end = int(search_region[1])
+    start = max(0, min(start, len(values) - 1))
+    end = max(start + 1, min(end, len(values)))
+    peak_idx, props = signal.find_peaks(
+        values[start:end],
+        height=min_height,
+        distance=distance,
+        prominence=(None, None),
+    )
+    peak_idx = peak_idx + start
+    if peak_idx.size == 0:
+        return peak_idx, np.array([], dtype=np.float64)
+    sort_values = props.get("prominences", props["peak_heights"])
+    keep = np.argsort(sort_values)[::-1][:max_number]
+    keep = sorted(keep)
+    return peak_idx[keep], props["peak_heights"][keep]
+
+
+def _profile_valleys(
+    values: np.ndarray,
+    min_distance: float,
+    max_number: int,
+    search_region: tuple[float, float],
+) -> tuple[np.ndarray, np.ndarray]:
+    valley_idx, _ = _profile_peaks(-values, min_distance, max_number, search_region)
+    return valley_idx, values[valley_idx]
+
+
+def _michelson(maximum: float, minimum: float) -> float:
+    denominator = maximum + minimum
+    if abs(denominator) < 1e-12:
+        return 0.0
+    return float((maximum - minimum) / denominator)
+
+
+def _frequency_at_relative_mtf(
+    frequencies: np.ndarray,
+    relative_mtf: np.ndarray,
+    target: float,
+) -> Optional[float]:
+    """Interpolate frequency where relative MTF reaches target."""
+    if frequencies.size < 2 or relative_mtf.size < 2:
+        return None
+    target_value = target / 100.0
+    order = np.argsort(relative_mtf)
+    mtf_sorted = relative_mtf[order]
+    freq_sorted = frequencies[order]
+    if target_value < float(mtf_sorted[0]) or target_value > float(mtf_sorted[-1]):
+        return None
+    return float(np.interp(target_value, mtf_sorted, freq_sorted))
+
+
+def _catphan_origin_slice_index(volume: np.ndarray) -> int:
+    """Return a stable origin estimate for public CatPhan demo-style stacks."""
+    return max(0, min(volume.shape[0] - 1, (volume.shape[0] // 2) + 1))
+
+
+def _estimate_catphan_roll_deg(slice_img: np.ndarray, px_mm: float) -> float:
+    """Estimate CatPhan roll from the two central air bubbles in the HU module."""
+    center_x, center_y = _find_phantom_center(slice_img)
+    yy, xx = np.indices(slice_img.shape)
+    distance_mm = np.hypot(xx - center_x, yy - center_y) * px_mm
+    mask = (
+        (slice_img < CATPHAN604_ROLL_AIR_THRESHOLD_HU)
+        & (distance_mm < CATPHAN604_ROLL_SEARCH_RADIUS_MM)
+        & (distance_mm > CATPHAN604_ROLL_IGNORE_CENTER_MM)
+    )
+    labels, count = ndimage.label(mask)
+    components: list[tuple[float, float, float]] = []
+    pixel_area_mm2 = px_mm * px_mm
+    for label in range(1, count + 1):
+        area_mm2 = float(np.sum(labels == label)) * pixel_area_mm2
+        if not (CATPHAN604_ROLL_MIN_AREA_MM2 <= area_mm2 <= CATPHAN604_ROLL_MAX_AREA_MM2):
+            continue
+        cy, cx = ndimage.center_of_mass(mask, labels, label)
+        if np.isfinite(cx) and np.isfinite(cy):
+            components.append((float(cx), float(cy), abs(float(cx) - center_x)))
+    if len(components) < 2:
+        return 0.0
+
+    central_bubbles = sorted(components, key=lambda item: item[2])[:2]
+    top, bottom = sorted(central_bubbles, key=lambda item: item[1])
+    y_dist = bottom[1] - top[1]
+    x_dist = bottom[0] - top[0]
+    return float(np.rad2deg(np.arctan2(y_dist, x_dist)) - 90.0)
+
+
+def _compute_catphan604_mtf(
+    datasets: list[pydicom.Dataset],
+    volume: np.ndarray,
+    px_mm: float,
+    mtf_slice: Optional[int] = None,
+    mtf_x: Optional[int] = None,
+    mtf_y: Optional[int] = None,
+) -> dict[str, Any]:
+    """Compute CatPhan604 CTP528 line-pair relative MTF."""
+    slice_spacing = _slice_spacing_mm(datasets)
+    origin_slice = _catphan_origin_slice_index(volume)
+    if mtf_slice is None:
+        ctp528_slice = origin_slice + round(CATPHAN604_CTP528_OFFSET_MM / slice_spacing)
+    else:
+        ctp528_slice = int(mtf_slice)
+    ctp528_slice = max(0, min(ctp528_slice, volume.shape[0] - 1))
+
+    ctp528_image = _combine_surrounding_slices(
+        volume,
+        ctp528_slice,
+        CATPHAN604_CTP528_COMBINE_SLICES,
+    )
+    if mtf_x is None or mtf_y is None:
+        center_x, center_y = _find_phantom_center(ctp528_image)
+    else:
+        center_x, center_y = float(mtf_x), float(mtf_y)
+
+    radius_px = CATPHAN604_LINE_PAIR_RADIUS_MM / max(px_mm, 1e-6)
+    roll_deg = _estimate_catphan_roll_deg(volume[origin_slice], px_mm)
+    profile = _collapsed_circle_profile(
+        ctp528_image,
+        center_x,
+        center_y,
+        radius_px,
+        start_angle=np.pi + np.deg2rad(roll_deg),
+    )
+
+    maximums: list[float] = []
+    minimums: list[float] = []
+    frequencies_lp_cm: list[float] = []
+    regions: list[dict[str, Any]] = []
+    for index, setting in enumerate(CATPHAN604_CTP528_SETTINGS, start=1):
+        peak_idx, peak_values = _profile_peaks(
+            profile,
+            float(setting["spacing"]),
+            int(setting["peaks"]),
+            (float(setting["start"]), float(setting["end"])),
+        )
+        if peak_values.size != int(setting["peaks"]):
+            break
+        valley_idx, valley_values = _profile_valleys(
+            profile,
+            float(setting["spacing"]),
+            int(setting["valleys"]),
+            (float(np.min(peak_idx)), float(np.max(peak_idx))),
+        )
+        if valley_values.size != int(setting["valleys"]):
+            break
+        maximum = float(np.mean(peak_values))
+        minimum = float(np.mean(valley_values))
+        lp_cm = float(setting["lp_mm"]) * 10.0
+        maximums.append(maximum)
+        minimums.append(minimum)
+        frequencies_lp_cm.append(lp_cm)
+        regions.append({
+            "region": index,
+            "lp_cm": lp_cm,
+            "maximum": maximum,
+            "minimum": minimum,
+        })
+
+    if len(frequencies_lp_cm) < 2:
+        raise ValueError("CatPhan604 CTP528 line pairs could not be resolved")
+
+    raw_mtf = np.array([
+        _michelson(maximum, minimum)
+        for maximum, minimum in zip(maximums, minimums)
+    ], dtype=np.float64)
+    relative_mtf = raw_mtf / max(float(raw_mtf[0]), 1e-12)
+    frequencies = np.array(frequencies_lp_cm, dtype=np.float64)
+
+    return {
+        "freq": frequencies.tolist(),
+        "mtf": relative_mtf.tolist(),
+        "mtf50": _frequency_at_relative_mtf(frequencies, relative_mtf, 50.0),
+        "mtf10": _frequency_at_relative_mtf(frequencies, relative_mtf, 10.0),
+        "unit": "lp/cm",
+        "method": "catphan604_ctp528_line_pair",
+        "slice_index": int(ctp528_slice),
+        "roi_x": int(round(center_x)),
+        "roi_y": int(round(center_y)),
+        "roi_size": int(round(radius_px * 2.0)),
+        "catphan_roll_deg": float(roll_deg),
+        "profile_radius_px": float(radius_px),
+        "line_pair_regions": regions,
+    }
 
 
 def _compute_mtf(roi: np.ndarray, px_mm: float) -> dict[str, Any]:
@@ -481,17 +786,46 @@ def analyze(
     datasets, volume, spacing = _load_series(dataset_id)
     px_mm = float(spacing[0])
 
-    # MTF: user-specified slice + ROI center if provided, else auto-detect.
-    if mtf_slice is not None:
-        edge_slice_idx = max(0, min(int(mtf_slice), volume.shape[0] - 1))
+    # MTF: CatPhan604 uses the CTP528 line-pair module; other datasets fall
+    # back to the older edge-spread reference method.
+    catphan604_mtf = dataset_id.casefold() == "catphan604"
+    if catphan604_mtf:
+        try:
+            mtf_result = _compute_catphan604_mtf(
+                datasets,
+                volume,
+                px_mm,
+                mtf_slice=mtf_slice,
+                mtf_x=mtf_x,
+                mtf_y=mtf_y,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "CATPHAN_MTF_FAILED",
+                    "message": str(exc),
+                },
+            ) from exc
+        edge_slice_idx = int(mtf_result["slice_index"])
+        roi_cx = int(mtf_result["roi_x"])
+        roi_cy = int(mtf_result["roi_y"])
+        roi_size_eff = max(
+            16,
+            min(int(mtf_result.get("roi_size", mtf_size)), min(volume.shape[1], volume.shape[2])),
+        )
     else:
-        edge_slice_idx = _select_edge_slice(volume)
-    if mtf_x is not None and mtf_y is not None:
-        roi_cy, roi_cx = int(mtf_y), int(mtf_x)
-        roi = _extract_roi(volume[edge_slice_idx], roi_cy, roi_cx, mtf_size)
-    else:
-        roi_cy, roi_cx, roi = _find_edge_roi(volume[edge_slice_idx], roi_size=mtf_size)
-    mtf_result = _compute_mtf(roi, px_mm)
+        if mtf_slice is not None:
+            edge_slice_idx = max(0, min(int(mtf_slice), volume.shape[0] - 1))
+        else:
+            edge_slice_idx = _select_edge_slice(volume)
+        if mtf_x is not None and mtf_y is not None:
+            roi_cy, roi_cx = int(mtf_y), int(mtf_x)
+            roi = _extract_roi(volume[edge_slice_idx], roi_cy, roi_cx, mtf_size)
+        else:
+            roi_cy, roi_cx, roi = _find_edge_roi(volume[edge_slice_idx], roi_size=mtf_size)
+        mtf_result = _compute_mtf(roi, px_mm)
+        roi_size_eff = max(16, min(int(mtf_size), min(volume.shape[1], volume.shape[2])))
 
     # FWHM: user-specified peak if provided, else auto-detect.
     fwhm_override: Optional[tuple[int, int, int]] = None
@@ -505,16 +839,18 @@ def analyze(
         for f, m in zip(mtf_result["freq"], mtf_result["mtf"])
     ]
 
-    roi_size_eff = max(16, min(int(mtf_size), min(volume.shape[1], volume.shape[2])))
-
     return {
         "dataset_id": dataset_id,
         "pixel_spacing_mm": list(spacing),
         "edge_slice_index": edge_slice_idx,
         "mtf": {
             "title": "空间分辨率 (MTF)",
-            "subtitle": "基于自动检测高对比边缘 (ESF→LSF→FFT)。",
-            "unit": "lp/cm",
+            "subtitle": (
+                "CatPhan CTP528 线对模块相对 MTF（参考评估，需确认）。"
+                if catphan604_mtf
+                else "基于高对比边缘的参考 MTF（ESF→LSF→FFT，需确认）。"
+            ),
+            "unit": mtf_result.get("unit", "lp/cm"),
             "y_label": "MTF",
             "points": mtf_points,
             "mtf50": mtf_result["mtf50"],
@@ -522,6 +858,10 @@ def analyze(
             "roi_x": int(roi_cx),
             "roi_y": int(roi_cy),
             "roi_size": int(roi_size_eff),
+            "method": mtf_result.get("method", "edge_esf"),
+            "catphan_roll_deg": mtf_result.get("catphan_roll_deg"),
+            "profile_radius_px": mtf_result.get("profile_radius_px"),
+            "line_pair_regions": mtf_result.get("line_pair_regions"),
         },
         "fwhm_h": {
             "title": "水平半高宽 (FWHM_H)",

@@ -20,6 +20,7 @@ import { saveScoutPositioningRange } from "../lib/scoutPositioningSession";
 import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { mergeDualScoutPlanSequences } from "../lib/headDualScoutDemo";
+import { DETAIL_TARGET_STORAGE_KEY } from "../features/protocolDetail/constants";
 import { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
 import { useI18n } from "../lib/i18nContext";
@@ -133,13 +134,18 @@ function FourDScoutParamPanel({
     readOnly: boolean;
 }) {
     const { t } = useI18n();
+    const navigate = useNavigate();
     const editableCardCls = `p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${
         readOnly ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"
     }`;
     const staticCardCls =
         "p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm";
+    const doseCardCls =
+        "p-1.5 bg-[#FFFBEB] border border-[#FDE68A]/80 rounded-md flex flex-col items-center justify-center shadow-sm";
     const labelCls = "text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter";
     const valueCls = "text-[13px] font-black text-[#37474F]";
+    const doseLabelCls = "text-[9px] font-black text-[#B45309] uppercase tracking-tighter";
+    const doseValueCls = "text-[13px] font-black text-[#B45309]";
     const chevronCls = `text-[#90A4AE] ${readOnly ? "" : "group-hover:text-[#4D94FF]"}`;
 
     return (
@@ -213,20 +219,24 @@ function FourDScoutParamPanel({
                         </div>
                     </div>
 
-                    <div className={staticCardCls}>
-                        <span className={labelCls}>CTDIvol</span>
-                        <span className={`${valueCls} mt-[1px]`}>{params.ctdiVol}</span>
+                    <div className={doseCardCls}>
+                        <span className={doseLabelCls}>CTDIvol</span>
+                        <span className={`${doseValueCls} mt-[1px]`}>{params.ctdiVol}</span>
                     </div>
 
-                    <div className={staticCardCls}>
-                        <span className={labelCls}>DLP</span>
-                        <span className={`${valueCls} mt-[1px]`}>{params.dlp}</span>
+                    <div className={doseCardCls}>
+                        <span className={doseLabelCls}>DLP</span>
+                        <span className={`${doseValueCls} mt-[1px]`}>{params.dlp}</span>
                     </div>
                 </div>
             </div>
 
             <div className="p-2 flex justify-center shrink-0">
                 <button
+                    onClick={() => {
+                        localStorage.setItem(DETAIL_TARGET_STORAGE_KEY, "topogram");
+                        navigate("/protocol-detail");
+                    }}
                     disabled={readOnly}
                     className={`h-[32px] w-full rounded-md text-[10px] font-bold flex items-center justify-center gap-1 border shadow-sm transition-all ${
                         readOnly

@@ -25,6 +25,7 @@ import { useI18n } from "../lib/i18nContext";
 const HOLD_DURATION_MS = 3000;
 const POSITIONING_DURATION_MS = 1000;
 const SCAN_DURATION_MS = 16000;
+const FOUR_D_AUTO_NEXT_STEP_DELAY_MS = 700;
 const BED_TRAVEL_MM = 19.2;
 
 const FOURD_PARAMS = {
@@ -103,6 +104,8 @@ export default function FourDDiagnosticConfirmScreen() {
     const positioningTimerRef = useRef<number | null>(null);
     const scanRafRef = useRef<number | null>(null);
     const scanProgressRef = useRef(0);
+    const autoNextTimerRef = useRef<number | null>(null);
+    const postScanNavigationStartedRef = useRef(false);
     const waveRafRef = useRef<number | null>(null);
     const waveTimeRef = useRef(0);
     // eslint-disable-next-line react-hooks/purity
@@ -179,6 +182,9 @@ export default function FourDDiagnosticConfirmScreen() {
 
     /** 扫描完成后点击"下一步"时的路由决策 */
     const handlePostScanNavigate = useCallback(() => {
+        if (postScanNavigationStartedRef.current) return;
+        postScanNavigationStartedRef.current = true;
+
         const scanResult = generateMockScanResult(
             bedSegmentCount,
             Number(FOURD_PARAMS.phases),
@@ -197,6 +203,21 @@ export default function FourDDiagnosticConfirmScreen() {
             navigate("/image-load", { state: postScanState });
         }
     }, [bedSegmentCount, dynamicParams.scanLength, navigate]);
+
+    useEffect(() => {
+        if (!scanCompleted) return;
+
+        autoNextTimerRef.current = window.setTimeout(() => {
+            handlePostScanNavigate();
+        }, FOUR_D_AUTO_NEXT_STEP_DELAY_MS);
+
+        return () => {
+            if (autoNextTimerRef.current !== null) {
+                window.clearTimeout(autoNextTimerRef.current);
+                autoNextTimerRef.current = null;
+            }
+        };
+    }, [handlePostScanNavigate, scanCompleted]);
 
     const handleCropBoxChange = useCallback(({ width, height }: { width: number; height: number }) => {
         setDynamicParams({
@@ -283,6 +304,11 @@ export default function FourDDiagnosticConfirmScreen() {
             setScanStarted(true);
             setScanPaused(false);
             setScanCompleted(false);
+            postScanNavigationStartedRef.current = false;
+            if (autoNextTimerRef.current !== null) {
+                window.clearTimeout(autoNextTimerRef.current);
+                autoNextTimerRef.current = null;
+            }
             scanProgressRef.current = 0;
             setScanProgress(0);
             setBedProgress(0);
@@ -393,6 +419,9 @@ export default function FourDDiagnosticConfirmScreen() {
         clearScanRaf();
         if (positioningTimerRef.current !== null) {
             window.clearTimeout(positioningTimerRef.current);
+        }
+        if (autoNextTimerRef.current !== null) {
+            window.clearTimeout(autoNextTimerRef.current);
         }
     }, []);
 

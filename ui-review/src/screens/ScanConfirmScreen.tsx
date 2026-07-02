@@ -1486,16 +1486,16 @@ const ScanConfirmScreen = ({
                                         renderScoutAngleSelectCard(t("scanFlow.flatScanAngle"))
                                     )}
 
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">CTDIvol</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">
+                                    <div className="p-1.5 bg-[#FFFBEB] border border-[#FDE68A]/80 rounded-md flex flex-col items-center justify-center shadow-sm">
+                                        <span className="text-[9px] font-black text-[#B45309] uppercase tracking-tighter">CTDIvol</span>
+                                        <span className="text-[13px] font-black text-[#B45309] mt-[1px]">
                                             {isHeadDualScoutFlow && dualScoutComputedDose ? dualScoutComputedDose.ctdi_vol.toFixed(2) : scoutDoseDisplayParams.doseCtdiVol}
                                         </span>
                                     </div>
 
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">DLP</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">
+                                    <div className="p-1.5 bg-[#FFFBEB] border border-[#FDE68A]/80 rounded-md flex flex-col items-center justify-center shadow-sm">
+                                        <span className="text-[9px] font-black text-[#B45309] uppercase tracking-tighter">DLP</span>
+                                        <span className="text-[13px] font-black text-[#B45309] mt-[1px]">
                                             {isHeadDualScoutFlow && dualScoutComputedDose ? dualScoutComputedDose.dlp.toFixed(2) : scoutDoseDisplayParams.doseDlp}
                                         </span>
                                     </div>
