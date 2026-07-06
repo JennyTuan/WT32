@@ -275,6 +275,18 @@ def _normalize_series_order(scan_session: models.ScanSession):
         series.series_order = index
 
 
+def _normalize_series_order_by_session_id(db: Session, scan_session_id: int) -> None:
+    # 删除后关系集合可能仍保留旧对象；从数据库重读剩余序列，避免顺序归一漏掉真实行。
+    ordered_series = (
+        db.query(models.ScanSessionSeries)
+        .filter(models.ScanSessionSeries.scan_session_id == scan_session_id)
+        .order_by(models.ScanSessionSeries.series_order.asc(), models.ScanSessionSeries.id.asc())
+        .all()
+    )
+    for index, series in enumerate(ordered_series, start=1):
+        series.series_order = index
+
+
 def _build_session_series_from_payload(payload: schemas.ScanSessionSeriesCreate) -> models.ScanSessionSeries:
     session_series = models.ScanSessionSeries(
         series_order=payload.series_order,
@@ -573,11 +585,10 @@ def duplicate_scan_session_series(session_series_id: int, db: Session = Depends(
 def delete_scan_session_series(session_series_id: int, db: Session = Depends(get_db)):
     entity = _get_entity_or_404(models.ScanSessionSeries, session_series_id, "Scan session series not found", db)
     scan_session_id = entity.scan_session_id
-    scan_session = _get_scan_session_or_404(scan_session_id, db)
 
     db.delete(entity)
     db.flush()
-    _normalize_series_order(scan_session)
+    _normalize_series_order_by_session_id(db, scan_session_id)
     db.commit()
     return _get_scan_session_or_404(scan_session_id, db)
 

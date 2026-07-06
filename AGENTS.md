@@ -74,3 +74,46 @@ Frontend reading order:
 - Session edits must not mutate protocol templates unless the workflow explicitly saves a template.
 - Keep long-form notes in `docs/`; do not add new root-level planning files.
 - Do not commit `.venv/`, `node_modules/`, build logs, runtime logs, or raw external DICOM dumps.
+
+## Testing And Quality Gates
+
+- See `docs/agents/testing.md` for the current testing baseline and recommended test-growth priorities.
+- Treat behavior tests as part of the implementation, not as optional cleanup.
+- Prefer tests through public interfaces and user-visible workflow behavior over private implementation details.
+- For backend changes, run:
+
+```powershell
+cd C:\STN\projects\WT32
+.\.venv\Scripts\python.exe -m unittest discover -s backend\tests
+```
+
+- For frontend changes, run the relevant focused check first, then at minimum:
+
+```powershell
+cd C:\STN\projects\WT32\ui-review
+npm.cmd run lint
+npm.cmd run build
+```
+
+- Current frontend has no dedicated test runner yet. When adding one, document the command here and keep it runnable with `npm.cmd` on Windows.
+- Do not let new lint or build warnings become background noise; either fix them or document why they are accepted.
+
+## Code Comments
+
+- Add comments for non-obvious business rules, CT domain constraints, safety wording, state transitions, and protocol/session copy boundaries.
+- Keep comments concise and useful. Avoid restating what the next line of code already says.
+- Use Simplified Chinese for new code comments.
+
+## Agent Skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues for `JennyTuan/WT32`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default five-label triage vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo. Read `docs/CT_DOMAIN_CONTEXT.md`, `docs/README.md`, and relevant docs/ADRs before domain-sensitive work. See `docs/agents/domain.md`.
