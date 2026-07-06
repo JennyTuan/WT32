@@ -21,7 +21,6 @@ import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { mergeDualScoutPlanSequences } from "../lib/headDualScoutDemo";
 import { DETAIL_TARGET_STORAGE_KEY } from "../features/protocolDetail/constants";
-import { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
 import { useI18n } from "../lib/i18nContext";
 
@@ -946,7 +945,6 @@ const ScoutScanScreen = ({
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
-    const [showPatientConfirm, setShowPatientConfirm] = useState(false);
     const [laserActive, setLaserActive] = useState(false);
     const [selectedPosition, setSelectedPosition] = useState<"start" | "end" | null>(null);
     const [expandedSeqId, setExpandedSeqId] = useState<string | null>(() => buildGroupsFromWorkflowPlans()[0]?.sequences[0]?.id ?? null);
@@ -1792,7 +1790,8 @@ const ScoutScanScreen = ({
                                 return;
                             }
                             if (is4DWorkflow && activeStepIdx === 2) {
-                                setShowPatientConfirm(true);
+                                try { await persistPositioningToSession(); } catch (error) { console.error(error); }
+                                navigate('/scout-execute', { state: { showCombinedPatientConfirm: true, returnRoute: "/scout-scan" } });
                                 return;
                             }
                             // 4D scout 共4步(0-3)，步骤0-2推进，步骤3才导航
@@ -1846,33 +1845,6 @@ const ScoutScanScreen = ({
                     </div>
                 </div>
             )}
-
-            <PatientConfirmationModal
-                isOpen={showPatientConfirm}
-                onClose={() => setShowPatientConfirm(false)}
-                onConfirm={async () => {
-                    setShowPatientConfirm(false);
-                    try {
-                        await persistPositioningToSession();
-                    } catch (error) {
-                        console.error(error);
-                    }
-                    navigate('/scout-execute');
-                }}
-                patientData={selectedPatient ? {
-                    name: selectedPatient.name,
-                    age: selectedPatient.age,
-                    gender: selectedPatient.gender,
-                    idNumber: "--",
-                    patientId: selectedPatient.patientId,
-                    checkType: selectedPatient.checkType ?? "4D Scout",
-                } : undefined}
-                scanData={{
-                    ctdi: "--",
-                    dlp: "--",
-                    protocol: t("scanFlow.scout"),
-                }}
-            />
 
             {/* Abort Confirmation Dialog */}
             {showAbortConfirm && (

@@ -725,10 +725,13 @@ const ScanConfirmScreen = ({
             : parameterPanelMode === "tomographicScan"
                 ? t("scanFlow.postScout.axial")
                 : t("scanFlow.scout");
+    const currentProtocolName = workflowPlans[0]?.title ?? scanSession?.name ?? currentProtocolLabel;
+    const currentSequenceName = allSequences.find((sequence) => sequence.id === resolvedActiveSequenceId)?.name ?? currentProtocolLabel;
     const currentScanData = {
         ctdi: scoutDoseDisplayParams.doseCtdiVol,
         dlp: scoutDoseDisplayParams.doseDlp,
-        protocol: currentProtocolLabel,
+        protocol: currentProtocolName,
+        sequence: currentSequenceName,
     };
     const handleScoutAngleChange = useCallback((nextAngle: TubeAngleOption) => {
         if (!singleScoutTopogramParam) return;
@@ -1567,6 +1570,10 @@ const ScanConfirmScreen = ({
                                 onExecuteScan();
                                 return;
                             }
+                            if (nextRoute === "/scout-execute") {
+                                navigate(nextRoute, { state: { showCombinedPatientConfirm: true, returnRoute: "/scan-confirm" } });
+                                return;
+                            }
                             setShowPatientConfirm(true);
                         }}
                         disabled={readOnlyMode && !onExecuteScan}
@@ -1687,7 +1694,8 @@ const ScanConfirmScreen = ({
                     gender: selectedPatient.gender,
                     idNumber: "--",
                     patientId: selectedPatient.patientId,
-                    checkType: selectedPatient.checkType ?? "CT Routine",
+                    checkType: currentScanData.sequence,
+                    scanSequence: currentScanData.sequence,
                 } : undefined}
                 scanData={currentScanData}
             />
@@ -1705,12 +1713,14 @@ interface PatientData {
     idNumber: string;
     patientId: string;
     checkType: string;
+    scanSequence?: string;
 }
 
 interface ScanData {
     ctdi: string;
     dlp: string;
     protocol: string;
+    sequence?: string;
 }
 
 interface PatientConfirmationModalProps {
@@ -1719,6 +1729,7 @@ interface PatientConfirmationModalProps {
     onConfirm: () => void;
     patientData?: PatientData;
     scanData?: ScanData;
+    physicalGuide?: PatientConfirmationPhysicalGuide;
 }
 
 // 辅助组件：信息项
@@ -1768,6 +1779,153 @@ const localizeProtocolValue = (
     return protocol;
 };
 
+type PatientConfirmationPhysicalStepState = "pending" | "active" | "done";
+
+type PatientConfirmationPhysicalStep = {
+    id: string;
+    label: string;
+    detail: string;
+    state: PatientConfirmationPhysicalStepState;
+};
+
+type PatientConfirmationPhysicalGuide = {
+    title: string;
+    description: string;
+    guideTitle: string;
+    triggerLabel: string;
+    emergencyLabel: string;
+    simulatedLabel: string;
+    steps: PatientConfirmationPhysicalStep[];
+    onHoldStart: () => void;
+    onHoldEnd: () => void;
+    buttonActive?: boolean;
+    disabled?: boolean;
+};
+
+const modalPhysicalStepClasses: Record<PatientConfirmationPhysicalStepState, string> = {
+    pending: "border-slate-200 bg-white text-slate-400",
+    active: "border-emerald-300 bg-emerald-50 text-emerald-700 shadow-[0_8px_18px_-14px_rgba(5,150,105,0.9)]",
+    done: "border-blue-200 bg-blue-50 text-blue-700",
+};
+
+const CombinedPhysicalGuideCard = ({ guide }: { guide: PatientConfirmationPhysicalGuide }) => {
+    const { t } = useI18n();
+    const buttonClass = guide.disabled
+        ? "border-[#8A98A8] bg-[radial-gradient(circle_at_38%_30%,#CBD5E1_0%,#94A3B8_54%,#64748B_100%)] opacity-75 cursor-not-allowed"
+        : guide.buttonActive
+            ? "translate-y-[2px] border-[#07533A] bg-[radial-gradient(circle_at_38%_28%,#39E296_0%,#11A66F_46%,#08734D_100%)] shadow-[0_8px_14px_rgba(6,95,70,0.38),inset_0_8px_15px_rgba(0,0,0,0.24)]"
+            : "border-[#07533A] bg-[radial-gradient(circle_at_38%_28%,#52F0A6_0%,#14B87A_48%,#08734D_100%)] shadow-[0_16px_28px_rgba(15,23,42,0.25),inset_0_5px_12px_rgba(255,255,255,0.28)] hover:translate-y-[-1px]";
+
+    const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (guide.disabled) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        guide.onHoldStart();
+    };
+
+    const handlePointerEnd = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        guide.onHoldEnd();
+    };
+
+    return (
+        <div className="rounded-2xl border border-[#D6E0EA] bg-[#F8FAFC] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_16px_28px_-24px_rgba(15,23,42,0.75)]">
+            <div className="mb-3">
+                <div className="text-[13px] font-black text-slate-700">{guide.title}</div>
+                <div className="mt-1 text-[10px] font-semibold leading-snug text-slate-500">{guide.description}</div>
+            </div>
+
+            <div className="relative rounded-[24px] border border-[#D7DEE7] bg-[#EDEDEA] p-3 shadow-[0_22px_32px_-24px_rgba(15,23,42,0.75),inset_0_1px_0_rgba(255,255,255,0.85)]">
+                <div className="mb-2 flex items-center px-1">
+                    <div className="text-[10px] font-black text-slate-500">{t("scanFlow.physicalGuide.controlBoxTitle")}</div>
+                </div>
+
+                <div className="flex justify-center">
+                    <div className="relative h-[232px] w-[156px] overflow-hidden rounded-[28px] border border-[#D3D8DF] bg-[#F6F7F5] px-4 py-4 shadow-[0_18px_24px_-22px_rgba(15,23,42,0.8),inset_3px_0_5px_rgba(148,163,184,0.22),inset_0_1px_0_rgba(255,255,255,0.95)]">
+                        <div className="absolute -left-3 top-[52px] h-[46px] w-5 rounded-full border border-[#D5DAE0] bg-[#EDEDEA]" />
+                        <div className="absolute -left-3 top-[124px] h-[52px] w-5 rounded-full border border-[#D5DAE0] bg-[#EDEDEA]" />
+
+                        <div className="relative z-10 flex h-full flex-col items-center">
+                            <div className="flex w-full items-start justify-between px-0.5">
+                                <div className="flex h-[42px] w-[42px] items-center justify-center rounded-full border-[6px] border-[#FCA5A5] bg-[#DC2626] shadow-[0_6px_12px_rgba(127,29,29,0.25)]" title={guide.emergencyLabel}>
+                                    <AlertTriangle size={18} className="text-white" />
+                                </div>
+                                <div className="mt-1 h-[28px] w-[28px] rounded-full border border-[#CBD5E1] bg-[radial-gradient(circle_at_35%_28%,#A8AFB8,#7C858F)] shadow-[inset_0_2px_3px_rgba(15,23,42,0.18)]" title={guide.simulatedLabel} />
+                            </div>
+
+                            <div className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-300 shadow-[inset_0_1px_1px_rgba(15,23,42,0.2)]" />
+                            <button
+                                type="button"
+                                aria-label={guide.triggerLabel}
+                                disabled={guide.disabled}
+                                onPointerDown={handlePointerDown}
+                                onPointerUp={handlePointerEnd}
+                                onPointerCancel={handlePointerEnd}
+                                onLostPointerCapture={guide.onHoldEnd}
+                                className={`relative mt-1 flex h-[74px] w-[74px] touch-none items-center justify-center rounded-full border-[9px] transition-all duration-150 ${buttonClass}`}
+                            >
+                                <span className="absolute -inset-2 rounded-full border-2 border-emerald-400/90 shadow-[0_0_18px_rgba(16,185,129,0.35)]" />
+                                <span className="absolute -right-7 -top-3 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[7px] font-black text-white shadow-md">
+                                    {t("scanFlow.physicalGuide.targetBadge")}
+                                </span>
+                                <div className="h-[44px] w-[44px] rounded-full border border-white/25 bg-white/10 shadow-[inset_0_5px_8px_rgba(255,255,255,0.16),inset_0_-6px_10px_rgba(6,95,70,0.2)]" />
+                            </button>
+
+                            <div className="mt-2 flex w-full items-center justify-center gap-1">
+                                <span className={`h-2.5 w-2.5 rounded-full ${guide.disabled ? "bg-slate-300" : guide.buttonActive ? "bg-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.9)]" : "bg-cyan-400 shadow-[0_0_9px_rgba(34,211,238,0.75)]"}`} />
+                                <span className="text-[8px] font-black text-slate-500">{guide.triggerLabel}</span>
+                            </div>
+
+                            <div className="mt-2 flex h-[40px] w-[96px] items-center justify-between rounded-full bg-[#6B7175] px-2.5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)]">
+                                <div className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[#F8FAFC] text-slate-500 shadow-sm">
+                                    <StretchHorizontal size={15} />
+                                </div>
+                                <div className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[#F8FAFC] text-slate-500 shadow-sm">
+                                    <CheckCircle size={15} />
+                                </div>
+                            </div>
+
+                            <div className="mt-2 grid w-[76px] grid-cols-3 grid-rows-3 text-center text-[11px] font-black leading-[11px] text-slate-500/80">
+                                <div />
+                                <ChevronsUp size={12} className="mx-auto" />
+                                <div />
+                                <ChevronLeft size={12} className="mx-auto" />
+                                <div className="text-[9px] leading-[13px]">••</div>
+                                <ChevronRight size={12} className="mx-auto" />
+                                <div />
+                                <ChevronDown size={12} className="mx-auto" />
+                                <div />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-white/70 px-3 py-2">
+                    <span className="text-[10px] font-bold text-slate-500">{t("scanFlow.physicalGuide.targetButtonHint")}</span>
+                    <span className="h-px flex-1 bg-emerald-200" />
+                    <span className="rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-black text-emerald-700">{guide.triggerLabel}</span>
+                </div>
+            </div>
+
+            <div className="mt-3 grid gap-2">
+                {guide.steps.map((step, index) => (
+                    <div key={step.id} className={`flex min-h-[48px] items-center gap-2 rounded-lg border px-3 py-2 transition-all ${modalPhysicalStepClasses[step.state]}`}>
+                        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-black ${step.state === "done" ? "bg-blue-600 text-white" : step.state === "active" ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+                            {step.state === "done" ? <CheckCircle size={14} /> : index + 1}
+                        </div>
+                        <div className="min-w-0">
+                            <div className="truncate text-[11px] font-black leading-tight">{step.label}</div>
+                            <div className="mt-0.5 max-h-[20px] overflow-hidden text-[9px] font-semibold leading-snug opacity-80">{step.detail}</div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> = ({
     isOpen,
     onClose,
@@ -1778,20 +1936,23 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
         gender: "--",
         idNumber: "11010119800101XXXX",
         patientId: "P20260226001",
-        checkType: "CT Routine"
+        checkType: "Scout"
     },
-    scanData = { ctdi: "12.45", dlp: "658.2", protocol: "Scout" }
+    scanData = { ctdi: "12.45", dlp: "658.2", protocol: "CT Routine", sequence: "Scout" },
+    physicalGuide,
 }) => {
     const { t } = useI18n();
+    const hasPhysicalGuide = Boolean(physicalGuide);
     const localizedGender = localizeGenderValue(patientData.gender, t);
-    const localizedProtocol = localizeProtocolValue(scanData.protocol, t);
+    const localizedProtocol = hasPhysicalGuide ? scanData.protocol : localizeProtocolValue(scanData.protocol, t);
+    const localizedScanSequence = localizeProtocolValue(scanData.sequence ?? patientData.scanSequence ?? patientData.checkType, t);
 
     if (!isOpen) return null;
 
     return (
         <div className="absolute inset-0 z-[999] flex items-center justify-center bg-[#0F172A]/40 backdrop-blur-sm animate-in fade-in duration-300">
             {/* 弹窗主容器 - 尺寸经过优化以适配 1024x768 */}
-            <div className="bg-white w-[880px] rounded-[40px] shadow-[0_30px_60px_-12px_rgba(0,0,0,0.25)] p-10 flex flex-col gap-8 border border-white relative overflow-hidden">
+            <div className={`bg-white ${hasPhysicalGuide ? "w-[920px] rounded-[32px] p-8 gap-5" : "w-[880px] rounded-[40px] p-10 gap-8"} shadow-[0_30px_60px_-12px_rgba(0,0,0,0.25)] flex flex-col border border-white relative overflow-hidden`}>
 
                 {/* Close Button */}
                 <button
@@ -1815,58 +1976,104 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                     </div>
                 </div>
 
-                <div className="grid grid-cols-12 gap-8 relative z-10">
-
-                    {/* 左侧：精简后的患者档案 (占据 7/12 列) */}
-                    <div className="col-span-7 flex flex-col gap-4">
-                        <h3 className="text-[12px] font-bold text-[#94A3B8] tracking-widest px-1">{t("scanFlow.patientConfirm.patientInfo")}</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                            <InfoItem label={t("scanFlow.patientConfirm.name")} value={patientData.name} icon={UserCircle} />
-                            <div className="grid grid-cols-2 gap-4">
+                {hasPhysicalGuide && physicalGuide ? (
+                    <div className="grid grid-cols-[1fr_360px] gap-8 relative z-10">
+                        <div className="flex flex-col gap-4">
+                            <h3 className="text-[12px] font-bold text-[#94A3B8] tracking-widest px-1">{t("scanFlow.patientConfirm.patientInfo")}</h3>
+                            <div className="grid grid-cols-4 gap-4">
+                                <div className="col-span-2">
+                                    <InfoItem label={t("scanFlow.patientConfirm.name")} value={patientData.name} icon={UserCircle} />
+                                </div>
                                 <InfoItem label={t("scanFlow.patientConfirm.age")} value={patientData.age} />
                                 <InfoItem label={t("scanFlow.patientConfirm.gender")} value={localizedGender} />
-                            </div>
-                            <InfoItem label={t("scanFlow.patientConfirm.checkType")} value={patientData.checkType} icon={Stethoscope} />
-                            <InfoItem label={t("scanFlow.patientConfirm.patientId")} value={patientData.patientId} icon={Info} />
-                            <div className="col-span-2">
-                                <InfoItem label={t("scanFlow.patientConfirm.idNumber")} value={patientData.idNumber} icon={Fingerprint} />
-                            </div>
-                        </div>
-                    </div>
 
-                    {/* 右侧：剂量与序列 (占据 5/12 列) */}
-                    <div className="col-span-5 flex flex-col gap-6">
-                        <div className="flex flex-col gap-4">
-                            <h3 className="text-[12px] font-bold text-[#94A3B8] tracking-widest px-1">{t("scanFlow.patientConfirm.parameters")}</h3>
-
-                            {/* 剂量卡片 */}
-                            <div className="bg-[#FFFBEB] rounded-[28px] p-5 border border-[#FEF3C7] flex items-center justify-around shadow-sm">
-                                <div className="text-center">
-                                    <div className="text-[10px] font-bold text-[#B45309] mb-1 opacity-70 uppercase">CTDIvol (mGy)</div>
-                                    <div className="text-[32px] font-black text-[#B45309] leading-none">{scanData.ctdi}</div>
+                                <div className="col-span-2">
+                                    <InfoItem label={t("scanFlow.currentProtocol")} value={localizedProtocol} icon={Stethoscope} />
                                 </div>
-                                <div className="w-px h-8 bg-[#FEF3C7]" />
-                                <div className="text-center">
-                                    <div className="text-[10px] font-bold text-[#B45309] mb-1 opacity-70 uppercase">DLP (mGy·cm)</div>
-                                    <div className="text-[32px] font-black text-[#B45309] leading-none">{scanData.dlp}</div>
+                                <div className="col-span-2">
+                                    <InfoItem label={t("scanFlow.patientConfirm.scanSequence")} value={localizedScanSequence} icon={CheckCircle} />
+                                </div>
+
+                                <div className="col-span-2">
+                                    <InfoItem label={t("scanFlow.patientConfirm.patientId")} value={patientData.patientId} icon={Info} />
+                                </div>
+                                <div className="col-span-2">
+                                    <InfoItem label={t("scanFlow.patientConfirm.idNumber")} value={patientData.idNumber} icon={Fingerprint} />
                                 </div>
                             </div>
 
-                            {/* 序列卡片 */}
-                            <div className="bg-[#EFF6FF] rounded-[28px] p-5 border border-[#DBEAFE] flex flex-col items-center justify-center min-h-[120px]">
-                                <div className="text-[10px] font-bold text-[#3B82F6] mb-1 uppercase">{t("scanFlow.currentProtocol")}</div>
-                                <div className="text-[28px] font-black text-[#2563EB] text-center leading-tight">
-                                    {localizedProtocol}
+                            <div className="rounded-2xl border border-[#FEF3C7] bg-[#FFFBEB] p-4 shadow-sm">
+                                <div className="mb-3 text-[12px] font-bold tracking-widest text-[#B45309]/70">{t("scanFlow.patientConfirm.referenceDose")}</div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="rounded-xl bg-white/60 px-4 py-3 text-center">
+                                        <div className="text-[10px] font-bold uppercase text-[#B45309]/70">CTDIvol (mGy)</div>
+                                        <div className="mt-1 text-[26px] font-black leading-none text-[#B45309]">{scanData.ctdi}</div>
+                                    </div>
+                                    <div className="rounded-xl bg-white/60 px-4 py-3 text-center">
+                                        <div className="text-[10px] font-bold uppercase text-[#B45309]/70">DLP (mGy·cm)</div>
+                                        <div className="mt-1 text-[26px] font-black leading-none text-[#B45309]">{scanData.dlp}</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
+
+                        <div className="flex flex-col justify-start">
+                            <CombinedPhysicalGuideCard guide={physicalGuide} />
+                        </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="grid grid-cols-12 gap-8 relative z-10">
+                        {/* 左侧：精简后的患者档案 (占据 7/12 列) */}
+                        <div className="col-span-7 flex flex-col gap-4">
+                            <h3 className="text-[12px] font-bold text-[#94A3B8] tracking-widest px-1">{t("scanFlow.patientConfirm.patientInfo")}</h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                <InfoItem label={t("scanFlow.patientConfirm.name")} value={patientData.name} icon={UserCircle} />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <InfoItem label={t("scanFlow.patientConfirm.age")} value={patientData.age} />
+                                    <InfoItem label={t("scanFlow.patientConfirm.gender")} value={localizedGender} />
+                                </div>
+                                <InfoItem label={t("scanFlow.patientConfirm.scanSequence")} value={localizedScanSequence} icon={Stethoscope} />
+                                <InfoItem label={t("scanFlow.patientConfirm.patientId")} value={patientData.patientId} icon={Info} />
+                                <div className="col-span-2">
+                                    <InfoItem label={t("scanFlow.patientConfirm.idNumber")} value={patientData.idNumber} icon={Fingerprint} />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 右侧：剂量与序列 (占据 5/12 列) */}
+                        <div className="col-span-5 flex flex-col gap-6">
+                            <div className="flex flex-col gap-4">
+                                <h3 className="text-[12px] font-bold text-[#94A3B8] tracking-widest px-1">{t("scanFlow.patientConfirm.parameters")}</h3>
+
+                                {/* 剂量卡片 */}
+                                <div className="bg-[#FFFBEB] rounded-[28px] p-5 border border-[#FEF3C7] flex items-center justify-around shadow-sm">
+                                    <div className="text-center">
+                                        <div className="text-[10px] font-bold text-[#B45309] mb-1 opacity-70 uppercase">CTDIvol (mGy)</div>
+                                        <div className="text-[32px] font-black text-[#B45309] leading-none">{scanData.ctdi}</div>
+                                    </div>
+                                    <div className="w-px h-8 bg-[#FEF3C7]" />
+                                    <div className="text-center">
+                                        <div className="text-[10px] font-bold text-[#B45309] mb-1 opacity-70 uppercase">DLP (mGy·cm)</div>
+                                        <div className="text-[32px] font-black text-[#B45309] leading-none">{scanData.dlp}</div>
+                                    </div>
+                                </div>
+
+                                {/* 协议卡片 */}
+                                <div className="bg-[#EFF6FF] rounded-[28px] p-5 border border-[#DBEAFE] flex flex-col items-center justify-center min-h-[120px]">
+                                    <div className="text-[10px] font-bold text-[#3B82F6] mb-1 uppercase">{t("scanFlow.currentProtocol")}</div>
+                                    <div className="text-[28px] font-black text-[#2563EB] text-center leading-tight">
+                                        {localizedProtocol}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* 底部按钮栏 */}
-                <div className="flex items-center justify-between mt-2 pt-8 border-t border-slate-100 relative z-10">
+                <div className={`flex items-center justify-between ${hasPhysicalGuide ? "mt-0 pt-5" : "mt-2 pt-8"} border-t border-slate-100 relative z-10`}>
                     <p className="text-[14px] italic text-[#64748B] font-medium">
-                        {t("scanFlow.patientConfirm.hint")}
+                        {hasPhysicalGuide ? t("scanFlow.patientConfirm.combinedHint") : t("scanFlow.patientConfirm.hint")}
                     </p>
 
                     <div className="flex items-center gap-5">
@@ -1875,15 +2082,17 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22C55E] opacity-75"></span>
                                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#22C55E]"></span>
                             </div>
-                            <span className="text-[14px] font-bold text-[#166534]">{t("scanFlow.patientConfirm.ready")}</span>
+                            <span className="text-[14px] font-bold text-[#166534]">{hasPhysicalGuide ? t("scanFlow.patientConfirm.waitingPhysical") : t("scanFlow.patientConfirm.ready")}</span>
                         </div>
 
-                        <button
-                            onClick={onConfirm}
-                            className="h-[60px] px-12 bg-[#4D94FF] text-white font-black rounded-2xl shadow-[0_15px_30px_-8px_rgba(77,148,255,0.4)] hover:bg-[#3B82F6] hover:translate-y-[-1px] active:translate-y-[1px] transition-all text-[18px]"
-                        >
-                            {t("scanFlow.readyToStart")}
-                        </button>
+                        {!hasPhysicalGuide && (
+                            <button
+                                onClick={onConfirm}
+                                className="h-[60px] px-12 bg-[#4D94FF] text-white font-black rounded-2xl shadow-[0_15px_30px_-8px_rgba(77,148,255,0.4)] hover:bg-[#3B82F6] hover:translate-y-[-1px] active:translate-y-[1px] transition-all text-[18px]"
+                            >
+                                {t("scanFlow.readyToStart")}
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>

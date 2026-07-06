@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
+import { loadSelectedPatient } from "../lib/patientSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
 import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
@@ -17,12 +18,13 @@ import {
     isHeadDualScoutSession,
     isHeadDualScoutWorkflow,
     loadHeadDualScoutManifest,
+    mergeDualScoutPlanSequences,
     type HeadDualScoutManifest,
 } from "../lib/headDualScoutDemo";
 import DicomViewer from "../components/DicomViewer";
 import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
-import ScanConfirmScreen from "./ScanConfirmScreen";
+import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
 
@@ -73,6 +75,10 @@ type ScoutDicomSeries = typeof SCOUT_SERIES & {
 
 type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "rendering" | "completed";
 type PhysicalTriggerAction = "position" | "exposure";
+type ScoutExecuteLocationState = {
+    showCombinedPatientConfirm?: boolean;
+    returnRoute?: string;
+};
 
 type ProjectionMeta = {
     width: number;
@@ -552,10 +558,15 @@ function ScoutProjectionViewport({
 
 export default function ScoutExecuteScanScreen() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { t } = useI18n();
+    const routeState = location.state as ScoutExecuteLocationState | null;
+    const initialCombinedPatientConfirm = routeState?.showCombinedPatientConfirm === true;
+    const combinedPatientReturnRoute = routeState?.returnRoute ?? "/scan-confirm";
     const [stage, setStage] = useState<ScanStage>("idle");
     const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
-    const [guideVisible, setGuideVisible] = useState(true);
+    const [showCombinedPatientConfirm, setShowCombinedPatientConfirm] = useState(initialCombinedPatientConfirm);
+    const [guideVisible, setGuideVisible] = useState(!initialCombinedPatientConfirm);
     const [renderProgress, setRenderProgress] = useState(0);
     const [dualPhase, setDualPhase] = useState<DualScoutPhase>(null);
     const [apRenderProgress, setApRenderProgress] = useState(0);
@@ -567,6 +578,7 @@ export default function ScoutExecuteScanScreen() {
     const [gatingBreathingMode, setGatingBreathingMode] = useState<string | null>(null);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
+    const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const thresholdGuard = useDoseThresholdGuard();
     const rafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
@@ -574,6 +586,7 @@ export default function ScoutExecuteScanScreen() {
     const exposureTimerRef = useRef<number | null>(null);
     const positioningTimerRef = useRef<number | null>(null);
     const autoNextTimerRef = useRef<number | null>(null);
+    const selectedPatient = useMemo(() => loadSelectedPatient(), []);
 
     useEffect(() => {
         let cancelled = false;
@@ -648,6 +661,25 @@ export default function ScoutExecuteScanScreen() {
                 : (isHeadDualScoutFlow && headDualApSeries)
                     ? headDualApSeries
                     : SCOUT_SERIES;
+    const currentProtocolName = workflowPlans[0]?.title ?? scanSession?.name ?? t("scanFlow.scout");
+    const currentScanSequenceName = (() => {
+        for (const plan of workflowPlans) {
+            const sequence = mergeDualScoutPlanSequences(plan).sequences.find((item) => item.type === "scout");
+            if (sequence?.name) return sequence.name;
+        }
+        return t("scanFlow.scout");
+    })();
+    const patientConfirmScanData = useMemo(() => {
+        const topogramParam = scanSession?.series.find((series) => series.series_type === "topogram" && series.topogram_param)?.topogram_param;
+        const formatDose = (value: number | null | undefined) => value == null ? "--" : value.toFixed(2);
+
+        return {
+            ctdi: formatDose(topogramParam?.ctdi_vol),
+            dlp: formatDose(topogramParam?.dlp),
+            protocol: currentProtocolName,
+            sequence: currentScanSequenceName,
+        };
+    }, [currentProtocolName, currentScanSequenceName, scanSession]);
 
     useEffect(() => {
         if (!isLimbsHelicalScoutWorkflow) return;
@@ -761,6 +793,7 @@ export default function ScoutExecuteScanScreen() {
         const sessionId = loadSelectedScanSessionId();
         if (sessionId) void startScanSession(sessionId);
         clearHoldRaf();
+        setShowCombinedPatientConfirm(false);
         setStage("enabled");
         setApRenderProgress(0);
         setLatRenderProgress(0);
@@ -802,6 +835,7 @@ export default function ScoutExecuteScanScreen() {
         const sessionId = loadSelectedScanSessionId();
         if (sessionId) void startScanSession(sessionId);
         clearHoldRaf();
+        setShowCombinedPatientConfirm(false);
         setStage("enabled");
 
         window.setTimeout(() => {
@@ -864,7 +898,7 @@ export default function ScoutExecuteScanScreen() {
     };
 
     const startHold = () => {
-        if (!guideVisible || stage === "positioning" || stage === "enabled" || stage === "exposing" || stage === "rendering" || stage === "completed") {
+        if ((!guideVisible && !showCombinedPatientConfirm) || stage === "positioning" || stage === "enabled" || stage === "exposing" || stage === "rendering" || stage === "completed") {
             return;
         }
 
@@ -934,6 +968,12 @@ export default function ScoutExecuteScanScreen() {
                         : "pending",
         },
     ];
+
+    const handleCombinedPatientClose = () => {
+        clearHoldRaf();
+        holdStartRef.current = null;
+        navigate(combinedPatientReturnRoute);
+    };
 
     return (
         <div className="relative h-[768px] w-[1024px] overflow-hidden">
@@ -1023,6 +1063,34 @@ export default function ScoutExecuteScanScreen() {
                     buttonActive={stage === "arming" || stage === "positioning" || stage === "enabled" || stage === "exposing"}
                 />
             </div>
+
+            <PatientConfirmationModal
+                isOpen={showCombinedPatientConfirm}
+                onClose={handleCombinedPatientClose}
+                onConfirm={() => setShowCombinedPatientConfirm(false)}
+                patientData={selectedPatient ? {
+                    name: selectedPatient.name,
+                    age: selectedPatient.age,
+                    gender: selectedPatient.gender,
+                    idNumber: "--",
+                    patientId: selectedPatient.patientId,
+                    checkType: currentScanSequenceName,
+                    scanSequence: currentScanSequenceName,
+                } : undefined}
+                scanData={patientConfirmScanData}
+                physicalGuide={{
+                    title: t("scanFlow.physicalGuide.title"),
+                    description: t("scanFlow.physicalGuide.twoStepDescription"),
+                    guideTitle,
+                    triggerLabel: t("scanFlow.physicalGuide.triggerLabel"),
+                    emergencyLabel: t("scanFlow.physicalGuide.referenceEmergency"),
+                    simulatedLabel: t("scanFlow.physicalGuide.referenceSimulated"),
+                    steps: physicalTriggerSteps,
+                    onHoldStart: startHold,
+                    onHoldEnd: stopHold,
+                    buttonActive: stage === "arming" || stage === "positioning" || stage === "enabled" || stage === "exposing",
+                }}
+            />
         </div>
     );
 }
