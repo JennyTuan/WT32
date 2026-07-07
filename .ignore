@@ -1,0 +1,48 @@
+# Dependency and build output
+.venv/
+venv/
+env/
+ui-review/node_modules/
+ui-review/dist/
+dist/
+build/
+package-lock.json
+ui-review/package-lock.json
+
+# Agent, test, and build artifacts
+.codex-run-logs/
+test-results/
+ui-review/build*.txt
+ui-review/*_output.txt
+ui-review/scan_results.txt
+ui-review/all_corrupted_lines.txt
+*.log
+
+# Raw/generated medical image data and image stacks
+backend/data/**/*.dcm
+backend/data/**/*.dicom
+backend/data/**/*.mha
+backend/data/dicom_out/
+backend/data/CatPhan604/
+backend/data/lihVr/
+backend/data/水/
+ui-review/public/dicom/
+ui-review/public/dicom-4d/
+ui-review/public/fourd-engineer/
+*.dcm
+*.dicom
+*.mha
+*.webp
+*.raw
+*.img
+
+# Large binary reference docs/assets
+*.docx
+*.xlsx
+*.7z
+*.zip
+
+# Local/editor noise
+.DS_Store
+.idea/
+.vscode/

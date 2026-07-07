@@ -39,13 +39,27 @@ ui-review/dist/
 # Logs
 *.log
 npm-debug.log*
+test-results/
+.codex-run-logs/
+ui-review/build*.txt
+ui-review/*_output.txt
+ui-review/scan_results.txt
+ui-review/all_corrupted_lines.txt
 
 # Medical image data
+*.dcm
 *.dicom
 *.img
 *.mha
 backend/data/images/
+backend/data/dicom_out/
+backend/data/CatPhan604/
+backend/data/lihVr/
+backend/data/水/
+ui-review/public/dicom/
+ui-review/public/dicom-4d/
 ui-review/public/fourd-engineer/
 
 # Large archives (too big for GitHub 100MB limit)
 *.7z
+*.zip

@@ -22,6 +22,18 @@ Do not generate text or behavior that implies:
 
 Use wording such as "estimated", "reference", "simulation", and "requires confirmation" for scan parameters, dose, contrast, and safety-related UI copy.
 
+## Generated And Bulky Files
+
+Do not read these by default:
+
+- `.venv/`, `ui-review/node_modules/`, `ui-review/dist/`
+- `.codex-run-logs/`, `test-results/`, build logs and temporary check files
+- Raw or generated medical image data under `backend/data/**`, `ui-review/public/dicom/`, `ui-review/public/dicom-4d/`, and `ui-review/public/fourd-engineer/`
+- DICOM/MHA/WebP image stacks such as `*.dcm`, `*.dicom`, `*.mha`, and generated slice assets
+- Large binary documents such as `*.docx`, `*.xlsx`, and archives
+
+Open these files only when the task is specifically about image loading, DICOM ingestion, demo data, or build-output comparison.
+
 ## Local Development
 
 Backend:
@@ -103,6 +115,13 @@ npm.cmd run build
 - Add comments for non-obvious business rules, CT domain constraints, safety wording, state transitions, and protocol/session copy boundaries.
 - Keep comments concise and useful. Avoid restating what the next line of code already says.
 - Use Simplified Chinese for new code comments.
+
+## Token Budget Notes
+
+- Start with this file, then `README.md`, then only the relevant backend router, frontend screen, or domain doc.
+- For frontend workflow changes, prefer `ui-review/src/App.tsx`, `ui-review/src/screens/`, and relevant helpers in `ui-review/src/lib/`.
+- For backend API changes, prefer `backend/main.py`, `backend/models.py`, `backend/schemas.py`, and the specific `backend/routers/*.py` module.
+- For CT terminology or safety-sensitive copy, read `docs/CT_DOMAIN_CONTEXT.md` before editing.
 
 ## Agent Skills
 
