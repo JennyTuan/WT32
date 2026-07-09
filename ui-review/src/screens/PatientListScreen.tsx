@@ -29,6 +29,7 @@ import {
 } from '../lib/patientsApi';
 import { generateMockScanResult } from '../lib/fourDTypes';
 import { saveSelectedScanSessionId } from '../lib/scanSession';
+import { clearSelectedExamWorkflowState } from '../lib/workflowNavigationState';
 import { useI18n } from '../lib/i18nContext';
 import type { TranslationKey } from '../lib/i18n';
 
@@ -56,7 +57,7 @@ const mapApiPatientToRecord = (p: ApiPatient, index: number, locale: string): Pa
     patientId: p.patient_id,
     name: p.name,
     gender: mapGenderToZh(p.gender),
-    age: calcAgeFromBirthDate(p.birth_date),
+    age: typeof p.age === "number" ? p.age : (p.birth_date ? calcAgeFromBirthDate(p.birth_date) : 0),
     checkStatus: mapStatusToZh(p.latest_scan_status),
     latestSessionId: p.latest_scan_session_id,
     latestAcquisitionType: p.latest_scan_acquisition_type,
@@ -509,6 +510,7 @@ const PatientListScreen = () => {
                                         age: selectedPatient.age,
                                     });
                                     if (activeTab === 'completed') {
+                                        clearSelectedExamWorkflowState();
                                         if (selectedPatient.latestSessionId) {
                                             saveSelectedScanSessionId(selectedPatient.latestSessionId);
                                         }
@@ -527,6 +529,7 @@ const PatientListScreen = () => {
                                             navigate('/image-viewer', { state: { offlineRecon: true } });
                                         }
                                     } else {
+                                        clearSelectedExamWorkflowState();
                                         navigate('/protocol-select');
                                     }
                                 }

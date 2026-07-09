@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -15,6 +17,14 @@ def _derive_full_name(last_name: str | None, first_name: str | None) -> str | No
     return "".join(parts) if parts else None
 
 
+def _calc_age_from_birth_date(birth_date: date) -> int:
+    today = date.today()
+    age = today.year - birth_date.year
+    if (today.month, today.day) < (birth_date.month, birth_date.day):
+        age -= 1
+    return max(0, age)
+
+
 def _serialize_patient(patient: models.Patient, latest: "LatestSessionInfo | None") -> dict:
     return {
         "id": patient.id,
@@ -24,6 +34,7 @@ def _serialize_patient(patient: models.Patient, latest: "LatestSessionInfo | Non
         "patient_id": patient.patient_id,
         "id_number": patient.id_number,
         "gender": patient.gender,
+        "age": patient.age,
         "birth_date": patient.birth_date,
         "height": patient.height,
         "weight": patient.weight,
@@ -123,8 +134,12 @@ def create_patient(payload: schemas.PatientCreate, db: Session = Depends(get_db)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Either name or last_name/first_name must be provided",
-            )
+        )
         data["name"] = derived
+
+    # 出生日期是可选信息；一旦提供，只允许由出生日期单向刷新年龄。
+    if data.get("birth_date"):
+        data["age"] = _calc_age_from_birth_date(data["birth_date"])
 
     patient = models.Patient(**data)
     db.add(patient)
@@ -151,6 +166,10 @@ def update_patient(patient_id: int, payload: schemas.PatientUpdate, db: Session 
 
     for field, value in updates.items():
         setattr(patient, field, value)
+
+    # 出生日期是更精确信息；更新生日时单向刷新年龄，不从年龄反推生日。
+    if "birth_date" in updates and updates["birth_date"] is not None:
+        patient.age = _calc_age_from_birth_date(updates["birth_date"])
 
     # Re-derive name when last/first updated but name wasn't explicitly set
     if ("last_name" in updates or "first_name" in updates) and "name" not in updates:

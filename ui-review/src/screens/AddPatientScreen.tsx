@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
-import { createPatient } from "../lib/patientsApi";
+import { calcAgeFromBirthDate, createPatient } from "../lib/patientsApi";
 import { useI18n } from "../lib/i18nContext";
 
 interface InputBoxProps {
@@ -25,6 +25,8 @@ const InputBox = ({ label, value, onChange, type = "text", placeholder = "", rea
             placeholder={placeholder}
             readOnly={readOnly}
             onChange={(e) => onChange?.(e.target.value)}
+            onInput={(e) => onChange?.(e.currentTarget.value)}
+            onBlur={(e) => onChange?.(e.currentTarget.value)}
             className="text-[14px] font-bold text-[#37474F] bg-transparent outline-none w-full"
         />
     </div>
@@ -83,6 +85,7 @@ const generateDefaultPatientId = (): string => {
 const emptyForm = () => ({
     lastName: "",
     firstName: "",
+    age: "",
     birthday: "",
     gender: "",
     height: "",
@@ -112,6 +115,14 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
         setFormData((prev) => ({ ...prev, [key]: value }));
     };
 
+    const updateBirthday = (value: string) => {
+        setFormData((prev) => ({
+            ...prev,
+            birthday: value,
+            age: value ? String(calcAgeFromBirthDate(value)) : prev.age,
+        }));
+    };
+
     const handleSave = async () => {
         setError(null);
 
@@ -123,8 +134,8 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
             setError(t("addPatient.errorPatientId"));
             return;
         }
-        if (!formData.birthday) {
-            setError(t("addPatient.errorBirthday"));
+        if (!formData.age.trim()) {
+            setError(t("addPatient.errorAgeRequired"));
             return;
         }
         if (!formData.gender) {
@@ -132,8 +143,13 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
             return;
         }
 
+        const ageNum = Number(formData.age);
         const heightNum = formData.height ? Number(formData.height) : null;
         const weightNum = formData.weight ? Number(formData.weight) : null;
+        if (!Number.isInteger(ageNum) || ageNum < 0) {
+            setError(t("addPatient.errorAgeNumber"));
+            return;
+        }
         if (heightNum !== null && Number.isNaN(heightNum)) {
             setError(t("addPatient.errorHeightNumber"));
             return;
@@ -151,7 +167,8 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
                 patient_id: formData.patientId.trim(),
                 id_number: formData.idNumber.trim() || undefined,
                 gender: formData.gender,
-                birth_date: formData.birthday,
+                age: ageNum,
+                birth_date: formData.birthday || null,
                 height: heightNum,
                 weight: weightNum,
             });
@@ -184,7 +201,8 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
                         <InputBox label={t("addPatient.lastName")} value={formData.lastName} onChange={update("lastName")} placeholder={t("addPatient.lastNamePlaceholder")} required />
                         <InputBox label={t("addPatient.firstName")} value={formData.firstName} onChange={update("firstName")} placeholder={t("addPatient.firstNamePlaceholder")} required />
 
-                        <InputBox label={t("addPatient.birthDate")} value={formData.birthday} onChange={update("birthday")} type="date" required />
+                        <InputBox label={t("addPatient.age")} value={formData.age} onChange={update("age")} type="number" placeholder={t("addPatient.agePlaceholder")} required />
+                        <InputBox label={t("addPatient.birthDate")} value={formData.birthday} onChange={updateBirthday} type="date" />
                         <SelectBox
                             label={t("addPatient.gender")}
                             value={formData.gender}

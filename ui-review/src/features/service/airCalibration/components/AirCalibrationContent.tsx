@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { useI18n } from "../../../../lib/i18nContext";
+import { formatCalibrationFocusLabel } from "../labels";
 import type {
   CalibrationRunStatus,
   CalibrationSelections,
@@ -73,8 +75,13 @@ export function AirCalibrationContent({
   toggleSelection,
   totalCombinations,
 }: AirCalibrationContentProps) {
+  const { t } = useI18n();
   const startButtonLabel =
-    runStatus === "paused" ? "Resume Calibration" : runStatus === "completed" ? "Retry Incomplete" : "Start Calibration";
+    runStatus === "paused"
+      ? t("service.airCalibration.action.resume")
+      : runStatus === "completed"
+        ? t("service.airCalibration.action.retryIncomplete")
+        : t("service.airCalibration.action.start");
 
   return (
     <section className="flex-1 bg-white border border-[#B0C4DE] rounded-md shadow-sm p-8 flex flex-col relative overflow-hidden h-full">
@@ -82,18 +89,20 @@ export function AirCalibrationContent({
         <div className="h-full flex flex-col">
           <div className="flex items-end justify-between gap-6 pb-4 border-b border-[#E7EEF7]">
             <div>
-              <div className="text-[20px] font-black text-[#31485E] tracking-[0.01em]">Calibration Parameters</div>
+              <div className="text-[20px] font-black text-[#31485E] tracking-[0.01em]">
+                {t("service.airCalibration.title")}
+              </div>
               <div className="text-[13px] text-[#7B92A8] mt-1">
-                Select parameter combinations for the current air calibration run.
+                {t("service.airCalibration.subtitle")}
               </div>
             </div>
             <div className="px-3 py-1.5 text-[12px] font-bold text-[#6B85A0]">
-              {totalCombinations} combos queued
+              {t("service.airCalibration.combosQueued", { count: totalCombinations })}
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-x-10 gap-y-8 mt-6 pb-2">
-            <ParameterGroup title="Rotation Speed">
+            <ParameterGroup title={t("service.airCalibration.rotationSpeed")}>
               {["1", "2", "0.75"].map((value) => (
                 <OptionButton
                   key={value}
@@ -105,11 +114,11 @@ export function AirCalibrationContent({
               ))}
             </ParameterGroup>
 
-            <ParameterGroup title="Focus">
+            <ParameterGroup title={t("service.airCalibration.focus")}>
               {["small", "big"].map((value) => (
                 <OptionButton
                   key={value}
-                  label={value}
+                  label={formatCalibrationFocusLabel(t, value)}
                   active={selectionState.focuses.includes(value)}
                   disabled={isCalibrating}
                   onClick={() => toggleSelection("focuses", value)}
@@ -117,7 +126,7 @@ export function AirCalibrationContent({
               ))}
             </ParameterGroup>
 
-            <ParameterGroup title="Voltage">
+            <ParameterGroup title={t("service.airCalibration.voltage")}>
               {["80", "100", "120", "140"].map((value) => (
                 <OptionButton
                   key={value}
@@ -129,7 +138,7 @@ export function AirCalibrationContent({
               ))}
             </ParameterGroup>
 
-            <ParameterGroup title="Collimator">
+            <ParameterGroup title={t("service.airCalibration.collimator")}>
               {["32*0.6"].map((value) => (
                 <OptionButton
                   key={value}
@@ -146,10 +155,14 @@ export function AirCalibrationContent({
 
       <div className="mt-4 pt-4 border-t border-[#E7EEF7] flex items-center justify-between">
         <div className="text-[14px] font-bold text-[#546E7A] leading-relaxed">
-          Queue Size:
+          {t("service.airCalibration.queueSize")}
           <span className="text-[#1E88E5] text-[18px] ml-1.5">{totalCombinations}</span>
           <span className="text-[#90A4AE] ml-2 text-[13px]">
-            ({completedCount} completed, {failedCount} failed, {pendingCount} pending)
+            {t("service.airCalibration.queueStatus", {
+              completed: completedCount,
+              failed: failedCount,
+              pending: pendingCount,
+            })}
           </span>
         </div>
         <div className="flex items-center gap-3">
@@ -162,7 +175,7 @@ export function AirCalibrationContent({
                 : "bg-white border-[#B0C4DE] text-[#546E7A] hover:bg-gray-50 active:scale-95"
             }`}
           >
-            Clear
+            {t("service.airCalibration.action.clear")}
           </button>
           <button
             onClick={handleStartCalibration}

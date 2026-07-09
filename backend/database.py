@@ -38,6 +38,33 @@ TOP0GRAM_DEFAULTS = {
     "dlp": None,
 }
 
+AXIAL_RECON_SLICE_OPTIONS = (0.6, 1.2, 2.4, 4.8, 9.6)
+HELICAL_RECON_SLICE_OPTIONS = tuple(float(value) for value in range(1, 11))
+
+
+def _nearest_recon_slice_thickness(series_kind: str, value: float | None) -> float | None:
+    if value is None:
+        return None
+    candidates = {
+        "axial": AXIAL_RECON_SLICE_OPTIONS,
+        "helical": HELICAL_RECON_SLICE_OPTIONS,
+    }.get(series_kind)
+    if not candidates:
+        return value
+    return min(candidates, key=lambda candidate: abs(candidate - value))
+
+
+def _normalize_recon_spacing(
+    series_kind: str,
+    slice_thickness: float | None,
+    increment: float | None,
+) -> tuple[float | None, float | None]:
+    # 规则只约束轴扫/螺旋重建参数；层厚和层间隔必须保持一致。
+    normalized = _nearest_recon_slice_thickness(series_kind, slice_thickness)
+    if series_kind in {"axial", "helical"}:
+        return normalized, normalized
+    return slice_thickness, increment
+
 GATING_PROTOCOL_NAMES = {
     "胸腔深吸气屏息（断层）",
     "胸腔深吸气屏息（螺旋）",
@@ -80,7 +107,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "helical",
         "params": {"kv": 120, "ma": 215, "slice_thickness": 5.0, "pitch": 0.5, "rotation_time": 1.0, "scan_length": 165.0, "fov": 250.0, "ctdi_vol": 59.4, "dlp": 1168.5, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 100, 40, 5.0, 5.0),
+            recon("软组织", "Brain", 512, 100, 40, 5.0, 5.0),
             recon("骨骼", "Bone2", 512, 3500, 600, 5.0, 5.0),
         ],
     },
@@ -92,7 +119,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "axial",
         "params": {"kv": 120, "ma": 200, "slice_thickness": 2.4, "slice_interval": 19.2, "rotation_time": 2.0, "scan_length": 173.0, "fov": 250.0, "ctdi_vol": 55.2, "dlp": 954.96, "step_count": 9, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 100, 600, 2.4, 2.4),
+            recon("软组织", "Brain", 512, 100, 600, 2.4, 2.4),
             recon("骨骼", "Bone2", 512, 3500, 600, 2.4, 2.4),
         ],
     },
@@ -104,7 +131,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "axial",
         "params": {"kv": 120, "ma": 200, "slice_thickness": 4.8, "slice_interval": 19.2, "rotation_time": 2.0, "scan_length": 173.0, "fov": 250.0, "ctdi_vol": 55.2, "dlp": 954.96, "step_count": 9, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 100, 600, 4.8, 4.8),
+            recon("软组织", "Brain", 512, 100, 600, 4.8, 4.8),
             recon("骨骼", "Bone2", 512, 3500, 600, 4.8, 4.8),
         ],
     },
@@ -127,7 +154,7 @@ HEAD_PROTOCOLS = [
         "scan_mode": "plain",
         "series_kind": "helical",
         "params": {"kv": 120, "ma": 130, "slice_thickness": 0.6, "pitch": 0.6, "rotation_time": 1.0, "scan_length": 98.0, "fov": 200.0, "ctdi_vol": 29.9, "dlp": 293.02, "auto_ma": False},
-        "recons": [recon("骨骼", "Bone2", 512, 4000, 600, 0.6, 0.6)],
+        "recons": [recon("骨骼", "Bone2", 512, 4000, 600, 1.0, 1.0)],
     },
     {
         "name": "IAC",
@@ -164,7 +191,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "axial",
         "params": {"kv": 120, "ma": 192, "slice_thickness": 2.4, "slice_interval": 19.2, "rotation_time": 1.0, "scan_length": 135.0, "fov": 200.0, "ctdi_vol": 26.5, "dlp": 357.75, "step_count": 7, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 100, 40, 2.4, 2.4),
+            recon("软组织", "Brain", 512, 100, 40, 2.4, 2.4),
             recon("骨骼", "Bone2", 512, 3500, 600, 2.4, 2.4),
         ],
     },
@@ -176,7 +203,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "axial",
         "params": {"kv": 120, "ma": 205, "slice_thickness": 2.4, "slice_interval": 19.2, "rotation_time": 1.0, "scan_length": 135.0, "fov": 200.0, "ctdi_vol": 32.1, "dlp": 433.35, "step_count": 7, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 100, 40, 2.4, 2.4),
+            recon("软组织", "Brain", 512, 100, 40, 2.4, 2.4),
             recon("骨骼", "Bone2", 512, 3500, 600, 2.4, 2.4),
         ],
     },
@@ -188,7 +215,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "axial",
         "params": {"kv": 120, "ma": 235, "slice_thickness": 2.4, "slice_interval": 19.2, "rotation_time": 1.0, "scan_length": 135.0, "fov": 200.0, "ctdi_vol": 36.8, "dlp": 496.8, "step_count": 7, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 100, 40, 2.4, 2.4),
+            recon("软组织", "Brain", 512, 100, 40, 2.4, 2.4),
             recon("骨骼", "Bone2", 512, 3500, 600, 2.4, 2.4),
         ],
     },
@@ -200,7 +227,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "helical",
         "params": {"kv": 120, "ma": 115, "slice_thickness": 3.0, "pitch": 0.6, "rotation_time": 1.0, "scan_length": 120.0, "fov": 200.0, "ctdi_vol": 26.5, "dlp": 318.0, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 100, 40, 3.0, 3.0),
+            recon("软组织", "Brain", 512, 100, 40, 3.0, 3.0),
             recon("骨骼", "Bone2", 512, 3500, 600, 3.0, 3.0),
         ],
     },
@@ -212,7 +239,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "helical",
         "params": {"kv": 120, "ma": 140, "slice_thickness": 3.0, "pitch": 0.6, "rotation_time": 1.0, "scan_length": 120.0, "fov": 200.0, "ctdi_vol": 32.2, "dlp": 386.4, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 100, 40, 3.0, 3.0),
+            recon("软组织", "Brain", 512, 100, 40, 3.0, 3.0),
             recon("骨骼", "Bone2", 512, 3500, 600, 3.0, 3.0),
         ],
     },
@@ -224,7 +251,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "helical",
         "params": {"kv": 120, "ma": 160, "slice_thickness": 3.0, "pitch": 0.6, "rotation_time": 1.0, "scan_length": 120.0, "fov": 200.0, "ctdi_vol": 36.8, "dlp": 441.6, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 100, 40, 3.0, 3.0),
+            recon("软组织", "Brain", 512, 100, 40, 3.0, 3.0),
             recon("骨骼", "Bone2", 512, 3500, 600, 3.0, 3.0),
         ],
     },
@@ -254,7 +281,7 @@ HEAD_PROTOCOLS = [
         "series_kind": "helical",
         "params": {"kv": 120, "ma": 255, "slice_thickness": 5.0, "pitch": 1.3, "rotation_time": 1.0, "scan_length": 305.0, "fov": 250.0, "ctdi_vol": 30.7, "dlp": 936.35, "auto_ma": False},
         "recons": [
-            recon("软组织", "Brain2", 512, 300, 40, 5.0, 5.0),
+            recon("软组织", "Brain", 512, 300, 40, 5.0, 5.0),
             recon("骨骼", "Bone2", 512, 300, 40, 5.0, 5.0),
         ],
     },
@@ -560,7 +587,7 @@ SPINE_PROTOCOLS = [
         "scan_mode": "plain",
         "series_kind": "axial",
         "params": {"kv": 120, "ma": 180, "slice_thickness": 2.4, "slice_interval": 19.2, "rotation_time": 1.0, "scan_length": 39.0, "fov": 200.0, "ctdi_vol": 15.0, "dlp": 58.5, "step_count": 2, "auto_ma": False},
-        "recons": [recon("骨骼", "S2", 512, 4000, 600, 2.4, None)],
+        "recons": [recon("骨骼", "S2", 512, 4000, 600, 2.4, 2.4)],
     },
 ]
 
@@ -1003,6 +1030,11 @@ def seed_protocol(db, models, protocol_seed: dict) -> None:
         db.add(models.GatingConfig(series_id=diagnostic_series.id, **gating_defaults))
 
     for recon_seed in protocol_seed["recons"]:
+        recon_slice_thickness, recon_increment = _normalize_recon_spacing(
+            protocol_seed["series_kind"],
+            recon_seed["slice_thickness"],
+            recon_seed["increment"],
+        )
         db.add(
             models.ReconSeries(
                 series_id=diagnostic_series.id,
@@ -1012,13 +1044,59 @@ def seed_protocol(db, models, protocol_seed: dict) -> None:
                 matrix=recon_seed["matrix"],
                 window_width=recon_seed["window_width"],
                 window_level=recon_seed["window_level"],
-                slice_thickness=recon_seed["slice_thickness"],
-                increment=recon_seed["increment"],
+                slice_thickness=recon_slice_thickness,
+                increment=recon_increment,
                 recon_fov=recon_seed.get("recon_fov"),
                 center_x=recon_seed.get("center_x"),
                 center_y=recon_seed.get("center_y"),
             )
         )
+
+
+def _sync_factory_brain_kernel_names(db, models) -> int:
+    # 旧版本地库可能已经种过 Brain2；只同步原厂模板，避免改写会话内编辑。
+    factory_series_ids = (
+        db.query(models.Series.id)
+        .join(models.Protocol, models.Series.protocol_id == models.Protocol.id)
+        .filter(models.Protocol.is_factory.is_(True))
+    )
+    return (
+        db.query(models.ReconSeries)
+        .filter(
+            models.ReconSeries.kernel == "Brain2",
+            models.ReconSeries.series_id.in_(factory_series_ids),
+        )
+        .update({models.ReconSeries.kernel: "Brain"}, synchronize_session=False)
+    )
+
+
+def _sync_factory_recon_spacing(db, models) -> int:
+    # 只同步默认模板的重建层厚/重建增量，避免改写已生成的扫描会话。
+    factory_recons = (
+        db.query(models.ReconSeries, models.Series.series_type)
+        .join(models.Series, models.ReconSeries.series_id == models.Series.id)
+        .join(models.Protocol, models.Series.protocol_id == models.Protocol.id)
+        .filter(
+            models.Protocol.is_factory.is_(True),
+            models.Series.series_type.in_(("axial", "helical")),
+        )
+        .all()
+    )
+    updated = 0
+    for recon_series, series_type in factory_recons:
+        next_slice_thickness, next_increment = _normalize_recon_spacing(
+            series_type,
+            recon_series.slice_thickness,
+            recon_series.increment,
+        )
+        if (
+            recon_series.slice_thickness != next_slice_thickness
+            or recon_series.increment != next_increment
+        ):
+            recon_series.slice_thickness = next_slice_thickness
+            recon_series.increment = next_increment
+            updated += 1
+    return updated
 
 
 def _seed_gating_protocols(db, models) -> None:
@@ -1113,11 +1191,138 @@ def _migrate_protocol_columns() -> None:
     """Add new Protocol columns to existing SQLite database (idempotent)."""
     from sqlalchemy import text
 
+    def foreign_key_targets(conn, table_name: str) -> set[str]:
+        return {
+            row[2]
+            for row in conn.execute(text(f"PRAGMA foreign_key_list({table_name})")).fetchall()
+        }
+
+    def rebuild_scan_sessions_patient_fk(conn) -> bool:
+        if "patients_old" not in foreign_key_targets(conn, "scan_sessions"):
+            return False
+
+        # SQLite 会在重命名父表时自动改写子表外键；这里关闭改写，避免临时表名再次泄漏。
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text("PRAGMA legacy_alter_table=ON"))
+        conn.execute(text("ALTER TABLE scan_sessions RENAME TO scan_sessions_fk_old"))
+        conn.execute(text(
+            "CREATE TABLE scan_sessions ("
+            "id INTEGER NOT NULL PRIMARY KEY, "
+            "patient_id INTEGER NOT NULL, "
+            "protocol_id INTEGER NOT NULL, "
+            "status VARCHAR(20) NOT NULL, "
+            "session_name VARCHAR(120), "
+            "name VARCHAR(100) NOT NULL, "
+            "body_part VARCHAR(100) NOT NULL, "
+            "age_group VARCHAR(20) NOT NULL, "
+            "patient_weight VARCHAR(50) NOT NULL, "
+            "patient_position VARCHAR(10) NOT NULL, "
+            "table_direction VARCHAR(10) NOT NULL, "
+            "scan_mode VARCHAR(20) NOT NULL, "
+            "description TEXT, "
+            "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, "
+            "started_at DATETIME, "
+            "completed_at DATETIME, "
+            "acquisition_type VARCHAR(20) NOT NULL DEFAULT 'regular', "
+            "FOREIGN KEY(patient_id) REFERENCES patients (id) ON DELETE RESTRICT, "
+            "FOREIGN KEY(protocol_id) REFERENCES protocols (id) ON DELETE RESTRICT)"
+        ))
+        conn.execute(text(
+            "INSERT INTO scan_sessions "
+            "(id, patient_id, protocol_id, status, session_name, name, body_part, age_group, "
+            "patient_weight, patient_position, table_direction, scan_mode, description, created_at, "
+            "started_at, completed_at, acquisition_type) "
+            "SELECT id, patient_id, protocol_id, status, session_name, name, body_part, age_group, "
+            "patient_weight, patient_position, table_direction, scan_mode, description, created_at, "
+            "started_at, completed_at, acquisition_type FROM scan_sessions_fk_old"
+        ))
+        conn.execute(text("DROP TABLE scan_sessions_fk_old"))
+        for sql in [
+            "CREATE INDEX IF NOT EXISTS ix_scan_sessions_age_group ON scan_sessions (age_group)",
+            "CREATE INDEX IF NOT EXISTS ix_scan_sessions_id ON scan_sessions (id)",
+            "CREATE INDEX IF NOT EXISTS ix_scan_sessions_name ON scan_sessions (name)",
+            "CREATE INDEX IF NOT EXISTS ix_scan_sessions_patient_id ON scan_sessions (patient_id)",
+            "CREATE INDEX IF NOT EXISTS ix_scan_sessions_protocol_id ON scan_sessions (protocol_id)",
+            "CREATE INDEX IF NOT EXISTS ix_scan_sessions_scan_mode ON scan_sessions (scan_mode)",
+            "CREATE INDEX IF NOT EXISTS ix_scan_sessions_status ON scan_sessions (status)",
+        ]:
+            conn.execute(text(sql))
+        conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        conn.commit()
+        return True
+
+    def rebuild_dose_logs_patient_fk(conn) -> bool:
+        if "patients_old" not in foreign_key_targets(conn, "dose_logs"):
+            return False
+
+        # dose_logs 是审计快照，重建表只修外键目标，不改写日志内容。
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text("PRAGMA legacy_alter_table=ON"))
+        conn.execute(text("ALTER TABLE dose_logs RENAME TO dose_logs_fk_old"))
+        conn.execute(text(
+            "CREATE TABLE dose_logs ("
+            "id INTEGER NOT NULL PRIMARY KEY, "
+            "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, "
+            "scanned_at DATETIME NOT NULL, "
+            "patient_id INTEGER, "
+            "scan_session_id INTEGER, "
+            "scan_session_series_id INTEGER, "
+            "patient_name_snapshot VARCHAR(100), "
+            "patient_id_snapshot VARCHAR(50), "
+            "protocol_name_snapshot VARCHAR(100), "
+            "series_order INTEGER, "
+            "series_type VARCHAR(20) NOT NULL, "
+            "series_label VARCHAR(100), "
+            "body_part VARCHAR(100), "
+            "scan_mode VARCHAR(20), "
+            "kv INTEGER, "
+            "ma FLOAT, "
+            "rotation_time FLOAT, "
+            "pitch FLOAT, "
+            "scan_length FLOAT, "
+            "collimator VARCHAR(50), "
+            "ctdi_vol FLOAT, "
+            "dlp FLOAT, "
+            "operator VARCHAR(50), "
+            "acquisition_type VARCHAR(20), "
+            "FOREIGN KEY(patient_id) REFERENCES patients (id) ON DELETE SET NULL, "
+            "FOREIGN KEY(scan_session_id) REFERENCES scan_sessions (id) ON DELETE SET NULL, "
+            "FOREIGN KEY(scan_session_series_id) REFERENCES scan_session_series (id) ON DELETE SET NULL)"
+        ))
+        conn.execute(text(
+            "INSERT INTO dose_logs "
+            "(id, created_at, scanned_at, patient_id, scan_session_id, scan_session_series_id, "
+            "patient_name_snapshot, patient_id_snapshot, protocol_name_snapshot, series_order, "
+            "series_type, series_label, body_part, scan_mode, kv, ma, rotation_time, pitch, "
+            "scan_length, collimator, ctdi_vol, dlp, operator, acquisition_type) "
+            "SELECT id, created_at, scanned_at, patient_id, scan_session_id, scan_session_series_id, "
+            "patient_name_snapshot, patient_id_snapshot, protocol_name_snapshot, series_order, "
+            "series_type, series_label, body_part, scan_mode, kv, ma, rotation_time, pitch, "
+            "scan_length, collimator, ctdi_vol, dlp, operator, acquisition_type FROM dose_logs_fk_old"
+        ))
+        conn.execute(text("DROP TABLE dose_logs_fk_old"))
+        for sql in [
+            "CREATE INDEX IF NOT EXISTS ix_dose_logs_id ON dose_logs (id)",
+            "CREATE INDEX IF NOT EXISTS ix_dose_logs_patient_id ON dose_logs (patient_id)",
+            "CREATE INDEX IF NOT EXISTS ix_dose_logs_patient_id_snapshot ON dose_logs (patient_id_snapshot)",
+            "CREATE INDEX IF NOT EXISTS ix_dose_logs_scan_session_id ON dose_logs (scan_session_id)",
+            "CREATE INDEX IF NOT EXISTS ix_dose_logs_scan_session_series_id ON dose_logs (scan_session_series_id)",
+            "CREATE INDEX IF NOT EXISTS ix_dose_logs_scanned_at ON dose_logs (scanned_at)",
+            "CREATE INDEX IF NOT EXISTS ix_dose_logs_series_type ON dose_logs (series_type)",
+        ]:
+            conn.execute(text(sql))
+        conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        conn.commit()
+        return True
+
     migrations = [
         # Patient additions
         "ALTER TABLE patients ADD COLUMN last_name VARCHAR(50)",
         "ALTER TABLE patients ADD COLUMN first_name VARCHAR(50)",
         "ALTER TABLE patients ADD COLUMN id_number VARCHAR(50)",
+        "ALTER TABLE patients ADD COLUMN age INTEGER",
         "ALTER TABLE protocols ADD COLUMN is_factory BOOLEAN NOT NULL DEFAULT 0",
         "ALTER TABLE protocols ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT 1",
         "ALTER TABLE protocols ADD COLUMN updated_at DATETIME",
@@ -1188,6 +1393,86 @@ def _migrate_protocol_columns() -> None:
             conn.commit()
         except Exception:
             pass
+
+        # 患者年龄改为独立必填字段；生日只作为可选精确信息。
+        try:
+            conn.execute(text(
+                "UPDATE patients SET age = CASE "
+                "WHEN birth_date IS NULL THEN 0 "
+                "WHEN ((CAST(strftime('%Y', 'now') AS INTEGER) - CAST(strftime('%Y', birth_date) AS INTEGER)) - "
+                "CASE WHEN strftime('%m-%d', 'now') < strftime('%m-%d', birth_date) THEN 1 ELSE 0 END) < 0 "
+                "THEN 0 ELSE ((CAST(strftime('%Y', 'now') AS INTEGER) - CAST(strftime('%Y', birth_date) AS INTEGER)) - "
+                "CASE WHEN strftime('%m-%d', 'now') < strftime('%m-%d', birth_date) THEN 1 ELSE 0 END) END "
+                "WHERE age IS NULL"
+            ))
+            conn.commit()
+        except Exception:
+            pass
+
+        try:
+            patient_columns = {
+                row[1]: {"notnull": bool(row[3])}
+                for row in conn.execute(text("PRAGMA table_info(patients)")).fetchall()
+            }
+            needs_patient_rebuild = (
+                patient_columns.get("birth_date", {}).get("notnull", False)
+                or not patient_columns.get("age", {}).get("notnull", False)
+            )
+            if needs_patient_rebuild:
+                conn.execute(text("PRAGMA foreign_keys=OFF"))
+                conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                conn.execute(text("ALTER TABLE patients RENAME TO patients_old"))
+                conn.execute(text(
+                    "CREATE TABLE patients ("
+                    "id INTEGER NOT NULL PRIMARY KEY, "
+                    "name VARCHAR(100) NOT NULL, "
+                    "last_name VARCHAR(50), "
+                    "first_name VARCHAR(50), "
+                    "patient_id VARCHAR(50) NOT NULL, "
+                    "id_number VARCHAR(50), "
+                    "gender VARCHAR(20) NOT NULL, "
+                    "age INTEGER NOT NULL, "
+                    "birth_date DATE, "
+                    "height FLOAT, "
+                    "weight FLOAT, "
+                    "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL)"
+                ))
+                conn.execute(text(
+                    "INSERT INTO patients "
+                    "(id, name, last_name, first_name, patient_id, id_number, gender, age, birth_date, height, weight, created_at) "
+                    "SELECT id, name, last_name, first_name, patient_id, id_number, gender, "
+                    "COALESCE(age, 0), birth_date, height, weight, created_at FROM patients_old"
+                ))
+                conn.execute(text("DROP TABLE patients_old"))
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_patients_patient_id ON patients (patient_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_patients_id ON patients (id)"))
+                conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
+                conn.commit()
+        except Exception:
+            try:
+                conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
+                conn.commit()
+            except Exception:
+                pass
+
+        try:
+            fixed_scan_session_fk = rebuild_scan_sessions_patient_fk(conn)
+            fixed_dose_log_fk = rebuild_dose_logs_patient_fk(conn)
+            if fixed_scan_session_fk or fixed_dose_log_fk:
+                print(
+                    "Rebuilt patient foreign keys: "
+                    f"scan_sessions={fixed_scan_session_fk}, dose_logs={fixed_dose_log_fk}"
+                )
+        except Exception:
+            try:
+                conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
+                conn.commit()
+            except Exception:
+                pass
+            raise
 
         # Fix: reset user-created protocols that were wrongly marked as factory
         # Seeded protocols are created with is_factory=True in init_db,
@@ -1926,11 +2211,20 @@ def init_db() -> None:
             for protocol_seed in missing_protocols:
                 seed_protocol(db, models, protocol_seed)
 
-            if missing_protocols or deleted_stale_protocols:
+            renamed_brain_kernels = _sync_factory_brain_kernel_names(db, models)
+            normalized_recon_spacing = _sync_factory_recon_spacing(db, models)
+            if (
+                missing_protocols
+                or deleted_stale_protocols
+                or renamed_brain_kernels
+                or normalized_recon_spacing
+            ):
                 db.commit()
                 print(
                     f"Synced seeded protocols: {len(missing_protocols)} added, "
-                    f"{deleted_stale_protocols} stale removed"
+                    f"{deleted_stale_protocols} stale removed, "
+                    f"{renamed_brain_kernels} Brain kernels renamed, "
+                    f"{normalized_recon_spacing} recon spacing normalized"
                 )
             _seed_gating_protocols(db, models)
             print(f"Seeded protocols: {db.query(models.Protocol).count()}")
@@ -1940,6 +2234,7 @@ def init_db() -> None:
             name="Test Patient",
             patient_id="P20260330001",
             gender="male",
+            age=38,
             birth_date=date(1988, 5, 12),
             height=175.0,
             weight=72.0,

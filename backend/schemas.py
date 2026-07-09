@@ -10,6 +10,10 @@ class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+FOV_MIN_MM = 50.0
+FOV_MAX_MM = 750.0
+
+
 class PatientBase(BaseModel):
     name: str
     last_name: Optional[str] = None
@@ -17,7 +21,8 @@ class PatientBase(BaseModel):
     patient_id: str
     id_number: Optional[str] = None
     gender: str
-    birth_date: date
+    age: int = Field(ge=0)
+    birth_date: Optional[date] = None
     height: Optional[float] = None
     weight: Optional[float] = None
 
@@ -31,7 +36,8 @@ class PatientCreate(BaseModel):
     patient_id: str
     id_number: Optional[str] = None
     gender: str
-    birth_date: date
+    age: int = Field(ge=0)
+    birth_date: Optional[date] = None
     height: Optional[float] = None
     weight: Optional[float] = None
 
@@ -43,6 +49,7 @@ class PatientUpdate(BaseModel):
     patient_id: Optional[str] = None
     id_number: Optional[str] = None
     gender: Optional[str] = None
+    age: Optional[int] = Field(default=None, ge=0)
     birth_date: Optional[date] = None
     height: Optional[float] = None
     weight: Optional[float] = None
@@ -177,7 +184,7 @@ class TopogramParamBase(BaseModel):
 
 
 class TopogramParamCreate(TopogramParamBase):
-    pass
+    fov: float = Field(default=500.0, ge=FOV_MIN_MM, le=FOV_MAX_MM)
 
 
 class TopogramParamUpdate(BaseModel):
@@ -186,7 +193,7 @@ class TopogramParamUpdate(BaseModel):
     ma: Optional[int] = None
     scan_length: Optional[float] = None
     tube_angle: Optional[float] = None
-    fov: Optional[float] = None
+    fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
     scan_direction: Optional[str] = None
     dom: Optional[str] = None
@@ -218,7 +225,7 @@ class HelicalParamBase(BaseModel):
 
 
 class HelicalParamCreate(HelicalParamBase):
-    pass
+    fov: float = Field(ge=FOV_MIN_MM, le=FOV_MAX_MM)
 
 
 class HelicalParamUpdate(BaseModel):
@@ -229,7 +236,7 @@ class HelicalParamUpdate(BaseModel):
     pitch: Optional[float] = None
     rotation_time: Optional[float] = None
     scan_length: Optional[float] = None
-    fov: Optional[float] = None
+    fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
     scan_direction: Optional[str] = None
     dom: Optional[str] = None
@@ -265,7 +272,7 @@ class AxialParamBase(BaseModel):
 
 
 class AxialParamCreate(AxialParamBase):
-    pass
+    fov: float = Field(ge=FOV_MIN_MM, le=FOV_MAX_MM)
 
 
 class AxialParamUpdate(BaseModel):
@@ -276,7 +283,7 @@ class AxialParamUpdate(BaseModel):
     slice_interval: Optional[float] = None
     rotation_time: Optional[float] = None
     scan_length: Optional[float] = None
-    fov: Optional[float] = None
+    fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
     scan_direction: Optional[str] = None
     dom: Optional[str] = None
@@ -308,7 +315,7 @@ class ReconSeriesBase(BaseModel):
 
 
 class ReconSeriesCreate(ReconSeriesBase):
-    pass
+    recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
 
 
 class ReconSeriesUpdate(BaseModel):
@@ -321,7 +328,7 @@ class ReconSeriesUpdate(BaseModel):
     window_level: Optional[int] = None
     slice_thickness: Optional[float] = None
     increment: Optional[float] = None
-    recon_fov: Optional[float] = None
+    recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     center_x: Optional[float] = None
     center_y: Optional[float] = None
 
@@ -542,7 +549,7 @@ class ScanSessionTopogramParamUpdate(BaseModel):
     ma: Optional[int] = None
     scan_length: Optional[float] = None
     tube_angle: Optional[float] = None
-    fov: Optional[float] = None
+    fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
     scan_direction: Optional[str] = None
     dom: Optional[str] = None
@@ -573,7 +580,7 @@ class ScanSessionHelicalParamUpdate(BaseModel):
     pitch: Optional[float] = None
     rotation_time: Optional[float] = None
     scan_length: Optional[float] = None
-    fov: Optional[float] = None
+    fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
     scan_direction: Optional[str] = None
     dom: Optional[str] = None
@@ -612,7 +619,7 @@ class ScanSessionAxialParamUpdate(BaseModel):
     slice_interval: Optional[float] = None
     rotation_time: Optional[float] = None
     scan_length: Optional[float] = None
-    fov: Optional[float] = None
+    fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
     scan_direction: Optional[str] = None
     dom: Optional[str] = None
@@ -655,7 +662,7 @@ class ScanSessionReconSeriesCreate(BaseModel):
     window_level: int = 40
     slice_thickness: float = 1.0
     increment: Optional[float] = None
-    recon_fov: Optional[float] = None
+    recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     center_x: Optional[float] = None
     center_y: Optional[float] = None
 
@@ -669,7 +676,7 @@ class ScanSessionReconSeriesUpdate(BaseModel):
     window_level: Optional[int] = None
     slice_thickness: Optional[float] = None
     increment: Optional[float] = None
-    recon_fov: Optional[float] = None
+    recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     center_x: Optional[float] = None
     center_y: Optional[float] = None
 

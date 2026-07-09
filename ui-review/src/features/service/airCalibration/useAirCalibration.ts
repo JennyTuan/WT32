@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import type { TranslationKey } from "../../../lib/i18n";
+import { useI18n } from "../../../lib/i18nContext";
+import { formatCalibrationCombo } from "./labels";
 import {
   buildCalibrationCombos,
   clearAirCalibrationState,
@@ -37,30 +40,16 @@ const WAIT_DURATIONS: Record<
 
 const ABORT_ERROR_NAME = "AirCalibrationAbort";
 
-const buildResultSummary = (combo: CalibrationCombo) =>
-  `Air calibration complete for ${combo.rotationSpeed}s / ${combo.focus} / ${combo.voltage}kV / ${combo.collimator}`;
-
-const buildStageLabel = (stage: CalibrationExecutionStage) => {
-  switch (stage) {
-    case "validating":
-      return "Checking device state";
-    case "configuring":
-      return "Setting scan parameters";
-    case "scanning":
-      return "Running air scan";
-    case "waiting-data":
-      return "Waiting for detector data";
-    case "computing":
-      return "Computing calibration result";
-    case "saving":
-      return "Saving calibration output";
-    case "paused":
-      return "Calibration paused";
-    case "completed":
-      return "Calibration completed";
-    default:
-      return "Ready";
-  }
+const STAGE_LABEL_KEYS: Record<CalibrationExecutionStage, TranslationKey> = {
+  idle: "service.airCalibration.stage.ready",
+  validating: "service.airCalibration.stage.validating",
+  configuring: "service.airCalibration.stage.configuring",
+  scanning: "service.airCalibration.stage.scanning",
+  "waiting-data": "service.airCalibration.stage.waitingData",
+  computing: "service.airCalibration.stage.computing",
+  saving: "service.airCalibration.stage.saving",
+  paused: "service.airCalibration.stage.paused",
+  completed: "service.airCalibration.stage.completed",
 };
 
 const createAbortError = () => {
@@ -91,6 +80,7 @@ const sleep = (durationMs: number, signal: AbortSignal) =>
   });
 
 export function useAirCalibration() {
+  const { t } = useI18n();
   const persistedState = typeof window === "undefined" ? null : loadAirCalibrationState();
   const [selectionState, setSelectionState] = useState<CalibrationSelections>(
     persistedState?.selections ?? INITIAL_SELECTIONS,
@@ -134,7 +124,7 @@ export function useAirCalibration() {
   const pendingCount = Math.max(0, totalCombinations - completedCount - failedCount);
   const calibrationProgress = totalCombinations === 0 ? 0 : (completedCount / totalCombinations) * 100;
   const isCalibrating = runStatus === "running";
-  const stageLabel = buildStageLabel(executionStage);
+  const stageLabel = t(STAGE_LABEL_KEYS[executionStage]);
 
   useEffect(() => {
     saveAirCalibrationState({
@@ -202,7 +192,7 @@ export function useAirCalibration() {
       combo,
       status: "success",
       timestamp: new Date().toISOString(),
-      resultSummary: buildResultSummary(combo),
+      resultSummary: t("service.airCalibration.result.success", { combo: formatCalibrationCombo(t, combo) }),
     } satisfies CalibrationComboRecord;
   };
 
@@ -241,14 +231,14 @@ export function useAirCalibration() {
             throw error;
           }
 
-          const message = error instanceof Error ? error.message : "Unknown calibration failure";
+          const message = error instanceof Error ? error.message : t("service.airCalibration.error.unknownFailure");
           setCompletedCombos((prev) => ({
             ...prev,
             [comboKey]: {
               combo,
               status: "failed",
               timestamp: new Date().toISOString(),
-              resultSummary: `Calibration failed for ${combo.rotationSpeed}s / ${combo.focus} / ${combo.voltage}kV / ${combo.collimator}`,
+              resultSummary: t("service.airCalibration.result.failed", { combo: formatCalibrationCombo(t, combo) }),
               error: message,
             },
           }));

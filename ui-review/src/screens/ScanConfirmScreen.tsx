@@ -30,7 +30,6 @@ import {
 } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { isHeadDualScoutWorkflow, mergeDualScoutPlanSequences } from "../lib/headDualScoutDemo";
-import { estimateDose } from "../lib/doseEstimate";
 import AppHeader from "../components/AppHeader";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
@@ -47,13 +46,6 @@ interface ProtocolGroup {
     name: string;
     sequences: Sequence[];
 }
-
-type DualScoutDoseSeed = {
-    refMa: number;
-    refKv: number;
-    refLength: number;
-    refCtdi: number | null;
-};
 
 type ScanConfirmScreenProps = {
     activeScoutStepIndex?: number;
@@ -485,7 +477,6 @@ const ScanConfirmScreen = ({
     const [dualScoutKv, setDualScoutKv] = useState<number | null>(null);
     const [dualScoutScanLength, setDualScoutScanLength] = useState<number | null>(null);
     const [editingDualField, setEditingDualField] = useState<"ma" | "kv" | "scanLength" | null>(null);
-    const [dualScoutDoseSeed, setDualScoutDoseSeed] = useState<DualScoutDoseSeed | null>(null);
 
     // Data structure with sequences at the same level
     const [groups, setGroups] = useState<ProtocolGroup[]>([
@@ -599,40 +590,18 @@ const ScanConfirmScreen = ({
             ma: topos[0].ma,
             kv: topos[0].kv,
             scanLength: topos[0].scan_length,
-            ctdiVol: topos[0].ctdi_vol ?? null,
         };
     }, [isHeadDualScoutFlow, scanSession]);
 
     // Seed editable dual-scout fields from session once it loads.
     useEffect(() => {
         if (!dualScoutTopogramIds) return;
-        setDualScoutDoseSeed({
-            refMa: dualScoutTopogramIds.ma,
-            refKv: dualScoutTopogramIds.kv,
-            refLength: dualScoutTopogramIds.scanLength,
-            refCtdi: dualScoutTopogramIds.ctdiVol,
-        });
         setDualScoutMa((prev) => prev ?? dualScoutTopogramIds.ma);
         setDualScoutKv((prev) => prev ?? dualScoutTopogramIds.kv);
         setDualScoutScanLength((prev) => prev ?? dualScoutTopogramIds.scanLength);
         setDualScoutApAngle((prev) => (prev === 0 && dualScoutTopogramIds.apAngle !== 0 ? dualScoutTopogramIds.apAngle : prev));
         setDualScoutLatAngle((prev) => (prev === 90 && dualScoutTopogramIds.latAngle !== 90 ? dualScoutTopogramIds.latAngle : prev));
     }, [dualScoutTopogramIds]);
-
-    const dualScoutComputedDose = useMemo(() => {
-        if (!isHeadDualScoutFlow || !dualScoutDoseSeed || dualScoutMa == null || dualScoutKv == null || dualScoutScanLength == null) {
-            return null;
-        }
-        return estimateDose({
-            current: { ma: dualScoutMa, kv: dualScoutKv, scan_length: dualScoutScanLength },
-            reference: {
-                ma: dualScoutDoseSeed.refMa,
-                kv: dualScoutDoseSeed.refKv,
-                scan_length: dualScoutDoseSeed.refLength,
-                ctdi_vol: dualScoutDoseSeed.refCtdi,
-            },
-        });
-    }, [isHeadDualScoutFlow, dualScoutDoseSeed, dualScoutMa, dualScoutKv, dualScoutScanLength]);
 
     const persistDualScoutPatch = useCallback(
         (patch: Partial<{ ma: number; kv: number; scan_length: number; tube_angle: number }>, target: "shared" | "ap" | "lat") => {
@@ -1492,14 +1461,14 @@ const ScanConfirmScreen = ({
                                     <div className="p-1.5 bg-[#FFFBEB] border border-[#FDE68A]/80 rounded-md flex flex-col items-center justify-center shadow-sm">
                                         <span className="text-[9px] font-black text-[#B45309] uppercase tracking-tighter">CTDIvol</span>
                                         <span className="text-[13px] font-black text-[#B45309] mt-[1px]">
-                                            {isHeadDualScoutFlow && dualScoutComputedDose ? dualScoutComputedDose.ctdi_vol.toFixed(2) : scoutDoseDisplayParams.doseCtdiVol}
+                                            {scoutDoseDisplayParams.doseCtdiVol}
                                         </span>
                                     </div>
 
                                     <div className="p-1.5 bg-[#FFFBEB] border border-[#FDE68A]/80 rounded-md flex flex-col items-center justify-center shadow-sm">
                                         <span className="text-[9px] font-black text-[#B45309] uppercase tracking-tighter">DLP</span>
                                         <span className="text-[13px] font-black text-[#B45309] mt-[1px]">
-                                            {isHeadDualScoutFlow && dualScoutComputedDose ? dualScoutComputedDose.dlp.toFixed(2) : scoutDoseDisplayParams.doseDlp}
+                                            {scoutDoseDisplayParams.doseDlp}
                                         </span>
                                     </div>
 

@@ -23,7 +23,6 @@ import AppHeader from "../components/AppHeader";
 import { saveSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import { estimateDose } from "../lib/doseEstimate";
 import {
-    clearSelectedScanSessionId,
     createScanSessionForSelectedPatient,
     deleteSelectedScanSessionSeries,
     duplicateSelectedScanSessionSeries,
@@ -38,8 +37,10 @@ import {
     updateSelectedScanSessionTopogramParam,
 } from "../lib/scanSession";
 import type { ApiScanSessionDetail } from "../lib/scanSession";
+import { clearSelectedExamWorkflowState } from "../lib/workflowNavigationState";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
+import { parseFovValue } from "../lib/fov";
 
 const PROTOCOL_SELECT_RESUME_KEY = "protocolSelectResume";
 const PROTOCOL_SELECT_SELECTED_IDS_KEY = "protocolSelectSelectedIds";
@@ -131,6 +132,7 @@ type ApiReconSeries = {
     window_level: number;
     slice_thickness: number;
     increment?: number | null;
+    recon_fov?: number | null;
 };
 
 type ApiFourDConfig = {
@@ -438,6 +440,7 @@ const mapApiSeriesToRawSequence = (
                 windowWidth: recon.window_width,
                 matrix: recon.matrix,
                 ...(recon.increment !== null && recon.increment !== undefined ? { interval: recon.increment } : {}),
+                ...(recon.recon_fov !== null && recon.recon_fov !== undefined ? { fov: recon.recon_fov } : {}),
             },
         })),
     };
@@ -629,7 +632,7 @@ export const protocolCaseData: RawProtocolCase[] = [
                         params: {
                             sliceThickness: 5,
                             interval: 5,
-                            kernel: "Brain2",
+                            kernel: "Brain",
                             windowCenter: 40,
                             windowWidth: 100,
                             fov: 250,
@@ -710,7 +713,7 @@ export const protocolCaseData: RawProtocolCase[] = [
                         params: {
                             sliceThickness: 2.4,
                             interval: 2.4,
-                            kernel: "Brain2",
+                            kernel: "Brain",
                             windowCenter: 600,
                             windowWidth: 100,
                             fov: 250,
@@ -920,7 +923,15 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const [activeTab, setActiveTab] = useState<"scan" | "recon">("scan");
     const [libraryTab, setLibraryTab] = useState<"spiral" | "axial">("spiral");
     const [selectedBodyRegion, setSelectedBodyRegion] = useState<BodyRegion>(bodyRegions[0]);
-    const [selectedProtocolIds, setSelectedProtocolIds] = useState<number[]>(() => loadStoredSelectedProtocolIds());
+    const [shouldResumePreviousSession] = useState(() => {
+        if (typeof window === "undefined") return false;
+        const shouldResume = sessionStorage.getItem(PROTOCOL_SELECT_RESUME_KEY) === "1";
+        sessionStorage.removeItem(PROTOCOL_SELECT_RESUME_KEY);
+        return shouldResume;
+    });
+    const [selectedProtocolIds, setSelectedProtocolIds] = useState<number[]>(() => (
+        shouldResumePreviousSession ? loadStoredSelectedProtocolIds() : []
+    ));
     const [positionGroupIndex, setPositionGroupIndex] = useState<0 | 1>(0);
     const [planListOpen, setPlanListOpen] = useState(true);
     const [collapsedPlanIds, setCollapsedPlanIds] = useState<string[]>([]);
@@ -932,10 +943,14 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         if (!patient || !Number.isFinite(patient.age) || patient.age <= 0) return "adult";
         return patient.age < 18 ? "child" : "adult";
     });
-    const [selectedPlanId, setSelectedPlanId] = useState(() => loadStoredSelectedPlanId());
+    const [selectedPlanId, setSelectedPlanId] = useState(() => (
+        shouldResumePreviousSession ? loadStoredSelectedPlanId() : ""
+    ));
 
     // 选中序列 ID 和重建方案索引
-    const [selectedSeqId, setSelectedSeqId] = useState(() => loadStoredSelectedSeqId());
+    const [selectedSeqId, setSelectedSeqId] = useState(() => (
+        shouldResumePreviousSession ? loadStoredSelectedSeqId() : ""
+    ));
     const [selectedReconIndex, setSelectedReconIndex] = useState(0);
 
     // 多选删除相关
@@ -1078,20 +1093,12 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         return region;
     };
 
-    const [shouldResumePreviousSession] = useState(() => {
-        if (typeof window === "undefined") return false;
-        const shouldResume = sessionStorage.getItem(PROTOCOL_SELECT_RESUME_KEY) === "1";
-        sessionStorage.removeItem(PROTOCOL_SELECT_RESUME_KEY);
-        return shouldResume;
-    });
-
     useEffect(() => {
         if (shouldResumePreviousSession) {
             setDraftScanProtocol(loadDraftProtocolFromStorage());
             return;
         }
-        clearSelectedScanSessionId();
-        localStorage.removeItem("selectedProtocol");
+        clearSelectedExamWorkflowState();
         setDraftScanProtocol(null);
     }, [shouldResumePreviousSession]);
 
@@ -1717,7 +1724,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? topo.kv;
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? topo.scan_length;
                 if (label === "ANG") patch.tube_angle = parseEditableNumber(rawValue) ?? topo.tube_angle;
-                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? topo.fov;
+                if (label === "FOV") patch.fov = parseFovValue(rawValue, topo.fov);
                 if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
                 if (Object.keys(patch).length > 0) {
                     await updateSelectedScanSessionTopogramParam(topo.id, patch);
@@ -1732,7 +1739,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? helical.ma;
                 if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? helical.kv;
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? helical.scan_length;
-                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? helical.fov;
+                if (label === "FOV") patch.fov = parseFovValue(rawValue, helical.fov);
                 if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
                 if (Object.keys(patch).length > 0) {
                     // Recompute CTDIvol/DLP so the session (and the dose_log
@@ -1765,7 +1772,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? axial.ma;
                 if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? axial.kv;
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? axial.scan_length;
-                if (label === "FOV") patch.fov = parseEditableNumber(rawValue) ?? axial.fov;
+                if (label === "FOV") patch.fov = parseFovValue(rawValue, axial.fov);
                 if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
                 if (Object.keys(patch).length > 0) {
                     const seedAxial = seedSeries?.axial_param ?? null;
@@ -1832,9 +1839,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             if (label === "WC") patch.window_level = parseEditableNumber(rawValue) ?? activeSessionRecon.window_level;
             if (label === "WW") patch.window_width = parseEditableNumber(rawValue) ?? activeSessionRecon.window_width;
             if (label === "MAT") patch.matrix = parseEditableNumber(rawValue) ?? activeSessionRecon.matrix;
-            if (label === "FOV") {
-                return;
-            }
+            if (label === "FOV") patch.recon_fov = parseFovValue(rawValue, activeSessionRecon.recon_fov ?? 250);
 
             if (Object.keys(patch).length > 0) {
                 await updateSelectedScanSessionReconSeries(activeSessionRecon.id, patch);

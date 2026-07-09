@@ -39,6 +39,10 @@ import {
     updateSelectedScanSessionAxialParam,
     updateSelectedScanSessionReconSeries
 } from "../../../lib/scanSession";
+import { clampFov } from "../../../lib/fov";
+
+const parseDraftFov = (value: string, fallback: number) => clampFov(parseNumber(value) ?? fallback);
+const normalizeFov = (value: number | null | undefined, fallback = 250) => clampFov(value ?? fallback);
 
 export function useProtocolDetail() {
     const navigate = useNavigate();
@@ -383,7 +387,7 @@ export function useProtocolDetail() {
                         ma: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.ma) ?? s.topogram_param.ma) : s.topogram_param.ma,
                         scan_length: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.topogram_param.scan_length) : s.topogram_param.scan_length,
                         tube_angle: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.tubeAngle) ?? s.topogram_param.tube_angle) : s.topogram_param.tube_angle,
-                        fov: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.topogram_param.fov) : s.topogram_param.fov,
+                        fov: (isSeriesActive && selection.type === "series") ? parseDraftFov(seriesDraft.fov, s.topogram_param.fov) : normalizeFov(s.topogram_param.fov),
                         collimator: (isSeriesActive && selection.type === "series") ? (seriesDraft.collimator || s.topogram_param.collimator) : s.topogram_param.collimator,
                         scan_direction: (isSeriesActive && selection.type === "series") ? (seriesDraft.scanDirection || s.topogram_param.scan_direction) : s.topogram_param.scan_direction,
                         dom: (isSeriesActive && selection.type === "series") ? (seriesDraft.dom || s.topogram_param.dom) : s.topogram_param.dom,
@@ -395,7 +399,7 @@ export function useProtocolDetail() {
                         pitch: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.pitch) ?? s.helical_param.pitch) : s.helical_param.pitch,
                         rotation_time: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.rotationTime) ?? s.helical_param.rotation_time) : s.helical_param.rotation_time,
                         scan_length: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.helical_param.scan_length) : s.helical_param.scan_length,
-                        fov: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.helical_param.fov) : s.helical_param.fov,
+                        fov: (isSeriesActive && selection.type === "series") ? parseDraftFov(seriesDraft.fov, s.helical_param.fov) : normalizeFov(s.helical_param.fov),
                         auto_ma: s.helical_param.auto_ma,
                         collimator: (isSeriesActive && selection.type === "series") ? (seriesDraft.collimator || s.helical_param.collimator) : s.helical_param.collimator,
                         scan_direction: (isSeriesActive && selection.type === "series") ? (seriesDraft.scanDirection || s.helical_param.scan_direction) : s.helical_param.scan_direction,
@@ -408,7 +412,7 @@ export function useProtocolDetail() {
                         slice_interval: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.sliceInterval) ?? s.axial_param.slice_interval) : s.axial_param.slice_interval,
                         rotation_time: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.rotationTime) ?? s.axial_param.rotation_time) : s.axial_param.rotation_time,
                         scan_length: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.scanLength) ?? s.axial_param.scan_length) : s.axial_param.scan_length,
-                        fov: (isSeriesActive && selection.type === "series") ? (parseNumber(seriesDraft.fov) ?? s.axial_param.fov) : s.axial_param.fov,
+                        fov: (isSeriesActive && selection.type === "series") ? parseDraftFov(seriesDraft.fov, s.axial_param.fov) : normalizeFov(s.axial_param.fov),
                         step_count: s.axial_param.step_count,
                         collimator: (isSeriesActive && selection.type === "series") ? (seriesDraft.collimator || s.axial_param.collimator) : s.axial_param.collimator,
                         scan_direction: (isSeriesActive && selection.type === "series") ? (seriesDraft.scanDirection || s.axial_param.scan_direction) : s.axial_param.scan_direction,
@@ -425,7 +429,7 @@ export function useProtocolDetail() {
                             window_level: isReconActive ? (parseNumber(reconDraft.windowLevel) ?? r.window_level) : r.window_level,
                             slice_thickness: isReconActive ? (parseNumber(reconDraft.sliceThickness) ?? r.slice_thickness) : r.slice_thickness,
                             increment: isReconActive ? (parseNumber(reconDraft.increment) ?? r.increment) : r.increment,
-                            recon_fov: isReconActive ? (parseNumber(reconDraft.reconFov) ?? r.recon_fov ?? 250) : (r.recon_fov ?? 250),
+                            recon_fov: isReconActive ? parseDraftFov(reconDraft.reconFov, r.recon_fov ?? 250) : normalizeFov(r.recon_fov),
                             center_x: isReconActive ? (parseNumber(reconDraft.centerX) ?? r.center_x ?? 0) : (r.center_x ?? 0),
                             center_y: isReconActive ? (parseNumber(reconDraft.centerY) ?? r.center_y ?? 0) : (r.center_y ?? 0),
                         };
@@ -487,8 +491,10 @@ export function useProtocolDetail() {
                 for (const [index, s] of series.entries()) {
                     await createScanSessionSeries(savedSession.id, {
                         series_order: index + 1, series_type: s.series_type, series_label: s.series_label,
-                        topogram_param: s.topogram_param, helical_param: s.helical_param, axial_param: s.axial_param,
-                        recon_series: s.recon_series,
+                        topogram_param: s.topogram_param ? { ...s.topogram_param, fov: normalizeFov(s.topogram_param.fov) } : s.topogram_param,
+                        helical_param: s.helical_param ? { ...s.helical_param, fov: normalizeFov(s.helical_param.fov) } : s.helical_param,
+                        axial_param: s.axial_param ? { ...s.axial_param, fov: normalizeFov(s.axial_param.fov) } : s.axial_param,
+                        recon_series: s.recon_series.map((r) => ({ ...r, recon_fov: normalizeFov(r.recon_fov) })),
                     });
                 }
                 navigate(-1); return;
@@ -527,9 +533,9 @@ export function useProtocolDetail() {
                         series_order: i + 1,
                         series_type: s.series_type,
                         series_label: s.series_label,
-                        topogram_param: s.topogram_param,
-                        helical_param: s.helical_param,
-                        axial_param: s.axial_param,
+                        topogram_param: s.topogram_param ? { ...s.topogram_param, fov: normalizeFov(s.topogram_param.fov) } : s.topogram_param,
+                        helical_param: s.helical_param ? { ...s.helical_param, fov: normalizeFov(s.helical_param.fov) } : s.helical_param,
+                        axial_param: s.axial_param ? { ...s.axial_param, fov: normalizeFov(s.axial_param.fov) } : s.axial_param,
                         recon_series: s.recon_series.map((r) => ({
                             recon_name: r.recon_name,
                             recon_type: "soft",
@@ -539,6 +545,7 @@ export function useProtocolDetail() {
                             window_level: r.window_level,
                             slice_thickness: r.slice_thickness,
                             increment: r.increment ?? r.slice_thickness,
+                            recon_fov: normalizeFov(r.recon_fov),
                         })),
                     });
                 }
@@ -557,6 +564,7 @@ export function useProtocolDetail() {
                             window_level: r.window_level,
                             slice_thickness: r.slice_thickness,
                             increment: r.increment ?? r.slice_thickness,
+                            recon_fov: normalizeFov(r.recon_fov),
                         });
                     }
                 }
@@ -577,7 +585,7 @@ export function useProtocolDetail() {
                         kv: parseNumber(seriesDraft.kv) ?? activeSeries.topogram_param.kv,
                         ma: parseNumber(seriesDraft.ma) ?? activeSeries.topogram_param.ma,
                         scan_length: parseNumber(seriesDraft.scanLength) ?? activeSeries.topogram_param.scan_length,
-                        fov: parseNumber(seriesDraft.fov) ?? activeSeries.topogram_param.fov,
+                        fov: parseDraftFov(seriesDraft.fov, activeSeries.topogram_param.fov),
                         tube_angle: parseNumber(seriesDraft.tubeAngle) ?? activeSeries.topogram_param.tube_angle,
                         collimator: seriesDraft.collimator || activeSeries.topogram_param.collimator || null,
                         scan_direction: seriesDraft.scanDirection || activeSeries.topogram_param.scan_direction || null,
@@ -589,7 +597,7 @@ export function useProtocolDetail() {
                         kv: parseNumber(seriesDraft.kv) ?? activeSeries.helical_param.kv,
                         ma: parseNumber(seriesDraft.ma) ?? activeSeries.helical_param.ma,
                         scan_length: parseNumber(seriesDraft.scanLength) ?? activeSeries.helical_param.scan_length,
-                        fov: parseNumber(seriesDraft.fov) ?? activeSeries.helical_param.fov,
+                        fov: parseDraftFov(seriesDraft.fov, activeSeries.helical_param.fov),
                         rotation_time: parseNumber(seriesDraft.rotationTime) ?? activeSeries.helical_param.rotation_time,
                         pitch: parseNumber(seriesDraft.pitch) ?? activeSeries.helical_param.pitch,
                         slice_thickness: parseNumber(seriesDraft.sliceThickness) ?? activeSeries.helical_param.slice_thickness,
@@ -603,7 +611,7 @@ export function useProtocolDetail() {
                         kv: parseNumber(seriesDraft.kv) ?? activeSeries.axial_param.kv,
                         ma: parseNumber(seriesDraft.ma) ?? activeSeries.axial_param.ma,
                         scan_length: parseNumber(seriesDraft.scanLength) ?? activeSeries.axial_param.scan_length,
-                        fov: parseNumber(seriesDraft.fov) ?? activeSeries.axial_param.fov,
+                        fov: parseDraftFov(seriesDraft.fov, activeSeries.axial_param.fov),
                         rotation_time: parseNumber(seriesDraft.rotationTime) ?? activeSeries.axial_param.rotation_time,
                         slice_interval: parseNumber(seriesDraft.sliceInterval) ?? activeSeries.axial_param.slice_interval,
                         slice_thickness: parseNumber(seriesDraft.sliceThickness) ?? activeSeries.axial_param.slice_thickness,
@@ -621,7 +629,7 @@ export function useProtocolDetail() {
                     matrix: parseNumber(reconDraft.matrix) ?? activeRecon.matrix,
                     window_level: parseNumber(reconDraft.windowLevel) ?? activeRecon.window_level,
                     window_width: parseNumber(reconDraft.windowWidth) ?? activeRecon.window_width,
-                    recon_fov: parseNumber(reconDraft.reconFov) ?? activeRecon.recon_fov ?? 250,
+                    recon_fov: parseDraftFov(reconDraft.reconFov, activeRecon.recon_fov ?? 250),
                     center_x: parseNumber(reconDraft.centerX) ?? activeRecon.center_x ?? 0,
                     center_y: parseNumber(reconDraft.centerY) ?? activeRecon.center_y ?? 0,
                 });

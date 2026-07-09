@@ -8,7 +8,8 @@ export type ApiPatient = {
     patient_id: string;
     id_number: string | null;
     gender: string;
-    birth_date: string; // YYYY-MM-DD
+    age: number;
+    birth_date: string | null; // YYYY-MM-DD
     height: number | null;
     weight: number | null;
     created_at: string;
@@ -27,7 +28,8 @@ export type CreatePatientPayload = {
     patient_id: string;
     id_number?: string;
     gender: string;
-    birth_date: string;
+    age: number;
+    birth_date?: string | null;
     height?: number | null;
     weight?: number | null;
 };
@@ -58,8 +60,9 @@ export async function createPatient(payload: CreatePatientPayload): Promise<ApiP
 }
 
 export function calcAgeFromBirthDate(birthDate: string): number {
+    const [year, month, day] = birthDate.split("-").map(Number);
+    const dob = new Date(year, month - 1, day);
     const today = new Date();
-    const dob = new Date(birthDate);
     let age = today.getFullYear() - dob.getFullYear();
     const monthDelta = today.getMonth() - dob.getMonth();
     if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < dob.getDate())) {

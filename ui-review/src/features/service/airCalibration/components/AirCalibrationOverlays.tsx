@@ -1,5 +1,7 @@
 import { AlertTriangle, Square } from "lucide-react";
 
+import { useI18n } from "../../../../lib/i18nContext";
+import { formatCalibrationCombo } from "../labels";
 import type { CalibrationCombo } from "../types";
 
 type AirCalibrationOverlaysProps = {
@@ -31,13 +33,15 @@ export function AirCalibrationOverlays({
   showAbortConfirm,
   totalCombinations,
 }: AirCalibrationOverlaysProps) {
+  const { t } = useI18n();
+
   return (
     <>
       {isCalibrating && (
         <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] z-50 flex items-center justify-center animate-in fade-in duration-300">
           <div className="bg-white w-[640px] h-[420px] rounded-3xl shadow-2xl p-10 flex flex-col justify-center animate-in zoom-in-95 duration-300">
             <div className="flex justify-between items-baseline mb-8">
-              <h2 className="text-[32px] font-black text-[#37474F]">Air Calibration Running</h2>
+              <h2 className="text-[32px] font-black text-[#37474F]">{t("service.airCalibration.runningTitle")}</h2>
               <span className="text-[72px] font-black text-[#4D94FF] italic">{Math.floor(calibrationProgress)}%</span>
             </div>
 
@@ -47,15 +51,19 @@ export function AirCalibrationOverlays({
 
             <div className="grid grid-cols-2 gap-4 mb-8">
               <div className="rounded-2xl border border-[#D7E3F0] bg-[#F8FAFC] px-5 py-4">
-                <div className="text-[12px] font-bold text-[#90A4AE] uppercase">Stage</div>
+                <div className="text-[12px] font-bold text-[#90A4AE] uppercase">
+                  {t("service.airCalibration.stage")}
+                </div>
                 <div className="mt-2 text-[18px] font-black text-[#37474F]">{stageLabel}</div>
               </div>
               <div className="rounded-2xl border border-[#D7E3F0] bg-[#F8FAFC] px-5 py-4">
-                <div className="text-[12px] font-bold text-[#90A4AE] uppercase">Current Combo</div>
+                <div className="text-[12px] font-bold text-[#90A4AE] uppercase">
+                  {t("service.airCalibration.currentCombo")}
+                </div>
                 <div className="mt-2 text-[16px] font-black text-[#1E88E5] leading-snug">
                   {currentCombo
-                    ? `${currentCombo.rotationSpeed}s / ${currentCombo.focus} / ${currentCombo.voltage}kV / ${currentCombo.collimator}`
-                    : "Preparing queue"}
+                    ? formatCalibrationCombo(t, currentCombo)
+                    : t("service.airCalibration.preparingQueue")}
                 </div>
               </div>
             </div>
@@ -66,10 +74,10 @@ export function AirCalibrationOverlays({
                   {calibrationProgress.toFixed(2)}%
                 </div>
                 <div className="px-4 py-1.5 bg-[#F8FAFC] border border-[#B0C4DE] rounded-lg text-[15px] font-bold text-[#37474F] shadow-sm">
-                  {completedCount}/{totalCombinations} complete
+                  {t("service.airCalibration.completedRatio", { completed: completedCount, total: totalCombinations })}
                 </div>
                 <div className="px-4 py-1.5 bg-[#F8FAFC] border border-[#B0C4DE] rounded-lg text-[15px] font-bold text-[#37474F] shadow-sm">
-                  {failedCount} failed / {pendingCount} pending
+                  {t("service.airCalibration.failedPending", { failed: failedCount, pending: pendingCount })}
                 </div>
               </div>
               <button
@@ -77,7 +85,7 @@ export function AirCalibrationOverlays({
                 className="flex items-center gap-2 px-6 h-12 bg-[#FFF1F0] border border-[#FFA39E] text-[#CF1322] font-black rounded-xl shadow-sm hover:bg-[#FFCCC7] transition-all active:scale-95"
               >
                 <Square size={16} fill="currentColor" />
-                <span className="text-[16px]">Stop</span>
+                <span className="text-[16px]">{t("service.airCalibration.action.stop")}</span>
               </button>
             </div>
           </div>
@@ -92,12 +100,12 @@ export function AirCalibrationOverlays({
                 <AlertTriangle size={32} className="text-[#FF9800]" />
               </div>
               <div>
-                <h3 className="font-black text-[#37474F] mb-3">Stop current calibration run?</h3>
+                <h3 className="font-black text-[#37474F] mb-3">{t("service.airCalibration.stopConfirmTitle")}</h3>
                 <p className="text-[16px] text-[#546E7A] font-bold leading-relaxed">
-                  Completed combos will be kept. The next run will resume from unfinished or failed combos.
+                  {t("service.airCalibration.stopConfirmBody")}
                 </p>
                 <p className="text-[16px] text-[#4D94FF] font-black mt-2">
-                  Progress: {calibrationProgress.toFixed(2)}%
+                  {t("service.airCalibration.progress", { progress: calibrationProgress.toFixed(2) })}
                 </p>
               </div>
             </div>
@@ -107,13 +115,13 @@ export function AirCalibrationOverlays({
                 onClick={() => setShowAbortConfirm(false)}
                 className="flex-1 h-14 bg-white border-2 border-[#B0C4DE] text-[#546E7A] font-black rounded-2xl text-[18px] hover:bg-gray-50 transition-all active:scale-95 shadow-sm"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 onClick={confirmAbort}
                 className="flex-1 h-14 bg-[#4D94FF] text-white font-black rounded-2xl text-[18px] hover:bg-blue-600 transition-all active:scale-95 shadow-lg"
               >
-                Confirm
+                {t("service.airCalibration.action.confirmStop")}
               </button>
             </div>
           </div>

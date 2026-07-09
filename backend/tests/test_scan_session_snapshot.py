@@ -8,7 +8,7 @@ from backend.routers.scan_sessions import _clone_session_from_protocol, _clone_s
 
 class ScanSessionSnapshotTests(unittest.TestCase):
     def test_clone_from_protocol_keeps_all_scan_param_snapshot_fields(self) -> None:
-        patient = models.Patient(id=101, name="Test Patient", patient_id="P001", gender="M", birth_date="1980-01-01")
+        patient = models.Patient(id=101, name="Test Patient", patient_id="P001", gender="M", age=46, birth_date="1980-01-01")
         protocol = models.Protocol(
             id=202,
             name="Snapshot Protocol",

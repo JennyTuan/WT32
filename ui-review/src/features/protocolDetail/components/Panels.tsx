@@ -14,6 +14,7 @@ import {
 } from "../constants";
 import { FieldInput, FieldSelect, FieldSpinner, Divider } from "./SharedUI";
 import { useI18n } from "../../../lib/i18nContext";
+import { FOV_MAX_MM, FOV_MIN_MM } from "../../../lib/fov";
 
 const TUBE_ANGLE_OPTIONS = ["0", "90", "180", "270"];
 
@@ -118,7 +119,7 @@ export function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, o
                     <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator} placeholder="e.g. 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
                     <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
                     <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
-                    <FieldInput label="FOV" value={draft.fov} required onChange={(value) => onDraftChange({ fov: value })} />
+                    <FieldInput label="FOV" value={draft.fov} required min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ fov: value })} />
                     <FieldInput label="DOM" value={draft.dom} placeholder={language === "en-US" ? "0 or 1" : "0 或 1"} onChange={(value) => onDraftChange({ dom: value })} />
                     <FieldSelect label={t("protocolDetail.fieldTableAngle")} value={draft.tubeAngle} options={TUBE_ANGLE_OPTIONS} required onChange={(value) => onDraftChange({ tubeAngle: value })} />
                 </div>
@@ -161,7 +162,7 @@ export function HelicalParamsPanel({ series, draft, canEditMode, onModeChange, o
                     <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator} placeholder="e.g. 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
                     <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
                     <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
-                    <FieldInput label="FOV" value={draft.fov} required onChange={(value) => onDraftChange({ fov: value })} />
+                    <FieldInput label="FOV" value={draft.fov} required min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ fov: value })} />
                     <FieldInput label="DOM" value={draft.dom} placeholder={language === "en-US" ? "0 or 1" : "0 或 1"} onChange={(value) => onDraftChange({ dom: value })} />
                     {series.series_type === "helical" && (
                         <FieldInput label="PITCH" value={draft.pitch} required onChange={(value) => onDraftChange({ pitch: value })} />
@@ -203,7 +204,7 @@ export function ReconParamsPanel({ series, draft, onDelete, onDraftChange }: {
                     <FieldInput label="KERNEL" value={draft.kernel} onChange={(value) => onDraftChange({ kernel: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldSliceThickness")} value={draft.sliceThickness} onChange={(value) => onDraftChange({ sliceThickness: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldSliceIncrement")} value={draft.increment} onChange={(value) => onDraftChange({ increment: value })} />
-                    <FieldSpinner label={t("protocolDetail.reconFov")} value={draft.reconFov} onChange={(value) => onDraftChange({ reconFov: value })} />
+                    <FieldSpinner label={t("protocolDetail.reconFov")} value={draft.reconFov} min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ reconFov: value })} />
                     <FieldSpinner label="MATRIX" value={draft.matrix} onChange={(value) => onDraftChange({ matrix: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldWindowLevel")} value={draft.windowLevel} onChange={(value) => onDraftChange({ windowLevel: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldWindowWidth")} value={draft.windowWidth} onChange={(value) => onDraftChange({ windowWidth: value })} />

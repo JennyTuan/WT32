@@ -9,7 +9,7 @@ export default function WT32NewProtocolReconDetailScreen({ type = 'soft' }: Reco
 
     const fields = [
         { label: "系列名称 (组织类型)", value: isSoft ? "软组织" : "骨骼" },
-        { label: "KERNEL (滤波器)", value: isSoft ? "Brain2" : "Bone2" },
+        { label: "KERNEL (滤波器)", value: isSoft ? "Brain" : "Bone2" },
         { label: "层厚 (MM)", value: "5", isSpinner: true },
         { label: "重建增量 (MM)", value: "5", isSpinner: true },
         { label: "重建 FOV (MM)", value: "250", isSpinner: true },

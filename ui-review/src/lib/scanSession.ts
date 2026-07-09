@@ -11,6 +11,7 @@ const AD_HOC_SESSION_IDS_KEY = "adHocScanSessionIds";
 type ApiPatient = {
     id: number;
     patient_id: string;
+    age: number;
 };
 
 export type ApiScanSessionTopogramParam = {
@@ -237,12 +238,6 @@ const cacheSelectedScanSession = (scanSession: ApiScanSessionDetail) => {
     localStorage.setItem(DETAIL_CACHE_KEY, JSON.stringify(scanSession));
 };
 
-const inferBirthDate = (age: number) => {
-    const today = new Date();
-    const birthYear = today.getFullYear() - Math.max(0, age);
-    return `${birthYear}-01-01`;
-};
-
 const cacheBackendPatientId = (patientId: string, backendPatientId: number) => {
     localStorage.setItem(PATIENT_CACHE_KEY, JSON.stringify({ patientId, backendPatientId }));
 };
@@ -274,7 +269,8 @@ const resolveBackendPatientId = async (selectedPatient: SelectedPatientSession) 
             name: selectedPatient.name,
             patient_id: selectedPatient.patientId,
             gender: selectedPatient.gender,
-            birth_date: inferBirthDate(selectedPatient.age),
+            age: selectedPatient.age,
+            birth_date: null,
             height: null,
             weight: null,
         }),
@@ -468,6 +464,7 @@ export const createScanSessionReconSeries = async (sessionSeriesId: number, payl
     window_level?: number;
     slice_thickness?: number;
     increment?: number | null;
+    recon_fov?: number | null;
 }) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/series/${sessionSeriesId}/recon-series`), {
         method: "POST",

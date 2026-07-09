@@ -70,6 +70,7 @@ class ScanSessionApiTests(unittest.TestCase):
                 name="Test Patient",
                 patient_id="P-API-001",
                 gender="male",
+                age=46,
                 birth_date=date(1980, 1, 1),
                 height=170.0,
                 weight=68.0,

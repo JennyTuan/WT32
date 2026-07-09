@@ -1,8 +1,23 @@
 import { ChevronDown } from "lucide-react";
 
-export function FieldInput({ label, value, placeholder, required, onChange }: {
+const clampNumberInput = (value: string, min?: number, max?: number) => {
+    if (min === undefined && max === undefined) return value;
+    const normalized = value.replace(/[^\d.-]/g, "").trim();
+    if (!normalized) return value;
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed)) return value;
+    let next = parsed;
+    if (min !== undefined) next = Math.max(min, next);
+    if (max !== undefined) next = Math.min(max, next);
+    return String(next);
+};
+
+export function FieldInput({ label, value, placeholder, required, onChange, min, max }: {
     label: string; value?: string | number; placeholder?: string; required?: boolean; onChange?: (value: string) => void;
+    min?: number; max?: number;
 }) {
+    const numericRange = min !== undefined || max !== undefined;
+
     return (
         <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-black text-[#90A4AE] ml-1 uppercase tracking-tight flex items-center gap-0.5 select-none">
@@ -13,8 +28,13 @@ export function FieldInput({ label, value, placeholder, required, onChange }: {
                 type="text"
                 value={value !== undefined && value !== null ? String(value) : ""}
                 onChange={(event) => onChange?.(event.target.value)}
+                onBlur={(event) => {
+                    const next = clampNumberInput(event.target.value, min, max);
+                    if (next !== event.target.value) onChange?.(next);
+                }}
                 readOnly={!onChange}
                 placeholder={placeholder}
+                inputMode={numericRange ? "decimal" : undefined}
                 className="w-full h-[40px] px-3 bg-white border border-[#B0C4DE] rounded-md text-[13px] font-bold text-[#37474F] outline-none placeholder:font-normal placeholder:text-[#90A4AE]/40 focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/10 shadow-sm select-text"
             />
         </div>
@@ -65,7 +85,12 @@ export function FieldSpinner({ label, value, onChange, step = 1, min, max }: {
                     type="text"
                     value={value !== undefined && value !== null ? String(value) : ""}
                     onChange={(event) => onChange?.(event.target.value)}
+                    onBlur={(event) => {
+                        const next = clampNumberInput(event.target.value, min, max);
+                        if (next !== event.target.value) onChange?.(next);
+                    }}
                     readOnly={!onChange}
+                    inputMode={min !== undefined || max !== undefined ? "decimal" : undefined}
                     className="w-full h-[40px] px-3 pr-10 bg-white border border-[#B0C4DE] rounded-md text-[13px] font-bold text-[#37474F] outline-none focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/10 shadow-sm select-text"
                 />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-0 border-l border-[#B0C4DE] pl-2 h-7 justify-center">

@@ -3976,7 +3976,7 @@
           "protocolQueueId": "origin-1:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":5,\"interval\":5,\"kernel\":\"Brain2\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":250,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":5,\"interval\":5,\"kernel\":\"Brain\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":250,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -3994,7 +3994,7 @@
           "protocolQueueId": "origin-2:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":2.4,\"interval\":2.4,\"kernel\":\"Brain2\",\"windowCenter\":600,\"windowWidth\":100,\"fov\":250,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":2.4,\"interval\":2.4,\"kernel\":\"Brain\",\"windowCenter\":600,\"windowWidth\":100,\"fov\":250,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4012,7 +4012,7 @@
           "protocolQueueId": "origin-3:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":4.8,\"interval\":4.8,\"kernel\":\"Brain2\",\"windowCenter\":600,\"windowWidth\":100,\"fov\":250,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":4.8,\"interval\":4.8,\"kernel\":\"Brain\",\"windowCenter\":600,\"windowWidth\":100,\"fov\":250,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4048,7 +4048,7 @@
           "protocolQueueId": "origin-6:q-2",
           "taskId": "seq-1",
           "name": "骨骼",
-          "params": "{\"sliceThickness\":0.6,\"interval\":0.6,\"kernel\":\"Bone2\",\"windowCenter\":600,\"windowWidth\":4000,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":1,\"interval\":1,\"kernel\":\"Bone2\",\"windowCenter\":600,\"windowWidth\":4000,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4084,7 +4084,7 @@
           "protocolQueueId": "origin-10:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":2.4,\"interval\":2.4,\"kernel\":\"Brain2\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":2.4,\"interval\":2.4,\"kernel\":\"Brain\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4102,7 +4102,7 @@
           "protocolQueueId": "origin-11:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":2.4,\"interval\":2.4,\"kernel\":\"Brain2\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":2.4,\"interval\":2.4,\"kernel\":\"Brain\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4120,7 +4120,7 @@
           "protocolQueueId": "origin-12:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":2.4,\"interval\":2.4,\"kernel\":\"Brain2\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":2.4,\"interval\":2.4,\"kernel\":\"Brain\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4138,7 +4138,7 @@
           "protocolQueueId": "origin-13:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":3,\"interval\":3,\"kernel\":\"Brain2\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":3,\"interval\":3,\"kernel\":\"Brain\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4156,7 +4156,7 @@
           "protocolQueueId": "origin-14:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":3,\"interval\":3,\"kernel\":\"Brain2\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":3,\"interval\":3,\"kernel\":\"Brain\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4174,7 +4174,7 @@
           "protocolQueueId": "origin-15:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":3,\"interval\":3,\"kernel\":\"Brain2\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":3,\"interval\":3,\"kernel\":\"Brain\",\"windowCenter\":40,\"windowWidth\":100,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4210,7 +4210,7 @@
           "protocolQueueId": "origin-18:q-2",
           "taskId": "seq-1",
           "name": "软组织",
-          "params": "{\"sliceThickness\":5,\"interval\":5,\"kernel\":\"Brain2\",\"windowCenter\":40,\"windowWidth\":300,\"fov\":250,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":5,\"interval\":5,\"kernel\":\"Brain\",\"windowCenter\":40,\"windowWidth\":300,\"fov\":250,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4228,7 +4228,7 @@
           "protocolQueueId": "origin-19:q-2",
           "taskId": "seq-1",
           "name": "ST",
-          "params": "{\"sliceThickness\":9.2,\"interval\":9.2,\"kernel\":\"S2\",\"windowCenter\":100,\"windowWidth\":0,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":9.6,\"interval\":9.6,\"kernel\":\"S2\",\"windowCenter\":100,\"windowWidth\":0,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4237,7 +4237,7 @@
           "protocolQueueId": "origin-20:q-2",
           "taskId": "seq-1",
           "name": "ST",
-          "params": "{\"sliceThickness\":9.2,\"interval\":9.2,\"kernel\":\"S2\",\"windowCenter\":100,\"windowWidth\":0,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":9.6,\"interval\":9.6,\"kernel\":\"S2\",\"windowCenter\":100,\"windowWidth\":0,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {
@@ -4444,7 +4444,7 @@
           "protocolQueueId": "origin-43:q-2",
           "taskId": "seq-1",
           "name": "骨骼",
-          "params": "{\"sliceThickness\":2.4,\"interval\":null,\"kernel\":\"S2\",\"windowCenter\":600,\"windowWidth\":4000,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
+          "params": "{\"sliceThickness\":2.4,\"interval\":2.4,\"kernel\":\"S2\",\"windowCenter\":600,\"windowWidth\":4000,\"fov\":200,\"matrix\":512,\"centerX\":0,\"centerY\":0,\"metalReduction\":false}",
           "sortOrder": 0
         },
         {

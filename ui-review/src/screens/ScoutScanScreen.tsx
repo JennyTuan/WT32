@@ -19,10 +19,12 @@ import { loadSelectedPatient } from "../lib/patientSession";
 import { saveScoutPositioningRange } from "../lib/scoutPositioningSession";
 import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { clearSelectedExamWorkflowState } from "../lib/workflowNavigationState";
 import { mergeDualScoutPlanSequences } from "../lib/headDualScoutDemo";
 import { DETAIL_TARGET_STORAGE_KEY } from "../features/protocolDetail/constants";
 import AppHeader from "../components/AppHeader";
 import { useI18n } from "../lib/i18nContext";
+import { useRespiraScopeBreathing } from "../lib/respiraScopeBreathing";
 
 interface Sequence {
     id: string;
@@ -60,6 +62,10 @@ const BREATHING_HELICAL_PARAM_PREVIEW = {
 const BREATHING_BED_POSITION_COUNT = 10;
 const BED_POSITION_MIN = 320;
 const BED_POSITION_MAX = 780;
+const EMPTY_BREATHING_WAVE_DATA = Array.from({ length: 500 }, () => 100);
+const RESPIRASCOPE_STALE_MS = 5000;
+
+type RespiraScopeUiSeverity = "ready" | "pending" | "warning" | "error";
 
 type BreathingProjectionMeta = {
     width: number;
@@ -99,6 +105,42 @@ function clamp(value: number, min: number, max: number) {
 
 function clamp01(value: number) {
     return Math.min(1, Math.max(0, value));
+}
+
+function padWaveData(values: number[], length = 500, fallback = 100) {
+    if (values.length >= length) return values.slice(-length);
+    return [...new Array(length - values.length).fill(fallback), ...values];
+}
+
+function estimatePeakCvPercent(values: number[]) {
+    const extremaWindow = 6;
+    const recent = values.slice(-360);
+    const peaks: number[] = [];
+    if (recent.length < extremaWindow * 2 + 1) return null;
+
+    const maxValue = Math.max(...recent);
+    const minValue = Math.min(...recent);
+    const threshold = minValue + (maxValue - minValue) * 0.68;
+
+    for (let index = extremaWindow; index < recent.length - extremaWindow; index += 1) {
+        const value = recent[index];
+        const neighbors = [
+            ...recent.slice(index - extremaWindow, index),
+            ...recent.slice(index + 1, index + extremaWindow + 1),
+        ];
+        if (value > threshold && neighbors.every((neighbor) => value > neighbor)) {
+            peaks.push(value);
+        }
+    }
+
+    const latestPeaks = peaks.slice(-6);
+    if (latestPeaks.length < 3) return null;
+
+    const mean = latestPeaks.reduce((sum, value) => sum + value, 0) / latestPeaks.length;
+    if (mean <= 0) return null;
+
+    const variance = latestPeaks.reduce((sum, value) => sum + (value - mean) ** 2, 0) / latestPeaks.length;
+    return Math.sqrt(variance) / mean * 100;
 }
 
 function clampBedPosition(value: number) {
@@ -684,6 +726,7 @@ const ScoutScanScreen = ({
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const navigate = useNavigate();
     const resolvedFirstStepLabel = firstStepLabel ?? t("scanFlow.step.laserPosition");
+    const [workflowGuardStatus, setWorkflowGuardStatus] = useState<"checking" | "ready">("checking");
 
     // 4D workflow detection - driven by scan session acquisition_type
     const [is4DWorkflow, setIs4DWorkflow] = useState(false);
@@ -693,20 +736,70 @@ const ScoutScanScreen = ({
     const is4DScoutExecuteStep = is4DWorkflow && activeStepIdx === 3;
 
     useEffect(() => {
-        fetchSelectedScanSession().then(session => {
-            // Gating shares the 4-step flow with 4D: 呼吸训练 → 定位像 → 参数确认 → 执行扫描.
-            // The post-scout route is what differs (handled in ScoutExecuteScanScreen).
-            if (session?.acquisition_type === 'four_d' || session?.acquisition_type === 'gating') {
-                setIs4DWorkflow(true);
+        let cancelled = false;
+
+        const redirectToWorkflowEntry = (route: "/patients" | "/protocol-select") => {
+            clearSelectedExamWorkflowState();
+            navigate(route, { replace: true });
+        };
+
+        const validateWorkflowSession = async () => {
+            if (!selectedPatient) {
+                redirectToWorkflowEntry("/patients");
+                return;
             }
-        }).catch(() => {});
-    }, []);
+
+            if (workflowPlans.length === 0) {
+                redirectToWorkflowEntry("/protocol-select");
+                return;
+            }
+
+            try {
+                const session = await fetchSelectedScanSession();
+                if (cancelled) return;
+
+                if (!session || session.patient_id !== selectedPatient.id) {
+                    redirectToWorkflowEntry("/protocol-select");
+                    return;
+                }
+
+                // Gating shares the 4-step flow with 4D: 呼吸训练 -> 定位像 -> 参数确认 -> 执行扫描。
+                // 扫描后的去向由 ScoutExecuteScanScreen 根据协议类型处理。
+                setIs4DWorkflow(session.acquisition_type === "four_d" || session.acquisition_type === "gating");
+                setWorkflowGuardStatus("ready");
+            } catch {
+                if (!cancelled) {
+                    redirectToWorkflowEntry("/protocol-select");
+                }
+            }
+        };
+
+        void validateWorkflowSession();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [navigate, selectedPatient, workflowPlans.length]);
 
     const isBreathingTraining = bottomPanelMode === "breathing" && breathingWorkflowVariant === "training";
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
     const [startPos, setStartPos] = useState("472.95");
     const [endPos, setEndPos] = useState("595.17");
     const isBreathingSignalEnabled = true;
+    const isRespiraScopeActive = isBreathingSignalEnabled && (isBreathingAcquisitionStep || bottomPanelMode === "breathing");
+    const [respiraScopeNowMs, setRespiraScopeNowMs] = useState(() => Date.now());
+    const respiraScopeBreathing = useRespiraScopeBreathing({
+        enabled: isRespiraScopeActive,
+        maxPoints: 500,
+    });
+
+    useEffect(() => {
+        if (!isRespiraScopeActive) return;
+
+        setRespiraScopeNowMs(Date.now());
+        const timer = window.setInterval(() => setRespiraScopeNowMs(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, [isRespiraScopeActive]);
     const [breathingAcquisitionParams, setBreathingAcquisitionParams] = useState({
         minSpacing: 2.0,
         filterThreshold: 0.45,
@@ -763,16 +856,191 @@ const ScoutScanScreen = ({
     const [metrics, setMetrics] = useState({ rawMainFreq: "0.25", bpm: "14.8", peakErr: "1.7", freqErr: "1.9" });
     const timerRef = useRef<number | null>(null);
     const tRef = useRef(0); // Persistent time counter to prevent resets on re-render
-    const latestSignalValue = filteredWaveData[filteredWaveData.length - 1] ?? 0;
+    const hasRespiraScopeSamples = respiraScopeBreathing.hasSamples;
+    const isRespiraScopeStale = isRespiraScopeActive &&
+        hasRespiraScopeSamples &&
+        respiraScopeBreathing.lastMessageAt !== null &&
+        respiraScopeNowMs - respiraScopeBreathing.lastMessageAt > RESPIRASCOPE_STALE_MS;
+    const respiraScopeUiState = useMemo<{
+        severity: RespiraScopeUiSeverity;
+        badgeLabel: string;
+        title: string;
+        detail: string;
+    }>(() => {
+        if (!isRespiraScopeActive) {
+            return {
+                severity: "ready",
+                badgeLabel: "实时波形",
+                title: "",
+                detail: "",
+            };
+        }
+
+        if (isRespiraScopeStale) {
+            return {
+                severity: "error",
+                badgeLabel: "呼吸信号中断",
+                title: "呼吸信号已中断",
+                detail: `超过 ${Math.round(RESPIRASCOPE_STALE_MS / 1000)} 秒未收到新样本，请检查呼吸设备、采集服务和网络连接。`,
+            };
+        }
+
+        if (hasRespiraScopeSamples) {
+            return {
+                severity: "ready",
+                badgeLabel: "RespiraScope",
+                title: "",
+                detail: "",
+            };
+        }
+
+        if (respiraScopeBreathing.status === "unavailable") {
+            return {
+                severity: "error",
+                badgeLabel: "呼吸系统未连接",
+                title: "呼吸系统连接失败",
+                detail: respiraScopeBreathing.errorMessage ?? `无法访问 ${respiraScopeBreathing.apiBase}/health 或 /startReceive。`,
+            };
+        }
+
+        if (respiraScopeBreathing.status === "error") {
+            return {
+                severity: "error",
+                badgeLabel: "呼吸连接异常",
+                title: "呼吸 WebSocket 异常",
+                detail: respiraScopeBreathing.errorMessage ?? `请检查 ${respiraScopeBreathing.apiBase}/socket.io/ 是否可用。`,
+            };
+        }
+
+        if (respiraScopeBreathing.status === "waiting" || respiraScopeBreathing.status === "receiving") {
+            return {
+                severity: "warning",
+                badgeLabel: "等待呼吸数据",
+                title: "已连接，未收到波形样本",
+                detail: "请检查呼吸采集是否已启动，确认 raw/filtered 样本正在发送。",
+            };
+        }
+
+        return {
+            severity: "pending",
+            badgeLabel: "连接呼吸系统中",
+            title: "正在连接呼吸系统",
+            detail: `目标服务：${respiraScopeBreathing.apiBase}`,
+        };
+    }, [
+        hasRespiraScopeSamples,
+        isRespiraScopeActive,
+        isRespiraScopeStale,
+        respiraScopeBreathing.apiBase,
+        respiraScopeBreathing.errorMessage,
+        respiraScopeBreathing.status,
+    ]);
+    const liveFilteredValues = respiraScopeBreathing.filteredValues.length > 0
+        ? respiraScopeBreathing.filteredValues
+        : respiraScopeBreathing.rawValues;
+    // 生产联调时不能用模拟波形掩盖呼吸系统未连接。
+    const shouldUseDemoBreathingWave = !isRespiraScopeActive;
+    const displayRawWaveData = hasRespiraScopeSamples
+        ? padWaveData(respiraScopeBreathing.rawValues)
+        : shouldUseDemoBreathingWave ? rawWaveData : EMPTY_BREATHING_WAVE_DATA;
+    const displayFilteredWaveData = hasRespiraScopeSamples
+        ? padWaveData(liveFilteredValues)
+        : shouldUseDemoBreathingWave ? filteredWaveData : EMPTY_BREATHING_WAVE_DATA;
+    const liveBpm = respiraScopeBreathing.metrics.bpm;
+    const livePeakErr = estimatePeakCvPercent(displayFilteredWaveData);
+    const displayMetrics = hasRespiraScopeSamples
+        ? {
+            rawMainFreq: liveBpm !== null ? (liveBpm / 60).toFixed(2) : metrics.rawMainFreq,
+            bpm: liveBpm !== null ? liveBpm.toFixed(1) : metrics.bpm,
+            peakErr: livePeakErr !== null ? livePeakErr.toFixed(1) : metrics.peakErr,
+            freqErr: respiraScopeBreathing.metrics.intervalCv !== null
+                ? (respiraScopeBreathing.metrics.intervalCv * 100).toFixed(1)
+                : metrics.freqErr,
+        }
+        : shouldUseDemoBreathingWave ? metrics : {
+            rawMainFreq: "--",
+            bpm: "--",
+            peakErr: "--",
+            freqErr: "--",
+        };
+    const isRespiraScopeReady = !isRespiraScopeActive || respiraScopeUiState.severity === "ready";
+    const isBreathingStatusReady = breathingPhase === "stable" && isRespiraScopeReady;
+    const liveWaveBadgeLabel = respiraScopeUiState.badgeLabel;
+    const breathingPhaseLabel = isRespiraScopeActive && !isRespiraScopeReady
+        ? respiraScopeUiState.badgeLabel
+        : hasRespiraScopeSamples
+        ? (breathingPhase === "stable" ? t("scanFlow.breathingStable") : t("scanFlow.fourD.breathingAcquiring"))
+        : (breathingPhase === "stable" ? t("scanFlow.breathingStable") : t("scanFlow.breathingSimulating", { seconds: breathingReadyCountdown }));
+    const latestSignalValue = displayFilteredWaveData[displayFilteredWaveData.length - 1] ?? 0;
+    const latestSignalDisplay = hasRespiraScopeSamples ? latestSignalValue.toFixed(1) : "--";
     const normalizedSignal = clamp01(latestSignalValue / 1100);
     const breathingBedIndex = Math.min(
         BREATHING_BED_POSITION_COUNT - 1,
         Math.max(0, Math.floor(normalizedSignal * BREATHING_BED_POSITION_COUNT))
     );
+    const canContinueBreathingAcquisition = breathingPhase === "stable" && isRespiraScopeReady;
+    const shouldShowRespiraScopeConnectionOverlay = isRespiraScopeActive && !isRespiraScopeReady;
+    const respiraScopeBadgeClassName = respiraScopeUiState.severity === "ready"
+        ? "border-[#C8E6C9] bg-[#E8F5E9] text-[#2E7D32]"
+        : respiraScopeUiState.severity === "error"
+            ? "border-[#FFCDD2] bg-[#FFEBEE] text-[#B71C1C]"
+            : "border-[#FFE0B2] bg-[#FFF8E1] text-[#E65100]";
+    const respiraScopeDotClassName = respiraScopeUiState.severity === "ready"
+        ? "bg-[#4CAF50] animate-pulse"
+        : respiraScopeUiState.severity === "error"
+            ? "bg-[#D32F2F]"
+            : "bg-[#FFA726] animate-pulse";
+    const renderRespiraScopeConnectionOverlay = (compact = false) => {
+        if (!shouldShowRespiraScopeConnectionOverlay) return null;
+
+        const isError = respiraScopeUiState.severity === "error";
+        const isPending = respiraScopeUiState.severity === "pending";
+
+        return (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/82 px-5 backdrop-blur-[2px]">
+                <div className={`w-full ${compact ? "max-w-[360px] px-4 py-3" : "max-w-[460px] px-5 py-4"} rounded-lg border bg-white shadow-xl ${
+                    isError ? "border-[#FFCDD2]" : "border-[#FFE0B2]"
+                }`}>
+                    <div className="flex items-start gap-3">
+                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+                            isError ? "bg-[#FFEBEE] text-[#D32F2F]" : "bg-[#FFF8E1] text-[#F57C00]"
+                        }`}>
+                            {isPending ? (
+                                <span className="h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                            ) : (
+                                <AlertTriangle size={18} />
+                            )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <div className={`text-[14px] font-black ${isError ? "text-[#B71C1C]" : "text-[#E65100]"}`}>
+                                {respiraScopeUiState.title}
+                            </div>
+                            <div className="mt-1 text-[12px] font-semibold leading-snug text-[#546E7A]">
+                                {respiraScopeUiState.detail}
+                            </div>
+                            <div className="mt-2 truncate rounded border border-[#E3EAF3] bg-[#F8FAFC] px-2 py-1 text-[10px] font-mono text-[#78909C]">
+                                {respiraScopeBreathing.apiBase}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                        <span className="text-[10px] font-bold text-[#90A4AE]">未收到真实呼吸波形时已暂停继续</span>
+                        <button
+                            type="button"
+                            onClick={respiraScopeBreathing.retry}
+                            className="h-[32px] shrink-0 rounded-md border border-[#4D94FF] bg-white px-3 text-[11px] font-black text-[#1565C0] shadow-sm transition-colors hover:bg-[#EEF6FF] active:scale-95"
+                        >
+                            重新连接
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
 
     useEffect(() => {
         if (!isBreathingAcquisitionStep && bottomPanelMode !== 'breathing') return;
-        if (!isBreathingSignalEnabled) return;
+        if (isRespiraScopeActive) return;
 
         const update = () => {
             tRef.current += 0.05; // Standard speed for ~15 bpm breaths
@@ -830,7 +1098,7 @@ const ScoutScanScreen = ({
         return () => {
             if (timerRef.current !== null) cancelAnimationFrame(timerRef.current);
         };
-    }, [bottomPanelMode, breathingPhase, isBreathingAcquisitionStep, isBreathingSignalEnabled]);
+    }, [bottomPanelMode, breathingPhase, isBreathingAcquisitionStep, isRespiraScopeActive]);
 
     useEffect(() => {
         if (!isBreathingAcquisitionStep) {
@@ -1098,6 +1366,20 @@ const ScoutScanScreen = ({
         setShowDeleteConfirm(false);
     };
 
+    if (workflowGuardStatus === "checking") {
+        return (
+            <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl relative text-[#37474F] font-sans select-none">
+                <AppHeader
+                    patientName={selectedPatient?.name ?? null}
+                    patientId={selectedPatient?.patientId ?? null}
+                />
+                <main className="flex-1 flex items-center justify-center text-[13px] font-bold text-[#78909C]">
+                    正在确认检查流程...
+                </main>
+            </div>
+        );
+    }
+
     return (
         <div className="flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl relative text-[#37474F] font-sans select-none">
 
@@ -1276,10 +1558,10 @@ const ScoutScanScreen = ({
                             <div className="text-[10px] font-black text-[#90A4AE] uppercase tracking-wider px-0.5">呼吸参数</div>
                             <div className="grid grid-cols-2 gap-1.5 overflow-y-auto">
                                 {[
-                                    { label: "原始数据主频率", value: `${metrics.rawMainFreq} Hz` },
-                                    { label: "峰值误差", value: `${metrics.peakErr}%` },
-                                    { label: "呼吸频率", value: `${metrics.bpm} BPM` },
-                                    { label: "频率误差", value: `${metrics.freqErr}%` },
+                                    { label: "原始数据主频率", value: `${displayMetrics.rawMainFreq} Hz` },
+                                    { label: "峰值误差", value: `${displayMetrics.peakErr}%` },
+                                    { label: "呼吸频率", value: `${displayMetrics.bpm} BPM` },
+                                    { label: "频率误差", value: `${displayMetrics.freqErr}%` },
                                 ].map(({ label, value }) => (
                                     <div key={label} className="px-1.5 py-1 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
                                         <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</span>
@@ -1375,14 +1657,14 @@ const ScoutScanScreen = ({
                             <div className="min-h-0 flex-1 bg-gradient-to-b from-white to-[#F6FAFE] rounded-lg border border-[#B0C4DE]/50 shadow-sm relative overflow-hidden">
                                 {/* Top-left: status cluster */}
                                 <div className="absolute left-4 top-4 flex items-center gap-2 z-10">
-                                    <div className="flex items-center gap-1.5 rounded-full border border-[#C8E6C9] bg-[#E8F5E9] px-2.5 py-1 shadow-sm">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-[#4CAF50] animate-pulse"></div>
-                                        <span className="text-[11px] font-bold text-[#2E7D32]">实时波形</span>
+                                    <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-sm ${respiraScopeBadgeClassName}`}>
+                                        <div className={`w-1.5 h-1.5 rounded-full ${respiraScopeDotClassName}`}></div>
+                                        <span className="text-[11px] font-bold">{liveWaveBadgeLabel}</span>
                                     </div>
-                                    <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-sm ${breathingPhase === 'stable' ? 'border-[#C8E6C9] bg-[#E8F5E9]' : 'border-[#FFE0B2] bg-[#FFF8E1]'}`}>
-                                        <div className={`w-1.5 h-1.5 rounded-full ${breathingPhase === 'stable' ? 'bg-[#4CAF50]' : 'bg-[#FFA726] animate-pulse'}`}></div>
-                                        <span className={`text-[11px] font-bold ${breathingPhase === 'stable' ? 'text-[#2E7D32]' : 'text-[#E65100]'}`}>
-                                            {breathingPhase === 'stable' ? t("scanFlow.breathingStable") : t("scanFlow.breathingSimulating", { seconds: breathingReadyCountdown })}
+                                    <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-sm ${isBreathingStatusReady ? 'border-[#C8E6C9] bg-[#E8F5E9]' : 'border-[#FFE0B2] bg-[#FFF8E1]'}`}>
+                                        <div className={`w-1.5 h-1.5 rounded-full ${isBreathingStatusReady ? 'bg-[#4CAF50]' : 'bg-[#FFA726] animate-pulse'}`}></div>
+                                        <span className={`text-[11px] font-bold ${isBreathingStatusReady ? 'text-[#2E7D32]' : 'text-[#E65100]'}`}>
+                                            {breathingPhaseLabel}
                                         </span>
                                     </div>
                                 </div>
@@ -1392,7 +1674,7 @@ const ScoutScanScreen = ({
                                     <div className="bg-white/90 backdrop-blur border border-[#E3EAF3] rounded-lg px-3 py-1.5 shadow-sm">
                                         <div className="text-[8px] font-black text-[#90A4AE] uppercase tracking-wider leading-none">实时采样</div>
                                         <div className="flex items-baseline gap-1 mt-0.5">
-                                            <span className="text-[20px] font-black text-[#2F80FF] tabular-nums leading-none">{(filteredWaveData[filteredWaveData.length - 1] ?? 0).toFixed(1)}</span>
+                                            <span className="text-[20px] font-black text-[#2F80FF] tabular-nums leading-none">{latestSignalDisplay}</span>
                                             <span className="text-[10px] font-bold text-[#90A4AE]">a.u.</span>
                                         </div>
                                     </div>
@@ -1429,15 +1711,15 @@ const ScoutScanScreen = ({
                                             </linearGradient>
                                         </defs>
                                         <line x1="0" y1="160" x2="800" y2="160" stroke="#7FA1C5" strokeWidth="1.2" strokeDasharray="4 4" opacity="0.5" />
-                                        <path d={`M ${rawWaveData.map((v,i)=>`${(i/(rawWaveData.length-1))*800},${320-(v/1100)*320}`).join(' L ')}`} fill="none" stroke="#8FA3B8" strokeWidth="1.4" className="opacity-50" />
-                                        <path d={`M 0,320 L ${filteredWaveData.map((v,i)=>`${(i/(filteredWaveData.length-1))*800},${320-(v/1100)*320}`).join(' L ')} L 800,320 Z`} fill="url(#acq-wave-fill)" />
-                                        <path d={`M ${filteredWaveData.map((v,i)=>`${(i/(filteredWaveData.length-1))*800},${320-(v/1100)*320}`).join(' L ')}`} fill="none" stroke="#2F80FF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 5px rgba(77,148,255,0.32))" }} />
-                                        {filteredWaveData.map((v, i) => {
-                                            if (i < 10 || i > filteredWaveData.length - 10) return null;
-                                            const mx = v > filteredWaveData[i-1] && v > filteredWaveData[i+1] && v > filteredWaveData[i-2] && v > filteredWaveData[i+2] && v > filteredWaveData[i-3] && v > filteredWaveData[i+3];
-                                            const mn = v < filteredWaveData[i-1] && v < filteredWaveData[i+1] && v < filteredWaveData[i-2] && v < filteredWaveData[i+2] && v < filteredWaveData[i-3] && v < filteredWaveData[i+3];
-                                            if (mx && v >= 650) return <circle key={`pk-${i}`} cx={(i/(filteredWaveData.length-1))*800} cy={320-(v/1100)*320} r="5" fill="#FF1744" stroke="#FFF" strokeWidth="1.5" />;
-                                            if (mn && v <= 380) return <circle key={`vl-${i}`} cx={(i/(filteredWaveData.length-1))*800} cy={320-(v/1100)*320} r="4.5" fill="#FFD600" stroke="#FFF" strokeWidth="1.2" />;
+                                        <path d={`M ${displayRawWaveData.map((v,i)=>`${(i/(displayRawWaveData.length-1))*800},${320-(v/1100)*320}`).join(' L ')}`} fill="none" stroke="#8FA3B8" strokeWidth="1.4" className="opacity-50" />
+                                        <path d={`M 0,320 L ${displayFilteredWaveData.map((v,i)=>`${(i/(displayFilteredWaveData.length-1))*800},${320-(v/1100)*320}`).join(' L ')} L 800,320 Z`} fill="url(#acq-wave-fill)" />
+                                        <path d={`M ${displayFilteredWaveData.map((v,i)=>`${(i/(displayFilteredWaveData.length-1))*800},${320-(v/1100)*320}`).join(' L ')}`} fill="none" stroke="#2F80FF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 5px rgba(77,148,255,0.32))" }} />
+                                        {displayFilteredWaveData.map((v, i) => {
+                                            if (i < 10 || i > displayFilteredWaveData.length - 10) return null;
+                                            const mx = v > displayFilteredWaveData[i-1] && v > displayFilteredWaveData[i+1] && v > displayFilteredWaveData[i-2] && v > displayFilteredWaveData[i+2] && v > displayFilteredWaveData[i-3] && v > displayFilteredWaveData[i+3];
+                                            const mn = v < displayFilteredWaveData[i-1] && v < displayFilteredWaveData[i+1] && v < displayFilteredWaveData[i-2] && v < displayFilteredWaveData[i+2] && v < displayFilteredWaveData[i-3] && v < displayFilteredWaveData[i+3];
+                                            if (mx && v >= 650) return <circle key={`pk-${i}`} cx={(i/(displayFilteredWaveData.length-1))*800} cy={320-(v/1100)*320} r="5" fill="#FF1744" stroke="#FFF" strokeWidth="1.5" />;
+                                            if (mn && v <= 380) return <circle key={`vl-${i}`} cx={(i/(displayFilteredWaveData.length-1))*800} cy={320-(v/1100)*320} r="4.5" fill="#FFD600" stroke="#FFF" strokeWidth="1.2" />;
                                             return null;
                                         })}
                                     </svg>
@@ -1451,6 +1733,7 @@ const ScoutScanScreen = ({
                                     <div className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#FFD600]"></span><span>谷值</span></div>
                                 </div>
 
+                                {renderRespiraScopeConnectionOverlay()}
                             </div>
 
                             {/* Collapsible params sheet — in-flow so it compresses the waveform instead of overlaying */}
@@ -1519,18 +1802,18 @@ const ScoutScanScreen = ({
                                         </defs>
                                         <line x1="0" y1="80" x2="800" y2="80" stroke="#7FA1C5" strokeWidth="1.2" strokeDasharray="4 4" opacity="0.55" />
                                         <path
-                                            d={`M ${rawWaveData.map((val, i) => `${(i / (rawWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')}`}
+                                            d={`M ${displayRawWaveData.map((val, i) => `${(i / (displayRawWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')}`}
                                             fill="none"
                                             stroke="#8FA3B8"
                                             strokeWidth="1.4"
                                             className="opacity-55"
                                         />
                                         <path
-                                            d={`M 0,160 L ${filteredWaveData.map((val, i) => `${(i / (filteredWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')} L 800,160 Z`}
+                                            d={`M 0,160 L ${displayFilteredWaveData.map((val, i) => `${(i / (displayFilteredWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')} L 800,160 Z`}
                                             fill="url(#breathing-wave-fill)"
                                         />
                                         <path
-                                            d={`M ${filteredWaveData.map((val, i) => `${(i / (filteredWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')}`}
+                                            d={`M ${displayFilteredWaveData.map((val, i) => `${(i / (displayFilteredWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')}`}
                                             fill="none"
                                             stroke="#2F80FF"
                                             strokeWidth="2.8"
@@ -1538,21 +1821,21 @@ const ScoutScanScreen = ({
                                             strokeLinejoin="round"
                                             style={{ filter: "drop-shadow(0 0 4px rgba(77,148,255,0.28))" }}
                                         />
-                                        {filteredWaveData.map((val, i) => {
-                                            if (i < 10 || i > filteredWaveData.length - 10) return null;
+                                        {displayFilteredWaveData.map((val, i) => {
+                                            if (i < 10 || i > displayFilteredWaveData.length - 10) return null;
 
-                                            const isLocalMax = val > filteredWaveData[i - 1] && val > filteredWaveData[i + 1] &&
-                                                val > filteredWaveData[i - 2] && val > filteredWaveData[i + 2] &&
-                                                val > filteredWaveData[i - 3] && val > filteredWaveData[i + 3];
-                                            const isLocalMin = val < filteredWaveData[i - 1] && val < filteredWaveData[i + 1] &&
-                                                val < filteredWaveData[i - 2] && val < filteredWaveData[i + 2] &&
-                                                val < filteredWaveData[i - 3] && val < filteredWaveData[i + 3];
+                                            const isLocalMax = val > displayFilteredWaveData[i - 1] && val > displayFilteredWaveData[i + 1] &&
+                                                val > displayFilteredWaveData[i - 2] && val > displayFilteredWaveData[i + 2] &&
+                                                val > displayFilteredWaveData[i - 3] && val > displayFilteredWaveData[i + 3];
+                                            const isLocalMin = val < displayFilteredWaveData[i - 1] && val < displayFilteredWaveData[i + 1] &&
+                                                val < displayFilteredWaveData[i - 2] && val < displayFilteredWaveData[i + 2] &&
+                                                val < displayFilteredWaveData[i - 3] && val < displayFilteredWaveData[i + 3];
 
                                             if (isLocalMax && val >= 650) {
                                                 return (
                                                     <circle
                                                         key={`pk-${i}`}
-                                                        cx={(i / (filteredWaveData.length - 1)) * 800}
+                                                        cx={(i / (displayFilteredWaveData.length - 1)) * 800}
                                                         cy={160 - (val / 1100) * 160}
                                                         r="4.5"
                                                         fill="#FF1744"
@@ -1566,7 +1849,7 @@ const ScoutScanScreen = ({
                                                 return (
                                                     <circle
                                                         key={`vl-${i}`}
-                                                        cx={(i / (filteredWaveData.length - 1)) * 800}
+                                                        cx={(i / (displayFilteredWaveData.length - 1)) * 800}
                                                         cy={160 - (val / 1100) * 160}
                                                         r="4"
                                                         fill="#FFD600"
@@ -1583,9 +1866,9 @@ const ScoutScanScreen = ({
 
                                 <div className="absolute right-4 top-8 rounded border border-[#B0C4DE]/50 bg-white p-2 shadow-xl z-10 scale-90">
                                     <div className="text-[10px] font-bold text-[#546E7A]">呼吸频率</div>
-                                    <div className="text-[10px] text-[#90A4AE]">{metrics.bpm} BPM</div>
+                                    <div className="text-[10px] text-[#90A4AE]">{displayMetrics.bpm} BPM</div>
                                     <div className="mt-1 text-[10px] font-bold text-[#546E7A]">频率误差</div>
-                                    <div className="text-[10px] text-[#90A4AE]">{metrics.freqErr}%</div>
+                                    <div className="text-[10px] text-[#90A4AE]">{displayMetrics.freqErr}%</div>
                                 </div>
 
                                 <div className="pointer-events-none absolute left-12 top-2 text-[9px] font-mono font-bold tracking-[0.08em] text-[#8AA1B8]">
@@ -1614,6 +1897,8 @@ const ScoutScanScreen = ({
                                         当前: #{breathingBedIndex + 1}
                                     </div>
                                 </div>
+
+                                {renderRespiraScopeConnectionOverlay(true)}
                             </div>
                         </div>
                     ) : bottomPanelMode === 'breathing' ? (
@@ -1670,9 +1955,9 @@ const ScoutScanScreen = ({
                             </div>
 
                             <div className="min-h-0 flex-1 bg-white rounded-md border border-[#B0C4DE]/40 shadow-inner p-3 relative overflow-hidden">
-                                <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded border border-[#C8E6C9] bg-[#E8F5E9] px-2 py-1">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-[#4CAF50] animate-pulse"></div>
-                                    <span className="text-[10px] font-bold text-[#2E7D32]">实时波形</span>
+                                <div className={`absolute left-3 top-3 flex items-center gap-1.5 rounded border px-2 py-1 ${respiraScopeBadgeClassName}`}>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${respiraScopeDotClassName}`}></div>
+                                    <span className="text-[10px] font-bold">{liveWaveBadgeLabel}</span>
                                 </div>
 
                                 <div className="absolute inset-x-8 top-7 bottom-7 flex flex-col justify-between pointer-events-none opacity-20">
@@ -1687,35 +1972,35 @@ const ScoutScanScreen = ({
                                 <div className="absolute inset-x-0 inset-y-5 flex flex-col justify-end px-14">
                                     <svg viewBox="0 0 800 160" className="w-full h-full overflow-visible" preserveAspectRatio="none">
                                         <path
-                                            d={`M ${rawWaveData.map((val, i) => `${(i / (rawWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')}`}
+                                            d={`M ${displayRawWaveData.map((val, i) => `${(i / (displayRawWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')}`}
                                             fill="none"
                                             stroke="#B0BEC5"
                                             strokeWidth="1.2"
                                             className="opacity-40"
                                         />
                                         <path
-                                            d={`M ${filteredWaveData.map((val, i) => `${(i / (filteredWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')}`}
+                                            d={`M ${displayFilteredWaveData.map((val, i) => `${(i / (displayFilteredWaveData.length - 1)) * 800},${160 - (val / 1100) * 160}`).join(' L ')}`}
                                             fill="none"
                                             stroke="#4D94FF"
                                             strokeWidth="2.5"
                                             strokeLinecap="round"
                                             strokeLinejoin="round"
                                         />
-                                        {filteredWaveData.map((val, i) => {
-                                            if (i < 10 || i > filteredWaveData.length - 10) return null;
+                                        {displayFilteredWaveData.map((val, i) => {
+                                            if (i < 10 || i > displayFilteredWaveData.length - 10) return null;
 
-                                            const isLocalMax = val > filteredWaveData[i - 1] && val > filteredWaveData[i + 1] &&
-                                                val > filteredWaveData[i - 2] && val > filteredWaveData[i + 2] &&
-                                                val > filteredWaveData[i - 3] && val > filteredWaveData[i + 3];
-                                            const isLocalMin = val < filteredWaveData[i - 1] && val < filteredWaveData[i + 1] &&
-                                                val < filteredWaveData[i - 2] && val < filteredWaveData[i + 2] &&
-                                                val < filteredWaveData[i - 3] && val < filteredWaveData[i + 3];
+                                            const isLocalMax = val > displayFilteredWaveData[i - 1] && val > displayFilteredWaveData[i + 1] &&
+                                                val > displayFilteredWaveData[i - 2] && val > displayFilteredWaveData[i + 2] &&
+                                                val > displayFilteredWaveData[i - 3] && val > displayFilteredWaveData[i + 3];
+                                            const isLocalMin = val < displayFilteredWaveData[i - 1] && val < displayFilteredWaveData[i + 1] &&
+                                                val < displayFilteredWaveData[i - 2] && val < displayFilteredWaveData[i + 2] &&
+                                                val < displayFilteredWaveData[i - 3] && val < displayFilteredWaveData[i + 3];
 
                                             if (isLocalMax && val >= 650) {
                                                 return (
                                                     <circle
                                                         key={`pk-${i}`}
-                                                        cx={(i / (filteredWaveData.length - 1)) * 800}
+                                                        cx={(i / (displayFilteredWaveData.length - 1)) * 800}
                                                         cy={160 - (val / 1100) * 160}
                                                         r="4"
                                                         fill="#FF1744"
@@ -1729,7 +2014,7 @@ const ScoutScanScreen = ({
                                                 return (
                                                     <circle
                                                         key={`vl-${i}`}
-                                                        cx={(i / (filteredWaveData.length - 1)) * 800}
+                                                        cx={(i / (displayFilteredWaveData.length - 1)) * 800}
                                                         cy={160 - (val / 1100) * 160}
                                                         r="3.5"
                                                         fill="#FFD600"
@@ -1744,6 +2029,7 @@ const ScoutScanScreen = ({
                                     </svg>
                                 </div>
 
+                                {renderRespiraScopeConnectionOverlay(true)}
                             </div>
                         </div>
                     ) : (
@@ -1783,9 +2069,10 @@ const ScoutScanScreen = ({
 
                 <div className="flex-1 flex justify-end">
                     <button
-                        disabled={isBreathingAcquisitionStep && breathingPhase !== 'stable'}
+                        disabled={isBreathingAcquisitionStep && !canContinueBreathingAcquisition}
                         onClick={async () => {
                             if (isBreathingAcquisitionStep) {
+                                if (!canContinueBreathingAcquisition) return;
                                 setActiveStepIdx(idx => idx + 1);
                                 return;
                             }
@@ -1805,7 +2092,7 @@ const ScoutScanScreen = ({
                             }
                         }}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md shadow-lg transition-all uppercase text-[13px] active:scale-95 ${
-                            (isBreathingAcquisitionStep && breathingPhase !== 'stable')
+                            (isBreathingAcquisitionStep && !canContinueBreathingAcquisition)
                                 ? 'bg-gray-300 text-white cursor-not-allowed shadow-none active:scale-100'
                                 : (isBreathingAcquisitionStep ? 'bg-[#4D94FF] text-white hover:bg-blue-600' : (bottomPanelMode === 'breathing' ? 'bg-[#7EAAFF] text-white hover:bg-[#6FA0FF]' : 'bg-[#4D94FF] text-white hover:bg-blue-600'))
                         }`}
