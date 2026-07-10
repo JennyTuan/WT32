@@ -3,26 +3,56 @@ from __future__ import annotations
 import csv
 from datetime import date, datetime
 import json
+import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./backend/app.db"
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DATABASE_URL = "sqlite:///./backend/app.db"
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+def _normalize_database_url(database_url: str) -> str:
+    """让通用 PostgreSQL URL 明确使用项目安装的 psycopg 3 驱动。"""
+    database_url = database_url.strip() or DEFAULT_DATABASE_URL
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace(
+            "postgresql://", "postgresql+psycopg://", 1
+        )
+    parsed_url = make_url(database_url)
+    if parsed_url.get_backend_name() == "postgresql" and "@" in (parsed_url.host or ""):
+        raise ValueError(
+            "DATABASE_URL 的密码包含未编码的 @；请将 @ 写成 %40。"
+        )
+    return database_url
+
+
+SQLALCHEMY_DATABASE_URL = _normalize_database_url(
+    os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
 )
+
+_engine_options: dict = {}
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    _engine_options["connect_args"] = {"check_same_thread": False}
+else:
+    _engine_options["pool_pre_ping"] = True
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL, **_engine_options)
 
 CSV_PROTOCOL_DESCRIPTION_PREFIX = "protocol-csv:"
 
 
-@event.listens_for(engine, "connect")
-def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+if engine.dialect.name == "sqlite":
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -2134,12 +2164,36 @@ def _seed_corner_defaults(db) -> None:
         print("Seeded / migrated corner defaults")
 
 
+def assert_database_current(target_engine: Engine = engine) -> None:
+    """目标数据库必须先通过 Alembic 建表，避免静默修改结构。"""
+    from alembic.config import Config
+    from alembic.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    scripts = ScriptDirectory.from_config(config)
+    expected_heads = set(scripts.get_heads())
+
+    with target_engine.connect() as connection:
+        current_heads = set(MigrationContext.configure(connection).get_current_heads())
+
+    if current_heads != expected_heads:
+        raise RuntimeError(
+            "数据库结构未迁移到最新版本。请先在项目根目录运行 "
+            "`.\\.venv\\Scripts\\python.exe -m alembic upgrade head`。"
+        )
+
+
 def init_db() -> None:
     from . import models
 
-    Base.metadata.create_all(bind=engine)
-    _migrate_protocol_columns()
-    _cleanup_scan_session_orphans()
+    if engine.dialect.name == "sqlite":
+        # SQLite 仅作为无 DATABASE_URL 时的本地兼容回退，保留旧库升级逻辑。
+        Base.metadata.create_all(bind=engine)
+        _migrate_protocol_columns()
+        _cleanup_scan_session_orphans()
+    else:
+        assert_database_current()
 
     db = SessionLocal()
     try:

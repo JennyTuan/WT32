@@ -19,6 +19,9 @@ ui-review/node_modules/
 ui-review/dist/
 
 # Environment
+.env
+.env.*
+!.env.example
 .env.local
 .env.*.local
 

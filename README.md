@@ -29,6 +29,27 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 ```
 
+### Configure PostgreSQL And Migrate
+
+Set `DATABASE_URL` in the same terminal that will run Alembic and the backend. URL-encode special characters in the password (`@` becomes `%40`).
+
+```powershell
+$env:DATABASE_URL = "postgresql+psycopg://jenny_dev:YOUR_URL_ENCODED_PASSWORD@localhost:5432/wt32"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m alembic current
+```
+
+Alternatively, copy `.env.example` to the ignored `.env` file and set `DATABASE_URL` there. Both Alembic and FastAPI load that file from the project root.
+
+To preserve the existing `backend/app.db` records, run the legacy data migration before the first backend startup:
+
+```powershell
+.\.venv\Scripts\python.exe -m backend.migrate_legacy_sqlite --source backend\app.db --dry-run
+.\.venv\Scripts\python.exe -m backend.migrate_legacy_sqlite --source backend\app.db
+```
+
+The FastAPI startup seeds the prototype defaults after confirming that the schema is at the current Alembic revision. It does not create or upgrade PostgreSQL tables implicitly. See [docs/database-migrations.md](docs/database-migrations.md) for rollback and troubleshooting.
+
 If Python 3.14 cannot build `pydantic-core`, use:
 
 ```powershell
@@ -73,7 +94,7 @@ URLs:
 | Layer | Stack |
 | --- | --- |
 | Backend | FastAPI 0.115.12, Uvicorn 0.34.0 |
-| Database | SQLite, SQLAlchemy 2.0.39 |
+| Database | PostgreSQL, SQLAlchemy 2.0.39, Alembic (SQLite fallback for legacy local tests) |
 | Schemas | Pydantic 2.11.2 |
 | Frontend | React 19.2.0, TypeScript 5.9.3, Vite 7.3.1 |
 | Styling | Tailwind CSS 3.4.17 |
@@ -95,7 +116,7 @@ backend (FastAPI)
   - REST APIs for patients, protocols, scan params, scan sessions, service data
   - WebSocket scan event simulation
   - SQLAlchemy models
-  - SQLite database and seed protocols
+  - PostgreSQL schema managed by Alembic and seed protocols
 ```
 
 The backend separates two domains:
@@ -108,7 +129,8 @@ The backend separates two domains:
 ```text
 backend/
   main.py                 FastAPI entrypoint, CORS, routes, static mounts
-  database.py             SQLite engine, sessions, seed data
+  database.py             Database engine, sessions, seed data
+  migrations/             Alembic schema migration history
   models.py               SQLAlchemy models
   schemas.py              Pydantic schemas
   routers/                API route modules
@@ -181,6 +203,7 @@ Use [docs/README.md](docs/README.md) as the documentation index. Keep new long-f
 
 ## Notes
 
-- `backend/app.db` is local runtime data and is ignored by Git.
+- `DATABASE_URL` selects PostgreSQL; without it, the backend retains a legacy local SQLite fallback at `backend/app.db`.
+- Database credentials belong in local environment variables and are ignored by Git.
 - `ui-review/node_modules/`, `.venv/`, build logs, and generated output should stay untracked.
 - Raw external DICOM data should not be committed unless it is intentionally curated demo data.
