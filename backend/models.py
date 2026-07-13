@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -345,6 +345,9 @@ class ScanSessionSeries(Base):
     contrast_delay = Column(Float, nullable=True)
     trigger_mode = Column(String(30), nullable=True)
     tracking_threshold = Column(Float, nullable=True)
+    execution_status = Column(String(20), nullable=False, default="pending", server_default="pending", index=True)
+    failure_reason = Column(Text, nullable=True)
+    range_confirmed = Column(Boolean, nullable=False, default=False, server_default=false())
 
     scan_session = relationship("ScanSession", back_populates="series")
     topogram_param = relationship(

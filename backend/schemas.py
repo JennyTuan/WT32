@@ -544,6 +544,12 @@ class ScanSessionSeriesUpdate(BaseModel):
     tracking_threshold: Optional[float] = None
 
 
+class ScanSessionSeriesExecutionUpdate(BaseModel):
+    execution_status: Optional[Literal["pending", "running", "image_ready", "failed"]] = None
+    failure_reason: Optional[str] = Field(default=None, max_length=500)
+    range_confirmed: Optional[bool] = None
+
+
 class ScanSessionTopogramParamUpdate(BaseModel):
     kv: Optional[int] = None
     ma: Optional[int] = None
@@ -770,6 +776,9 @@ class ScanSessionSeries(ORMModel):
     contrast_delay: Optional[float] = None
     trigger_mode: Optional[Literal["manual", "auto_timing", "bolus_tracking"]] = None
     tracking_threshold: Optional[float] = None
+    execution_status: Literal["pending", "running", "image_ready", "failed"] = "pending"
+    failure_reason: Optional[str] = None
+    range_confirmed: bool = False
     topogram_param: Optional[ScanSessionTopogramParam] = None
     helical_param: Optional[ScanSessionHelicalParam] = None
     axial_param: Optional[ScanSessionAxialParam] = None

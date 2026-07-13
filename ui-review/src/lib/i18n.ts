@@ -13,6 +13,7 @@ const zhCN = {
   "common.nextStep": "下一步",
   "common.previousStep": "上一步",
   "common.refresh": "刷新",
+  "common.retry": "重试定位像",
   "common.save": "保存",
   "common.saving": "保存中",
 
@@ -556,6 +557,7 @@ const zhCN = {
   "scanFlow.scoutGenerated": "定位像已生成",
   "scanFlow.scoutGenerating": "定位像生成中...",
   "scanFlow.scoutLoadError": "定位像加载失败",
+  "scanFlow.localizerPrerequisiteBlocked": "定位像未成功出图或状态未确认，后续扫描已阻止。",
   "scanFlow.scoutLoading": "正在载入定位像...",
   "scanFlow.scoutLoadingData": "正在载入定位像数据...",
   "scanFlow.scout": "定位像",
@@ -1705,6 +1707,7 @@ const enUS: Record<TranslationKey, string> = {
   "common.nextStep": "Next",
   "common.previousStep": "Back",
   "common.refresh": "Refresh",
+  "common.retry": "Retry Scout",
   "common.save": "Save",
   "common.saving": "Saving",
 
@@ -2248,6 +2251,7 @@ const enUS: Record<TranslationKey, string> = {
   "scanFlow.scoutGenerated": "Scout image generated",
   "scanFlow.scoutGenerating": "Generating scout image...",
   "scanFlow.scoutLoadError": "Failed to load scout image",
+  "scanFlow.localizerPrerequisiteBlocked": "The scout image is unavailable or unconfirmed. The dependent scan is blocked.",
   "scanFlow.scoutLoading": "Loading scout image...",
   "scanFlow.scoutLoadingData": "Loading scout image data...",
   "scanFlow.scout": "Scout",

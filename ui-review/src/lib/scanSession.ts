@@ -120,6 +120,9 @@ export type ApiScanSessionSeries = {
     contrast_delay?: number | null;
     trigger_mode?: "manual" | "auto_timing" | "bolus_tracking" | null;
     tracking_threshold?: number | null;
+    execution_status: "pending" | "running" | "image_ready" | "failed";
+    failure_reason?: string | null;
+    range_confirmed: boolean;
     topogram_param?: ApiScanSessionTopogramParam | null;
     helical_param?: ApiScanSessionHelicalParam | null;
     axial_param?: ApiScanSessionAxialParam | null;
@@ -422,6 +425,26 @@ export const createScanSessionSeries = async (scanSessionId: number, payload: Cr
 
 export const updateSelectedScanSessionSeries = async (sessionSeriesId: number, payload: UpdatePayload) =>
     updateSelectedScanSessionEntity<ApiScanSessionSeries>(`/api/scan-sessions/series/${sessionSeriesId}`, payload);
+
+export const updateScanSessionSeriesExecution = async (
+    sessionSeriesId: number,
+    payload: {
+        execution_status?: "pending" | "running" | "image_ready" | "failed";
+        failure_reason?: string | null;
+        range_confirmed?: boolean;
+    },
+) => {
+    const response = await fetch(buildApiUrl(`/api/scan-sessions/series/${sessionSeriesId}/execution`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        const body = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(body?.detail || `Failed to update scan series execution: ${response.status}`);
+    }
+    return (await response.json()) as ApiScanSessionSeries;
+};
 
 export const duplicateSelectedScanSessionSeries = async (sessionSeriesId: number) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/series/${sessionSeriesId}/duplicate`), {

@@ -69,6 +69,7 @@ type ScanConfirmScreenProps = {
     executeButtonCompact?: boolean;
     nextRoute?: string;
     allowBackNavigation?: boolean;
+    executeDisabled?: boolean;
 };
 
 type ScoutDisplayParams = {
@@ -460,6 +461,7 @@ const ScanConfirmScreen = ({
     executeButtonCompact = false,
     nextRoute = "/scout-execute",
     allowBackNavigation = true,
+    executeDisabled = false,
 }: ScanConfirmScreenProps) => {
     const navigate = useNavigate();
     const { t } = useI18n();
@@ -1545,8 +1547,8 @@ const ScanConfirmScreen = ({
                             }
                             setShowPatientConfirm(true);
                         }}
-                        disabled={readOnlyMode && !onExecuteScan}
-                        className={`flex items-center justify-center rounded-md font-bold uppercase transition-all ${executeButtonCompact ? "h-[46px] w-[236px] gap-1.5 px-4 text-center text-[11px] leading-[1.15]" : "h-[52px] gap-2 px-10 text-[13px]"} ${readOnlyMode && !onExecuteScan ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
+                        disabled={(readOnlyMode && !onExecuteScan) || executeDisabled}
+                        className={`flex items-center justify-center rounded-md font-bold uppercase transition-all ${executeButtonCompact ? "h-[46px] w-[236px] gap-1.5 px-4 text-center text-[11px] leading-[1.15]" : "h-[52px] gap-2 px-10 text-[13px]"} ${(readOnlyMode && !onExecuteScan) || executeDisabled ? "bg-[#CBD5E1] text-white cursor-not-allowed shadow-none" : "bg-[#4D94FF] text-white shadow-lg hover:bg-blue-600 active:scale-95"}`}
                     >
                         <span className={executeButtonCompact ? "min-w-0 whitespace-normal" : undefined}>{resolvedExecuteButtonLabel}</span>
                         <ChevronRight size={executeButtonCompact ? 16 : 20} className="shrink-0" />

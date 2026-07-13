@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import { imageLoader, metaData } from "@cornerstonejs/core";
 import { Crosshair, Hand, Move, RotateCcw, Undo2, ZoomIn, ZoomOut } from "lucide-react";
-import { fetchSelectedScanSession, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
-import type { ApiScanSessionAxialParam } from "../lib/scanSession";
+import { fetchSelectedScanSession, updateScanSessionSeriesExecution, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
+import type { ApiScanSessionAxialParam, ApiScanSessionSeries } from "../lib/scanSession";
 import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
 import AutoMaPanel, { NOISE_SLIDER_DEFAULT, type NoiseLevel } from "../components/AutoMaPanel";
 import ScanConfirmScreen from "./ScanConfirmScreen";
@@ -87,37 +88,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
     });
 }
 
-function createFallbackScoutProjection(metrics?: { scanLength?: string; scoutFov?: string }): { output: Uint8ClampedArray; meta: ProjectionMeta } {
-    const width = 320;
-    const height = 620;
-    const scanLength = Number(metrics?.scanLength);
-    const scoutFov = Number(metrics?.scoutFov);
-    const meta: ProjectionMeta = {
-        width,
-        height,
-        pixelSpacingX: Number.isFinite(scoutFov) && scoutFov > 0 ? scoutFov / width : 250 / width,
-        sliceThickness: Number.isFinite(scanLength) && scanLength > 0 ? scanLength / height : 305 / height,
-    };
-    const output = new Uint8ClampedArray(width * height);
-
-    for (let y = 0; y < height; y += 1) {
-        const yNorm = y / (height - 1);
-        const neckTaper = Math.max(0.42, 1 - Math.max(0, yNorm - 0.62) * 1.3);
-        const bodyHalfWidth = (0.2 + 0.22 * Math.sin(Math.PI * yNorm)) * width * neckTaper;
-        const spineHalfWidth = 0.025 * width;
-        const centerX = width * (0.5 + 0.015 * Math.sin(yNorm * Math.PI * 2));
-        for (let x = 0; x < width; x += 1) {
-            const dx = Math.abs(x - centerX);
-            const body = dx < bodyHalfWidth ? 78 + Math.round(38 * (1 - dx / bodyHalfWidth)) : 8;
-            const spine = dx < spineHalfWidth ? 148 : 0;
-            const shoulder = yNorm > 0.45 && yNorm < 0.72 && dx < bodyHalfWidth * 1.15 ? 34 : 0;
-            output[y * width + x] = Math.min(210, Math.max(body, spine) + shoulder);
-        }
-    }
-
-    return { output, meta };
-}
-
 type CropBox = {
     x: number;
     y: number;
@@ -166,6 +136,7 @@ export function TomographicScoutViewport({
     cropBoxOverride,
     tubeAngle = 180,
     onReconCenterChange,
+    onLoadStateChange,
 }: {
     onMeasurementChange: (values: { scanLength: string; scoutFov: string }) => void;
     initialMeasurements?: { scanLength?: string; scoutFov?: string };
@@ -179,6 +150,7 @@ export function TomographicScoutViewport({
     cropBoxOverride?: { x: number; y: number; width: number; height: number };
     tubeAngle?: number;
     onReconCenterChange?: (delta: ReconCenterDelta) => void;
+    onLoadStateChange?: (state: "loading" | "ready" | "error") => void;
 }) {
     const { t } = useI18n();
     const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -216,6 +188,9 @@ export function TomographicScoutViewport({
         initialOffsetY: number;
     } | null>(null);
     const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+    useEffect(() => {
+        onLoadStateChange?.(loadState);
+    }, [loadState, onLoadStateChange]);
     const [cropBox, setCropBox] = useState<CropBox>({
         x: 0.18,
         y: 0.2,
@@ -533,13 +508,8 @@ export function TomographicScoutViewport({
                 };
                 setLoadState("ready");
             } catch (error) {
-                console.warn("Failed to load scout DICOM; using fallback scout projection.", error);
-                if (!cancelled) {
-                    const fallback = createFallbackScoutProjection(initialMeasurementsRef.current);
-                    projectionRef.current = fallback.output;
-                    metaRef.current = fallback.meta;
-                    setLoadState("ready");
-                }
+                console.warn("Failed to load scout DICOM.", error);
+                if (!cancelled) setLoadState("error");
             }
         };
 
@@ -1002,6 +972,8 @@ export function TomographicScoutViewport({
 }
 
 const SequenceScanConfirmScreen = () => {
+    const navigate = useNavigate();
+    const { t } = useI18n();
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [axialParam, setAxialParam] = useState<ApiScanSessionAxialParam | null>(null);
     const [noiseLevel, setNoiseLevel] = useState<NoiseLevel>(NOISE_SLIDER_DEFAULT);
@@ -1011,6 +983,11 @@ const SequenceScanConfirmScreen = () => {
     // 暂存重建中心偏移，后续接入扫描协议持久化时使用
     const [, setReconCenterDelta] = useState<ReconCenterDelta | null>(null);
     const [topogramTubeAngle, setTopogramTubeAngle] = useState<number>(180);
+    const [topogramSeries, setTopogramSeries] = useState<ApiScanSessionSeries | null>(null);
+    const [axialSeries, setAxialSeries] = useState<ApiScanSessionSeries | null>(null);
+    const [scoutLoadState, setScoutLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const [executionError, setExecutionError] = useState<string | null>(null);
+    const [sessionResolved, setSessionResolved] = useState(false);
     const axialParamId = axialParam?.id ?? null;
     const updateTimerRef = useRef<number | null>(null);
 
@@ -1021,7 +998,15 @@ const SequenceScanConfirmScreen = () => {
             try {
                 const scanSession = await fetchSelectedScanSession({ preferCache: false });
                 const loaded = scanSession?.series.find((series) => series.series_type === "axial")?.axial_param as ApiScanSessionAxialParam | null | undefined;
-                const topogram = scanSession?.series.find((series) => series.series_type === "topogram")?.topogram_param;
+                const loadedAxialSeries = scanSession?.series.find((series) => series.series_type === "axial") ?? null;
+                const loadedTopogramSeries = scanSession?.series
+                    .filter((series) => series.series_type === "topogram" && (!loadedAxialSeries || series.series_order < loadedAxialSeries.series_order))
+                    .sort((a, b) => b.series_order - a.series_order)[0] ?? null;
+                const topogram = loadedTopogramSeries?.topogram_param;
+                if (!cancelled) {
+                    setTopogramSeries(loadedTopogramSeries);
+                    setAxialSeries(loadedAxialSeries);
+                }
                 if (topogram && !cancelled) {
                     setTopogramTubeAngle(topogram.tube_angle ?? 180);
                 }
@@ -1034,6 +1019,8 @@ const SequenceScanConfirmScreen = () => {
                 });
             } catch (error) {
                 console.error("Failed to load axial scan session defaults.", error);
+            } finally {
+                if (!cancelled) setSessionResolved(true);
             }
         };
 
@@ -1115,6 +1102,26 @@ const SequenceScanConfirmScreen = () => {
         }
     }, [showAutoMaPanel, scoutHu, scoutCropBox, axialParam, axialBedCount]);
 
+    const topogramDependencyReady = sessionResolved && (
+        !topogramSeries || (topogramSeries.execution_status === "image_ready" && scoutLoadState === "ready")
+    );
+
+    const handleExecuteScan = async () => {
+        setExecutionError(null);
+        try {
+            if (topogramSeries) {
+                if (!topogramDependencyReady) throw new Error("定位像未成功出图，无法执行后续断层扫描");
+                await updateScanSessionSeriesExecution(topogramSeries.id, { range_confirmed: true });
+            }
+            if (axialSeries) {
+                await updateScanSessionSeriesExecution(axialSeries.id, { execution_status: "running" });
+            }
+            navigate("/image-viewer");
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : "断层扫描前置条件校验失败");
+        }
+    };
+
     return (
         <ScanConfirmScreen
             activeSequenceId="s2"
@@ -1124,6 +1131,9 @@ const SequenceScanConfirmScreen = () => {
             onScoutAngleChange={setTopogramTubeAngle}
             autoMaEnabled={showAutoMaPanel}
             onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
+            onExecuteScan={() => { void handleExecuteScan(); }}
+            patientConfirmBeforeExecute
+            executeDisabled={!topogramDependencyReady}
             rightViewportContent={
                 <>
                     <TomographicScoutViewport
@@ -1137,7 +1147,13 @@ const SequenceScanConfirmScreen = () => {
                         onCropBoxChange={setScoutCropBox}
                         tubeAngle={topogramTubeAngle}
                         onReconCenterChange={setReconCenterDelta}
+                        onLoadStateChange={setScoutLoadState}
                     />
+                    {(executionError || (topogramSeries && !topogramDependencyReady)) && (
+                        <div className="absolute bottom-3 left-3 right-3 z-30 rounded border border-[#EF4444]/60 bg-[#2A1115]/95 px-3 py-2 text-[12px] font-bold text-[#FCA5A5]">
+                            {executionError ?? t("scanFlow.localizerPrerequisiteBlocked")}
+                        </div>
+                    )}
                     {axialParam && showAutoMaPanel && (
                         <AutoMaPanel
                             autoMa={axialParam.auto_ma ?? false}

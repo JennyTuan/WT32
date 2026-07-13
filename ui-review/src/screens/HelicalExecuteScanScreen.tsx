@@ -6,7 +6,7 @@ import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import DibhStatusRow from "../components/DibhStatusRow";
 import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/useBreathHoldStateMachine";
-import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession } from "../lib/scanSession";
+import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession, updateScanSessionSeriesExecution, type ApiScanSessionDetail } from "../lib/scanSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { getLimbsDicomSeries, isLimbsHelicalScanSession, loadLimbsDicomDemoManifest } from "../lib/limbsDicomDemo";
 import { useI18n } from "../lib/i18nContext";
@@ -301,7 +301,9 @@ export default function HelicalExecuteScanScreen() {
     const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
     const [guideVisible, setGuideVisible] = useState(true);
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
+    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const [completedBeds, setCompletedBeds] = useState(0);
+    const [executionError, setExecutionError] = useState<string | null>(null);
     const [currentSlice, setCurrentSlice] = useState(0);
     const [axialWaitingForBreath, setAxialWaitingForBreath] = useState(false);
     const [pendingBedIndex, setPendingBedIndex] = useState<number | null>(null);
@@ -367,8 +369,9 @@ export default function HelicalExecuteScanScreen() {
 
         const loadSessionMeasurements = async () => {
             try {
-                const scanSession = await fetchSelectedScanSession();
-                if (executeMode === "helical" && isLimbsHelicalScanSession(scanSession)) {
+                const loadedScanSession = await fetchSelectedScanSession({ preferCache: false });
+                if (!cancelled) setScanSession(loadedScanSession);
+                if (executeMode === "helical" && isLimbsHelicalScanSession(loadedScanSession)) {
                     const manifest = await loadLimbsDicomDemoManifest();
                     const liveSeries = getLimbsDicomSeries(manifest, "thin-soft");
                     if (!cancelled && liveSeries) {
@@ -382,7 +385,7 @@ export default function HelicalExecuteScanScreen() {
                 }
 
                 if (isGatedAxial) {
-                    const axialParam = scanSession?.series.find((series) => series.series_type === "axial")?.axial_param;
+                    const axialParam = loadedScanSession?.series.find((series) => series.series_type === "axial")?.axial_param;
                     if (!axialParam || cancelled) return;
 
                     setMeasurements({
@@ -392,7 +395,7 @@ export default function HelicalExecuteScanScreen() {
                     return;
                 }
 
-                const helicalParam = scanSession?.series.find((series) => series.series_type === "helical")?.helical_param;
+                const helicalParam = loadedScanSession?.series.find((series) => series.series_type === "helical")?.helical_param;
                 if (!helicalParam || cancelled) return;
 
                 setMeasurements({
@@ -430,21 +433,34 @@ export default function HelicalExecuteScanScreen() {
 
     useEffect(() => {
         if (stage !== "completed") return;
-
-        const sessionId = loadSelectedScanSessionId();
-        if (sessionId) void completeScanSession(sessionId);
-
-        autoNavigateTimerRef.current = window.setTimeout(() => {
-            navigate("/image-viewer");
-        }, AUTO_NAVIGATE_DELAY_MS);
+        let cancelled = false;
+        const finish = async () => {
+            try {
+                const targetType = isGatedAxial ? "axial" : "helical";
+                const targetSeries = scanSession?.series.find((series) => series.series_type === targetType);
+                if (targetSeries) {
+                    await updateScanSessionSeriesExecution(targetSeries.id, { execution_status: "image_ready" });
+                }
+                const sessionId = loadSelectedScanSessionId();
+                if (sessionId) await completeScanSession(sessionId);
+                if (cancelled) return;
+                autoNavigateTimerRef.current = window.setTimeout(() => {
+                    navigate("/image-viewer");
+                }, AUTO_NAVIGATE_DELAY_MS);
+            } catch (error) {
+                if (!cancelled) setExecutionError(error instanceof Error ? error.message : "扫描结果状态更新失败");
+            }
+        };
+        void finish();
 
         return () => {
+            cancelled = true;
             if (autoNavigateTimerRef.current !== null) {
                 window.clearTimeout(autoNavigateTimerRef.current);
                 autoNavigateTimerRef.current = null;
             }
         };
-    }, [navigate, stage]);
+    }, [isGatedAxial, navigate, scanSession, stage]);
 
     useEffect(() => {
         return () => {
@@ -639,9 +655,24 @@ export default function HelicalExecuteScanScreen() {
         }, POSITIONING_DURATION_MS);
     };
 
-    const triggerScanSequence = () => {
+    const triggerScanSequence = async () => {
         const sessionId = loadSelectedScanSessionId();
-        if (sessionId) void startScanSession(sessionId);
+        setExecutionError(null);
+        try {
+            if (sessionId) await startScanSession(sessionId);
+            const activeScanSession = scanSession ?? await fetchSelectedScanSession({ preferCache: false });
+            const targetType = isGatedAxial ? "axial" : "helical";
+            const targetSeries = activeScanSession?.series.find((series) => series.series_type === targetType);
+            if (sessionId && !targetSeries) throw new Error("当前扫描会话缺少待执行序列");
+            if (targetSeries) {
+                await updateScanSessionSeriesExecution(targetSeries.id, { execution_status: "running" });
+            }
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : "扫描前置条件校验失败");
+            setStage("positioned");
+            setGuideVisible(false);
+            return;
+        }
         clearHoldRaf();
         setStage("enabled");
         setCompletedBeds(0);
@@ -821,7 +852,7 @@ export default function HelicalExecuteScanScreen() {
         }
 
         if (physicalTriggerAction === "exposure") {
-            triggerScanSequence();
+            void triggerScanSequence();
             return;
         }
 
@@ -1027,6 +1058,24 @@ export default function HelicalExecuteScanScreen() {
                     buttonActive={stage === "arming" || stage === "positioning" || stage === "enabled" || stage === "exposing"}
                 />
             </div>
+
+            {executionError && (
+                <div className="absolute inset-0 z-[70] flex items-center justify-center bg-slate-900/55 backdrop-blur-[1px]">
+                    <div className="w-[440px] rounded-xl border border-[#EF4444]/60 bg-white shadow-2xl">
+                        <div className="border-b border-red-100 bg-red-50 px-6 py-4 text-[15px] font-black text-red-800">扫描无法继续</div>
+                        <div className="px-6 py-5 text-[13px] leading-relaxed text-slate-600">{executionError}</div>
+                        <div className="flex justify-end border-t border-slate-100 bg-slate-50 px-6 py-4">
+                            <button
+                                type="button"
+                                onClick={() => setExecutionError(null)}
+                                className="rounded-md bg-[#1D4ED8] px-5 py-2 text-[12px] font-bold text-white"
+                            >
+                                返回确认
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {isGatedAxial && bedWaitTimedOut && (
                 <div className="absolute inset-0 z-[60] flex items-center justify-center bg-slate-900/55 backdrop-blur-[1px]">

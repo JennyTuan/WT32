@@ -16,7 +16,7 @@ import {
     ZoomOut,
     RotateCcw,
 } from "lucide-react";
-import { fetchSelectedScanSession, updateSelectedScanSessionHelicalParam } from "../lib/scanSession";
+import { fetchSelectedScanSession, updateScanSessionSeriesExecution, updateSelectedScanSessionHelicalParam } from "../lib/scanSession";
 import type { ApiScanSessionDetail, ApiScanSessionHelicalParam } from "../lib/scanSession";
 
 import { loadSelectedPatient } from "../lib/patientSession";
@@ -2086,6 +2086,8 @@ const HelicalScanConfirmScreen = () => {
     const [scanPositionRatio, setScanPositionRatio] = useState(0.5);
     const [scoutHu, setScoutHu] = useState<ScoutHuData | null>(null);
     const [scoutCropBox, setScoutCropBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+    const [scoutLoadState, setScoutLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const [executionError, setExecutionError] = useState<string | null>(null);
 
     // Keep the parent measurement update idempotent because the scout viewport
     // reports stringified values, and identical values should not re-render the
@@ -2297,7 +2299,31 @@ const HelicalScanConfirmScreen = () => {
         }
     }, [showAutoMaPanel, scoutHu, scoutCropBox, helicalParam]);
 
-    const handleExecuteScan = useCallback(() => {
+    const helicalSeries = scanSession?.series.find((series) => series.series_type === "helical") ?? null;
+    const requiredTopogram = scanSession?.series
+        .filter((series) => series.series_type === "topogram" && (!helicalSeries || series.series_order < helicalSeries.series_order))
+        .sort((a, b) => b.series_order - a.series_order)[0] ?? null;
+    const scoutDisplayReady = isHeadDualScoutFlow
+        ? Boolean(headDualScoutManifest && headDualApSeries && headDualLatSeries)
+        : scoutLoadState === "ready";
+    const topogramDependencyReady = sessionResolved && (
+        !requiredTopogram || (requiredTopogram.execution_status === "image_ready" && scoutDisplayReady)
+    );
+
+    const handleExecuteScan = useCallback(async () => {
+        setExecutionError(null);
+        if (!topogramDependencyReady) {
+            setExecutionError("定位像未成功出图，无法执行后续螺旋扫描");
+            return;
+        }
+        try {
+            if (requiredTopogram) {
+                await updateScanSessionSeriesExecution(requiredTopogram.id, { range_confirmed: true });
+            }
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : "螺旋扫描前置条件校验失败");
+            return;
+        }
         // Re-estimate CTDIvol/DLP from the current parameters so the guard sees
         // a value that actually tracks user edits (the session's stored
         // ctdi_vol stays at the protocol seed until backend recompute lands).
@@ -2324,7 +2350,7 @@ const HelicalScanConfirmScreen = () => {
             },
             () => navigate("/helical-execute"),
         );
-    }, [thresholdGuard, scanSession, helicalParam, protocolHelicalSeed, measurements.scanLength, navigate]);
+    }, [thresholdGuard, scanSession, helicalParam, protocolHelicalSeed, measurements.scanLength, navigate, requiredTopogram, topogramDependencyReady]);
 
     // 4D gets a completely different layout. Keep this after all hooks so
     // React sees the same hook order for gated and non-gated workflows.
@@ -2342,7 +2368,8 @@ const HelicalScanConfirmScreen = () => {
             onScoutAngleChange={handleScoutAngleChange}
             autoMaEnabled={showAutoMaPanel}
             onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
-            onExecuteScan={handleExecuteScan}
+            onExecuteScan={() => { void handleExecuteScan(); }}
+            executeDisabled={!topogramDependencyReady}
             rightViewportContent={
                 <>
                     {sessionResolved ? (
@@ -2370,6 +2397,7 @@ const HelicalScanConfirmScreen = () => {
                                 onScoutHuChange={setScoutHu}
                                 onCropBoxChange={setScoutCropBox}
                                 tubeAngle={topogramTubeAngle}
+                                onLoadStateChange={setScoutLoadState}
                             />
                         )
                     ) : (
@@ -2393,6 +2421,11 @@ const HelicalScanConfirmScreen = () => {
                             onChange={handleAutoMaChange}
                             realMaCurve={realMaCurve}
                         />
+                    )}
+                    {(executionError || (requiredTopogram && !topogramDependencyReady)) && (
+                        <div className="absolute bottom-3 left-3 right-3 z-30 rounded border border-[#EF4444]/60 bg-[#2A1115]/95 px-3 py-2 text-[12px] font-bold text-[#FCA5A5]">
+                            {executionError ?? t("scanFlow.localizerPrerequisiteBlocked")}
+                        </div>
                     )}
                 </>
             }

@@ -146,6 +146,37 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()
 
+    def _add_preceding_topogram(self, scan_session_id: int) -> tuple[int, int]:
+        db = self.SessionTesting()
+        try:
+            helical = (
+                db.query(models.ScanSessionSeries)
+                .filter(
+                    models.ScanSessionSeries.scan_session_id == scan_session_id,
+                    models.ScanSessionSeries.series_type == "helical",
+                )
+                .one()
+            )
+            helical.series_order = 2
+            topogram = models.ScanSessionSeries(
+                scan_session_id=scan_session_id,
+                series_order=1,
+                series_type="topogram",
+                series_label="Scout",
+            )
+            topogram.topogram_param = models.ScanSessionTopogramParam(
+                kv=100,
+                ma=30,
+                scan_length=300.0,
+                tube_angle=180.0,
+                fov=300.0,
+            )
+            db.add(topogram)
+            db.commit()
+            return topogram.id, helical.id
+        finally:
+            db.close()
+
     def test_create_scan_session_clones_protocol_template_snapshot_through_api(self) -> None:
         scan_session = self._create_scan_session()
 
@@ -160,6 +191,8 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(session_series["template_series_id"], self.template_series_id)
         self.assertEqual(session_series["series_type"], "helical")
         self.assertEqual(session_series["series_label"], "Helical")
+        self.assertEqual(session_series["execution_status"], "pending")
+        self.assertFalse(session_series["range_confirmed"])
 
         helical = session_series["helical_param"]
         self.assertIsNotNone(helical)
@@ -239,6 +272,78 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(len(remaining_session["series"]), 1)
         self.assertEqual(remaining_session["series"][0]["series_order"], 1)
         self.assertEqual(remaining_session["series"][0]["series_label"], "Helical Copy")
+
+    def test_dependent_helical_scan_is_blocked_until_topogram_image_and_range_are_ready(self) -> None:
+        scan_session = self._create_scan_session()
+        topogram_id, helical_id = self._add_preceding_topogram(scan_session["id"])
+
+        blocked = self.client.put(
+            f"/api/scan-sessions/series/{helical_id}/execution",
+            json={"execution_status": "running"},
+        )
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+
+        self.assertEqual(
+            self.client.put(
+                f"/api/scan-sessions/series/{topogram_id}/execution",
+                json={"execution_status": "running"},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.put(
+                f"/api/scan-sessions/series/{topogram_id}/execution",
+                json={"execution_status": "image_ready"},
+            ).status_code,
+            200,
+        )
+
+        missing_range = self.client.put(
+            f"/api/scan-sessions/series/{helical_id}/execution",
+            json={"execution_status": "running"},
+        )
+        self.assertEqual(missing_range.status_code, 409, missing_range.text)
+
+        confirmed = self.client.put(
+            f"/api/scan-sessions/series/{topogram_id}/execution",
+            json={"range_confirmed": True},
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertTrue(confirmed.json()["range_confirmed"])
+
+        allowed = self.client.put(
+            f"/api/scan-sessions/series/{helical_id}/execution",
+            json={"execution_status": "running"},
+        )
+        self.assertEqual(allowed.status_code, 200, allowed.text)
+        self.assertEqual(allowed.json()["execution_status"], "running")
+
+    def test_failed_topogram_clears_range_and_cannot_confirm_it(self) -> None:
+        scan_session = self._create_scan_session()
+        topogram_id, _ = self._add_preceding_topogram(scan_session["id"])
+
+        failed = self.client.put(
+            f"/api/scan-sessions/series/{topogram_id}/execution",
+            json={"execution_status": "failed", "failure_reason": "Image reconstruction failed"},
+        )
+        self.assertEqual(failed.status_code, 200, failed.text)
+        self.assertEqual(failed.json()["failure_reason"], "Image reconstruction failed")
+        self.assertFalse(failed.json()["range_confirmed"])
+
+        confirm = self.client.put(
+            f"/api/scan-sessions/series/{topogram_id}/execution",
+            json={"range_confirmed": True},
+        )
+        self.assertEqual(confirm.status_code, 409, confirm.text)
+
+    def test_series_without_preceding_topogram_keeps_existing_execution_path(self) -> None:
+        scan_session = self._create_scan_session()
+        helical_id = scan_session["series"][0]["id"]
+        response = self.client.put(
+            f"/api/scan-sessions/series/{helical_id}/execution",
+            json={"execution_status": "running"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
 
 
 if __name__ == "__main__":

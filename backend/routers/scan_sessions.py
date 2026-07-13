@@ -13,6 +13,7 @@ router = APIRouter(prefix="/scan-sessions", tags=["scan-sessions"])
 
 
 SESSION_STATUS_SEQUENCE = ["draft", "in_progress", "completed", "cancelled"]
+DEPENDENT_LOCALIZER_SERIES_TYPES = {"helical", "axial"}
 
 TOPOGRAM_PARAM_FIELDS = (
     "kv",
@@ -267,6 +268,65 @@ def _clone_session_from_protocol(patient: models.Patient, protocol: models.Proto
 def _apply_updates(entity, updates: dict):
     for field, value in updates.items():
         setattr(entity, field, value)
+
+
+def _required_topogram(series: models.ScanSessionSeries) -> models.ScanSessionSeries | None:
+    if series.series_type not in DEPENDENT_LOCALIZER_SERIES_TYPES or not series.scan_session:
+        return None
+    preceding = [
+        candidate
+        for candidate in series.scan_session.series
+        if candidate.series_type == "topogram" and candidate.series_order < series.series_order
+    ]
+    return max(preceding, key=lambda candidate: candidate.series_order, default=None)
+
+
+def _apply_series_execution_update(
+    series: models.ScanSessionSeries,
+    payload: schemas.ScanSessionSeriesExecutionUpdate,
+) -> None:
+    updates = payload.model_dump(exclude_unset=True)
+    next_status = updates.get("execution_status")
+
+    if updates.get("range_confirmed") is True:
+        if series.series_type != "topogram":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Only a topogram series can confirm a scan range",
+            )
+        if series.execution_status != "image_ready" and next_status != "image_ready":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Topogram image is not ready; scan range cannot be confirmed",
+            )
+
+    if next_status == "running":
+        required_topogram = _required_topogram(series)
+        if required_topogram and (
+            required_topogram.execution_status != "image_ready"
+            or not required_topogram.range_confirmed
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Required topogram image and confirmed scan range are not available",
+            )
+        series.failure_reason = None
+        if series.series_type == "topogram":
+            # 定位像重扫时，旧的范围确认不能继续解锁后续序列。
+            series.range_confirmed = False
+
+    if next_status == "image_ready":
+        series.failure_reason = None
+
+    if next_status == "failed":
+        series.failure_reason = (updates.get("failure_reason") or "Series execution failed").strip()
+        if series.series_type == "topogram":
+            series.range_confirmed = False
+
+    if "range_confirmed" in updates:
+        series.range_confirmed = updates["range_confirmed"]
+    if next_status is not None:
+        series.execution_status = next_status
 
 
 def _normalize_series_order(scan_session: models.ScanSession):
@@ -557,6 +617,24 @@ def create_scan_session_series(scan_session_id: int, payload: schemas.ScanSessio
 def update_scan_session_series(session_series_id: int, payload: schemas.ScanSessionSeriesUpdate, db: Session = Depends(get_db)):
     entity = _get_entity_or_404(models.ScanSessionSeries, session_series_id, "Scan session series not found", db)
     _apply_updates(entity, payload.model_dump(exclude_unset=True))
+    db.commit()
+    db.refresh(entity)
+    return entity
+
+
+@router.put("/series/{session_series_id}/execution", response_model=schemas.ScanSessionSeries)
+def update_scan_session_series_execution(
+    session_series_id: int,
+    payload: schemas.ScanSessionSeriesExecutionUpdate,
+    db: Session = Depends(get_db),
+):
+    entity = _get_entity_or_404(
+        models.ScanSessionSeries,
+        session_series_id,
+        "Scan session series not found",
+        db,
+    )
+    _apply_series_execution_update(entity, payload)
     db.commit()
     db.refresh(entity)
     return entity

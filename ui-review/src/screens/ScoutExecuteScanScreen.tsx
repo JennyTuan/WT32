@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
 import { useLocation, useNavigate } from "react-router-dom";
-import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, type ApiScanSessionDetail } from "../lib/scanSession";
+import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, updateScanSessionSeriesExecution, type ApiScanSessionDetail } from "../lib/scanSession";
 import { loadSelectedPatient } from "../lib/patientSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
@@ -73,7 +73,8 @@ type ScoutDicomSeries = typeof SCOUT_SERIES & {
     useCornerstoneViewer?: boolean;
 };
 
-type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "rendering" | "completed";
+type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "rendering" | "completed" | "failed";
+type ScoutImageLoadState = "loading" | "ready" | "error";
 type PhysicalTriggerAction = "position" | "exposure";
 type ScoutExecuteLocationState = {
     showCombinedPatientConfirm?: boolean;
@@ -209,10 +210,12 @@ function ScoutProjectionViewport({
     renderProgress,
     active,
     series,
+    onLoadStateChange,
 }: {
     renderProgress: number;
     active: boolean;
     series: ScoutDicomSeries;
+    onLoadStateChange?: (state: ScoutImageLoadState) => void;
 }) {
     const { t } = useI18n();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -221,7 +224,10 @@ function ScoutProjectionViewport({
     const projectionSizeRef = useRef<{ width: number; height: number } | null>(null);
     const metaRef = useRef<ProjectionMeta | null>(null);
     const [meta, setMeta] = useState<ProjectionMeta | null>(null);
-    const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const [loadState, setLoadState] = useState<ScoutImageLoadState>("loading");
+    useEffect(() => {
+        onLoadStateChange?.(loadState);
+    }, [loadState, onLoadStateChange]);
     const imageUrls = useMemo(
         () =>
             series.fileNames?.length
@@ -571,6 +577,11 @@ export default function ScoutExecuteScanScreen() {
     const [dualPhase, setDualPhase] = useState<DualScoutPhase>(null);
     const [apRenderProgress, setApRenderProgress] = useState(0);
     const [latRenderProgress, setLatRenderProgress] = useState(0);
+    const [scoutImageLoadState, setScoutImageLoadState] = useState<ScoutImageLoadState>("loading");
+    const [apImageLoadState, setApImageLoadState] = useState<ScoutImageLoadState>("loading");
+    const [latImageLoadState, setLatImageLoadState] = useState<ScoutImageLoadState>("loading");
+    const [imageLoadAttempt, setImageLoadAttempt] = useState(0);
+    const [executionError, setExecutionError] = useState<string | null>(null);
     const [postScoutScanType, setPostScoutScanType] = useState<PostScoutScanType>(
         () => resolvePostScoutScanTypeFromWorkflowPlans() ?? DEFAULT_POST_SCOUT_SCAN_TYPE
     );
@@ -587,6 +598,7 @@ export default function ScoutExecuteScanScreen() {
     const positioningTimerRef = useRef<number | null>(null);
     const autoNextTimerRef = useRef<number | null>(null);
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
+    const topogramSeries = scanSession?.series.find((series) => series.series_type === "topogram") ?? null;
 
     useEffect(() => {
         let cancelled = false;
@@ -731,6 +743,69 @@ export default function ScoutExecuteScanScreen() {
         };
     }, [navigate, postScoutRoute, stage]);
 
+    const renderFinished = isHeadDualScoutFlow
+        ? dualPhase === "done" && apRenderProgress >= 1 && latRenderProgress >= 1
+        : renderProgress >= 1;
+    const scoutImagesReady = isHeadDualScoutFlow
+        ? apImageLoadState === "ready" && latImageLoadState === "ready"
+        : scoutImageLoadState === "ready";
+    const scoutImagesFailed = isHeadDualScoutFlow
+        ? apImageLoadState === "error" || latImageLoadState === "error"
+        : scoutImageLoadState === "error";
+
+    useEffect(() => {
+        if (stage !== "rendering" || !renderFinished) return;
+        if (!scoutImagesReady && !scoutImagesFailed) return;
+        let cancelled = false;
+
+        const finish = async () => {
+            if (!scoutImagesReady) {
+                const message = t("scanFlow.scoutLoadError");
+                if (topogramSeries) {
+                    await updateScanSessionSeriesExecution(topogramSeries.id, {
+                        execution_status: "failed",
+                        failure_reason: message,
+                    }).catch(() => undefined);
+                }
+                if (!cancelled) {
+                    setExecutionError(message);
+                    setStage("failed");
+                }
+                return;
+            }
+
+            try {
+                if (topogramSeries) {
+                    await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "image_ready" });
+                }
+                if (!cancelled) setStage("completed");
+            } catch (error) {
+                if (!cancelled) {
+                    setExecutionError(error instanceof Error ? error.message : t("scanFlow.scoutLoadError"));
+                    setStage("failed");
+                }
+            }
+        };
+        void finish();
+        return () => { cancelled = true; };
+    }, [renderFinished, scoutImagesFailed, scoutImagesReady, stage, t, topogramSeries]);
+
+    useEffect(() => {
+        if (stage !== "rendering" || !renderFinished || scoutImagesReady || scoutImagesFailed) return;
+        const timer = window.setTimeout(() => {
+            const message = t("scanFlow.scoutLoadError");
+            if (topogramSeries) {
+                void updateScanSessionSeriesExecution(topogramSeries.id, {
+                    execution_status: "failed",
+                    failure_reason: message,
+                });
+            }
+            setExecutionError(message);
+            setStage("failed");
+        }, 10000);
+        return () => window.clearTimeout(timer);
+    }, [renderFinished, scoutImagesFailed, scoutImagesReady, stage, t, topogramSeries]);
+
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
             cancelAnimationFrame(rafRef.current);
@@ -767,7 +842,7 @@ export default function ScoutExecuteScanScreen() {
             }
 
             rafRef.current = null;
-            setStage("completed");
+            setRenderProgress(1);
         };
 
         rafRef.current = requestAnimationFrame(tick);
@@ -789,9 +864,18 @@ export default function ScoutExecuteScanScreen() {
         rafRef.current = requestAnimationFrame(tick);
     };
 
-    const performTriggerScanDual = () => {
+    const performTriggerScanDual = async () => {
         const sessionId = loadSelectedScanSessionId();
-        if (sessionId) void startScanSession(sessionId);
+        try {
+            if (sessionId) await startScanSession(sessionId);
+            if (topogramSeries) {
+                await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "running" });
+            }
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : t("scanFlow.scoutLoadError"));
+            setStage("failed");
+            return;
+        }
         clearHoldRaf();
         setShowCombinedPatientConfirm(false);
         setStage("enabled");
@@ -819,7 +903,7 @@ export default function ScoutExecuteScanScreen() {
                         setDualPhase("lat_rendering");
                         runRampAnimation(setLatRenderProgress, RENDER_DURATION_MS, () => {
                             setDualPhase("done");
-                            setStage("completed");
+                            setStage("rendering");
                         });
                     }, EXPOSURE_DURATION_MS);
                 }, GANTRY_ROTATION_DURATION_MS);
@@ -827,13 +911,22 @@ export default function ScoutExecuteScanScreen() {
         }, EXPOSURE_DURATION_MS);
     };
 
-    const performTriggerScan = () => {
+    const performTriggerScan = async () => {
         if (isHeadDualScoutFlow) {
             performTriggerScanDual();
             return;
         }
         const sessionId = loadSelectedScanSessionId();
-        if (sessionId) void startScanSession(sessionId);
+        try {
+            if (sessionId) await startScanSession(sessionId);
+            if (topogramSeries) {
+                await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "running" });
+            }
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : t("scanFlow.scoutLoadError"));
+            setStage("failed");
+            return;
+        }
         clearHoldRaf();
         setShowCombinedPatientConfirm(false);
         setStage("enabled");
@@ -887,6 +980,21 @@ export default function ScoutExecuteScanScreen() {
     };
 
     const handleExecuteScanClick = () => {
+        if (stage === "failed") {
+            setExecutionError(null);
+            setRenderProgress(0);
+            setApRenderProgress(0);
+            setLatRenderProgress(0);
+            setDualPhase(null);
+            setScoutImageLoadState("loading");
+            setApImageLoadState("loading");
+            setLatImageLoadState("loading");
+            setPhysicalTriggerAction("position");
+            setImageLoadAttempt((attempt) => attempt + 1);
+            setStage("idle");
+            setGuideVisible(true);
+            return;
+        }
         if (stage === "completed") {
             navigate(postScoutRoute);
             return;
@@ -982,7 +1090,7 @@ export default function ScoutExecuteScanScreen() {
                 forceFourDScoutWorkflow={isFourDScoutWorkflow}
                 readOnlyMode
                 onExecuteScan={handleExecuteScanClick}
-                executeButtonLabel={stage === "completed" ? postScoutActionLabel : t("scanFlow.executeScan")}
+                executeButtonLabel={stage === "completed" ? postScoutActionLabel : stage === "failed" ? t("common.retry") : t("scanFlow.executeScan")}
             />
 
             <ThresholdGuardModal
@@ -1005,9 +1113,11 @@ export default function ScoutExecuteScanScreen() {
                                 <div className="grid h-full grid-cols-2 gap-[2px] bg-[#0A0F14]">
                                     <div className="relative overflow-hidden bg-black">
                                         <ScoutProjectionViewport
+                                            key={`ap-${imageLoadAttempt}`}
                                             renderProgress={apRenderProgress}
                                             active={dualPhase === "ap_rendering" || dualPhase === "rotating" || dualPhase === "lat_exposing" || dualPhase === "lat_rendering" || dualPhase === "done"}
                                             series={headDualApSeries}
+                                            onLoadStateChange={setApImageLoadState}
                                         />
                                         <div className="pointer-events-none absolute left-3 bottom-3 z-10 rounded border border-[#4D94FF]/40 bg-[#08111f]/85 px-2 py-1 text-[10px] font-black tracking-[0.12em] text-[#DBEAFE]">
                                             AP · 正位 0°{dualPhase === "ap_rendering" ? " · 采集中" : (dualPhase === "rotating" || dualPhase === "lat_exposing" || dualPhase === "lat_rendering" || dualPhase === "done") ? " · ✓" : ""}
@@ -1027,9 +1137,11 @@ export default function ScoutExecuteScanScreen() {
                                             </div>
                                         ) : dualPhase === "lat_rendering" || dualPhase === "done" ? (
                                             <ScoutProjectionViewport
+                                                key={`lat-${imageLoadAttempt}`}
                                                 renderProgress={latRenderProgress}
                                                 active={true}
                                                 series={headDualLatSeries}
+                                                onLoadStateChange={setLatImageLoadState}
                                             />
                                         ) : null}
                                         <div className="pointer-events-none absolute left-3 bottom-3 z-10 rounded border border-[#4D94FF]/40 bg-[#08111f]/85 px-2 py-1 text-[10px] font-black tracking-[0.12em] text-[#DBEAFE]">
@@ -1039,15 +1151,26 @@ export default function ScoutExecuteScanScreen() {
                                 </div>
                             ) : (
                                 <ScoutProjectionViewport
+                                    key={`single-${imageLoadAttempt}`}
                                     renderProgress={renderProgress}
                                     active={stage === "rendering" || stage === "completed"}
                                     series={scoutResultSeries}
+                                    onLoadStateChange={setScoutImageLoadState}
                                 />
                             )}
                         </div>
                     </div>
                 </div>
             </div>
+
+            {stage === "failed" && (
+                <div className="pointer-events-none absolute bottom-[84px] left-[246px] right-0 top-[88px] z-30 flex items-center justify-center bg-[#05080C]/85">
+                    <div className="max-w-[420px] rounded-lg border border-[#EF4444]/60 bg-[#1F1215] px-6 py-5 text-center text-[#FCA5A5] shadow-2xl">
+                        <div className="text-[16px] font-black">{t("scanFlow.scoutLoadError")}</div>
+                        <div className="mt-2 text-[12px] text-[#D1D9E1]">{executionError}</div>
+                    </div>
+                </div>
+            )}
 
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
                 <PhysicalTriggerGuide
