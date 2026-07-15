@@ -19,6 +19,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 import AddPatientScreen from './AddPatientScreen';
 import AppHeader from '../components/AppHeader';
+import { FeedbackNotice } from '../components/FeedbackNotice';
 import { saveSelectedPatient } from '../lib/patientSession';
 import {
     listPatients,
@@ -191,6 +192,7 @@ const PatientListScreen = () => {
     const formatGender = (gender: string) => {
         if (gender === "男") return t("patientList.gender.male");
         if (gender === "女") return t("patientList.gender.female");
+        if (gender === "其他") return t("patientList.gender.other");
         return gender;
     };
     const formatCheckStatus = (status: CheckStatus) => {
@@ -546,9 +548,9 @@ const PatientListScreen = () => {
                 </footer>
 
                 {loadError && (
-                    <div className="absolute top-[88px] left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-red-50 border border-red-200 text-red-600 text-[12px] rounded shadow">
+                    <FeedbackNotice className="absolute left-1/2 top-[88px] z-50 w-[520px] -translate-x-1/2 shadow-lg">
                         {loadError}
-                    </div>
+                    </FeedbackNotice>
                 )}
 
                 {/* Modal Integration - Constrained to this relative container */}

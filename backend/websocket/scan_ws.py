@@ -1,23 +1,75 @@
 ﻿from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from ..database import SessionLocal
+from ..device_errors import build_device_error_event, extract_protocol_error_inputs, normalize_error_code, record_device_error_event
+
 router = APIRouter(tags=["scan-websocket"])
+_connections: set[WebSocket] = set()
+_active_error_codes: set[str] = set()
 
 
 def _mock_event(event_type: str, **payload):
     return {
         "event": event_type,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         **payload,
     }
+
+
+def _persist_device_error(event: dict) -> None:
+    db = SessionLocal()
+    try:
+        record_device_error_event(db, event)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+async def _broadcast_json(payload: dict) -> None:
+    disconnected: list[WebSocket] = []
+    for connection in list(_connections):
+        try:
+            await connection.send_json(payload)
+        except Exception:
+            disconnected.append(connection)
+    for connection in disconnected:
+        _connections.discard(connection)
 
 
 @router.websocket("/ws/scan-control")
 async def scan_control_ws(websocket: WebSocket):
     await websocket.accept()
+    _connections.add(websocket)
+
+    async def emit_device_error(event: dict) -> bool:
+        code = normalize_error_code(event["error"]["code"])
+        occurrence = event["occurrence"]
+        if occurrence == "raised" and code in _active_error_codes:
+            return False
+        if occurrence == "raised":
+            _active_error_codes.add(code)
+        elif occurrence == "cleared":
+            _active_error_codes.discard(code)
+
+        _persist_device_error(event)
+        await _broadcast_json(event)
+        if occurrence == "raised" and event["error"]["severity"] == "fatal":
+            await _broadcast_json(
+                _mock_event(
+                    "SCAN_STATUS",
+                    status="blocked",
+                    message="检测到 Fatal 级设备错误，当前界面流程已暂停，需要确认。",
+                )
+            )
+        return True
+
     await websocket.send_json(
         _mock_event(
             "SCAN_STATUS",
@@ -46,6 +98,13 @@ async def scan_control_ws(websocket: WebSocket):
             message = await websocket.receive_json()
             command = message.get("command", "UNKNOWN")
 
+            protocol_errors = extract_protocol_error_inputs(message)
+            if protocol_errors:
+                for item in protocol_errors:
+                    event = build_device_error_event(**item)
+                    await emit_device_error(event)
+                continue
+
             if command == "START_SCAN":
                 responses = [
                     _mock_event("START_SCAN", accepted=True),
@@ -67,6 +126,37 @@ async def scan_control_ws(websocket: WebSocket):
                     _mock_event("INJECTOR_STATUS", status="stopped", progress=100),
                     _mock_event("SCAN_STATUS", status="stopped"),
                 ]
+            elif command in {"INJECT_DEVICE_ERROR", "INJECT_HW_ERRORS"}:
+                error_codes = message.get("error_codes") or [message.get("error_code")]
+                source = "hardware_detail" if command == "INJECT_HW_ERRORS" else "simulation"
+                for error_code in error_codes:
+                    if not error_code:
+                        continue
+                    event = build_device_error_event(
+                        error_code,
+                        source=source,
+                        command=command,
+                        scan_session_id=message.get("scan_session_id"),
+                        raw_payload=message,
+                    )
+                    await emit_device_error(event)
+                responses = []
+            elif command in {"ACKNOWLEDGE_DEVICE_ERROR", "CLEAR_DEVICE_ERROR"}:
+                error_code = message.get("error_code")
+                if not error_code:
+                    responses = [_mock_event("DEVICE_ERROR_ACTION_REJECTED", reason="missing_error_code")]
+                else:
+                    occurrence = "acknowledged" if command == "ACKNOWLEDGE_DEVICE_ERROR" else "cleared"
+                    event = build_device_error_event(
+                        error_code,
+                        source="simulation",
+                        occurrence=occurrence,
+                        command=command,
+                        scan_session_id=message.get("scan_session_id"),
+                        raw_payload=message,
+                    )
+                    await emit_device_error(event)
+                    responses = []
             else:
                 responses = [
                     _mock_event(
@@ -79,4 +169,6 @@ async def scan_control_ws(websocket: WebSocket):
             for response in responses:
                 await websocket.send_json(response)
     except WebSocketDisconnect:
-        return
+        pass
+    finally:
+        _connections.discard(websocket)

@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertCircle, KeyRound, ShieldCheck } from "lucide-react";
+import { KeyRound, ShieldCheck } from "lucide-react";
 
+import { FeedbackNotice } from "../components/FeedbackNotice";
 import { useAuth } from "../lib/authContext";
 import { useI18n } from "../lib/i18nContext";
 
@@ -83,10 +84,7 @@ export default function ChangePasswordScreen() {
                     />
 
                     {error && (
-                        <div className="flex items-center gap-2 rounded-md border border-[#FCA5A5] bg-[#FEF2F2] px-3 py-2 text-[12px] text-[#B91C1C]">
-                            <AlertCircle size={14} />
-                            <span>{error}</span>
-                        </div>
+                        <FeedbackNotice compact>{error}</FeedbackNotice>
                     )}
 
                     <div className="mt-2 flex gap-3">

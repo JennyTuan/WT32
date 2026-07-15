@@ -2,6 +2,7 @@
 import { useNavigate, useSearchParams } from "react-router-dom";
 import DicomViewer from "../components/DicomViewer";
 import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
+import ScanTriggerFailureDialog from "../components/ScanTriggerFailureDialog";
 import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import DibhStatusRow from "../components/DibhStatusRow";
@@ -10,6 +11,7 @@ import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, 
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { getLimbsDicomSeries, isLimbsHelicalScanSession, loadLimbsDicomDemoManifest } from "../lib/limbsDicomDemo";
 import { useI18n } from "../lib/i18nContext";
+import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceErrorEvents";
 
 type HelicalResultSeriesConfig = {
     basePath?: string;
@@ -32,12 +34,13 @@ const BRAIN_HELICAL_RESULT_SERIES: HelicalResultSeriesConfig = {
 
 import ScanConfirmScreen from "./ScanConfirmScreen";
 
-type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "paused" | "rendering" | "completed";
+type ScanStage = "idle" | "positioning" | "positioned" | "enabled" | "exposing" | "paused" | "rendering" | "completed";
 type ExecuteMode = "helical" | "gated_helical" | "gated_axial";
 type PhysicalTriggerAction = "position" | "exposure";
 
 const HOLD_DURATION_MS = 3000;
-const POSITIONING_DURATION_MS = 1000;
+const POSITIONING_TIMEOUT_MS = 8000;
+const EXPOSURE_REQUEST_TIMEOUT_MS = 8000;
 const EXPOSURE_DURATION_MS = 1500;
 const RENDER_DURATION_MS = 1600;
 const LIVE_FRAME_INTERVAL_MS = 85;
@@ -304,6 +307,7 @@ export default function HelicalExecuteScanScreen() {
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const [completedBeds, setCompletedBeds] = useState(0);
     const [executionError, setExecutionError] = useState<string | null>(null);
+    const [triggerFailure, setTriggerFailure] = useState<{ title: string; message: string } | null>(null);
     const [currentSlice, setCurrentSlice] = useState(0);
     const [axialWaitingForBreath, setAxialWaitingForBreath] = useState(false);
     const [pendingBedIndex, setPendingBedIndex] = useState<number | null>(null);
@@ -327,6 +331,8 @@ export default function HelicalExecuteScanScreen() {
     const progressStartRef = useRef<number | null>(null);
     const exposureTimerRef = useRef<number | null>(null);
     const positioningTimerRef = useRef<number | null>(null);
+    const positioningTimeoutRef = useRef<number | null>(null);
+    const triggerRequestIdRef = useRef(0);
     const dibhMidScanPauseTimerRef = useRef<number | null>(null);
     const axialProgressTimerRef = useRef<number | null>(null);
     const axialWaitTimerRef = useRef<number | null>(null);
@@ -352,6 +358,46 @@ export default function HelicalExecuteScanScreen() {
             rafRef.current = null;
         }
     };
+
+    const clearPositioningTimeout = () => {
+        if (positioningTimeoutRef.current !== null) {
+            window.clearTimeout(positioningTimeoutRef.current);
+            positioningTimeoutRef.current = null;
+        }
+    };
+
+    const returnToExecuteConfirm = () => {
+        navigate(isGatedAxial ? "/gated-axial-confirm" : isHelicalDIBH ? "/gated-helical-confirm" : "/helical-confirm");
+    };
+
+    const exitTriggerFlowWithFailure = (failure: { title: string; message: string }) => {
+        triggerRequestIdRef.current += 1;
+        clearHoldRaf();
+        clearPositioningTimeout();
+        if (positioningTimerRef.current !== null) {
+            window.clearTimeout(positioningTimerRef.current);
+            positioningTimerRef.current = null;
+        }
+        setGuideVisible(false);
+        setPhysicalTriggerAction("position");
+        setStage("idle");
+        setTriggerFailure(failure);
+    };
+
+    useEffect(() => {
+        const handleDeviceError = (event: Event) => {
+            const deviceError = (event as CustomEvent<DeviceErrorEvent>).detail;
+            if (!deviceError || deviceError.error.severity === "warning") return;
+            const selectedSessionId = loadSelectedScanSessionId();
+            if (deviceError.scan_session_id !== null && deviceError.scan_session_id !== selectedSessionId) return;
+            exitTriggerFlowWithFailure({
+                title: `设备异常：${deviceError.error.code}`,
+                message: `${deviceError.error.message}。当前模拟定位/曝光请求已停止，请按设备提示处理后重新尝试。`,
+            });
+        };
+        window.addEventListener(DEVICE_ERROR_RAISED_EVENT, handleDeviceError);
+        return () => window.removeEventListener(DEVICE_ERROR_RAISED_EVENT, handleDeviceError);
+    });
 
     const clearDibhTimers = () => {
         if (exposureTimerRef.current !== null) {
@@ -478,6 +524,7 @@ export default function HelicalExecuteScanScreen() {
             if (positioningTimerRef.current !== null) {
                 window.clearTimeout(positioningTimerRef.current);
             }
+            clearPositioningTimeout();
             if (bedWaitTickRef.current !== null) {
                 window.clearInterval(bedWaitTickRef.current);
             }
@@ -642,37 +689,33 @@ export default function HelicalExecuteScanScreen() {
 
     const triggerPositioningSequence = () => {
         clearHoldRaf();
-        holdStartRef.current = null;
-        setStage("positioning");
-
-        if (positioningTimerRef.current !== null) {
-            window.clearTimeout(positioningTimerRef.current);
-        }
-        positioningTimerRef.current = window.setTimeout(() => {
-            positioningTimerRef.current = null;
-            setPhysicalTriggerAction("exposure");
-            setStage("positioned");
-        }, POSITIONING_DURATION_MS);
+        clearPositioningTimeout();
+        setPhysicalTriggerAction("exposure");
+        setStage("positioned");
     };
 
     const triggerScanSequence = async () => {
+        const requestId = ++triggerRequestIdRef.current;
         const sessionId = loadSelectedScanSessionId();
         setExecutionError(null);
         try {
-            if (sessionId) await startScanSession(sessionId);
-            const activeScanSession = scanSession ?? await fetchSelectedScanSession({ preferCache: false });
-            const targetType = isGatedAxial ? "axial" : "helical";
-            const targetSeries = activeScanSession?.series.find((series) => series.series_type === targetType);
-            if (sessionId && !targetSeries) throw new Error("当前扫描会话缺少待执行序列");
-            if (targetSeries) {
-                await updateScanSessionSeriesExecution(targetSeries.id, { execution_status: "running" });
-            }
+            await Promise.race([
+                (async () => {
+                    if (sessionId) await startScanSession(sessionId);
+                    const activeScanSession = scanSession ?? await fetchSelectedScanSession({ preferCache: false });
+                    const targetType = isGatedAxial ? "axial" : "helical";
+                    const targetSeries = activeScanSession?.series.find((series) => series.series_type === targetType);
+                    if (sessionId && !targetSeries) throw new Error("当前扫描会话缺少待执行序列");
+                    if (targetSeries) await updateScanSessionSeriesExecution(targetSeries.id, { execution_status: "running" });
+                })(),
+                new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("扫描下发超时")), EXPOSURE_REQUEST_TIMEOUT_MS)),
+            ]);
         } catch (error) {
-            setExecutionError(error instanceof Error ? error.message : "扫描前置条件校验失败");
-            setStage("positioned");
-            setGuideVisible(false);
+            if (requestId !== triggerRequestIdRef.current) return;
+            exitTriggerFlowWithFailure({ title: "扫描下发超时或失败", message: error instanceof Error ? error.message : "扫描前置条件校验失败" });
             return;
         }
+        if (requestId !== triggerRequestIdRef.current) return;
         clearHoldRaf();
         setStage("enabled");
         setCompletedBeds(0);
@@ -841,7 +884,7 @@ export default function HelicalExecuteScanScreen() {
             return;
         }
 
-        if (stage === "idle" || stage === "arming" || stage === "positioned") {
+        if (stage === "idle" || stage === "positioned") {
             setGuideVisible(true);
         }
     };
@@ -858,7 +901,11 @@ export default function HelicalExecuteScanScreen() {
 
         clearHoldRaf();
         holdStartRef.current = performance.now();
-        setStage("arming");
+        setStage("positioning");
+        clearPositioningTimeout();
+        positioningTimeoutRef.current = window.setTimeout(() => {
+            exitTriggerFlowWithFailure({ title: "定位移动超时", message: "未在预期时间内收到起始位到达结果，当前按键引导已关闭。" });
+        }, POSITIONING_TIMEOUT_MS);
 
         const tick = (timestamp: number) => {
             const startedAt = holdStartRef.current ?? timestamp;
@@ -876,18 +923,17 @@ export default function HelicalExecuteScanScreen() {
     };
 
     const stopHold = () => {
-        if (stage !== "arming") return;
+        if (stage !== "positioning") return;
         clearHoldRaf();
+        clearPositioningTimeout();
         holdStartRef.current = null;
-        setStage(physicalTriggerAction === "position" ? "idle" : "positioned");
+        setStage("idle");
     };
 
     const guideTitle =
-        stage === "arming"
+        stage === "positioning"
             ? t("scanFlow.physicalGuide.keepHoldingPosition")
-            : stage === "positioning"
-                ? t("scanFlow.physicalGuide.moveToStart")
-                : stage === "positioned"
+            : stage === "positioned"
                     ? t("scanFlow.physicalGuide.pressAgainForExposure")
             : stage === "enabled"
                 ? axialWaitingForBreath
@@ -923,19 +969,18 @@ export default function HelicalExecuteScanScreen() {
             }
             return t("scanFlow.physicalGuide.scanReady");
         }
-        if (stage === "arming") return t("scanFlow.physicalGuide.keepHoldingPhysical");
         return t("scanFlow.executeScan");
     })();
     // Only allow click on the bottom-right button at the very start (kick off
     // the guide overlay) and at the very end (navigate to image viewer). During
-    // arming / enabled / exposing / rendering, or while either gating dialog is
+    // enabled / exposing / rendering, or while either gating dialog is
     // open, the button must be inert so it can't be mistaken for "click again
     // to trigger another scan".
     const executeButtonClickable =
         !bedWaitTimedOut &&
         !dibhTimedOut &&
         !dibhMidScanPaused &&
-        (stage === "idle" || stage === "arming" || stage === "positioned" || stage === "completed");
+        (stage === "idle" || stage === "positioned" || stage === "completed");
     const physicalTriggerSteps: PhysicalTriggerStep[] = [
         {
             id: "position",
@@ -1041,7 +1086,7 @@ export default function HelicalExecuteScanScreen() {
                 onExecuteScan={executeButtonClickable ? handleExecuteScanClick : undefined}
                 patientConfirmBeforeExecute={stage !== "completed"}
                 executeButtonLabel={executeButtonLabel}
-                executeButtonCompact={stage === "arming"}
+                executeButtonCompact={stage === "positioning"}
             />
 
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
@@ -1055,7 +1100,7 @@ export default function HelicalExecuteScanScreen() {
                     steps={physicalTriggerSteps}
                     onHoldStart={startHold}
                     onHoldEnd={stopHold}
-                    buttonActive={stage === "arming" || stage === "positioning" || stage === "enabled" || stage === "exposing"}
+                    buttonActive={stage === "positioning" || stage === "enabled" || stage === "exposing"}
                 />
             </div>
 
@@ -1076,6 +1121,18 @@ export default function HelicalExecuteScanScreen() {
                     </div>
                 </div>
             )}
+
+            <ScanTriggerFailureDialog
+                failure={triggerFailure}
+                onRetry={() => {
+                    setTriggerFailure(null);
+                    setExecutionError(null);
+                    setPhysicalTriggerAction("position");
+                    setStage("idle");
+                    setGuideVisible(true);
+                }}
+                onReturnToConfirm={returnToExecuteConfirm}
+            />
 
             {isGatedAxial && bedWaitTimedOut && (
                 <div className="absolute inset-0 z-[60] flex items-center justify-center bg-slate-900/55 backdrop-blur-[1px]">

@@ -23,13 +23,16 @@ import {
 } from "../lib/headDualScoutDemo";
 import DicomViewer from "../components/DicomViewer";
 import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
+import ScanTriggerFailureDialog from "../components/ScanTriggerFailureDialog";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
+import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceErrorEvents";
 
 const HOLD_DURATION_MS = 3000;
-const POSITIONING_DURATION_MS = 1000;
+const POSITIONING_TIMEOUT_MS = 8000;
+const EXPOSURE_REQUEST_TIMEOUT_MS = 8000;
 const EXPOSURE_DURATION_MS = 1200;
 const RENDER_DURATION_MS = 2200;
 const GANTRY_ROTATION_DURATION_MS = 1500;
@@ -73,7 +76,7 @@ type ScoutDicomSeries = typeof SCOUT_SERIES & {
     useCornerstoneViewer?: boolean;
 };
 
-type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "rendering" | "completed" | "failed";
+type ScanStage = "idle" | "positioning" | "positioned" | "enabled" | "exposing" | "rendering" | "completed" | "failed";
 type ScoutImageLoadState = "loading" | "ready" | "error";
 type PhysicalTriggerAction = "position" | "exposure";
 type ScoutExecuteLocationState = {
@@ -582,6 +585,7 @@ export default function ScoutExecuteScanScreen() {
     const [latImageLoadState, setLatImageLoadState] = useState<ScoutImageLoadState>("loading");
     const [imageLoadAttempt, setImageLoadAttempt] = useState(0);
     const [executionError, setExecutionError] = useState<string | null>(null);
+    const [triggerFailure, setTriggerFailure] = useState<{ title: string; message: string } | null>(null);
     const [postScoutScanType, setPostScoutScanType] = useState<PostScoutScanType>(
         () => resolvePostScoutScanTypeFromWorkflowPlans() ?? DEFAULT_POST_SCOUT_SCAN_TYPE
     );
@@ -596,9 +600,55 @@ export default function ScoutExecuteScanScreen() {
     const progressStartRef = useRef<number | null>(null);
     const exposureTimerRef = useRef<number | null>(null);
     const positioningTimerRef = useRef<number | null>(null);
+    const positioningTimeoutRef = useRef<number | null>(null);
+    const triggerRequestIdRef = useRef(0);
     const autoNextTimerRef = useRef<number | null>(null);
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const topogramSeries = scanSession?.series.find((series) => series.series_type === "topogram") ?? null;
+
+    const clearHoldRaf = () => {
+        if (rafRef.current !== null) {
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+        }
+    };
+
+    const clearPositioningTimeout = () => {
+        if (positioningTimeoutRef.current !== null) {
+            window.clearTimeout(positioningTimeoutRef.current);
+            positioningTimeoutRef.current = null;
+        }
+    };
+
+    const exitTriggerFlowWithFailure = (failure: { title: string; message: string }) => {
+        triggerRequestIdRef.current += 1;
+        clearHoldRaf();
+        clearPositioningTimeout();
+        if (positioningTimerRef.current !== null) {
+            window.clearTimeout(positioningTimerRef.current);
+            positioningTimerRef.current = null;
+        }
+        setShowCombinedPatientConfirm(false);
+        setGuideVisible(false);
+        setPhysicalTriggerAction("position");
+        setStage("idle");
+        setTriggerFailure(failure);
+    };
+
+    useEffect(() => {
+        const handleDeviceError = (event: Event) => {
+            const deviceError = (event as CustomEvent<DeviceErrorEvent>).detail;
+            if (!deviceError || deviceError.error.severity === "warning") return;
+            const selectedSessionId = loadSelectedScanSessionId();
+            if (deviceError.scan_session_id !== null && deviceError.scan_session_id !== selectedSessionId) return;
+            exitTriggerFlowWithFailure({
+                title: `设备异常：${deviceError.error.code}`,
+                message: `${deviceError.error.message}。当前模拟定位/曝光请求已停止，请按设备提示处理后重新尝试。`,
+            });
+        };
+        window.addEventListener(DEVICE_ERROR_RAISED_EVENT, handleDeviceError);
+        return () => window.removeEventListener(DEVICE_ERROR_RAISED_EVENT, handleDeviceError);
+    });
 
     useEffect(() => {
         let cancelled = false;
@@ -806,13 +856,6 @@ export default function ScoutExecuteScanScreen() {
         return () => window.clearTimeout(timer);
     }, [renderFinished, scoutImagesFailed, scoutImagesReady, stage, t, topogramSeries]);
 
-    const clearHoldRaf = () => {
-        if (rafRef.current !== null) {
-            cancelAnimationFrame(rafRef.current);
-            rafRef.current = null;
-        }
-    };
-
     useEffect(() => {
         return () => {
             clearHoldRaf();
@@ -822,6 +865,7 @@ export default function ScoutExecuteScanScreen() {
             if (positioningTimerRef.current !== null) {
                 window.clearTimeout(positioningTimerRef.current);
             }
+            clearPositioningTimeout();
             if (autoNextTimerRef.current !== null) {
                 window.clearTimeout(autoNextTimerRef.current);
             }
@@ -865,17 +909,22 @@ export default function ScoutExecuteScanScreen() {
     };
 
     const performTriggerScanDual = async () => {
+        const requestId = ++triggerRequestIdRef.current;
         const sessionId = loadSelectedScanSessionId();
         try {
-            if (sessionId) await startScanSession(sessionId);
-            if (topogramSeries) {
-                await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "running" });
-            }
+            await Promise.race([
+                (async () => {
+                    if (sessionId) await startScanSession(sessionId);
+                    if (topogramSeries) await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "running" });
+                })(),
+                new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("扫描下发超时")), EXPOSURE_REQUEST_TIMEOUT_MS)),
+            ]);
         } catch (error) {
-            setExecutionError(error instanceof Error ? error.message : t("scanFlow.scoutLoadError"));
-            setStage("failed");
+            if (requestId !== triggerRequestIdRef.current) return;
+            exitTriggerFlowWithFailure({ title: "扫描下发超时或失败", message: error instanceof Error ? error.message : t("scanFlow.scoutLoadError") });
             return;
         }
+        if (requestId !== triggerRequestIdRef.current) return;
         clearHoldRaf();
         setShowCombinedPatientConfirm(false);
         setStage("enabled");
@@ -916,17 +965,22 @@ export default function ScoutExecuteScanScreen() {
             performTriggerScanDual();
             return;
         }
+        const requestId = ++triggerRequestIdRef.current;
         const sessionId = loadSelectedScanSessionId();
         try {
-            if (sessionId) await startScanSession(sessionId);
-            if (topogramSeries) {
-                await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "running" });
-            }
+            await Promise.race([
+                (async () => {
+                    if (sessionId) await startScanSession(sessionId);
+                    if (topogramSeries) await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "running" });
+                })(),
+                new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("扫描下发超时")), EXPOSURE_REQUEST_TIMEOUT_MS)),
+            ]);
         } catch (error) {
-            setExecutionError(error instanceof Error ? error.message : t("scanFlow.scoutLoadError"));
-            setStage("failed");
+            if (requestId !== triggerRequestIdRef.current) return;
+            exitTriggerFlowWithFailure({ title: "扫描下发超时或失败", message: error instanceof Error ? error.message : t("scanFlow.scoutLoadError") });
             return;
         }
+        if (requestId !== triggerRequestIdRef.current) return;
         clearHoldRaf();
         setShowCombinedPatientConfirm(false);
         setStage("enabled");
@@ -959,17 +1013,9 @@ export default function ScoutExecuteScanScreen() {
 
     const triggerPositioningSequence = () => {
         clearHoldRaf();
-        holdStartRef.current = null;
-        setStage("positioning");
-
-        if (positioningTimerRef.current !== null) {
-            window.clearTimeout(positioningTimerRef.current);
-        }
-        positioningTimerRef.current = window.setTimeout(() => {
-            positioningTimerRef.current = null;
-            setPhysicalTriggerAction("exposure");
-            setStage("positioned");
-        }, POSITIONING_DURATION_MS);
+        clearPositioningTimeout();
+        setPhysicalTriggerAction("exposure");
+        setStage("positioned");
     };
 
     const triggerScanSequence = () => {
@@ -1000,7 +1046,7 @@ export default function ScoutExecuteScanScreen() {
             return;
         }
 
-        if (stage === "idle" || stage === "arming" || stage === "positioned") {
+        if (stage === "idle" || stage === "positioned") {
             setGuideVisible(true);
         }
     };
@@ -1017,7 +1063,11 @@ export default function ScoutExecuteScanScreen() {
 
         clearHoldRaf();
         holdStartRef.current = performance.now();
-        setStage("arming");
+        setStage("positioning");
+        clearPositioningTimeout();
+        positioningTimeoutRef.current = window.setTimeout(() => {
+            exitTriggerFlowWithFailure({ title: "定位移动超时", message: "未在预期时间内收到起始位到达结果，当前按键引导已关闭。" });
+        }, POSITIONING_TIMEOUT_MS);
 
         const tick = (timestamp: number) => {
             const startedAt = holdStartRef.current ?? timestamp;
@@ -1035,21 +1085,20 @@ export default function ScoutExecuteScanScreen() {
     };
 
     const stopHold = () => {
-        if (stage !== "arming") {
+        if (stage !== "positioning") {
             return;
         }
 
         clearHoldRaf();
+        clearPositioningTimeout();
         holdStartRef.current = null;
-        setStage(physicalTriggerAction === "position" ? "idle" : "positioned");
+        setStage("idle");
     };
 
     const guideTitle =
-        stage === "arming"
+        stage === "positioning"
             ? t("scanFlow.physicalGuide.keepHoldingPosition")
-            : stage === "positioning"
-                ? t("scanFlow.physicalGuide.moveToStart")
-                : stage === "positioned"
+            : stage === "positioned"
                     ? t("scanFlow.physicalGuide.pressAgainForExposure")
             : stage === "enabled"
                 ? t("scanFlow.physicalGuide.enabled")
@@ -1102,7 +1151,7 @@ export default function ScoutExecuteScanScreen() {
             <div className="pointer-events-none absolute bottom-[80px] left-[246px] right-0 top-[82px] z-20 overflow-hidden rounded-lg">
                 <div className="flex h-full flex-col border border-white/5 bg-[#1A222B]">
                     <div className="relative flex-1 overflow-hidden bg-[#05080C]">
-                        <div className={`absolute inset-0 transition-opacity duration-500 ${stage === "idle" || stage === "arming" || stage === "positioning" || stage === "positioned" || stage === "enabled" ? "opacity-100" : "opacity-0"}`}>
+                        <div className={`absolute inset-0 transition-opacity duration-500 ${stage === "idle" || stage === "positioning" || stage === "positioned" || stage === "enabled" ? "opacity-100" : "opacity-0"}`}>
                             <div className="flex h-full items-center justify-center text-[42px] font-thin uppercase tracking-[8px] text-[#44515F]/55">
                                 Viewport
                             </div>
@@ -1183,7 +1232,7 @@ export default function ScoutExecuteScanScreen() {
                     steps={physicalTriggerSteps}
                     onHoldStart={startHold}
                     onHoldEnd={stopHold}
-                    buttonActive={stage === "arming" || stage === "positioning" || stage === "enabled" || stage === "exposing"}
+                    buttonActive={stage === "positioning" || stage === "enabled" || stage === "exposing"}
                 />
             </div>
 
@@ -1211,8 +1260,19 @@ export default function ScoutExecuteScanScreen() {
                     steps: physicalTriggerSteps,
                     onHoldStart: startHold,
                     onHoldEnd: stopHold,
-                    buttonActive: stage === "arming" || stage === "positioning" || stage === "enabled" || stage === "exposing",
+                    buttonActive: stage === "positioning" || stage === "enabled" || stage === "exposing",
                 }}
+            />
+            <ScanTriggerFailureDialog
+                failure={triggerFailure}
+                onRetry={() => {
+                    setTriggerFailure(null);
+                    setExecutionError(null);
+                    setPhysicalTriggerAction("position");
+                    setStage("idle");
+                    setGuideVisible(true);
+                }}
+                onReturnToConfirm={() => navigate(combinedPatientReturnRoute)}
             />
         </div>
     );

@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .database import SessionLocal, init_db
-from .routers import ai_inference, auth, contrast_configs, corners, dicom_settings, disk_manager, dose_settings, logs, organization_info, patients, performance, protocols, recon_params, scan_params, scan_sessions, system_settings, user_management
+from .routers import ai_inference, auth, contrast_configs, corners, dicom_settings, disk_manager, dose_settings, logs, organization_info, patients, performance, protocols, recon_params, reconstruction, scan_params, scan_sessions, system_settings, user_management
 from .websocket.scan_ws import router as scan_ws_router
 
 app = FastAPI(title="CT Prototype Backend", version="1.0.0")
@@ -94,6 +94,7 @@ app.include_router(patients.router, prefix="/api")
 app.include_router(protocols.router, prefix="/api")
 app.include_router(scan_params.router, prefix="/api")
 app.include_router(recon_params.router, prefix="/api")
+app.include_router(reconstruction.router, prefix="/api")
 app.include_router(contrast_configs.router, prefix="/api")
 app.include_router(scan_sessions.router, prefix="/api")
 app.include_router(disk_manager.router, prefix="/api")

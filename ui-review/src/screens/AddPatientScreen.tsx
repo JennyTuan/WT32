@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
+import { FeedbackNotice } from "../components/FeedbackNotice";
 import { calcAgeFromBirthDate, createPatient } from "../lib/patientsApi";
 import { useI18n } from "../lib/i18nContext";
 
@@ -211,6 +212,7 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
                                 { label: t("addPatient.selectPlaceholder"), value: "" },
                                 { label: t("patientList.gender.male"), value: "male" },
                                 { label: t("patientList.gender.female"), value: "female" },
+                                { label: t("patientList.gender.other"), value: "other" },
                             ]}
                             required
                         />
@@ -223,9 +225,7 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
                     </div>
 
                     {error && (
-                        <div className="px-3 py-2 bg-red-50 border border-red-200 text-red-600 text-[13px] rounded">
-                            {error}
-                        </div>
+                        <FeedbackNotice compact>{error}</FeedbackNotice>
                     )}
                 </div>
 

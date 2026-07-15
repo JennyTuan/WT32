@@ -75,6 +75,7 @@ export function mapGenderToZh(gender: string): string {
     const g = gender.toLowerCase();
     if (g === "male" || g === "m" || g === "男") return "男";
     if (g === "female" || g === "f" || g === "女") return "女";
+    if (g === "other" || g === "o" || g === "其他") return "其他";
     return gender;
 }
 

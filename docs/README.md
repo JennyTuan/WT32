@@ -10,6 +10,9 @@ This directory holds project notes that are too detailed for the root README.
 - [常规扫描模块测试用例.md](常规扫描模块测试用例.md): Smoke, P0/P1/P2 test cases for the regular scan module, excluding gating, 4D, and DOM.
 - [4D-image-viewer-plan.md](4D-image-viewer-plan.md): 4D-Lung preprocessing and `/image-viewer` data integration plan.
 - [4D工程师IMG数据接入说明.md](4D工程师IMG数据接入说明.md): Engineer-provided 4D `.img` data parsing, preview generation, phase filtering, and formal frontend integration contract.
+- [reconstruction-service-integration.md](reconstruction-service-integration.md): 离线重建任务服务、Provider 接口、新序列接入、错误码与后续扩展说明。
+- [device-error-ui-production-implementation-guide.md](device-error-ui-production-implementation-guide.md): 设备错误与状态反馈 UI 的生产实现规则、事件契约、验收矩阵和 Codex 交接方式。
+- [模拟物理按键交接讨论稿.md](模拟物理按键交接讨论稿.md): 模拟物理按键的扫描流程、提示层关闭规则与异常处理。
 - [系统测试报告.md](系统测试报告.md): System test notes.
 
 ## DOM / Dose Work

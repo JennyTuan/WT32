@@ -15,15 +15,18 @@ import {
 } from "lucide-react";
 
 import { loadSelectedPatient } from "../lib/patientSession";
+import { loadSelectedScanSessionId } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
 import type { PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
+import ScanTriggerFailureDialog from "../components/ScanTriggerFailureDialog";
+import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceErrorEvents";
 import { useI18n } from "../lib/i18nContext";
 
 const HOLD_DURATION_MS = 3000;
-const POSITIONING_DURATION_MS = 1000;
+const POSITIONING_TIMEOUT_MS = 8000;
 const SCAN_DURATION_MS = 16000;
 const FOUR_D_AUTO_NEXT_STEP_DELAY_MS = 700;
 const BED_TRAVEL_MM = 19.2;
@@ -46,7 +49,7 @@ const FOURD_PARAMS = {
     dlp: "1334.97",
 };
 
-type ScanStage = "idle" | "arming" | "positioning" | "positioned" | "enabled" | "exposing" | "paused" | "completed";
+type ScanStage = "idle" | "positioning" | "positioned" | "enabled" | "exposing" | "paused" | "completed";
 type PhysicalTriggerAction = "position" | "exposure";
 
 interface Sequence {
@@ -80,6 +83,7 @@ export default function FourDDiagnosticConfirmScreen() {
     const [scanPaused, setScanPaused] = useState(false);
     const [scanCompleted, setScanCompleted] = useState(false);
     const [scanProgress, setScanProgress] = useState(0);
+    const [triggerFailure, setTriggerFailure] = useState<{ title: string; message: string } | null>(null);
     const [bedProgress, setBedProgress] = useState(0);
     const [dynamicParams, setDynamicParams] = useState({
         scanLength: Number(FOURD_PARAMS.scanLength),
@@ -101,6 +105,7 @@ export default function FourDDiagnosticConfirmScreen() {
     const holdRafRef = useRef<number | null>(null);
     const holdStartRef = useRef<number | null>(null);
     const positioningTimerRef = useRef<number | null>(null);
+    const positioningTimeoutRef = useRef<number | null>(null);
     const scanRafRef = useRef<number | null>(null);
     const scanProgressRef = useRef(0);
     const autoNextTimerRef = useRef<number | null>(null);
@@ -163,6 +168,42 @@ export default function FourDDiagnosticConfirmScreen() {
             scanRafRef.current = null;
         }
     };
+
+    const clearPositioningTimeout = () => {
+        if (positioningTimeoutRef.current !== null) {
+            window.clearTimeout(positioningTimeoutRef.current);
+            positioningTimeoutRef.current = null;
+        }
+    };
+
+    const exitTriggerFlowWithFailure = (failure: { title: string; message: string }) => {
+        clearHoldRaf();
+        clearPositioningTimeout();
+        if (positioningTimerRef.current !== null) {
+            window.clearTimeout(positioningTimerRef.current);
+            positioningTimerRef.current = null;
+        }
+        setShowPatientConfirm(false);
+        setPhysicalWorkflowReady(false);
+        setPhysicalTriggerAction("position");
+        setScanStage("idle");
+        setTriggerFailure(failure);
+    };
+
+    useEffect(() => {
+        const handleDeviceError = (event: Event) => {
+            const deviceError = (event as CustomEvent<DeviceErrorEvent>).detail;
+            if (!deviceError || deviceError.error.severity === "warning") return;
+            const selectedSessionId = loadSelectedScanSessionId();
+            if (deviceError.scan_session_id !== null && deviceError.scan_session_id !== selectedSessionId) return;
+            exitTriggerFlowWithFailure({
+                title: `设备异常：${deviceError.error.code}`,
+                message: `${deviceError.error.message}。当前模拟定位/采集请求已停止，请按设备提示处理后重新尝试。`,
+            });
+        };
+        window.addEventListener(DEVICE_ERROR_RAISED_EVENT, handleDeviceError);
+        return () => window.removeEventListener(DEVICE_ERROR_RAISED_EVENT, handleDeviceError);
+    });
 
     const bedSegmentCount = useMemo(
         () => Math.max(1, Math.ceil(dynamicParams.scanLength / BED_TRAVEL_MM)),
@@ -276,17 +317,9 @@ export default function FourDDiagnosticConfirmScreen() {
     const triggerPositioningSequence = useCallback(() => {
         if (!physicalWorkflowReady) return;
         clearHoldRaf();
-        holdStartRef.current = null;
-        setScanStage("positioning");
-
-        if (positioningTimerRef.current !== null) {
-            window.clearTimeout(positioningTimerRef.current);
-        }
-        positioningTimerRef.current = window.setTimeout(() => {
-            positioningTimerRef.current = null;
-            setPhysicalTriggerAction("exposure");
-            setScanStage("positioned");
-        }, POSITIONING_DURATION_MS);
+        clearPositioningTimeout();
+        setPhysicalTriggerAction("exposure");
+        setScanStage("positioned");
     }, [physicalWorkflowReady]);
 
     const triggerScanSequence = useCallback(() => {
@@ -325,7 +358,11 @@ export default function FourDDiagnosticConfirmScreen() {
 
         clearHoldRaf();
         holdStartRef.current = performance.now();
-        setScanStage("arming");
+        setScanStage("positioning");
+        clearPositioningTimeout();
+        positioningTimeoutRef.current = window.setTimeout(() => {
+            exitTriggerFlowWithFailure({ title: "定位移动超时", message: "未在预期时间内收到起始位到达结果，当前按键引导已关闭。" });
+        }, POSITIONING_TIMEOUT_MS);
 
         const tick = (timestamp: number) => {
             const startedAt = holdStartRef.current ?? timestamp;
@@ -343,10 +380,11 @@ export default function FourDDiagnosticConfirmScreen() {
     };
 
     const stopHold = () => {
-        if (scanStage !== "arming") return;
+        if (scanStage !== "positioning") return;
         clearHoldRaf();
+        clearPositioningTimeout();
         holdStartRef.current = null;
-        setScanStage(physicalTriggerAction === "position" ? "idle" : "positioned");
+        setScanStage("idle");
     };
 
     const toggleScanPause = () => {
@@ -416,6 +454,7 @@ export default function FourDDiagnosticConfirmScreen() {
 
     useEffect(() => () => {
         clearHoldRaf();
+        clearPositioningTimeout();
         clearScanRaf();
         if (positioningTimerRef.current !== null) {
             window.clearTimeout(positioningTimerRef.current);
@@ -426,8 +465,7 @@ export default function FourDDiagnosticConfirmScreen() {
     }, []);
 
     const guideTitle =
-        scanStage === "arming" ? t("scanFlow.physicalGuide.keepHoldingPosition")
-        : scanStage === "positioning" ? t("scanFlow.physicalGuide.moveToStart")
+        scanStage === "positioning" ? t("scanFlow.physicalGuide.keepHoldingPosition")
         : scanStage === "positioned" ? t("scanFlow.physicalGuide.pressAgainForExposure")
         : scanStage === "enabled" ? t("scanFlow.physicalGuide.enabled")
         : scanStage === "exposing" ? t("scanFlow.fourD.running")
@@ -941,8 +979,20 @@ export default function FourDDiagnosticConfirmScreen() {
                     onHoldStart: startHold,
                     onHoldEnd: stopHold,
                     disabled: !physicalWorkflowReady || scanStage === "exposing" || scanStage === "completed",
-                    buttonActive: scanStage === "arming" || scanStage === "positioning" || scanStage === "enabled" || scanStage === "exposing",
+                    buttonActive: scanStage === "positioning" || scanStage === "enabled" || scanStage === "exposing",
                 }}
+            />
+
+            <ScanTriggerFailureDialog
+                failure={triggerFailure}
+                onRetry={() => {
+                    setTriggerFailure(null);
+                    setPhysicalTriggerAction("position");
+                    setScanStage("idle");
+                    setPhysicalWorkflowReady(true);
+                    setShowPatientConfirm(true);
+                }}
+                onReturnToConfirm={() => navigate("/scout-execute")}
             />
 
             {showAbortConfirm && (

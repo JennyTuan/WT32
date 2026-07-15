@@ -5,17 +5,17 @@ import { annotation } from '@cornerstonejs/tools';
 import {
   buildWadoImageId,
   CornerstoneToolsEnums,
-  applyCanvasImagePostProcessing,
   destroyToolGroup,
   getOrCreateToolGroup,
   initCornerstone,
   TOOL_NAMES,
 } from '../lib/cornerstone/initCornerstone';
+import { fromVoiRange, getVoiLutFunction, toVoiRange, type VoiLutMode } from '../lib/cornerstone/voi';
+import { FeedbackViewportOverlay } from './FeedbackNotice';
 import { useI18n } from '../lib/i18nContext';
 
 type ActiveTool = 'pan' | 'zoom' | 'zoomin' | 'window' | 'ruler' | 'eraser' | 'zoomout' | 'fit' | 'flip' | 'reset' | 'annotate';
 type InterpolationMode = 'NEAREST' | 'LINEAR' | 'FAST_LINEAR';
-type VoiLutMode = 'LINEAR' | 'LINEAR_EXACT' | 'SIGMOID';
 type AppliedDisplayProperties = {
   lower: number;
   upper: number;
@@ -61,12 +61,6 @@ function getInterpolationType(mode: InterpolationMode) {
   if (mode === 'NEAREST') return Enums.InterpolationType.NEAREST;
   if (mode === 'FAST_LINEAR') return Enums.InterpolationType.FAST_LINEAR;
   return Enums.InterpolationType.LINEAR;
-}
-
-function getVoiLutFunction(mode: VoiLutMode) {
-  if (mode === 'SIGMOID') return Enums.VOILUTFunctionType.SAMPLED_SIGMOID;
-  if (mode === 'LINEAR_EXACT') return Enums.VOILUTFunctionType.LINEAR_EXACT;
-  return Enums.VOILUTFunctionType.LINEAR;
 }
 
 type DicomErrorCode =
@@ -216,6 +210,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       }
 
       let disposed = false;
+      const toolGroupId = toolGroupIdRef.current;
 
       const setupViewport = async () => {
         try {
@@ -248,7 +243,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
           const viewport = renderingEngine.getStackViewport(viewportIdRef.current);
           viewportRef.current = viewport;
 
-          const toolGroup = getOrCreateToolGroup(toolGroupIdRef.current);
+          const toolGroup = getOrCreateToolGroup(toolGroupId);
           toolGroup.addViewport(viewportIdRef.current, renderingEngineIdRef.current);
 
           // Start at index 0; the separate currentImageIndex effect will jump to the right position
@@ -256,6 +251,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
           viewport.render();
 
           resizeObserverRef.current = new ResizeObserver(() => {
+            if (disposed || renderingEngineRef.current !== renderingEngine) return;
             renderingEngine.resize(true, false);
           });
           resizeObserverRef.current.observe(elementRef.current);
@@ -278,7 +274,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         disposed = true;
         resizeObserverRef.current?.disconnect();
         resizeObserverRef.current = null;
-        destroyToolGroup(toolGroupIdRef.current);
+        destroyToolGroup(toolGroupId);
         viewportRef.current = null;
         renderingEngineRef.current?.destroy();
         renderingEngineRef.current = null;
@@ -287,7 +283,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       };
       // currentImageIndex intentionally excluded — handled by the effect below
        
-    }, [dicomUrl, imageUrls]);
+    }, [dicomUrl, imageUrls, t]);
 
     // ─── Slice navigation (lightweight, no teardown) ───
     useEffect(() => {
@@ -314,8 +310,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         return;
       }
 
-      const newLower = windowCenter - windowWidth / 2;
-      const newUpper = windowCenter + windowWidth / 2;
+      const { lower: newLower, upper: newUpper } = toVoiRange(windowWidth, windowCenter, voiLutMode);
       const nextDisplay: AppliedDisplayProperties = {
         lower: newLower,
         upper: newUpper,
@@ -350,6 +345,8 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         invert,
         interpolationType: getInterpolationType(interpolationMode),
         VOILUTFunction: getVoiLutFunction(voiLutMode),
+        smoothing,
+        sharpening,
       });
       viewport.render();
     }, [interpolationMode, invert, sharpening, smoothing, status, voiLutMode, windowCenter, windowWidth, windowSyncKey]);
@@ -438,8 +435,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
           const props = viewport.getProperties();
           if (props.voiRange) {
             const { lower, upper } = props.voiRange;
-            const ww = upper - lower;
-            const wc = (upper + lower) / 2;
+            const { windowWidth: ww, windowCenter: wc } = fromVoiRange(lower, upper, voiLutMode);
             
             // THRESHOLD GUARD
             const lastEmitted = lastEmittedVoiRef.current;
@@ -459,7 +455,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
 
       element.addEventListener(Enums.Events.IMAGE_RENDERED, handleImageRendered);
       return () => element.removeEventListener(Enums.Events.IMAGE_RENDERED, handleImageRendered);
-    }, [status, onWindowLevelChange]);
+    }, [status, onWindowLevelChange, voiLutMode]);
 
     // ─── Stack-image change sync ─────────────────────────────────────────────
     // Authoritative slice-index mirror: whenever Cornerstone advances to a new
@@ -489,39 +485,6 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       element.addEventListener(Enums.Events.STACK_NEW_IMAGE, handleStackNewImage);
       return () => element.removeEventListener(Enums.Events.STACK_NEW_IMAGE, handleStackNewImage);
     }, [status, onImageIndexChange]);
-
-    // Pixel-level denoise/sharpen pass for the rendered 2D canvas.
-    // Cornerstone redraws the original image first; this pass then writes processed pixels back.
-    useEffect(() => {
-      const element = elementRef.current;
-      const viewport = viewportRef.current;
-      if (!element || !viewport || status !== 'ready') return;
-
-      let frameId: number | null = null;
-      const runPostProcessing = () => {
-        if (frameId !== null) {
-          window.cancelAnimationFrame(frameId);
-        }
-        frameId = window.requestAnimationFrame(() => {
-          frameId = null;
-          try {
-            applyCanvasImagePostProcessing(element, smoothing, sharpening);
-          } catch (error) {
-            console.warn('DICOM canvas post-processing skipped.', error);
-          }
-        });
-      };
-
-      element.addEventListener(Enums.Events.IMAGE_RENDERED, runPostProcessing);
-      viewport.render();
-
-      return () => {
-        element.removeEventListener(Enums.Events.IMAGE_RENDERED, runPostProcessing);
-        if (frameId !== null) {
-          window.cancelAnimationFrame(frameId);
-        }
-      };
-    }, [sharpening, smoothing, status]);
 
     // ─── Mouse wheel: slice scroll or zoom ───
     useEffect(() => {
@@ -573,11 +536,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         )}
 
         {status === 'error' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/80">
-            <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
-            <span className="text-[14px] font-semibold text-red-400">{t('dicomError.unknown' as never)}</span>
-            <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{errorMsg}</span>
-          </div>
+          <FeedbackViewportOverlay title={t('dicomError.unknown' as never)} message={errorMsg} />
         )}
       </div>
     );

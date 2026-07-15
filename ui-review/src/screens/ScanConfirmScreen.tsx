@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
 import {
@@ -469,6 +469,7 @@ const ScanConfirmScreen = ({
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const isHeadDualScoutFlow = useMemo(() => isHeadDualScoutWorkflow(workflowPlans), [workflowPlans]);
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const [scanSessionLoadState, setScanSessionLoadState] = useState<"loading" | "ready" | "error">("loading");
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
     const [bedMode, setBedMode] = useState<"in" | "out">("in");
     const [patientPosition, setPatientPosition] = useState("HFS");
@@ -565,9 +566,11 @@ const ScanConfirmScreen = ({
                 const currentScanSession = await fetchSelectedScanSession({ preferCache: false });
                 if (!cancelled) {
                     setScanSession(currentScanSession);
+                    setScanSessionLoadState("ready");
                 }
             } catch (error) {
                 console.error("Failed to load selected scan session.", error);
+                if (!cancelled) setScanSessionLoadState("error");
             }
         };
 
@@ -825,6 +828,23 @@ const ScanConfirmScreen = ({
         setCheckedSeqIds([]);
         setShowDeleteConfirm(false);
     };
+    const hasStartedSeriesExecution = scanSession?.series.some(
+        (series) => series.execution_status !== "pending"
+    ) ?? false;
+    const canNavigateBackToProtocol =
+        !readOnlyMode &&
+        allowBackNavigation &&
+        scanSessionLoadState === "ready" &&
+        !hasStartedSeriesExecution;
+    const previousStepTitle = scanSessionLoadState === "error"
+        ? t("scanFlow.backStateUnavailable")
+        : !canNavigateBackToProtocol && scanSessionLoadState !== "loading"
+            ? t("scanFlow.backBlockedAfterAcquisition")
+            : undefined;
+    const handlePreviousStep = useCallback(() => {
+        if (!canNavigateBackToProtocol) return;
+        navigate("/protocol-select");
+    }, [canNavigateBackToProtocol, navigate]);
 
     return (
         <div className={`flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl relative text-[#37474F] font-sans select-none ${readOnlyMode ? "scan-confirm-read-only" : ""}`}>
@@ -1518,7 +1538,12 @@ const ScanConfirmScreen = ({
             {/* 3. Footer (Nav Buttons) */}
             <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">
                 <div className="flex-1">
-                    <button onClick={() => navigate(-1)} disabled={readOnlyMode || !allowBackNavigation} className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 shadow-sm transition-all uppercase text-[13px] ${readOnlyMode || !allowBackNavigation ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#4D94FF] border-[#4D94FF] hover:bg-solid active:scale-95"}`}>
+                    <button
+                        onClick={handlePreviousStep}
+                        disabled={!canNavigateBackToProtocol}
+                        title={previousStepTitle}
+                        className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 shadow-sm transition-all uppercase text-[13px] ${!canNavigateBackToProtocol ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#4D94FF] border-[#4D94FF] hover:bg-solid active:scale-95"}`}
+                    >
                         <ChevronLeft size={20} /> {t("common.previousStep")}
                     </button>
                 </div>
@@ -1727,6 +1752,9 @@ const localizeGenderValue = (
     if (normalized === "女" || normalized === "f" || normalized === "female") {
         return t("patientList.gender.female");
     }
+    if (normalized === "其他" || normalized === "o" || normalized === "other") {
+        return t("patientList.gender.other");
+    }
     return gender;
 };
 
@@ -1774,13 +1802,14 @@ type PatientConfirmationPhysicalGuide = {
 };
 
 const modalPhysicalStepClasses: Record<PatientConfirmationPhysicalStepState, string> = {
-    pending: "border-slate-200 bg-white text-slate-400",
-    active: "border-emerald-300 bg-emerald-50 text-emerald-700 shadow-[0_8px_18px_-14px_rgba(5,150,105,0.9)]",
-    done: "border-blue-200 bg-blue-50 text-blue-700",
+    pending: "text-slate-400",
+    active: "bg-emerald-50 text-emerald-700",
+    done: "text-slate-600",
 };
 
 const CombinedPhysicalGuideCard = ({ guide }: { guide: PatientConfirmationPhysicalGuide }) => {
-    const { t } = useI18n();
+    const activePointerIdRef = useRef<number | null>(null);
+    const pointerPressHandledRef = useRef(false);
     const buttonClass = guide.disabled
         ? "border-[#8A98A8] bg-[radial-gradient(circle_at_38%_30%,#CBD5E1_0%,#94A3B8_54%,#64748B_100%)] opacity-75 cursor-not-allowed"
         : guide.buttonActive
@@ -1788,107 +1817,84 @@ const CombinedPhysicalGuideCard = ({ guide }: { guide: PatientConfirmationPhysic
             : "border-[#07533A] bg-[radial-gradient(circle_at_38%_28%,#52F0A6_0%,#14B87A_48%,#08734D_100%)] shadow-[0_16px_28px_rgba(15,23,42,0.25),inset_0_5px_12px_rgba(255,255,255,0.28)] hover:translate-y-[-1px]";
 
     const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-        if (guide.disabled) return;
+        if (guide.disabled || activePointerIdRef.current !== null) return;
         event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
+        activePointerIdRef.current = event.pointerId;
+        pointerPressHandledRef.current = true;
+        // 部分触控环境不支持指针捕获；捕获失败不能阻断使能键动作。
+        try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+            // 标准 click 仍会作为兜底完成一次按键动作。
+        }
         guide.onHoldStart();
     };
 
     const handlePointerEnd = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (activePointerIdRef.current !== event.pointerId) return;
+        activePointerIdRef.current = null;
+        guide.onHoldEnd();
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
         }
+    };
+
+    const handleLostPointerCapture = () => {
+        if (activePointerIdRef.current === null) return;
+        activePointerIdRef.current = null;
+        guide.onHoldEnd();
+    };
+
+    const handleClick = () => {
+        if (guide.disabled) return;
+        if (pointerPressHandledRef.current) {
+            pointerPressHandledRef.current = false;
+            return;
+        }
+        // 键盘或只派发 click 的触控环境按一次即可触发曝光。
+        guide.onHoldStart();
         guide.onHoldEnd();
     };
 
     return (
-        <div className="rounded-2xl border border-[#D6E0EA] bg-[#F8FAFC] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_16px_28px_-24px_rgba(15,23,42,0.75)]">
-            <div className="mb-3">
-                <div className="text-[13px] font-black text-slate-700">{guide.title}</div>
-                <div className="mt-1 text-[10px] font-semibold leading-snug text-slate-500">{guide.description}</div>
+        <div className="rounded-2xl border border-[#D6E0EA] bg-white p-5 shadow-[0_16px_28px_-24px_rgba(15,23,42,0.65)]">
+            <div>
+                <div className="text-[14px] font-black text-slate-700">{guide.title}</div>
+                <div className="mt-1.5 text-[10px] font-semibold leading-relaxed text-slate-500">{guide.description}</div>
             </div>
 
-            <div className="relative rounded-[24px] border border-[#D7DEE7] bg-[#EDEDEA] p-3 shadow-[0_22px_32px_-24px_rgba(15,23,42,0.75),inset_0_1px_0_rgba(255,255,255,0.85)]">
-                <div className="mb-2 flex items-center px-1">
-                    <div className="text-[10px] font-black text-slate-500">{t("scanFlow.physicalGuide.controlBoxTitle")}</div>
-                </div>
-
-                <div className="flex justify-center">
-                    <div className="relative h-[232px] w-[156px] overflow-hidden rounded-[28px] border border-[#D3D8DF] bg-[#F6F7F5] px-4 py-4 shadow-[0_18px_24px_-22px_rgba(15,23,42,0.8),inset_3px_0_5px_rgba(148,163,184,0.22),inset_0_1px_0_rgba(255,255,255,0.95)]">
-                        <div className="absolute -left-3 top-[52px] h-[46px] w-5 rounded-full border border-[#D5DAE0] bg-[#EDEDEA]" />
-                        <div className="absolute -left-3 top-[124px] h-[52px] w-5 rounded-full border border-[#D5DAE0] bg-[#EDEDEA]" />
-
-                        <div className="relative z-10 flex h-full flex-col items-center">
-                            <div className="flex w-full items-start justify-between px-0.5">
-                                <div className="flex h-[42px] w-[42px] items-center justify-center rounded-full border-[6px] border-[#FCA5A5] bg-[#DC2626] shadow-[0_6px_12px_rgba(127,29,29,0.25)]" title={guide.emergencyLabel}>
-                                    <AlertTriangle size={18} className="text-white" />
-                                </div>
-                                <div className="mt-1 h-[28px] w-[28px] rounded-full border border-[#CBD5E1] bg-[radial-gradient(circle_at_35%_28%,#A8AFB8,#7C858F)] shadow-[inset_0_2px_3px_rgba(15,23,42,0.18)]" title={guide.simulatedLabel} />
-                            </div>
-
-                            <div className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-300 shadow-[inset_0_1px_1px_rgba(15,23,42,0.2)]" />
-                            <button
-                                type="button"
-                                aria-label={guide.triggerLabel}
-                                disabled={guide.disabled}
-                                onPointerDown={handlePointerDown}
-                                onPointerUp={handlePointerEnd}
-                                onPointerCancel={handlePointerEnd}
-                                onLostPointerCapture={guide.onHoldEnd}
-                                className={`relative mt-1 flex h-[74px] w-[74px] touch-none items-center justify-center rounded-full border-[9px] transition-all duration-150 ${buttonClass}`}
-                            >
-                                <span className="absolute -inset-2 rounded-full border-2 border-emerald-400/90 shadow-[0_0_18px_rgba(16,185,129,0.35)]" />
-                                <span className="absolute -right-7 -top-3 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[7px] font-black text-white shadow-md">
-                                    {t("scanFlow.physicalGuide.targetBadge")}
-                                </span>
-                                <div className="h-[44px] w-[44px] rounded-full border border-white/25 bg-white/10 shadow-[inset_0_5px_8px_rgba(255,255,255,0.16),inset_0_-6px_10px_rgba(6,95,70,0.2)]" />
-                            </button>
-
-                            <div className="mt-2 flex w-full items-center justify-center gap-1">
-                                <span className={`h-2.5 w-2.5 rounded-full ${guide.disabled ? "bg-slate-300" : guide.buttonActive ? "bg-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.9)]" : "bg-cyan-400 shadow-[0_0_9px_rgba(34,211,238,0.75)]"}`} />
-                                <span className="text-[8px] font-black text-slate-500">{guide.triggerLabel}</span>
-                            </div>
-
-                            <div className="mt-2 flex h-[40px] w-[96px] items-center justify-between rounded-full bg-[#6B7175] px-2.5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)]">
-                                <div className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[#F8FAFC] text-slate-500 shadow-sm">
-                                    <StretchHorizontal size={15} />
-                                </div>
-                                <div className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[#F8FAFC] text-slate-500 shadow-sm">
-                                    <CheckCircle size={15} />
-                                </div>
-                            </div>
-
-                            <div className="mt-2 grid w-[76px] grid-cols-3 grid-rows-3 text-center text-[11px] font-black leading-[11px] text-slate-500/80">
-                                <div />
-                                <ChevronsUp size={12} className="mx-auto" />
-                                <div />
-                                <ChevronLeft size={12} className="mx-auto" />
-                                <div className="text-[9px] leading-[13px]">••</div>
-                                <ChevronRight size={12} className="mx-auto" />
-                                <div />
-                                <ChevronDown size={12} className="mx-auto" />
-                                <div />
-                            </div>
-                        </div>
+            <div className="mt-4 flex justify-center rounded-2xl bg-slate-50 px-4 py-5">
+                <div className="flex flex-col items-center">
+                    <button
+                        type="button"
+                        aria-label={guide.triggerLabel}
+                        disabled={guide.disabled}
+                        onPointerDown={handlePointerDown}
+                        onPointerUp={handlePointerEnd}
+                        onPointerCancel={handlePointerEnd}
+                        onLostPointerCapture={handleLostPointerCapture}
+                        onClick={handleClick}
+                        className={`relative flex h-[92px] w-[92px] touch-none items-center justify-center rounded-full border-[10px] transition-all duration-150 ${buttonClass}`}
+                    >
+                        <span className="absolute -inset-2 rounded-full border border-emerald-300/80" />
+                        <div className="h-[54px] w-[54px] rounded-full border border-white/25 bg-white/10 shadow-[inset_0_6px_10px_rgba(255,255,255,0.18),inset_0_-7px_12px_rgba(6,95,70,0.22)]" />
+                    </button>
+                    <div className="mt-3 flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${guide.disabled ? "bg-slate-300" : "bg-emerald-500"}`} />
+                        <span className="text-[11px] font-black text-slate-600">{guide.triggerLabel}</span>
                     </div>
                 </div>
-
-                <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-white/70 px-3 py-2">
-                    <span className="text-[10px] font-bold text-slate-500">{t("scanFlow.physicalGuide.targetButtonHint")}</span>
-                    <span className="h-px flex-1 bg-emerald-200" />
-                    <span className="rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-black text-emerald-700">{guide.triggerLabel}</span>
-                </div>
             </div>
 
-            <div className="mt-3 grid gap-2">
+            <div className="mt-4 grid gap-1 rounded-xl bg-slate-50 p-1.5">
                 {guide.steps.map((step, index) => (
-                    <div key={step.id} className={`flex min-h-[48px] items-center gap-2 rounded-lg border px-3 py-2 transition-all ${modalPhysicalStepClasses[step.state]}`}>
-                        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-black ${step.state === "done" ? "bg-blue-600 text-white" : step.state === "active" ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+                    <div key={step.id} className={`flex min-h-[46px] items-center gap-3 rounded-lg px-3 py-2 transition-all ${modalPhysicalStepClasses[step.state]}`}>
+                        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-black ${step.state === "done" ? "bg-slate-600 text-white" : step.state === "active" ? "bg-emerald-600 text-white" : "bg-white text-slate-400"}`}>
                             {step.state === "done" ? <CheckCircle size={14} /> : index + 1}
                         </div>
                         <div className="min-w-0">
                             <div className="truncate text-[11px] font-black leading-tight">{step.label}</div>
-                            <div className="mt-0.5 max-h-[20px] overflow-hidden text-[9px] font-semibold leading-snug opacity-80">{step.detail}</div>
+                            <div className="mt-0.5 truncate text-[9px] font-semibold opacity-75">{step.detail}</div>
                         </div>
                     </div>
                 ))}
@@ -2053,7 +2059,7 @@ export const PatientConfirmationModal: React.FC<PatientConfirmationModalProps> =
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22C55E] opacity-75"></span>
                                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#22C55E]"></span>
                             </div>
-                            <span className="text-[14px] font-bold text-[#166534]">{hasPhysicalGuide ? t("scanFlow.patientConfirm.waitingPhysical") : t("scanFlow.patientConfirm.ready")}</span>
+                            <span className="text-[14px] font-bold text-[#166534]">{hasPhysicalGuide && physicalGuide ? physicalGuide.guideTitle : t("scanFlow.patientConfirm.ready")}</span>
                         </div>
 
                         {!hasPhysicalGuide && (

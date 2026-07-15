@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { AlertTriangle, Clock, Eye, EyeOff, KeyRound, Siren, User as UserIcon, AlertCircle } from "lucide-react";
+import { AlertTriangle, Clock, Eye, EyeOff, KeyRound, Siren, User as UserIcon } from "lucide-react";
 
+import { FeedbackNotice } from "../components/FeedbackNotice";
 import { useAuth } from "../lib/authContext";
 import { useI18n } from "../lib/i18nContext";
 import type { LanguageCode } from "../lib/systemSettingsApi";
@@ -154,10 +155,7 @@ export default function LoginScreen() {
                     </label>
 
                     {error && (
-                        <div className="flex items-center gap-2 rounded-md border border-[#FCA5A5] bg-[#FEF2F2] px-3 py-2 text-[12px] text-[#B91C1C]">
-                            <AlertCircle size={14} />
-                            <span>{error}</span>
-                        </div>
+                        <FeedbackNotice compact>{error}</FeedbackNotice>
                     )}
 
                     <button

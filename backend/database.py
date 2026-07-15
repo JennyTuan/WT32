@@ -506,7 +506,7 @@ GATING_CUSTOM_PROTOCOLS = [
         "series_kind": "helical",
         "params": {
             "kv": 120, "ma": 180, "slice_thickness": 1.25, "pitch": 1.2,
-            "rotation_time": 0.5, "scan_length": 350.0, "fov": 350.0,
+            "rotation_time": 0.75, "scan_length": 350.0, "fov": 350.0,
             "ctdi_vol": 8.2, "dlp": 287.0, "auto_ma": False,
         },
         "gating_config": {

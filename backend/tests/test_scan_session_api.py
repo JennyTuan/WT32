@@ -96,7 +96,7 @@ class ScanSessionApiTests(unittest.TestCase):
                 ma=180,
                 slice_thickness=1.0,
                 pitch=0.8,
-                rotation_time=0.5,
+                rotation_time=0.75,
                 scan_length=220.0,
                 fov=260.0,
                 collimator="128x0.6",

@@ -17,6 +17,7 @@ import { useI18n } from "../../../lib/i18nContext";
 import { FOV_MAX_MM, FOV_MIN_MM } from "../../../lib/fov";
 
 const TUBE_ANGLE_OPTIONS = ["0", "90", "180", "270"];
+const ROTATION_TIME_OPTIONS = ["0.75", "1", "2"];
 
 export function BasicInfoPanel({ protocol, draft, selectedPos, bodyPartOptions, ageGroupOptions, onPosChange, onDraftChange }: {
     protocol: ApiProtocolDetail | null;
@@ -115,7 +116,7 @@ export function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, o
                     <Divider />
                     <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
                     <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
-                    <FieldSelect label={t("protocolDetail.fieldRotationTime")} value="1" options={["1", "0.5", "1.5"]} required />
+                    <FieldSelect label={t("protocolDetail.fieldRotationTime")} value="1" options={ROTATION_TIME_OPTIONS} required />
                     <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator} placeholder="e.g. 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
                     <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
                     <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
@@ -158,7 +159,7 @@ export function HelicalParamsPanel({ series, draft, canEditMode, onModeChange, o
                     <Divider />
                     <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
                     <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
-                    <FieldSelect label={t("protocolDetail.fieldRotationTime")} value={draft.rotationTime || "1"} options={[draft.rotationTime || "1", "0.5", "1.5"]} required onChange={(value) => onDraftChange({ rotationTime: value })} />
+                    <FieldSelect label={t("protocolDetail.fieldRotationTime")} value={draft.rotationTime || "1"} options={ROTATION_TIME_OPTIONS} required onChange={(value) => onDraftChange({ rotationTime: value })} />
                     <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator} placeholder="e.g. 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
                     <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
                     <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />

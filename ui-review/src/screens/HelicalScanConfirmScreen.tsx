@@ -26,6 +26,7 @@ import { estimateDose } from "../lib/doseEstimate";
 import { buildApiUrl } from "../lib/apiClient";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
+import { FeedbackViewportOverlay } from "../components/FeedbackNotice";
 import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
 import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import DicomViewer from "../components/DicomViewer";
@@ -1107,11 +1108,10 @@ export function FourDScoutViewport({
             <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
             {loadState === "loading" && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#9FB2C5]">{t("scanFlow.imageLoading")}</div>}
             {loadState === "error" && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/85">
-                    <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
-                    <span className="text-[14px] font-semibold text-red-400">{t("scanFlow.imageLoadError")}</span>
-                    <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError ? translateDicomLoadFailure(t as (key: string) => string, loadError) : t("scanFlow.unknownError")}</span>
-                </div>
+                <FeedbackViewportOverlay
+                    title={t("scanFlow.imageLoadError")}
+                    message={loadError ? translateDicomLoadFailure(t as (key: string) => string, loadError) : t("scanFlow.unknownError")}
+                />
             )}
             {enableImageTools && (
                 <div className="absolute right-0 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-lg border border-r-0 border-[#334155] bg-[#0F172A]/92 px-1.5 py-2 shadow-md backdrop-blur-sm">
@@ -1398,11 +1398,10 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
 
                     {loadState === "loading" && <div className="text-[11px] text-white/40 animate-pulse">Initializing Recon Buffer...</div>}
                     {loadState === "error" && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center bg-black/85">
-                            <div className="w-12 h-12 rounded-full border-2 border-red-500/70 flex items-center justify-center text-red-400 text-2xl font-bold">!</div>
-                            <span className="text-[14px] font-semibold text-red-400">{t("dicomError.unknown")}</span>
-                            <span className="text-[12px] text-red-300/80 max-w-[420px] leading-relaxed">{loadError ? translateDicomLoadFailure(t as (key: string) => string, loadError) : t("scanFlow.unknownError")}</span>
-                        </div>
+                        <FeedbackViewportOverlay
+                            title={t("dicomError.unknown")}
+                            message={loadError ? translateDicomLoadFailure(t as (key: string) => string, loadError) : t("scanFlow.unknownError")}
+                        />
                     )}
 
                     {loadState === "ready" && (

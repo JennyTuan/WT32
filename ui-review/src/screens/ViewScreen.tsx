@@ -10,7 +10,7 @@ import {
     Move,
     Ruler,
     Pencil,
-    Rotate3D,
+    Crosshair,
     Maximize,
     RefreshCw,
     Play,
@@ -41,10 +41,9 @@ import {
 } from "../lib/headDualScoutDemo";
 import DicomViewer, { type DicomViewerHandle } from "../components/DicomViewer";
 import AppHeader from "../components/AppHeader";
+import { FeedbackNotice } from "../components/FeedbackNotice";
 import CornerstoneMPRViewport, {
     type CornerstoneMPRHandle,
-    type ObliqueAxis,
-    type ObliqueConfig,
 } from "../components/CornerstoneMPRViewport";
 import {
     loadFourDManifest,
@@ -69,6 +68,12 @@ import {
 } from "../lib/scanSession";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
+import {
+    createReconstructionJob,
+    listReconstructionJobs,
+    waitForReconstructionJob,
+    type ReconstructionOutputSeries,
+} from "../lib/reconstructionApi";
 
 type ImageItem = { id: string; name: string };
 type SeriesType = "topogram" | "helical" | "axial" | "4d" | "static";
@@ -137,6 +142,7 @@ type WindowPreset = {
     ww: number;
     wl: number;
 };
+type GeneratedReconSeries = { scanGroupId: string; series: Series };
 const WINDOW_PRESETS = [
     { key: "lung", label: "Lung", ww: 1500, wl: -600 },
     { key: "bone", label: "Bone", ww: 2000, wl: 300 },
@@ -399,20 +405,43 @@ const getSeriesDicomUrl = (
     return `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
 };
 
-type ViewerToolMode = "pan" | "wl" | "measure" | "annotate" | "eraser" | "rotate";
-type DisplayQualityMode = "standard" | "detail";
-
+type ViewerToolMode = "pan" | "wl" | "measure" | "annotate" | "eraser" | "crosshairs";
 const mapCornerstoneTool = (toolMode: ViewerToolMode) => {
     if (toolMode === "pan") return "pan";
     if (toolMode === "wl") return "window";
     if (toolMode === "measure") return "ruler";
     if (toolMode === "eraser") return "eraser";
     if (toolMode === "annotate") return "annotate";
-    if (toolMode === "rotate") return "rotate";
+    if (toolMode === "crosshairs") return "crosshairs";
     return "window";
 };
 
 const getSeriesMidSliceIndex = (count: number) => Math.max(0, Math.floor(count / 2));
+
+const buildGeneratedReconSeries = (
+    output: ReconstructionOutputSeries,
+    sourceSeries: Series,
+    fallbackWw: number,
+    fallbackWl: number,
+): Series => ({
+    id: `generated-${output.series_id}`,
+    name: output.series_description,
+    count: output.image_count,
+    kernel: output.kernel,
+    thickness: `${output.slice_thickness} mm`,
+    kV: sourceSeries.kV,
+    mAs: sourceSeries.mAs,
+    fov: `${output.fov} mm`,
+    matrix: String(output.matrix),
+    images: output.image_urls.map((_, index) => ({
+        id: `${output.series_id}-image-${index + 1}`,
+        name: `Image ${index + 1}`,
+    })),
+    seriesType: sourceSeries.seriesType,
+    defaultWw: output.window_width ?? fallbackWw,
+    defaultWl: output.window_level ?? fallbackWl,
+    dicomUrls: output.image_urls,
+});
 
 const parseDicomNumber = (value: string | undefined, fallback: number) => {
     if (!value) return fallback;
@@ -471,6 +500,7 @@ const ViewScreen = () => {
     }, [isFourDEntry]);
     // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const [generatedReconSeries, setGeneratedReconSeries] = useState<GeneratedReconSeries[]>([]);
     const isBrainHelicalDemo = isBrainHelicalWorkflowActive || (!isFourDEntry && isBrainHelicalScanSession(scanSession));
     const isLimbsDicomDemo = isLimbsHelicalWorkflowActive || (!isFourDEntry && isLimbsHelicalScanSession(scanSession));
     const isHeadDualScoutDemo = isHeadDualScoutWorkflowActive || (!isFourDEntry && isHeadDualScoutSession(scanSession));
@@ -598,13 +628,8 @@ const ViewScreen = () => {
     const [isImageInverted, setIsImageInverted] = useState(false);
     const [imageSmoothing, setImageSmoothing] = useState(0);
     const [imageSharpening, setImageSharpening] = useState(0);
-    const [displayQualityMode, setDisplayQualityMode] = useState<DisplayQualityMode>("standard");
     const [readerMode, setReaderMode] = useState(false);
     const [volumeQuality, setVolumeQuality] = useState<"performance" | "standard" | "fine">("standard");
-    const [obliqueEnabled, setObliqueEnabled] = useState(false);
-    const [obliquePanel, setObliquePanel] = useState<ObliqueConfig["panel"]>("axial");
-    const [obliqueAxis, setObliqueAxis] = useState<ObliqueAxis>("horizontal");
-    const [obliqueAngleDeg, setObliqueAngleDeg] = useState(0);
     const [isBrowseModeOpen, setIsBrowseModeOpen] = useState(false);
     const [isLayoutOpen, setIsLayoutOpen] = useState(false);
     const [isVolumePresetOpen, setIsVolumePresetOpen] = useState(false);
@@ -613,21 +638,6 @@ const ViewScreen = () => {
     const [isVoiLutOpen, setIsVoiLutOpen] = useState(false);
     const [isInterpolationOpen, setIsInterpolationOpen] = useState(false);
     const [isVolumeQualityOpen, setIsVolumeQualityOpen] = useState(false);
-    const applyDisplayQualityMode = useCallback((mode: DisplayQualityMode) => {
-        setDisplayQualityMode(mode);
-        if (mode === "detail") {
-            setSelectedVoiLutMode("LINEAR_EXACT");
-            setSelectedInterpolationMode("FAST_LINEAR");
-            setImageSmoothing(0);
-            setImageSharpening(0.16);
-            return;
-        }
-        setSelectedVoiLutMode("LINEAR");
-        setSelectedInterpolationMode("LINEAR");
-        setImageSmoothing(0);
-        setImageSharpening(0);
-    }, []);
-
     // ─── 离线重建参数状态 (仅 isOfflineRecon 模式使用) ──────────────────────────
     type ReconParams = {
         thickness: string;
@@ -655,8 +665,11 @@ const ViewScreen = () => {
         metalArtifact: false,
         reconMode: "",
     });
-    type ReconStatus = "idle" | "running" | "done";
+    type ReconStatus = "idle" | "submitting" | "queued" | "running" | "done" | "failed";
     const [reconStatus, setReconStatus] = useState<ReconStatus>("idle");
+    const [reconProgress, setReconProgress] = useState(0);
+    const [reconMessage, setReconMessage] = useState<string | null>(null);
+    const reconAbortRef = useRef<AbortController | null>(null);
     const [isReconMatrixOpen, setIsReconMatrixOpen] = useState(false);
 
     const currentLayoutSpec = useMemo(
@@ -683,15 +696,6 @@ const ViewScreen = () => {
     }, [t]);
     const volumeSampleDistanceMultiplier =
         volumeQuality === "performance" ? 1.25 : volumeQuality === "fine" ? 0.45 : 0.75;
-    const obliqueConfig = useMemo<ObliqueConfig>(
-        () => ({
-            enabled: obliqueEnabled,
-            panel: obliquePanel,
-            axis: obliqueAxis,
-            angleDeg: obliqueAngleDeg,
-        }),
-        [obliqueAngleDeg, obliqueAxis, obliqueEnabled, obliquePanel]
-    );
     const applyWindowPreset = useCallback((preset: WindowPreset) => {
         setWw(preset.ww);
         setWl(preset.wl);
@@ -1020,7 +1024,59 @@ const ViewScreen = () => {
         t,
     ]);
 
-    const seriesList = studyTree.flatMap((study) => study.scanGroups.flatMap((g) => g.series));
+    const displayStudyTree = useMemo(() => {
+        if (generatedReconSeries.length === 0) return studyTree;
+        return studyTree.map((study) => ({
+            ...study,
+            scanGroups: study.scanGroups.map((group) => {
+                const generatedForGroup = generatedReconSeries
+                    .filter(({ scanGroupId }) => group.id === scanGroupId)
+                    .map(({ series }) => series);
+                return generatedForGroup.length > 0
+                    ? { ...group, series: [...group.series, ...generatedForGroup] }
+                    : group;
+            }),
+        }));
+    }, [generatedReconSeries, studyTree]);
+    const seriesList = displayStudyTree.flatMap((study) => study.scanGroups.flatMap((g) => g.series));
+    useEffect(() => {
+        if (!scanSession?.id) return;
+        const controller = new AbortController();
+        void listReconstructionJobs(scanSession.id, controller.signal)
+            .then((jobs) => {
+                const seriesById = new Map<string, Series>();
+                const groupBySeriesId = new Map<string, string>();
+                studyTree.forEach((study) => study.scanGroups.forEach((group) => group.series.forEach((series) => {
+                    seriesById.set(series.id, series);
+                    groupBySeriesId.set(series.id, group.id);
+                })));
+
+                const restored: GeneratedReconSeries[] = [];
+                [...jobs].reverse().forEach((job) => {
+                    if (job.status !== "completed" || !job.output_series) return;
+                    const sourceId = job.request.source_series.series_id;
+                    const sourceSeries = seriesById.get(sourceId);
+                    const scanGroupId = groupBySeriesId.get(sourceId);
+                    if (!sourceSeries || !scanGroupId) return;
+                    const generated = buildGeneratedReconSeries(
+                        job.output_series,
+                        sourceSeries,
+                        job.request.parameters.window_width,
+                        job.request.parameters.window_level,
+                    );
+                    restored.push({ scanGroupId, series: generated });
+                    seriesById.set(generated.id, generated);
+                    groupBySeriesId.set(generated.id, scanGroupId);
+                });
+                setGeneratedReconSeries(restored);
+            })
+            .catch((error) => {
+                if (!controller.signal.aborted) {
+                    console.info("Reconstruction history is unavailable.", error);
+                }
+            });
+        return () => controller.abort();
+    }, [scanSession?.id, studyTree]);
     // Guard: if seriesList is somehow still empty, always fall back to the static series
     const safeSeriesList = seriesList.length > 0 ? seriesList : [{
         id: effectiveLungSeries.seriesId,
@@ -1124,11 +1180,11 @@ const ViewScreen = () => {
     const hasMultipleSlices = totalSlices > 1;
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview && hasMultipleSlices;
     const isToolSupportedInCurrentView = (mode: ViewerToolMode) => {
-        if (!isMprViewActive) return mode !== "rotate";
+        if (!isMprViewActive) return mode !== "crosshairs";
         if (isFourDMprViewActive) {
-            return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate";
+            return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "crosshairs";
         }
-        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser" || mode === "rotate";
+        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser" || mode === "crosshairs";
     };
 
     const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
@@ -1384,6 +1440,103 @@ const ViewScreen = () => {
         () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index, selectedSeries.seriesType, isBrainHelicalDemo, selectedSeries)),
         [selectedSeries, totalSlices, isBrainHelicalDemo]
     );
+    const handleOfflineReconstruction = useCallback(async () => {
+        if (["submitting", "queued", "running"].includes(reconStatus)) return;
+
+        const toRequiredNumber = (value: string, label: string) => {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${label}必须为大于 0 的有效数值。`);
+            return parsed;
+        };
+        const toOptionalNumber = (value: string) => {
+            if (!value.trim()) return undefined;
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed)) throw new Error("重建范围必须为有效数值。");
+            return parsed;
+        };
+        reconAbortRef.current?.abort();
+        const controller = new AbortController();
+        reconAbortRef.current = controller;
+        setReconStatus("submitting");
+        setReconProgress(0);
+        setReconMessage(null);
+
+        try {
+            const scanGroupId = displayStudyTree
+                .flatMap((study) => study.scanGroups)
+                .find((group) => group.series.some((series) => series.id === selectedSeries.id))?.id;
+            if (!scanGroupId) throw new Error("未找到当前序列所属的扫描分组。");
+
+            const created = await createReconstructionJob({
+                scan_session_id: scanSession?.id,
+                source_series: {
+                    series_id: selectedSeries.id,
+                    image_urls: seriesImageUrls,
+                },
+                parameters: {
+                    slice_thickness: toRequiredNumber(reconParams.thickness, "层厚"),
+                    slice_spacing: selectedSeries.seriesType === "helical"
+                        ? toRequiredNumber(reconParams.spacing, "层间隔")
+                        : toRequiredNumber(reconParams.thickness, "层厚"),
+                    kernel: reconParams.kernel.trim() || selectedSeries.kernel,
+                    fov: toRequiredNumber(reconParams.fov, "重建 FOV"),
+                    center_x: Number(reconParams.centerX) || 0,
+                    center_y: Number(reconParams.centerY) || 0,
+                    z_start: toOptionalNumber(reconParams.zStart),
+                    z_end: toOptionalNumber(reconParams.zEnd),
+                    matrix: Number(reconParams.matrix) as 512 | 1024,
+                    metal_artifact_reduction: reconParams.metalArtifact,
+                    reconstruction_mode: reconParams.reconMode.trim() || undefined,
+                    window_width: displayWw,
+                    window_level: displayWl,
+                },
+                requested_series_description: `${selectedSeries.name}${reconParams.metalArtifact ? " MAR" : " Recon"}`,
+            }, controller.signal);
+            setReconStatus(created.status === "running" ? "running" : "queued");
+            setReconProgress(created.progress);
+
+            const completed = await waitForReconstructionJob(created.job_id, controller.signal, (job) => {
+                if (job.status === "queued" || job.status === "running") setReconStatus(job.status);
+                setReconProgress(job.progress);
+            });
+            if (completed.status !== "completed" || !completed.output_series) {
+                throw new Error(completed.error_message || "重建任务未生成可用的新序列。");
+            }
+
+            const generatedSeries = buildGeneratedReconSeries(
+                completed.output_series,
+                selectedSeries,
+                displayWw,
+                displayWl,
+            );
+            setGeneratedReconSeries((current) => [
+                ...current.filter(({ series }) => series.id !== generatedSeries.id),
+                { scanGroupId, series: generatedSeries },
+            ]);
+            setSelectedSeriesId(generatedSeries.id);
+            setSliceIndex(getSeriesMidSliceIndex(generatedSeries.count));
+            setImageMode("2D");
+            if (generatedSeries.defaultWw != null && generatedSeries.defaultWl != null) {
+                applyWindowPreset({
+                    key: generatedSeries.id,
+                    label: generatedSeries.name,
+                    ww: generatedSeries.defaultWw,
+                    wl: generatedSeries.defaultWl,
+                });
+            }
+            setReconProgress(100);
+            setReconStatus("done");
+            setReconMessage(`已生成并选中新序列：${generatedSeries.name}`);
+        } catch (error) {
+            if (controller.signal.aborted) return;
+            setReconStatus("failed");
+            setReconMessage(error instanceof Error ? error.message : "重建任务失败。" );
+        } finally {
+            if (reconAbortRef.current === controller) reconAbortRef.current = null;
+        }
+    }, [applyWindowPreset, displayStudyTree, displayWl, displayWw, reconParams, reconStatus, scanSession?.id, selectedSeries, seriesImageUrls]);
+
+    useEffect(() => () => reconAbortRef.current?.abort(), []);
     const handleSeriesSelect = useCallback((seriesId: string) => {
         const nextSeries = safeSeriesList.find((series) => series.id === seriesId);
         setSelectedSeriesId(seriesId);
@@ -1432,10 +1585,11 @@ const ViewScreen = () => {
     }, []);
 
     useEffect(() => {
+        const controller = new AbortController();
         const loadSlice = async () => {
             try {
                 const url = getSeriesDicomUrl(clampSliceIndex(sliceIndex), selectedSeries.seriesType, isBrainHelicalDemo, selectedSeries);
-                const response = await fetch(url);
+                const response = await fetch(url, { signal: controller.signal });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch ${url}`);
                 }
@@ -1505,12 +1659,14 @@ const ViewScreen = () => {
 
                 // Cornerstone handles pixel rendering; we only needed metadata above.
             } catch (error) {
+                if (controller.signal.aborted) return;
                 // Keep UI alive if one slice fails.
                 console.error(error);
             }
         };
 
-        loadSlice();
+        void loadSlice();
+        return () => controller.abort();
     }, [sliceIndex, selectedSeriesId, selectedSeries.id, selectedSeries.name, selectedSeries.seriesType, selectedSeries.count, clampSliceIndex, isBrainHelicalDemo]);
 
     // (3D canvas renderCurrentSlice removed — now handled by CornerstoneMPRViewport)
@@ -1600,7 +1756,7 @@ const ViewScreen = () => {
                     </div>
 
                     <div className="h-[220px] overflow-y-auto p-2 border-b border-[#EEF2F9]">
-                        {studyTree.map((study) => (
+                        {displayStudyTree.map((study) => (
                             <div key={study.id} className="mb-1">
                                 {/* ── Protocol / Session name ── */}
                                 <div className="px-2 py-1.5 flex items-center gap-1.5">
@@ -1757,33 +1913,6 @@ const ViewScreen = () => {
                                                     </div>
                                                 )}
                                             </div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="w-[58px] shrink-0 text-[10px] font-black uppercase tracking-tight text-[#475569]">
-                                                    {t("view.controls.displayQuality")}
-                                                </span>
-                                                <div className="grid flex-1 grid-cols-2 gap-1 rounded-md border border-[#BFDBFE] bg-white/80 p-1">
-                                                    {([
-                                                        { value: "standard" as const, label: t("view.quality.standard") },
-                                                        { value: "detail" as const, label: t("view.quality.detailEnhanced") },
-                                                    ]).map((option) => {
-                                                        const active = displayQualityMode === option.value;
-                                                        return (
-                                                            <button
-                                                                key={option.value}
-                                                                type="button"
-                                                                onClick={() => applyDisplayQualityMode(option.value)}
-                                                                className={`h-[26px] rounded text-[11px] font-black transition-all ${
-                                                                    active
-                                                                        ? "bg-[#2563EB] text-white shadow-sm"
-                                                                        : "text-[#64748B] hover:bg-[#EFF6FF] hover:text-[#2563EB]"
-                                                                }`}
-                                                            >
-                                                                {option.label}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
                                         </div>
                                         <OfflineReconPanel
                                             params={reconParams}
@@ -1792,12 +1921,11 @@ const ViewScreen = () => {
                                             ww={Math.round(displayWw)}
                                             wl={Math.round(displayWl)}
                                             status={reconStatus}
+                                            progress={reconProgress}
+                                            message={reconMessage}
                                             isMatrixOpen={isReconMatrixOpen}
                                             setIsMatrixOpen={setIsReconMatrixOpen}
-                                            onApply={() => {
-                                                setReconStatus("running");
-                                                window.setTimeout(() => setReconStatus("done"), 1200);
-                                            }}
+                                            onApply={handleOfflineReconstruction}
                                             t={t}
                                             hideWindowValue
                                         />
@@ -1870,16 +1998,60 @@ const ViewScreen = () => {
                                     {/* Volume Rendering Preset Dropdown */}
                                     {!isFourDLungReconSeries && (
                                         <>
-                                            <PanelSection title={t("view.display")}>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <Param label="WW" value={String(Math.round(displayWw))} />
-                                                    <Param label="WL" value={String(Math.round(displayWl))} />
-                                                </div>
-                                                <div className="flex items-center gap-2 relative">
+                                             <PanelSection title={t("view.display")}>
+                                                 <div className="grid grid-cols-2 gap-2">
+                                                     <Param label="WW" value={String(Math.round(displayWw))} />
+                                                     <Param label="WL" value={String(Math.round(displayWl))} />
+                                                 </div>
+                                                 <div className="flex items-center gap-2 relative">
+                                                     <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.windowPreset")}</span>
+                                                     <div
+                                                         onClick={() => {
+                                                             setIsWindowPresetOpen(!isWindowPresetOpen);
+                                                             setIsVoiLutOpen(false);
+                                                             setIsInterpolationOpen(false);
+                                                             setIsVolumePresetOpen(false);
+                                                             setIsRenderModeOpen(false);
+                                                             setIsVolumeQualityOpen(false);
+                                                         }}
+                                                         className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isWindowPresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
+                                                     >
+                                                         <span className="text-[12px] font-medium text-[#37474F] truncate">
+                                                             {activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}
+                                                         </span>
+                                                         <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
+                                                     </div>
+                                                     {isWindowPresetOpen && (
+                                                         <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                             {windowPresetsForSelectedSeries.map((preset) => {
+                                                                 const active = activeWindowPreset?.key === preset.key;
+                                                                 return (
+                                                                     <div
+                                                                         key={preset.key}
+                                                                         onClick={() => {
+                                                                             applyWindowPreset(preset);
+                                                                             setIsWindowPresetOpen(false);
+                                                                         }}
+                                                                         className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${active ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                                     >
+                                                                         <div className="flex items-center justify-between gap-2">
+                                                                             <span>{preset.label}</span>
+                                                                             <span className="text-[10px] font-black tabular-nums opacity-60">
+                                                                                 {preset.ww}/{preset.wl}
+                                                                             </span>
+                                                                         </div>
+                                                                     </div>
+                                                                 );
+                                                             })}
+                                                         </div>
+                                                     )}
+                                                 </div>
+                                                 <div className="flex items-center gap-2 relative">
                                                     <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.voiCurve")}</span>
                                                     <div
                                                         onClick={() => {
-                                                            setIsVoiLutOpen(!isVoiLutOpen);
+                                                             setIsVoiLutOpen(!isVoiLutOpen);
+                                                             setIsWindowPresetOpen(false);
                                                             setIsInterpolationOpen(false);
                                                             setIsVolumePresetOpen(false);
                                                             setIsRenderModeOpen(false);
@@ -1914,7 +2086,8 @@ const ViewScreen = () => {
                                                     <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.interpolation")}</span>
                                                     <div
                                                         onClick={() => {
-                                                            setIsInterpolationOpen(!isInterpolationOpen);
+                                                             setIsInterpolationOpen(!isInterpolationOpen);
+                                                             setIsWindowPresetOpen(false);
                                                             setIsVoiLutOpen(false);
                                                             setIsVolumePresetOpen(false);
                                                             setIsRenderModeOpen(false);
@@ -1980,6 +2153,7 @@ const ViewScreen = () => {
                                                 <div
                                                     onClick={() => {
                                                         setIsVolumePresetOpen(!isVolumePresetOpen);
+                                                        setIsWindowPresetOpen(false);
                                                         setIsRenderModeOpen(false);
                                                         setIsVoiLutOpen(false);
                                                         setIsInterpolationOpen(false);
@@ -2012,6 +2186,7 @@ const ViewScreen = () => {
                                                 <div
                                                     onClick={() => {
                                                         setIsVolumeQualityOpen(!isVolumeQualityOpen);
+                                                        setIsWindowPresetOpen(false);
                                                         setIsVolumePresetOpen(false);
                                                         setIsRenderModeOpen(false);
                                                         setIsVoiLutOpen(false);
@@ -2051,6 +2226,7 @@ const ViewScreen = () => {
                                                 <div
                                                     onClick={() => {
                                                         setIsRenderModeOpen(!isRenderModeOpen);
+                                                        setIsWindowPresetOpen(false);
                                                         setIsVolumePresetOpen(false);
                                                         setIsVoiLutOpen(false);
                                                         setIsInterpolationOpen(false);
@@ -2099,85 +2275,6 @@ const ViewScreen = () => {
                                             </div>
                                             </PanelSection>
 
-                                            <PanelSection title={t("view.controls.oblique")}>
-                                                <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
-                                                    <span className="text-[11px] font-semibold text-[#546E7A]">{t("view.controls.enableOblique")}</span>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={obliqueEnabled}
-                                                        onChange={(event) => setObliqueEnabled(event.target.checked)}
-                                                        className="h-4 w-4 accent-[#FB923C]"
-                                                    />
-                                                </div>
-                                                <div className="grid grid-cols-3 gap-1">
-                                                    {([
-                                                        { value: "axial" as const, label: "Ax" },
-                                                        { value: "coronal" as const, label: "Co" },
-                                                        { value: "sagittal" as const, label: "Sa" },
-                                                    ]).map((opt) => (
-                                                        <button
-                                                            key={opt.value}
-                                                            type="button"
-                                                            onClick={() => setObliquePanel(opt.value)}
-                                                            className={`h-[30px] rounded-md border text-[11px] font-black transition-colors ${
-                                                                obliquePanel === opt.value
-                                                                    ? "border-[#FB923C] bg-[#FFF7ED] text-[#C2410C]"
-                                                                    : "border-[#DCE6F2] bg-white text-[#546E7A] hover:border-[#FB923C]/50"
-                                                            }`}
-                                                        >
-                                                            {opt.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-1">
-                                                    {([
-                                                        { value: "horizontal" as const, label: t("view.axis.horizontal") },
-                                                        { value: "vertical" as const, label: t("view.axis.vertical") },
-                                                    ]).map((opt) => (
-                                                        <button
-                                                            key={opt.value}
-                                                            type="button"
-                                                            onClick={() => setObliqueAxis(opt.value)}
-                                                            className={`h-[30px] rounded-md border text-[11px] font-bold transition-colors ${
-                                                                obliqueAxis === opt.value
-                                                                    ? "border-[#FB923C] bg-[#FFF7ED] text-[#C2410C]"
-                                                                    : "border-[#DCE6F2] bg-white text-[#546E7A] hover:border-[#FB923C]/50"
-                                                            }`}
-                                                        >
-                                                            {opt.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                                <div className="flex items-start gap-2">
-                                                    <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.angle")}</span>
-                                                    <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
-                                                        <div className="grid grid-cols-[minmax(0,1fr)_46px] items-center gap-2">
-                                                            <input
-                                                                type="range"
-                                                                min={-45}
-                                                                max={45}
-                                                                step={1}
-                                                                value={obliqueAngleDeg}
-                                                                onChange={(event) => setObliqueAngleDeg(Number(event.target.value))}
-                                                                className="h-[18px] w-full max-w-[120px] accent-[#FB923C]"
-                                                            />
-                                                            <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">
-                                                                {obliqueAngleDeg}°
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setObliqueEnabled(false);
-                                                        setObliqueAngleDeg(0);
-                                                    }}
-                                                    className="h-[30px] rounded-md border border-[#DCE6F2] bg-white text-[11px] font-bold text-[#546E7A] transition-colors hover:border-[#FB923C]/50 hover:text-[#C2410C]"
-                                                >
-                                                    {t("view.controls.reset")}
-                                                </button>
-                                            </PanelSection>
                                         </>
                                     )}
 
@@ -2320,9 +2417,6 @@ const ViewScreen = () => {
                                     volumePreset={selectedVolumePreset}
                                     volumeSampleDistanceMultiplier={volumeSampleDistanceMultiplier}
                                     slabThickness={slabThickness}
-                                    oblique={obliqueConfig}
-                                    onObliquePanelChange={setObliquePanel}
-                                    onObliqueAngleChange={setObliqueAngleDeg}
                                     invert={isImageInverted}
                                     interpolationMode={selectedInterpolationMode}
                                     voiLutMode={selectedVoiLutMode}
@@ -2465,20 +2559,20 @@ const ViewScreen = () => {
                 </div>
                 <aside className="w-[72px] bg-[#0F172A] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3" onPointerDown={(e) => e.stopPropagation()}>
-                            {(["pan", "wl", "measure", "annotate", "rotate"] as const).map((mode, i) => {
+                            {(["pan", "wl", "measure", "annotate", "crosshairs"] as const).map((mode, i) => {
                                 const icons = [
                                     <Move size={20} strokeWidth={1.5} key="pan" />,
                                     <WindowLevelIcon size={20} key="window-level" />,
                                     <Ruler size={20} strokeWidth={1.5} key="ruler" />,
                                     <Pencil size={20} strokeWidth={1.5} key="pencil" />,
-                                    <Rotate3D size={20} strokeWidth={1.5} key="rotate-3d" />,
+                                    <Crosshair size={20} strokeWidth={1.5} key="crosshairs" />,
                                 ];
                                 const titles = [
                                     t("view.tool.pan"),
                                     t("view.tool.windowLevel"),
                                     t("view.tool.measure"),
                                     t("view.tool.annotate"),
-                                    t("view.tool.rotate3d"),
+                                    t("view.tool.crosshairs"),
                                 ];
                                 const active = toolMode === mode;
                                 const supported = isToolSupportedInCurrentView(mode);
@@ -2745,7 +2839,9 @@ type OfflineReconPanelProps = {
     isHelical: boolean;
     ww: number;
     wl: number;
-    status: "idle" | "running" | "done";
+    status: "idle" | "submitting" | "queued" | "running" | "done" | "failed";
+    progress: number;
+    message: string | null;
     isMatrixOpen: boolean;
     setIsMatrixOpen: (value: boolean) => void;
     onApply: () => void;
@@ -2782,6 +2878,8 @@ const OfflineReconPanel = ({
     ww,
     wl,
     status,
+    progress,
+    message,
     isMatrixOpen,
     setIsMatrixOpen,
     onApply,
@@ -2938,22 +3036,41 @@ const OfflineReconPanel = ({
                 <button
                     type="button"
                     onClick={onApply}
-                    disabled={status === "running"}
+                    disabled={["submitting", "queued", "running"].includes(status)}
                     className={`mt-2 h-[36px] rounded-md font-bold text-[12px] uppercase tracking-wider transition-all shadow-sm active:scale-[0.98] ${
-                        status === "running"
+                        ["submitting", "queued", "running"].includes(status)
                             ? "bg-[#CBD5E1] text-white cursor-not-allowed"
                             : status === "done"
                             ? "bg-[#43A047] text-white hover:bg-[#388E3C]"
+                            : status === "failed"
+                            ? "bg-[#EF5350] text-white hover:bg-[#E53935]"
                             : "bg-[#4D94FF] text-white hover:bg-blue-600"
                     }`}
                     title={t("view.offlineRecon.applyHint")}
                 >
-                    {status === "running"
+                    {status === "submitting"
+                        ? t("view.offlineRecon.applySubmitting")
+                        : status === "queued"
+                        ? t("view.offlineRecon.applyQueued")
+                        : status === "running"
                         ? t("view.offlineRecon.applyRunning")
                         : status === "done"
                         ? t("view.offlineRecon.applyDone")
+                        : status === "failed"
+                        ? t("view.offlineRecon.applyFailed")
                         : t("view.offlineRecon.apply")}
                 </button>
+                {(["submitting", "queued", "running"].includes(status) || message) && (
+                    <FeedbackNotice
+                        compact
+                        tone={status === "failed" ? "error" : status === "done" ? "success" : "info"}
+                        className="text-[10px]"
+                    >
+                        {["submitting", "queued", "running"].includes(status)
+                            ? `${t("view.offlineRecon.progress")} ${Math.round(progress)}%`
+                            : message}
+                    </FeedbackNotice>
+                )}
             </PanelSection>
         </div>
     );

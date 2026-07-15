@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle } from "lucide-react";
+import { useRef } from "react";
 
 export type PhysicalTriggerStepState = "pending" | "active" | "done";
 
@@ -42,17 +43,62 @@ export default function PhysicalTriggerGuide({
     buttonActive = false,
     disabled = false,
 }: PhysicalTriggerGuideProps) {
+    const activePointerIdRef = useRef<number | null>(null);
+    const pointerPressHandledRef = useRef(false);
+    const keyboardPressActiveRef = useRef(false);
+    const keyboardPressHandledRef = useRef(false);
+
     const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-        if (disabled) return;
+        if (disabled || activePointerIdRef.current !== null) return;
         event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
+        activePointerIdRef.current = event.pointerId;
+        pointerPressHandledRef.current = true;
+        try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+            // 部分触控环境不支持指针捕获，仍需继续处理本次按键。
+        }
         onHoldStart();
     };
 
     const handlePointerEnd = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (activePointerIdRef.current !== event.pointerId) return;
+        activePointerIdRef.current = null;
+        onHoldEnd();
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
         }
+    };
+
+    const handleLostPointerCapture = () => {
+        if (activePointerIdRef.current === null) return;
+        activePointerIdRef.current = null;
+        onHoldEnd();
+    };
+
+    const handleClick = () => {
+        if (disabled) return;
+        if (pointerPressHandledRef.current || keyboardPressHandledRef.current) {
+            pointerPressHandledRef.current = false;
+            keyboardPressHandledRef.current = false;
+            return;
+        }
+    };
+
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (disabled || event.repeat || (event.key !== " " && event.key !== "Enter")) return;
+        event.preventDefault();
+        if (activePointerIdRef.current !== null || keyboardPressActiveRef.current) return;
+        keyboardPressActiveRef.current = true;
+        keyboardPressHandledRef.current = true;
+        onHoldStart();
+    };
+
+    const handleKeyUp = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (event.key !== " " && event.key !== "Enter") return;
+        event.preventDefault();
+        if (!keyboardPressActiveRef.current) return;
+        keyboardPressActiveRef.current = false;
         onHoldEnd();
     };
 
@@ -97,7 +143,10 @@ export default function PhysicalTriggerGuide({
                             onPointerDown={handlePointerDown}
                             onPointerUp={handlePointerEnd}
                             onPointerCancel={handlePointerEnd}
-                            onLostPointerCapture={onHoldEnd}
+                            onLostPointerCapture={handleLostPointerCapture}
+                            onClick={handleClick}
+                            onKeyDown={handleKeyDown}
+                            onKeyUp={handleKeyUp}
                             className={`relative flex h-[118px] w-[118px] touch-none items-center justify-center rounded-full border-[12px] transition-all duration-150 ${buttonClass}`}
                         >
                             <div className="h-[72px] w-[72px] rounded-full border border-white/30 bg-white/10 shadow-[inset_0_8px_14px_rgba(255,255,255,0.18),inset_0_-8px_15px_rgba(6,95,70,0.22)]" />

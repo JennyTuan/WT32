@@ -46,9 +46,11 @@ import SystemSettingsPage from "./features/service/systemSettings/SystemSettings
 import OrganizationInfoPage from "./features/service/organizationInfo/OrganizationInfoPage";
 import LoginScreen from "./screens/LoginScreen";
 import ChangePasswordScreen from "./screens/ChangePasswordScreen";
+import FeedbackShowcaseScreen from "./screens/FeedbackShowcaseScreen";
 import RequireAuth from "./components/RequireAuth";
 import EmergencyModeBanner from "./components/EmergencyModeBanner";
-import { AuthProvider } from "./lib/authContext";
+import DeviceErrorCenter from "./components/DeviceErrorCenter";
+import { AuthProvider, useAuth } from "./lib/authContext";
 
 const HomeRoute = HomeScreen ?? (() => <Navigate to="/patients" replace />);
 const TABLET_WIDTH = 1024;
@@ -79,6 +81,19 @@ function useTabletScale() {
   }, []);
 
   return scale;
+}
+
+function AuthenticatedSystemOverlays() {
+  const { isAuthenticated } = useAuth();
+
+  if (!isAuthenticated) return null;
+
+  return (
+    <>
+      <EmergencyModeBanner />
+      <DeviceErrorCenter />
+    </>
+  );
 }
 
 export default function App() {
@@ -116,8 +131,12 @@ export default function App() {
               transform: `translate(-50%, -50%) scale(${scale})`,
             }}
           >
-            <EmergencyModeBanner />
+            <AuthenticatedSystemOverlays />
             <Routes>
+              <Route
+                path="/dev/feedback-showcase"
+                element={import.meta.env.DEV ? <FeedbackShowcaseScreen /> : <Navigate to="/login" replace />}
+              />
               <Route path="/login" element={<LoginScreen />} />
               <Route element={<RequireAuth />}>
               <Route path="/change-password" element={<ChangePasswordScreen />} />

@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
-  AlertTriangle,
   CheckCircle2,
   ChevronRight,
   Database,
   LoaderCircle,
 } from "lucide-react";
+import { FeedbackNotice } from "../components/FeedbackNotice";
 import {
   FOUR_D_DICOM_MP_IDS,
   FOUR_D_DICOM_SLICES_PER_PHASE,
@@ -576,10 +576,9 @@ export default function ImageLoadScreen() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {globalError && (
-            <div className="absolute left-4 right-4 top-[92px] z-10 flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] font-medium text-rose-700 shadow-lg">
-              <AlertTriangle size={15} />
+            <FeedbackNotice className="absolute left-4 right-4 top-[92px] z-10 shadow-lg">
               {globalError}
-            </div>
+            </FeedbackNotice>
           )}
 
           <div className="min-h-0 flex-1 overflow-hidden bg-[#071426]">
