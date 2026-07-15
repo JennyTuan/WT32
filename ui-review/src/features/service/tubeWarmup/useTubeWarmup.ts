@@ -14,6 +14,7 @@ export function useTubeWarmup() {
   const [inputValue, setInputValue] = useState("60");
   const [status, setStatus] = useState<WarmupStatus>("idle");
   const [warmupProgress, setWarmupProgress] = useState(0);
+  const [showPhysicalTrigger, setShowPhysicalTrigger] = useState(false);
   const [showAbortConfirm, setShowAbortConfirm] = useState(false);
   const [logs, setLogs] = useState<WarmupLog[]>(initialWarmupLogs);
   const [lastCompletedAt, setLastCompletedAt] = useState<string | null>(null);
@@ -22,6 +23,7 @@ export function useTubeWarmup() {
     startHeat: 12.4,
     targetHeat: 60,
   });
+  const pendingWarmupTargetRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (logs.length <= initialWarmupLogs.length) {
@@ -93,6 +95,8 @@ export function useTubeWarmup() {
     setInputValue(String(normalizedTarget));
 
     if (normalizedTarget <= currentHeat) {
+      pendingWarmupTargetRef.current = null;
+      setShowPhysicalTrigger(false);
       setLogs((prev) => [
         {
           time: formatClock(new Date()),
@@ -103,6 +107,17 @@ export function useTubeWarmup() {
       ]);
       return;
     }
+
+    pendingWarmupTargetRef.current = normalizedTarget;
+    setShowPhysicalTrigger(true);
+  };
+
+  const handlePhysicalTrigger = () => {
+    const normalizedTarget = pendingWarmupTargetRef.current;
+    if (normalizedTarget === null || normalizedTarget <= currentHeat) return;
+
+    pendingWarmupTargetRef.current = null;
+    setShowPhysicalTrigger(false);
 
     warmupSessionRef.current = {
       startHeat: currentHeat,
@@ -122,6 +137,11 @@ export function useTubeWarmup() {
       },
       ...prev,
     ]);
+  };
+
+  const dismissPhysicalTrigger = () => {
+    pendingWarmupTargetRef.current = null;
+    setShowPhysicalTrigger(false);
   };
 
   const handleAbort = () => {
@@ -152,8 +172,10 @@ export function useTubeWarmup() {
     confirmAbort,
     currentHeat,
     deltaToTarget,
+    dismissPhysicalTrigger,
     estimatedMinutes,
     handleAbort,
+    handlePhysicalTrigger,
     handleStartWarmup,
     handleTargetInput,
     inputValue,
@@ -164,6 +186,7 @@ export function useTubeWarmup() {
     resetToRecommended,
     setLogs,
     setShowAbortConfirm,
+    showPhysicalTrigger,
     showAbortConfirm,
     status,
     targetHeat,

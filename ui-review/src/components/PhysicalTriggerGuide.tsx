@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle } from "lucide-react";
-import { useRef } from "react";
+
+import SimulatedPhysicalButton, { PhysicalButtonStatusDot } from "./SimulatedPhysicalButton";
 
 export type PhysicalTriggerStepState = "pending" | "active" | "done";
 
@@ -43,71 +44,6 @@ export default function PhysicalTriggerGuide({
     buttonActive = false,
     disabled = false,
 }: PhysicalTriggerGuideProps) {
-    const activePointerIdRef = useRef<number | null>(null);
-    const pointerPressHandledRef = useRef(false);
-    const keyboardPressActiveRef = useRef(false);
-    const keyboardPressHandledRef = useRef(false);
-
-    const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-        if (disabled || activePointerIdRef.current !== null) return;
-        event.preventDefault();
-        activePointerIdRef.current = event.pointerId;
-        pointerPressHandledRef.current = true;
-        try {
-            event.currentTarget.setPointerCapture(event.pointerId);
-        } catch {
-            // 部分触控环境不支持指针捕获，仍需继续处理本次按键。
-        }
-        onHoldStart();
-    };
-
-    const handlePointerEnd = (event: React.PointerEvent<HTMLButtonElement>) => {
-        if (activePointerIdRef.current !== event.pointerId) return;
-        activePointerIdRef.current = null;
-        onHoldEnd();
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-    };
-
-    const handleLostPointerCapture = () => {
-        if (activePointerIdRef.current === null) return;
-        activePointerIdRef.current = null;
-        onHoldEnd();
-    };
-
-    const handleClick = () => {
-        if (disabled) return;
-        if (pointerPressHandledRef.current || keyboardPressHandledRef.current) {
-            pointerPressHandledRef.current = false;
-            keyboardPressHandledRef.current = false;
-            return;
-        }
-    };
-
-    const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-        if (disabled || event.repeat || (event.key !== " " && event.key !== "Enter")) return;
-        event.preventDefault();
-        if (activePointerIdRef.current !== null || keyboardPressActiveRef.current) return;
-        keyboardPressActiveRef.current = true;
-        keyboardPressHandledRef.current = true;
-        onHoldStart();
-    };
-
-    const handleKeyUp = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-        if (event.key !== " " && event.key !== "Enter") return;
-        event.preventDefault();
-        if (!keyboardPressActiveRef.current) return;
-        keyboardPressActiveRef.current = false;
-        onHoldEnd();
-    };
-
-    const buttonClass = disabled
-        ? "border-[#8A98A8] bg-[radial-gradient(circle_at_38%_30%,#CBD5E1_0%,#94A3B8_54%,#64748B_100%)] opacity-75 cursor-not-allowed"
-        : buttonActive
-            ? "translate-y-[2px] border-[#09623E] bg-[radial-gradient(circle_at_38%_28%,#39E296_0%,#11A66F_46%,#08734D_100%)] shadow-[0_8px_14px_rgba(6,95,70,0.38),inset_0_8px_15px_rgba(0,0,0,0.24)]"
-            : "border-[#0A6A45] bg-[radial-gradient(circle_at_38%_28%,#52F0A6_0%,#14B87A_48%,#08734D_100%)] shadow-[0_16px_28px_rgba(15,23,42,0.25),inset_0_5px_12px_rgba(255,255,255,0.28)] hover:translate-y-[-1px]";
-
     return (
         <div className="pointer-events-auto flex h-full w-[235px] flex-col overflow-hidden rounded-l-2xl border border-r-0 border-[#CBD5E1] bg-[#E9EEF5] shadow-[-24px_0_48px_rgba(15,23,42,0.22)]">
             <div className="border-b border-slate-200 bg-[linear-gradient(180deg,#F8FAFC_0%,#EEF3F9_100%)] px-5 py-4">
@@ -131,26 +67,18 @@ export default function PhysicalTriggerGuide({
                     </div>
 
                     <div className="flex items-center justify-center gap-2">
-                        <span className={`h-2.5 w-2.5 rounded-full ${disabled ? "bg-slate-300" : buttonActive ? "bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.9)]" : "bg-emerald-400 shadow-[0_0_9px_rgba(52,211,153,0.75)]"}`} />
+                        <PhysicalButtonStatusDot active={buttonActive} disabled={disabled} />
                         <span className="text-[9px] font-black tracking-[0.12em] text-slate-500">{triggerLabel}</span>
                     </div>
 
                     <div className="mt-2 flex flex-col items-center">
-                        <button
-                            type="button"
-                            aria-label={triggerLabel}
+                        <SimulatedPhysicalButton
+                            active={buttonActive}
+                            ariaLabel={triggerLabel}
                             disabled={disabled}
-                            onPointerDown={handlePointerDown}
-                            onPointerUp={handlePointerEnd}
-                            onPointerCancel={handlePointerEnd}
-                            onLostPointerCapture={handleLostPointerCapture}
-                            onClick={handleClick}
-                            onKeyDown={handleKeyDown}
-                            onKeyUp={handleKeyUp}
-                            className={`relative flex h-[118px] w-[118px] touch-none items-center justify-center rounded-full border-[12px] transition-all duration-150 ${buttonClass}`}
-                        >
-                            <div className="h-[72px] w-[72px] rounded-full border border-white/30 bg-white/10 shadow-[inset_0_8px_14px_rgba(255,255,255,0.18),inset_0_-8px_15px_rgba(6,95,70,0.22)]" />
-                        </button>
+                            onPressEnd={onHoldEnd}
+                            onPressStart={onHoldStart}
+                        />
                         <div className="mt-2 text-[12px] font-black text-[#0F5130]">{triggerLabel}</div>
                         <div className="mt-0.5 text-[9px] font-semibold text-slate-400">{guideTitle}</div>
                     </div>
@@ -169,7 +97,6 @@ export default function PhysicalTriggerGuide({
                         </div>
                     ))}
                 </div>
-
             </div>
         </div>
     );

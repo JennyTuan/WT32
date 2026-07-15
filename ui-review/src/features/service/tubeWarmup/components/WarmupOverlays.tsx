@@ -1,5 +1,6 @@
-import { AlertTriangle, Square } from "lucide-react";
+import { AlertTriangle, Square, X } from "lucide-react";
 
+import SimulatedPhysicalButton, { PhysicalButtonStatusDot } from "../../../../components/SimulatedPhysicalButton";
 import { useI18n } from "../../../../lib/i18nContext";
 import type { WarmupPhase, WarmupStatus } from "../types";
 
@@ -7,9 +8,12 @@ type WarmupOverlaysProps = {
   activePhase: WarmupPhase;
   confirmAbort: () => void;
   currentHeat: number;
+  dismissPhysicalTrigger: () => void;
   handleAbort: () => void;
+  handlePhysicalTrigger: () => void;
   setShowAbortConfirm: (value: boolean) => void;
   showAbortConfirm: boolean;
+  showPhysicalTrigger: boolean;
   status: WarmupStatus;
   targetHeat: number;
   warmupProgress: number;
@@ -19,9 +23,12 @@ export function WarmupOverlays({
   activePhase,
   confirmAbort,
   currentHeat,
+  dismissPhysicalTrigger,
   handleAbort,
+  handlePhysicalTrigger,
   setShowAbortConfirm,
   showAbortConfirm,
+  showPhysicalTrigger,
   status,
   targetHeat,
   warmupProgress,
@@ -30,6 +37,55 @@ export function WarmupOverlays({
 
   return (
     <>
+      {showPhysicalTrigger && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#0F172A]/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="warmup-physical-trigger-title"
+            className="relative flex w-[560px] flex-col rounded-[28px] border border-white bg-white px-10 pb-9 pt-8 shadow-[0_30px_60px_-12px_rgba(0,0,0,0.28)] animate-in zoom-in-95 duration-200"
+          >
+            <button
+              type="button"
+              onClick={dismissPhysicalTrigger}
+              aria-label={t("service.tubeWarmup.closePhysicalGuide")}
+              className="absolute right-6 top-6 flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-400 transition-all hover:bg-slate-100 hover:text-slate-600"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="pr-12">
+              <div id="warmup-physical-trigger-title" className="text-[22px] font-black text-[#1E293B]">
+                {t("service.tubeWarmup.physicalGuideTitle")}
+              </div>
+              <div className="mt-2 text-[14px] font-bold leading-relaxed text-[#52657A]">
+                {t("service.tubeWarmup.physicalGuideDescription")}
+              </div>
+            </div>
+
+            <div className="mt-7 flex flex-col items-center rounded-2xl border border-[#D6E0EA] bg-slate-50 px-6 py-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+              <div className="mb-4 flex items-center gap-2">
+                <PhysicalButtonStatusDot />
+                <span className="text-[11px] font-black tracking-[0.12em] text-slate-500">
+                  {t("service.tubeWarmup.physicalGuideWaiting")}
+                </span>
+              </div>
+              <SimulatedPhysicalButton
+                ariaLabel={t("service.tubeWarmup.exposureButton")}
+                onPressStart={handlePhysicalTrigger}
+                size="compact"
+              />
+              <div className="mt-4 text-[14px] font-black text-[#0F5130]">
+                {t("service.tubeWarmup.exposureButton")}
+              </div>
+              <div className="mt-1 text-[10px] font-semibold text-slate-400">
+                {t("service.tubeWarmup.simulationOnly")}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {status === "warming" && (
         <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] z-50 flex items-center justify-center animate-in fade-in duration-300">
           <div className="bg-white w-[660px] rounded-3xl shadow-2xl p-10 flex flex-col justify-center animate-in zoom-in-95 duration-300">

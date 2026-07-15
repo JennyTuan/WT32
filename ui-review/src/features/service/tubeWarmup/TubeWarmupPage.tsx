@@ -14,8 +14,11 @@ export default function TubeWarmupPage() {
           activePhase={warmup.activePhase}
           confirmAbort={warmup.confirmAbort}
           currentHeat={warmup.currentHeat}
+          dismissPhysicalTrigger={warmup.dismissPhysicalTrigger}
           handleAbort={warmup.handleAbort}
+          handlePhysicalTrigger={warmup.handlePhysicalTrigger}
           setShowAbortConfirm={warmup.setShowAbortConfirm}
+          showPhysicalTrigger={warmup.showPhysicalTrigger}
           showAbortConfirm={warmup.showAbortConfirm}
           status={warmup.status}
           targetHeat={warmup.targetHeat}

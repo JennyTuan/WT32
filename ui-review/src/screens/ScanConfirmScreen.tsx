@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
 import {
@@ -31,6 +31,7 @@ import {
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { isHeadDualScoutWorkflow, mergeDualScoutPlanSequences } from "../lib/headDualScoutDemo";
 import AppHeader from "../components/AppHeader";
+import SimulatedPhysicalButton, { PhysicalButtonStatusDot } from "../components/SimulatedPhysicalButton";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
 
@@ -1808,54 +1809,6 @@ const modalPhysicalStepClasses: Record<PatientConfirmationPhysicalStepState, str
 };
 
 const CombinedPhysicalGuideCard = ({ guide }: { guide: PatientConfirmationPhysicalGuide }) => {
-    const activePointerIdRef = useRef<number | null>(null);
-    const pointerPressHandledRef = useRef(false);
-    const buttonClass = guide.disabled
-        ? "border-[#8A98A8] bg-[radial-gradient(circle_at_38%_30%,#CBD5E1_0%,#94A3B8_54%,#64748B_100%)] opacity-75 cursor-not-allowed"
-        : guide.buttonActive
-            ? "translate-y-[2px] border-[#07533A] bg-[radial-gradient(circle_at_38%_28%,#39E296_0%,#11A66F_46%,#08734D_100%)] shadow-[0_8px_14px_rgba(6,95,70,0.38),inset_0_8px_15px_rgba(0,0,0,0.24)]"
-            : "border-[#07533A] bg-[radial-gradient(circle_at_38%_28%,#52F0A6_0%,#14B87A_48%,#08734D_100%)] shadow-[0_16px_28px_rgba(15,23,42,0.25),inset_0_5px_12px_rgba(255,255,255,0.28)] hover:translate-y-[-1px]";
-
-    const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-        if (guide.disabled || activePointerIdRef.current !== null) return;
-        event.preventDefault();
-        activePointerIdRef.current = event.pointerId;
-        pointerPressHandledRef.current = true;
-        // 部分触控环境不支持指针捕获；捕获失败不能阻断使能键动作。
-        try {
-            event.currentTarget.setPointerCapture(event.pointerId);
-        } catch {
-            // 标准 click 仍会作为兜底完成一次按键动作。
-        }
-        guide.onHoldStart();
-    };
-
-    const handlePointerEnd = (event: React.PointerEvent<HTMLButtonElement>) => {
-        if (activePointerIdRef.current !== event.pointerId) return;
-        activePointerIdRef.current = null;
-        guide.onHoldEnd();
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-    };
-
-    const handleLostPointerCapture = () => {
-        if (activePointerIdRef.current === null) return;
-        activePointerIdRef.current = null;
-        guide.onHoldEnd();
-    };
-
-    const handleClick = () => {
-        if (guide.disabled) return;
-        if (pointerPressHandledRef.current) {
-            pointerPressHandledRef.current = false;
-            return;
-        }
-        // 键盘或只派发 click 的触控环境按一次即可触发曝光。
-        guide.onHoldStart();
-        guide.onHoldEnd();
-    };
-
     return (
         <div className="rounded-2xl border border-[#D6E0EA] bg-white p-5 shadow-[0_16px_28px_-24px_rgba(15,23,42,0.65)]">
             <div>
@@ -1865,22 +1818,16 @@ const CombinedPhysicalGuideCard = ({ guide }: { guide: PatientConfirmationPhysic
 
             <div className="mt-4 flex justify-center rounded-2xl bg-slate-50 px-4 py-5">
                 <div className="flex flex-col items-center">
-                    <button
-                        type="button"
-                        aria-label={guide.triggerLabel}
+                    <SimulatedPhysicalButton
+                        active={guide.buttonActive}
+                        ariaLabel={guide.triggerLabel}
                         disabled={guide.disabled}
-                        onPointerDown={handlePointerDown}
-                        onPointerUp={handlePointerEnd}
-                        onPointerCancel={handlePointerEnd}
-                        onLostPointerCapture={handleLostPointerCapture}
-                        onClick={handleClick}
-                        className={`relative flex h-[92px] w-[92px] touch-none items-center justify-center rounded-full border-[10px] transition-all duration-150 ${buttonClass}`}
-                    >
-                        <span className="absolute -inset-2 rounded-full border border-emerald-300/80" />
-                        <div className="h-[54px] w-[54px] rounded-full border border-white/25 bg-white/10 shadow-[inset_0_6px_10px_rgba(255,255,255,0.18),inset_0_-7px_12px_rgba(6,95,70,0.22)]" />
-                    </button>
+                        onPressEnd={guide.onHoldEnd}
+                        onPressStart={guide.onHoldStart}
+                        size="compact"
+                    />
                     <div className="mt-3 flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${guide.disabled ? "bg-slate-300" : "bg-emerald-500"}`} />
+                        <PhysicalButtonStatusDot active={guide.buttonActive} disabled={guide.disabled} size="small" />
                         <span className="text-[11px] font-black text-slate-600">{guide.triggerLabel}</span>
                     </div>
                 </div>
