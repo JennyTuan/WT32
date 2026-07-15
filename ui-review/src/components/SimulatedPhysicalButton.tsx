@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useSimulatedPhysicalPress } from "./useSimulatedPhysicalPress";
 
 type SimulatedPhysicalButtonSize = "compact" | "default";
 
@@ -46,71 +46,11 @@ export default function SimulatedPhysicalButton({
     active = false,
     ariaLabel,
     disabled = false,
-    onPressEnd = () => undefined,
+    onPressEnd,
     onPressStart,
     size = "default",
 }: SimulatedPhysicalButtonProps) {
-    const activePointerIdRef = useRef<number | null>(null);
-    const pointerPressHandledRef = useRef(false);
-    const keyboardPressActiveRef = useRef(false);
-    const keyboardPressHandledRef = useRef(false);
-
-    const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-        if (disabled || activePointerIdRef.current !== null) return;
-        event.preventDefault();
-        activePointerIdRef.current = event.pointerId;
-        pointerPressHandledRef.current = true;
-        try {
-            event.currentTarget.setPointerCapture(event.pointerId);
-        } catch {
-            // 部分触控环境不支持指针捕获；捕获失败不能阻断模拟实体按键动作。
-        }
-        onPressStart();
-    };
-
-    const handlePointerEnd = (event: React.PointerEvent<HTMLButtonElement>) => {
-        if (activePointerIdRef.current !== event.pointerId) return;
-        activePointerIdRef.current = null;
-        onPressEnd();
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-    };
-
-    const handleLostPointerCapture = () => {
-        if (activePointerIdRef.current === null) return;
-        activePointerIdRef.current = null;
-        onPressEnd();
-    };
-
-    const handleClick = () => {
-        if (disabled) return;
-        if (pointerPressHandledRef.current || keyboardPressHandledRef.current) {
-            pointerPressHandledRef.current = false;
-            keyboardPressHandledRef.current = false;
-            return;
-        }
-        onPressStart();
-        onPressEnd();
-    };
-
-    const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-        if (disabled || event.repeat || (event.key !== " " && event.key !== "Enter")) return;
-        event.preventDefault();
-        if (activePointerIdRef.current !== null || keyboardPressActiveRef.current) return;
-        keyboardPressActiveRef.current = true;
-        keyboardPressHandledRef.current = true;
-        onPressStart();
-    };
-
-    const handleKeyUp = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-        if (event.key !== " " && event.key !== "Enter") return;
-        event.preventDefault();
-        if (!keyboardPressActiveRef.current) return;
-        keyboardPressActiveRef.current = false;
-        onPressEnd();
-    };
-
+    const pressHandlers = useSimulatedPhysicalPress({ disabled, onPressEnd, onPressStart });
     const buttonClass = disabled
         ? "border-[#8A98A8] bg-[radial-gradient(circle_at_38%_30%,#CBD5E1_0%,#94A3B8_54%,#64748B_100%)] opacity-75 cursor-not-allowed"
         : active
@@ -123,13 +63,7 @@ export default function SimulatedPhysicalButton({
             type="button"
             aria-label={ariaLabel}
             disabled={disabled}
-            onPointerDown={handlePointerDown}
-            onPointerUp={handlePointerEnd}
-            onPointerCancel={handlePointerEnd}
-            onLostPointerCapture={handleLostPointerCapture}
-            onClick={handleClick}
-            onKeyDown={handleKeyDown}
-            onKeyUp={handleKeyUp}
+            {...pressHandlers}
             className={`relative flex touch-none items-center justify-center rounded-full transition-all duration-150 ${dimensions.button} ${buttonClass}`}
         >
             <span className="pointer-events-none absolute -inset-2 rounded-full border border-emerald-300/80" />

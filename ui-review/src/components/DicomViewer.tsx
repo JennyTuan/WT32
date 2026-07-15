@@ -19,6 +19,8 @@ interface DicomViewerProps {
     voiLutMode?: "LINEAR" | "LINEAR_EXACT" | "SIGMOID";
     smoothing?: number;
     sharpening?: number;
+    showAnnotations?: boolean;
+    stateKey?: string;
 }
 
 const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function DicomViewer(
@@ -38,6 +40,8 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
         voiLutMode,
         smoothing,
         sharpening,
+        showAnnotations,
+        stateKey,
     },
     ref
 ) {
@@ -47,6 +51,7 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
         zoomIn:  () => csRef.current?.zoomIn(),
         zoomOut: () => csRef.current?.zoomOut(),
         fit:     () => csRef.current?.fit(),
+        resetView: () => csRef.current?.resetView(),
         reset:   () => csRef.current?.reset(),
         clearAnnotations: () => csRef.current?.clearAnnotations(),
     }));
@@ -69,7 +74,9 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
             voiLutMode={voiLutMode}
             smoothing={smoothing}
             sharpening={sharpening}
-            className="w-full h-full relative overflow-hidden select-none"
+            showAnnotations={showAnnotations}
+            stateKey={stateKey}
+            className="w-full h-full relative overflow-hidden select-none touch-none"
         />
     );
 });

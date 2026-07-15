@@ -8,6 +8,7 @@ import {
   type Types,
   volumeLoader,
 } from '@cornerstonejs/core';
+import { annotation } from '@cornerstonejs/tools';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type RefObject } from 'react';
 
 import {
@@ -24,10 +25,15 @@ import { useI18n } from '../lib/i18nContext';
 import { FeedbackViewportOverlay } from './FeedbackNotice';
 
 export type MprPanelId = 'axial' | 'coronal' | 'sagittal';
+export type MprActivePanelId = MprPanelId | 'volume';
 
 export type CornerstoneMPRHandle = {
   zoomIn: () => void;
   zoomOut: () => void;
+  fitActive: () => void;
+  resetActiveView: () => void;
+  resetPlanes: () => void;
+  resetAllViews: () => void;
   resetAll: () => void;
   forceWindowLevel: (wc: number, ww: number) => void;
   /**
@@ -36,10 +42,10 @@ export type CornerstoneMPRHandle = {
    * cross-panel visual sync; the other two panels' reference lines update
    * automatically as the active panel's slice moves.
    */
-  advanceSlice: (panel: MprPanelId, delta: number) => void;
+  advanceSlice: (panel: MprActivePanelId, delta: number) => void;
 };
 
-type RenderMode = 'MPR' | 'MIP' | 'VR' | 'MinIP';
+type RenderMode = 'MPR' | 'MIP' | 'VR' | 'MinIP' | 'Avg';
 type LayoutMode = 'four-up' | 'three-up';
 type VolumePanelMode = 'slab' | 'volume3d';
 type VolumePreset = string;
@@ -56,7 +62,7 @@ interface CornerstoneMPRViewportProps {
   renderMode?: RenderMode;
   className?: string;
   currentSliceIndex?: number;
-  onSliceIndexChange?: (panel: PanelId, sliceIndex: number) => void;
+  onSliceIndexChange?: (panel: MprActivePanelId, sliceIndex: number) => void;
   windowSyncKey?: number;
   layoutMode?: LayoutMode;
   volumePanelMode?: VolumePanelMode;
@@ -80,8 +86,9 @@ interface CornerstoneMPRViewportProps {
    * panels move automatically because Cornerstone's crosshairs tool keeps
    * them in sync with the volume's camera/focal point.
    */
-  activeOrientation?: PanelId;
-  onActiveOrientationChange?: (panel: PanelId) => void;
+  activeOrientation?: MprActivePanelId;
+  onActiveOrientationChange?: (panel: MprActivePanelId) => void;
+  focusedPanel?: MprActivePanelId | null;
   /**
    * Optional list of URL-sets (e.g. one per 4D phase) to warm the cornerstone
    * volume cache in the background after mount, so phase-cine playback hits
@@ -91,11 +98,14 @@ interface CornerstoneMPRViewportProps {
   /** When false, disables Cornerstone crosshairs and reference lines in all panels.
    *  Defaults to true (the standard MPR working view). */
   showCrosshairs?: boolean;
+  showAnnotations?: boolean;
+  stateKey?: string;
 }
 
 interface TextAnnotation {
   id: string;
-  panel: PanelId;
+  stateKey: string;
+  panel: MprActivePanelId;
   x: number;
   y: number;
   text: string;
@@ -116,10 +126,23 @@ function registerVolumeLoader() {
 function awaitVolumeLoaded(vol: any): Promise<void> {
   if (vol?.loadStatus?.loaded) return Promise.resolve();
   return new Promise<void>((resolve) => {
-    try {
-      vol.load(() => resolve());
-    } catch {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearInterval(pollTimer);
+      window.clearTimeout(timeoutTimer);
       resolve();
+    };
+    // 同一体数据已在加载时，部分加载器不会登记第二个完成回调；轮询状态用于容错。
+    const pollTimer = window.setInterval(() => {
+      if (vol?.loadStatus?.loaded) finish();
+    }, 120);
+    const timeoutTimer = window.setTimeout(finish, 120_000);
+    try {
+      vol.load(finish);
+    } catch {
+      finish();
     }
   });
 }
@@ -145,11 +168,12 @@ function toPercentPoint(container: HTMLDivElement, clientX: number, clientY: num
 function getBlendMode(renderMode: RenderMode) {
   if (renderMode === 'MIP') return Enums.BlendModes.MAXIMUM_INTENSITY_BLEND;
   if (renderMode === 'MinIP') return Enums.BlendModes.MINIMUM_INTENSITY_BLEND;
+  if (renderMode === 'Avg') return Enums.BlendModes.AVERAGE_INTENSITY_BLEND;
   return Enums.BlendModes.COMPOSITE;
 }
 
 function isProjectionMode(renderMode: RenderMode) {
-  return renderMode === 'MIP' || renderMode === 'MinIP';
+  return renderMode === 'MIP' || renderMode === 'MinIP' || renderMode === 'Avg';
 }
 
 function getInterpolationType(mode: InterpolationMode) {
@@ -189,8 +213,11 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       onPhaseChange,
       activeOrientation,
       onActiveOrientationChange,
+      focusedPanel = null,
       preloadImageUrlsList,
       showCrosshairs: showCrosshairsProp = true,
+      showAnnotations = true,
+      stateKey = 'default',
     },
     ref
   ) {
@@ -215,11 +242,14 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     const vpCoronal = `${engineId.current}-coronal`;
     const vpSagittal = `${engineId.current}-sagittal`;
     const vpSlab = `${engineId.current}-slab`;
-    const activeViewportIds = useMemo(() => (
-      layoutMode === 'three-up'
-        ? [vpAxial, vpCoronal, vpSagittal]
-        : [vpAxial, vpCoronal, vpSagittal, vpSlab]
-    ), [layoutMode, vpAxial, vpCoronal, vpSagittal, vpSlab]);
+    const getViewportIdForPanel = (panel: MprActivePanelId = activeOrientation ?? 'axial') => (
+      panel === 'axial' ? vpAxial : panel === 'coronal' ? vpCoronal : panel === 'sagittal' ? vpSagittal : vpSlab
+    );
+    // 四个视口始终保持挂载；布局切换只改变可见性，避免销毁相机状态和标注。
+    const activeViewportIds = useMemo(
+      () => [vpAxial, vpCoronal, vpSagittal, vpSlab],
+      [vpAxial, vpCoronal, vpSagittal, vpSlab],
+    );
 
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [errorMsg, setErrorMsg] = useState('');
@@ -231,6 +261,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     const [engineReady, setEngineReady] = useState(false);
     const loadedVolumeIdsRef = useRef<Set<string>>(new Set());
     const hasFirstRenderRef = useRef(false);
+    const savedCamerasRef = useRef<Map<string, Types.ICamera>>(new Map());
+    const activeStateKeyRef = useRef(stateKey);
     // Latest imageUrls reference, read by the long-lived prewarm walker so it
     // can skip the active phase without being restarted on every cine tick.
     const currentImageUrlsRef = useRef(imageUrls);
@@ -263,21 +295,75 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       zoomIn: () => {
         const engine = engineRef.current;
         if (!engine) return;
-        activeViewportIds.forEach((id) => {
-          const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
-          if (!vp) return;
-          vp.setZoom(vp.getZoom() * 1.15);
-          vp.render();
-        });
+        const vp = engine.getViewport(getViewportIdForPanel()) as Types.IVolumeViewport | undefined;
+        if (!vp) return;
+        vp.setZoom(vp.getZoom() * 1.15);
+        vp.render();
       },
       zoomOut: () => {
         const engine = engineRef.current;
         if (!engine) return;
-        activeViewportIds.forEach((id) => {
+        const vp = engine.getViewport(getViewportIdForPanel()) as Types.IVolumeViewport | undefined;
+        if (!vp) return;
+        vp.setZoom(vp.getZoom() * 0.87);
+        vp.render();
+      },
+      fitActive: () => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        const vp = engine.getViewport(getViewportIdForPanel()) as Types.IVolumeViewport | undefined;
+        if (!vp) return;
+        const camera = vp.getCamera();
+        vp.resetCamera();
+        vp.setCamera({ viewPlaneNormal: camera.viewPlaneNormal, viewUp: camera.viewUp });
+        vp.render();
+      },
+      resetActiveView: () => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        const vp = engine.getViewport(getViewportIdForPanel()) as Types.IVolumeViewport | undefined;
+        if (!vp) return;
+        const activePanel = activeOrientation ?? 'axial';
+        if (activePanel !== 'volume') {
+          const toolGroup = getOrCreateToolGroup(toolGroupId.current);
+          const rotateTool = toolGroup.getToolInstance(TOOL_NAMES.planarRotate) as {
+            setAngle?: (target: Types.IVolumeViewport, angle: number) => void;
+          } | undefined;
+          rotateTool?.setAngle?.(vp, 0);
+        }
+        // MPR 当前视图复位仅恢复画面内状态，不能顺带改变用户建立的重建平面。
+        const camera = activePanel === 'volume' ? null : vp.getCamera();
+        vp.resetCamera();
+        if (camera) vp.setCamera({ viewPlaneNormal: camera.viewPlaneNormal, viewUp: camera.viewUp });
+        vp.render();
+      },
+      resetPlanes: () => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        const orientations = [
+          [vpAxial, Enums.OrientationAxis.AXIAL],
+          [vpCoronal, Enums.OrientationAxis.CORONAL],
+          [vpSagittal, Enums.OrientationAxis.SAGITTAL],
+        ] as const;
+        orientations.forEach(([id, orientation]) => {
           const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
           if (!vp) return;
-          vp.setZoom(vp.getZoom() * 0.87);
+          vp.setOrientation(orientation);
+          vp.resetCamera();
           vp.render();
+        });
+        const crosshairs = getOrCreateToolGroup(toolGroupId.current).getToolInstance(TOOL_NAMES.crosshairs) as {
+          resetCrosshairs?: () => void;
+        } | undefined;
+        crosshairs?.resetCrosshairs?.();
+      },
+      resetAllViews: () => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        activeViewportIds.forEach((id) => {
+          const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
+          vp?.resetCamera();
+          vp?.render();
         });
       },
       resetAll: () => {
@@ -285,11 +371,9 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         if (!engine) return;
         activeViewportIds.forEach((id) => {
           const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
-          if (!vp) return;
-          vp.resetCamera();
-          vp.render();
+          vp?.resetCamera();
+          vp?.render();
         });
-        setTextAnnotations([]);
       },
       forceWindowLevel: (wc: number, ww: number) => {
         const engine = engineRef.current;
@@ -306,7 +390,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         const engine = engineRef.current;
         if (!engine) return;
         const vpId =
-          panel === 'axial' ? vpAxial : panel === 'coronal' ? vpCoronal : vpSagittal;
+          panel === 'axial' ? vpAxial : panel === 'coronal' ? vpCoronal : panel === 'sagittal' ? vpSagittal : vpSlab;
         const vp = engine.getViewport(vpId) as Types.IVolumeViewport | undefined;
         if (!vp) return;
         try {
@@ -329,20 +413,28 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       },
     }));
 
-    // ── Engine lifecycle ─────────────────────────────────────────────────────
-    // Create the cornerstone rendering engine, viewports and tool group exactly
-    // once per mount, or when the explicit layout mode changes.
     useEffect(() => {
-      const refs = [axialRef.current, coronalRef.current, sagittalRef.current];
-      if (layoutMode === 'four-up') refs.push(slabRef.current);
+      const allAnnotations = annotation.state.getAllAnnotations();
+      allAnnotations.forEach((item) => {
+        if (item.annotationUID) {
+          annotation.visibility.setAnnotationVisibility(item.annotationUID, showAnnotations);
+        }
+      });
+      engineRef.current?.renderViewports(activeViewportIds);
+    }, [activeViewportIds, showAnnotations]);
+
+    // ── Engine lifecycle ─────────────────────────────────────────────────────
+    // Create the cornerstone rendering engine once per viewport type. Layout
+    // changes are CSS-only so the three/four-window switch retains observation state.
+    useEffect(() => {
+      const refs = [axialRef.current, coronalRef.current, sagittalRef.current, slabRef.current];
       if (!refs.every(Boolean)) return;
 
       let disposed = false;
       let ro: ResizeObserver | null = null;
       const mainToolGroupId = toolGroupId.current;
       const volume3dToolGroupId = volumeToolGroupId.current;
-      const loadedVolumeIds = loadedVolumeIdsRef.current;
-
+      const savedCameras = savedCamerasRef.current;
       (async () => {
         try {
           setStatus('loading');
@@ -372,25 +464,23 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
             element: sagittalRef.current!,
             defaultOptions: { orientation: Enums.OrientationAxis.SAGITTAL, background: [0, 0, 0] as [number, number, number] },
           });
-          if (layoutMode === 'four-up') {
-            engine.enableElement({
-              viewportId: vpSlab,
-              type: volumePanelMode === 'volume3d' ? Enums.ViewportType.VOLUME_3D : Enums.ViewportType.ORTHOGRAPHIC,
-              element: slabRef.current!,
-              defaultOptions: volumePanelMode === 'volume3d'
-                ? { background: [0, 0, 0] as [number, number, number] }
-                : { orientation: Enums.OrientationAxis.CORONAL, background: [0, 0, 0] as [number, number, number] },
-            });
-          }
+          engine.enableElement({
+            viewportId: vpSlab,
+            type: volumePanelMode === 'volume3d' ? Enums.ViewportType.VOLUME_3D : Enums.ViewportType.ORTHOGRAPHIC,
+            element: slabRef.current!,
+            defaultOptions: volumePanelMode === 'volume3d'
+              ? { background: [0, 0, 0] as [number, number, number] }
+              : { orientation: Enums.OrientationAxis.CORONAL, background: [0, 0, 0] as [number, number, number] },
+          });
 
           const toolGroup = getOrCreateToolGroup(mainToolGroupId);
           const primaryToolViewportIds =
-            layoutMode === 'four-up' && volumePanelMode === 'volume3d'
+            volumePanelMode === 'volume3d'
               ? [vpAxial, vpCoronal, vpSagittal]
               : activeViewportIds;
           primaryToolViewportIds.forEach((id) => toolGroup.addViewport(id, engineId.current));
 
-          if (layoutMode === 'four-up' && volumePanelMode === 'volume3d') {
+          if (volumePanelMode === 'volume3d') {
             const volumeToolGroup = getOrCreateToolGroup(volume3dToolGroupId);
             volumeToolGroup.addViewport(vpSlab, engineId.current);
             volumeToolGroup.setToolPassive(TOOL_NAMES.pan);
@@ -399,9 +489,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
             volumeToolGroup.setToolPassive(TOOL_NAMES.length);
             volumeToolGroup.setToolPassive(TOOL_NAMES.eraser);
             volumeToolGroup.setToolPassive(TOOL_NAMES.stackScroll);
-            volumeToolGroup.setToolActive(TOOL_NAMES.trackballRotate, {
-              bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Primary }],
-            });
+            volumeToolGroup.setToolPassive(TOOL_NAMES.planarRotate);
+            volumeToolGroup.setToolPassive(TOOL_NAMES.trackballRotate);
             volumeToolGroup.setToolActive(TOOL_NAMES.zoom, {
               bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Wheel }],
             });
@@ -429,22 +518,28 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       return () => {
         disposed = true;
         setEngineReady(false);
+        activeViewportIds.forEach((id) => {
+          const camera = (engineRef.current?.getViewport(id) as Types.IVolumeViewport | undefined)?.getCamera();
+          if (camera) savedCameras.set(`${stateKey}:${id}`, camera);
+        });
         if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
         ro?.disconnect();
         destroyToolGroup(mainToolGroupId);
         destroyToolGroup(volume3dToolGroupId);
-        // Drop all volumes that were created for this engine instance so the
-        // cornerstone cache doesn't grow unbounded across mount cycles.
-        loadedVolumeIds.forEach((id) => {
-          try { cache.removeVolumeLoadObject(id); } catch { /* ok */ }
-        });
-        loadedVolumeIds.clear();
         engineRef.current?.destroy();
         engineRef.current = null;
         lastVoiRef.current = null;
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [layoutMode, volumePanelMode]);
+    }, [volumePanelMode]);
+
+    useEffect(() => () => {
+      // 页面内切换 MPR/投影/体绘制时复用体数据；真正离开页面后再释放缓存。
+      loadedVolumeIdsRef.current.forEach((id) => {
+        try { cache.removeVolumeLoadObject(id); } catch { /* ok */ }
+      });
+      loadedVolumeIdsRef.current.clear();
+    }, []);
 
     // ── Volume swap ──────────────────────────────────────────────────────────
     // When imageUrls change (e.g. 4D phase-cine advances phase N → N+1),
@@ -526,21 +621,29 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           const displayVolumeId = volId;
           volumeIdRef.current = displayVolumeId;
 
-          // Snapshot cameras so we can restore pan/zoom/slice after the swap.
-          const cameras = hasFirstRenderRef.current
-            ? activeViewportIds
-                .map((id) => {
-                  const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
-                  const cam = vp?.getCamera();
-                  return cam ? { id, camera: cam } : null;
-                })
-                .filter((x): x is { id: string; camera: Types.ICamera } => x !== null)
-            : [];
+          // 同一序列换时相时保留当前相机；换序列时保存旧状态并恢复目标序列最近状态。
+          const scopeChanged = activeStateKeyRef.current !== stateKey;
+          if (scopeChanged && hasFirstRenderRef.current) {
+            activeViewportIds.forEach((id) => {
+              const camera = (engine.getViewport(id) as Types.IVolumeViewport | undefined)?.getCamera();
+              if (camera) savedCamerasRef.current.set(`${activeStateKeyRef.current}:${id}`, camera);
+            });
+          }
+          const cameras = activeViewportIds
+            .map((id) => {
+              const viewport = engine.getViewport(id) as Types.IVolumeViewport | undefined;
+              const camera = scopeChanged || !hasFirstRenderRef.current
+                ? savedCamerasRef.current.get(`${stateKey}:${id}`)
+                : viewport?.getCamera();
+              return camera ? { id, camera } : null;
+            })
+            .filter((item): item is { id: string; camera: Types.ICamera } => item !== null);
+          activeStateKeyRef.current = stateKey;
 
           await setVolumesForViewports(engine, [{ volumeId: displayVolumeId }], activeViewportIds);
           if (cancelled) return;
 
-          if (hasFirstRenderRef.current) {
+          if (cameras.length > 0) {
             cameras.forEach(({ id, camera }) => {
               const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
               try { vp?.setCamera(camera); } catch { /* volume geometry may differ */ }
@@ -556,7 +659,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           const lower = lastVoiRef.current?.lower ?? requestedVoi.lower;
           const upper = lastVoiRef.current?.upper ?? requestedVoi.upper;
           lastVoiRef.current = { lower, upper };
-          const voiViewportIds = (layoutMode === 'four-up' && volumePanelMode === 'volume3d')
+          const voiViewportIds = volumePanelMode === 'volume3d'
             ? [vpAxial, vpCoronal, vpSagittal]
             : activeViewportIds;
           voiViewportIds.forEach((id) => {
@@ -595,7 +698,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       // window-level effect below keeps them in sync without thrashing
       // the volume loader.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [imageUrls, engineReady, activeViewportIds, voiLutMode]);
+    }, [imageUrls, engineReady, activeViewportIds, stateKey, voiLutMode]);
 
     // ── Background phase pre-warm ────────────────────────────────────────────
     // Walk the URL-sets one at a time and create + fully load each volume in
@@ -670,7 +773,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       const { lower, upper } = toVoiRange(windowWidth, windowCenter, voiLutMode);
       lastVoiRef.current = { lower, upper };
       lastEmittedVoiRef.current = { lower, upper };
-      const voiViewportIds = (layoutMode === 'four-up' && volumePanelMode === 'volume3d')
+      const voiViewportIds = volumePanelMode === 'volume3d'
         ? [vpAxial, vpCoronal, vpSagittal]
         : activeViewportIds;
       voiViewportIds.forEach((id) => {
@@ -757,17 +860,43 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       if (status !== 'ready') return;
       const toolGroup = getOrCreateToolGroup(toolGroupId.current);
       const enableMprCrosshairs = showCrosshairsProp && (layoutMode === 'four-up' || renderMode === 'MPR');
-      if (layoutMode === 'four-up' && volumePanelMode === 'volume3d') {
+      if (volumePanelMode === 'volume3d') {
         const volumeToolGroup = getOrCreateToolGroup(volumeToolGroupId.current);
-        volumeToolGroup.setToolPassive(TOOL_NAMES.pan);
-        volumeToolGroup.setToolPassive(TOOL_NAMES.zoom);
-        volumeToolGroup.setToolPassive(TOOL_NAMES.windowLevel);
-        volumeToolGroup.setToolPassive(TOOL_NAMES.length);
-        volumeToolGroup.setToolPassive(TOOL_NAMES.eraser);
-        volumeToolGroup.setToolPassive(TOOL_NAMES.stackScroll);
-        volumeToolGroup.setToolActive(TOOL_NAMES.trackballRotate, {
-          bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Primary }],
-        });
+        const volumeToolNames = [
+          TOOL_NAMES.pan,
+          TOOL_NAMES.zoom,
+          TOOL_NAMES.windowLevel,
+          TOOL_NAMES.length,
+          TOOL_NAMES.eraser,
+          TOOL_NAMES.stackScroll,
+          TOOL_NAMES.planarRotate,
+          TOOL_NAMES.trackballRotate,
+          TOOL_NAMES.crosshairs,
+        ];
+        volumeToolNames.forEach((name) => volumeToolGroup.setToolPassive(name));
+        const volumePrimary = activeOrientation === 'volume'
+          ? activeTool === 'trackballRotate'
+            ? TOOL_NAMES.trackballRotate
+            : activeTool === 'planarRotate'
+              ? TOOL_NAMES.planarRotate
+            : activeTool === 'window'
+              ? TOOL_NAMES.windowLevel
+              : activeTool === 'ruler'
+                ? TOOL_NAMES.length
+                : activeTool === 'eraser'
+                  ? TOOL_NAMES.eraser
+                  : activeTool === 'annotate'
+                    ? undefined
+                    : TOOL_NAMES.pan
+          : undefined;
+        if (volumePrimary) {
+          volumeToolGroup.setToolActive(volumePrimary, {
+            bindings: [
+              { mouseButton: CornerstoneToolsEnums.MouseBindings.Primary },
+              { numTouchPoints: 1 },
+            ],
+          });
+        }
         volumeToolGroup.setToolActive(TOOL_NAMES.zoom, {
           bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Wheel }],
         });
@@ -779,6 +908,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         toolGroup.setToolPassive(TOOL_NAMES.length);
         toolGroup.setToolPassive(TOOL_NAMES.eraser);
         toolGroup.setToolPassive(TOOL_NAMES.trackballRotate);
+        toolGroup.setToolPassive(TOOL_NAMES.stackScroll);
+        toolGroup.setToolPassive(TOOL_NAMES.planarRotate);
         toolGroup.setToolPassive(TOOL_NAMES.crosshairs);
       };
       const setPrimaryTool = (toolName?: string) => {
@@ -787,9 +918,22 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         else toolGroup.setToolDisabled(TOOL_NAMES.crosshairs);
         if (!toolName) return;
         toolGroup.setToolActive(toolName, {
-          bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Primary }],
+          bindings: [
+            { mouseButton: CornerstoneToolsEnums.MouseBindings.Primary },
+            { numTouchPoints: 1 },
+          ],
         });
+        if (toolName !== TOOL_NAMES.stackScroll) {
+          toolGroup.setToolActive(TOOL_NAMES.stackScroll, {
+            bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Wheel }],
+          });
+        }
       };
+
+      if (activeOrientation === 'volume' && volumePanelMode === 'volume3d') {
+        setPrimaryTool();
+        return;
+      }
 
       switch (activeTool) {
         case 'window':
@@ -801,6 +945,15 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         case 'eraser':
           setPrimaryTool(TOOL_NAMES.eraser);
           break;
+        case 'stackScroll':
+          setPrimaryTool(TOOL_NAMES.stackScroll);
+          break;
+        case 'planarRotate':
+          setPrimaryTool(TOOL_NAMES.planarRotate);
+          break;
+        case 'trackballRotate':
+          setPrimaryTool(TOOL_NAMES.trackballRotate);
+          break;
         case 'annotate':
           setPrimaryTool();
           break;
@@ -808,7 +961,10 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           setToolsPassive();
           if (enableMprCrosshairs) {
             toolGroup.setToolActive(TOOL_NAMES.crosshairs, {
-              bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Primary }],
+              bindings: [
+                { mouseButton: CornerstoneToolsEnums.MouseBindings.Primary },
+                { numTouchPoints: 1 },
+              ],
             });
           } else {
             toolGroup.setToolDisabled(TOOL_NAMES.crosshairs);
@@ -818,7 +974,75 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           setPrimaryTool(TOOL_NAMES.pan);
           break;
       }
-    }, [activeTool, layoutMode, renderMode, status, volumePanelMode, showCrosshairsProp]);
+    }, [activeOrientation, activeTool, layoutMode, renderMode, status, volumePanelMode, showCrosshairsProp]);
+
+    // 平板双指手势：捏合缩放，同时允许移动双指中点来平移当前视口。
+    useEffect(() => {
+      if (status !== 'ready') return;
+      const targets = [
+        [axialRef.current, vpAxial],
+        [coronalRef.current, vpCoronal],
+        [sagittalRef.current, vpSagittal],
+        ...(layoutMode === 'four-up' ? [[slabRef.current, vpSlab] as const] : []),
+      ] as const;
+      const cleanups: Array<() => void> = [];
+
+      targets.forEach(([element, viewportId]) => {
+        if (!element) return;
+        let gesture: {
+          distance: number;
+          midpoint: [number, number];
+          zoom: number;
+          pan: [number, number];
+        } | null = null;
+        const readPair = (event: TouchEvent) => {
+          if (event.touches.length < 2) return null;
+          const first = event.touches[0];
+          const second = event.touches[1];
+          return {
+            distance: Math.max(1, Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY)),
+            midpoint: [(first.clientX + second.clientX) / 2, (first.clientY + second.clientY) / 2] as [number, number],
+          };
+        };
+        const handleTouchStart = (event: TouchEvent) => {
+          const pair = readPair(event);
+          const viewport = engineRef.current?.getViewport(viewportId) as Types.IVolumeViewport | undefined;
+          if (!pair || !viewport) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          const pan = viewport.getPan();
+          gesture = { ...pair, zoom: viewport.getZoom(), pan: [pan[0], pan[1]] };
+        };
+        const handleTouchMove = (event: TouchEvent) => {
+          const pair = readPair(event);
+          const viewport = engineRef.current?.getViewport(viewportId) as Types.IVolumeViewport | undefined;
+          if (!pair || !viewport || !gesture) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          viewport.setZoom(Math.min(20, Math.max(0.2, gesture.zoom * (pair.distance / gesture.distance))));
+          viewport.setPan([
+            gesture.pan[0] + pair.midpoint[0] - gesture.midpoint[0],
+            gesture.pan[1] + pair.midpoint[1] - gesture.midpoint[1],
+          ]);
+          viewport.render();
+        };
+        const handleTouchEnd = (event: TouchEvent) => {
+          if (event.touches.length < 2) gesture = null;
+        };
+        element.addEventListener('touchstart', handleTouchStart, { passive: false, capture: true });
+        element.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true });
+        element.addEventListener('touchend', handleTouchEnd, { capture: true });
+        element.addEventListener('touchcancel', handleTouchEnd, { capture: true });
+        cleanups.push(() => {
+          element.removeEventListener('touchstart', handleTouchStart, true);
+          element.removeEventListener('touchmove', handleTouchMove, true);
+          element.removeEventListener('touchend', handleTouchEnd, true);
+          element.removeEventListener('touchcancel', handleTouchEnd, true);
+        });
+      });
+
+      return () => cleanups.forEach((cleanup) => cleanup());
+    }, [layoutMode, status, vpAxial, vpCoronal, vpSagittal, vpSlab]);
 
     useEffect(() => {
       if (status !== 'ready') return;
@@ -827,7 +1051,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
       const blendMode = getBlendMode(renderMode);
       const useProjectionForMprPanels =
-        isProjectionMode(renderMode) && (layoutMode === 'three-up' || volumePanelMode === 'volume3d');
+        isProjectionMode(renderMode) && layoutMode === 'three-up';
       const commonProperties: Types.VolumeViewportProperties = {
         invert,
         interpolationType: getInterpolationType(interpolationMode),
@@ -851,13 +1075,22 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       if (!fourthVp) return;
 
       if (volumePanelMode === 'volume3d') {
-        fourthVp.setProperties({
-          preset: volumePreset,
-          sampleDistanceMultiplier: volumeSampleDistanceMultiplier,
-          smoothing,
-          sharpening,
-        } as Types.VolumeViewportProperties);
-        fourthVp.resetCamera();
+        if (renderMode === 'VR') {
+          fourthVp.setProperties({
+            preset: volumePreset,
+            sampleDistanceMultiplier: volumeSampleDistanceMultiplier,
+            smoothing,
+            sharpening,
+          } as Types.VolumeViewportProperties);
+          fourthVp.setBlendMode(Enums.BlendModes.COMPOSITE);
+        } else {
+          fourthVp.setProperties({
+            ...commonProperties,
+            sampleDistanceMultiplier: volumeSampleDistanceMultiplier,
+          } as Types.VolumeViewportProperties);
+          fourthVp.setBlendMode(blendMode);
+          fourthVp.setSlabThickness(slabThickness);
+        }
       } else {
         fourthVp.setProperties(commonProperties);
         fourthVp.setBlendMode(blendMode);
@@ -882,26 +1115,37 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       }
     }, [currentSliceIndex, status, vpAxial]);
 
-    const visibleAnnotations = useMemo(() => textAnnotations, [textAnnotations]);
-    const panelBase = 'relative overflow-hidden bg-black';
-    const slabLabel = volumePanelMode === 'volume3d' ? '3D' : renderMode === 'MIP' ? 'MIP' : renderMode === 'MinIP' ? 'MinIP' : 'Coronal';
+    const visibleAnnotations = useMemo(
+      () => showAnnotations ? textAnnotations.filter((item) => item.stateKey === stateKey) : [],
+      [showAnnotations, stateKey, textAnnotations],
+    );
+    const panelBase = 'relative overflow-hidden bg-black touch-none';
+    const slabLabel = volumePanelMode === 'volume3d'
+      ? renderMode === 'VR' ? 'VR' : renderMode
+      : renderMode === 'MIP' ? 'MIP' : renderMode === 'MinIP' ? 'MinIP' : renderMode === 'Avg' ? 'Avg' : 'Coronal';
 
-    const renderTextAnnotations = (panel: PanelId) =>
+    const renderTextAnnotations = (panel: MprActivePanelId) =>
       visibleAnnotations
         .filter((item) => item.panel === panel)
         .map((annotation) => (
           <div
             key={annotation.id}
-            className={`absolute z-[12] flex items-center gap-1 ${activeTool === 'eraser' ? 'cursor-pointer' : 'pointer-events-none'}`}
+            className={`absolute z-[12] flex items-center gap-1 ${activeTool === 'eraser' || activeTool === 'annotate' ? 'cursor-pointer' : 'pointer-events-none'}`}
             style={{
               left: `${annotation.x}%`,
               top: `${annotation.y}%`,
               transform: 'translate(-50%, -50%)',
             }}
             onClick={(e) => {
-              if (activeTool !== 'eraser') return;
               e.stopPropagation();
-              setTextAnnotations((prev) => prev.filter((item) => item.id !== annotation.id));
+              if (activeTool === 'eraser') {
+                setTextAnnotations((prev) => prev.filter((item) => item.id !== annotation.id));
+                return;
+              }
+              if (activeTool === 'annotate') {
+                const text = window.prompt('请输入标注文字', annotation.text)?.trim();
+                if (text) setTextAnnotations((prev) => prev.map((item) => item.id === annotation.id ? { ...item, text } : item));
+              }
             }}
           >
             <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#FFD54F]" />
@@ -976,36 +1220,52 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       );
     };
 
-    const renderAnnotateLayer = (panel: PanelId, refEl: RefObject<HTMLDivElement | null>) => (
+    const renderAnnotateLayer = (panel: MprActivePanelId, refEl: RefObject<HTMLDivElement | null>) => (
       <div
         className={`absolute inset-0 z-[11] ${activeTool === 'annotate' ? 'cursor-cell' : 'pointer-events-none'}`}
         onClick={(e) => {
           if (activeTool !== 'annotate' || !refEl.current) return;
           const point = toPercentPoint(refEl.current, e.clientX, e.clientY);
-          const noteCount = textAnnotations.filter((item) => item.panel === panel).length;
+          const noteCount = textAnnotations.filter((item) => item.stateKey === stateKey && item.panel === panel).length;
+          const text = window.prompt('请输入标注文字', `标注 ${noteCount + 1}`)?.trim();
+          if (!text) return;
           setTextAnnotations((prev) => [
             ...prev,
             {
               id: makeId('text'),
+              stateKey,
               panel,
               x: point.x,
               y: point.y,
-              text: `Note ${noteCount + 1}`,
+              text,
             },
           ]);
         }}
       />
     );
 
+    const getPanelLayoutClass = (panel: MprActivePanelId) => {
+      if (focusedPanel) {
+        return focusedPanel === panel ? 'col-start-1 row-start-1' : 'hidden';
+      }
+      if (layoutMode !== 'three-up') return '';
+      if (panel === 'axial') return 'col-start-1 row-start-1';
+      if (panel === 'coronal') return 'col-start-2 row-start-1 row-span-2';
+      if (panel === 'sagittal') return 'col-start-1 row-start-2';
+      return 'hidden';
+    };
+
     return (
       <div
         className={className ?? 'flex-1 min-w-0 grid grid-cols-2 grid-rows-2 gap-px overflow-hidden bg-[#0F172A]'}
-        style={{ minHeight: 0 }}
+        style={focusedPanel
+          ? { minHeight: 0, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
+          : { minHeight: 0 }}
       >
         <div
           ref={axialRef}
           onPointerDown={() => onActiveOrientationChange?.('axial')}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-1' : ''} ${activeOrientation === 'axial' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
+          className={`${panelBase} ${getPanelLayoutClass('axial')} ${activeOrientation === 'axial' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
           style={{ minHeight: 0 }}
         >
           <div className={PANEL_LABEL_CLASS}>Axial</div>
@@ -1016,7 +1276,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         <div
           ref={coronalRef}
           onPointerDown={() => onActiveOrientationChange?.('coronal')}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-2 row-start-1 row-span-2' : ''} ${activeOrientation === 'coronal' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
+          className={`${panelBase} ${getPanelLayoutClass('coronal')} ${activeOrientation === 'coronal' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
           style={{ minHeight: 0 }}
         >
           <div className={PANEL_LABEL_CLASS}>Coronal</div>
@@ -1027,7 +1287,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         <div
           ref={sagittalRef}
           onPointerDown={() => onActiveOrientationChange?.('sagittal')}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'col-start-1 row-start-2' : ''} ${activeOrientation === 'sagittal' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
+          className={`${panelBase} ${getPanelLayoutClass('sagittal')} ${activeOrientation === 'sagittal' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
           style={{ minHeight: 0 }}
         >
           <div className={PANEL_LABEL_CLASS}>Sagittal</div>
@@ -1037,10 +1297,13 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         </div>
         <div
           ref={slabRef}
-          className={`${panelBase} ${layoutMode === 'three-up' ? 'hidden' : ''}`}
+          onPointerDown={() => onActiveOrientationChange?.('volume')}
+          className={`${panelBase} ${getPanelLayoutClass('volume')} ${activeOrientation === 'volume' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
           style={{ minHeight: 0 }}
         >
           <div className={PANEL_LABEL_CLASS} style={{ color: '#86EFAC' }}>{slabLabel}</div>
+          {renderMode !== 'VR' && renderAnnotateLayer('volume', slabRef)}
+          {renderTextAnnotations('volume')}
         </div>
 
         {status === 'loading' && (

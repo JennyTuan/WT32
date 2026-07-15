@@ -17,6 +17,15 @@ import {
     Pause,
     PanelLeftClose,
     PanelLeftOpen,
+    RotateCw,
+    Orbit,
+    ScanLine,
+    Eye,
+    EyeOff,
+    LayoutGrid,
+    Focus,
+    X,
+    Check,
 } from "lucide-react";
 import type { ChangeEvent, ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -44,6 +53,7 @@ import AppHeader from "../components/AppHeader";
 import { FeedbackNotice } from "../components/FeedbackNotice";
 import CornerstoneMPRViewport, {
     type CornerstoneMPRHandle,
+    type MprActivePanelId,
 } from "../components/CornerstoneMPRViewport";
 import {
     loadFourDManifest,
@@ -113,6 +123,7 @@ type Study = {
 // (ScreenMeasure removed — unused)
 type TextAnnotation = {
     id: string;
+    seriesId: string;
     kind: "text";
     slice: number;
     /** image-pixel coords in 3D mode; viewport-% (0-100) in 2D mode */
@@ -405,14 +416,36 @@ const getSeriesDicomUrl = (
     return `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
 };
 
-type ViewerToolMode = "pan" | "wl" | "measure" | "annotate" | "eraser" | "crosshairs";
+type ViewerToolMode = "browse" | "pan" | "wl" | "measure" | "annotate" | "eraser" | "crosshairs" | "imageRotate" | "planeRotate" | "rotate3d";
+type ThreeDDisplayMode = "MPR" | "MIP" | "MinIP" | "Avg" | "VR";
+type SeriesBrowserState = {
+    sliceIndex: number;
+    imageMode: "2D" | "3D";
+    toolMode: ViewerToolMode;
+    lastTools: Record<"2D" | "3D", ViewerToolMode>;
+    ww: number;
+    wl: number;
+    displayWw: number;
+    displayWl: number;
+    voiLutMode: "LINEAR" | "LINEAR_EXACT" | "SIGMOID";
+    interpolationMode: "LINEAR" | "NEAREST" | "FAST_LINEAR";
+    inverted: boolean;
+    smoothing: number;
+    sharpening: number;
+    layout: LayoutKey;
+    displayMode3D: ThreeDDisplayMode;
+    activeMprPanel: MprActivePanelId;
+};
 const mapCornerstoneTool = (toolMode: ViewerToolMode) => {
+    if (toolMode === "browse") return "stackScroll";
     if (toolMode === "pan") return "pan";
     if (toolMode === "wl") return "window";
     if (toolMode === "measure") return "ruler";
     if (toolMode === "eraser") return "eraser";
     if (toolMode === "annotate") return "annotate";
-    if (toolMode === "crosshairs") return "crosshairs";
+    if (toolMode === "crosshairs" || toolMode === "planeRotate") return "crosshairs";
+    if (toolMode === "imageRotate") return "planarRotate";
+    if (toolMode === "rotate3d") return "trackballRotate";
     return "window";
 };
 
@@ -507,7 +540,7 @@ const ViewScreen = () => {
     const effectiveLungSeries = isBrainHelicalDemo ? BRAIN_HELICAL_VIEW_SERIES : REAL_LUNG_SERIES;
     /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
     const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";
-    const [, setViewerLoadStatus] = useState<"loading" | "ready" | "error">("ready");
+    const [viewerLoadStatus, setViewerLoadStatus] = useState<"loading" | "ready" | "error">("ready");
 
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(isFourDEntry ? "4d-preview-recon" : effectiveLungSeries.seriesId);
@@ -526,11 +559,13 @@ const ViewScreen = () => {
     const [phaseMipMode, setPhaseMipMode] = useState<"MIP" | "MinIP" | "Avg">("MIP");
     const [slabThickness, setSlabThickness] = useState(5);
     const [imageMode, setImageMode] = useState<"2D" | "3D">(isFourDEntry ? "3D" : "2D");
+    const [hasMounted3D, setHasMounted3D] = useState(isFourDEntry);
     // Currently-selected MPR panel for cine / paging. Defaults to axial — the
     // clinical primary view. Clicking another panel updates this.
-    const [activeMprOrientation, setActiveMprOrientation] = useState<"axial" | "coronal" | "sagittal">("axial");
+    const [activeMprOrientation, setActiveMprOrientation] = useState<MprActivePanelId>("axial");
     const [sliceIndex, setSliceIndex] = useState(Math.floor(effectiveLungSeries.count / 2));
     const [toolMode, setToolMode] = useState<ViewerToolMode>("wl");
+    const lastToolByModeRef = useRef<Record<"2D" | "3D", ViewerToolMode>>({ "2D": "wl", "3D": "pan" });
     const [ww, setWw] = useState(350);
     const [wl, setWl] = useState(45);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -542,6 +577,10 @@ const ViewScreen = () => {
     const dicomViewerRef = useRef<DicomViewerHandle>(null);
     // Ref for the 3D MPR Cornerstone viewport
     const mprRef = useRef<CornerstoneMPRHandle>(null);
+
+    useEffect(() => {
+        if (imageMode === "3D") setHasMounted3D(true);
+    }, [imageMode]);
 
     // ─── 4D manifest (pre-rendered WebP dataset) ───────────────────────────
     const [fourDManifest, setFourDManifest] = useState<FourDManifest | null>(null);
@@ -629,6 +668,13 @@ const ViewScreen = () => {
     const [imageSmoothing, setImageSmoothing] = useState(0);
     const [imageSharpening, setImageSharpening] = useState(0);
     const [readerMode, setReaderMode] = useState(false);
+    const [threeDDisplayMode, setThreeDDisplayMode] = useState<ThreeDDisplayMode>("VR");
+    const [focusedMprPanel, setFocusedMprPanel] = useState<MprActivePanelId | null>(null);
+    const [showAnnotations, setShowAnnotations] = useState(true);
+    const seriesBrowserStateRef = useRef<Map<string, SeriesBrowserState>>(new Map());
+    const [isResetSheetOpen, setIsResetSheetOpen] = useState(false);
+    const [pendingReset, setPendingReset] = useState<"planes" | "all" | null>(null);
+    const [viewerNotice, setViewerNotice] = useState<string | null>(null);
     const [volumeQuality, setVolumeQuality] = useState<"performance" | "standard" | "fine">("standard");
     const [isBrowseModeOpen, setIsBrowseModeOpen] = useState(false);
     const [isLayoutOpen, setIsLayoutOpen] = useState(false);
@@ -1122,7 +1168,6 @@ const ViewScreen = () => {
     const isMprViewActive = !isTopogramSeries && imageMode === "3D";
     const isReaderModeSupported = imageMode === "2D" || isTopogramSeries;
     const isReaderModeActive = readerMode && isReaderModeSupported;
-    const isFourDMprViewActive = isMprViewActive && isFourDLungReconSeries;
     const isFourDPlaybackBlockedByReview = isFourDLungReconSeries && isFourDEntry && fourDStage !== "done";
     const getFourDEngineerMhaUrlsForPhase = useCallback(
         (phaseIndex: number) => {
@@ -1178,14 +1223,125 @@ const ViewScreen = () => {
     );
     const fourDPhaseBadgeLabel = `Phase ${FOUR_D_PHASE_LABELS[selectedPhaseIndex] ?? `${selectedPhaseIndex * 10}%`}`;
     const hasMultipleSlices = totalSlices > 1;
-    const isPlaybackEnabled = !isFourDPlaybackBlockedByReview && hasMultipleSlices;
-    const isToolSupportedInCurrentView = (mode: ViewerToolMode) => {
-        if (!isMprViewActive) return mode !== "crosshairs";
-        if (isFourDMprViewActive) {
-            return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "crosshairs";
+    const canUse3D = !isTopogramSeries && hasMultipleSlices;
+    const isProjectionViewportActive = isMprViewActive && activeMprOrientation === "volume" && threeDDisplayMode !== "VR";
+    const isVolumeViewportActive = isMprViewActive && activeMprOrientation === "volume" && threeDDisplayMode === "VR";
+    const canBrowseSlicesInActiveViewport = imageMode === "2D" || activeMprOrientation !== "volume";
+    const isPlaybackEnabled = !isFourDPlaybackBlockedByReview && hasMultipleSlices && canBrowseSlicesInActiveViewport;
+    const isToolSupportedInCurrentView = useCallback((mode: ViewerToolMode) => {
+        if (!isMprViewActive) {
+            return mode === "browse" || mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser" || mode === "imageRotate";
         }
-        return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser" || mode === "crosshairs";
-    };
+        if (isVolumeViewportActive) {
+            return mode === "pan" || mode === "rotate3d";
+        }
+        if (isProjectionViewportActive) {
+            return mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser" || mode === "imageRotate" || mode === "rotate3d";
+        }
+        return mode === "browse" || mode === "pan" || mode === "wl" || mode === "measure" || mode === "annotate" || mode === "eraser" || mode === "imageRotate" || mode === "crosshairs" || mode === "planeRotate";
+    }, [isMprViewActive, isProjectionViewportActive, isVolumeViewportActive]);
+
+    const showViewerNotice = useCallback((message: string) => {
+        setViewerNotice(message);
+    }, []);
+
+    const handleImageModeChange = useCallback((nextMode: "2D" | "3D") => {
+        if (nextMode === imageMode) return;
+        if (nextMode === "3D" && !canUse3D) {
+            showViewerNotice(isTopogramSeries ? "定位像仅支持 2D 浏览" : "图像层数不足，无法进入 3D");
+            return;
+        }
+        lastToolByModeRef.current[imageMode] = toolMode;
+        setIsPlaying(false);
+        setFocusedMprPanel(null);
+        setImageMode(nextMode);
+        setToolMode(lastToolByModeRef.current[nextMode]);
+        if (nextMode === "3D" && activeMprOrientation === "volume" && threeDDisplayMode === "MPR") {
+            setActiveMprOrientation("axial");
+        }
+    }, [activeMprOrientation, canUse3D, imageMode, isTopogramSeries, showViewerNotice, threeDDisplayMode, toolMode]);
+
+    const handleThreeDDisplayModeChange = useCallback((nextMode: ThreeDDisplayMode) => {
+        setThreeDDisplayMode(nextMode);
+        setFocusedMprPanel(null);
+        if (nextMode === "MPR") {
+            setSelectedLayout("mpr");
+            setActiveMprOrientation((current) => current === "volume" ? "axial" : current);
+            return;
+        }
+        setSelectedLayout("four-up");
+        setActiveMprOrientation("volume");
+        if (nextMode === "MIP" || nextMode === "MinIP") {
+            setSelectedRenderMode(nextMode);
+        }
+    }, []);
+
+    const handleViewerStatusChange = useCallback((status: "loading" | "ready" | "error") => {
+        setViewerLoadStatus(status);
+        if (status === "error" && imageMode === "3D") {
+            setImageMode("2D");
+            setToolMode(lastToolByModeRef.current["2D"]);
+            setFocusedMprPanel(null);
+            showViewerNotice("3D 加载失败，已保留并返回 2D 浏览");
+        }
+    }, [imageMode, showViewerNotice]);
+
+    const handleFitActiveViewport = useCallback(() => {
+        if (imageMode === "2D") dicomViewerRef.current?.fit();
+        else mprRef.current?.fitActive();
+        showViewerNotice("已适合当前视口");
+    }, [imageMode, showViewerNotice]);
+
+    const restoreDisplayParameters = useCallback(() => {
+        const defaults = defaultWindowRef.current;
+        setWw(defaults.ww);
+        setWl(defaults.wl);
+        setDisplayWw(defaults.ww);
+        setDisplayWl(defaults.wl);
+        setSelectedVoiLutMode("LINEAR");
+        setSelectedInterpolationMode("LINEAR");
+        setIsImageInverted(false);
+        setImageSmoothing(0);
+        setImageSharpening(0);
+        setSlabThickness(5);
+        setVolumeQuality("standard");
+        setSelectedVolumePreset(resolveDefaultVolumePreset(scanSession?.body_part));
+        if (imageMode === "3D") mprRef.current?.forceWindowLevel(defaults.wl, defaults.ww);
+    }, [imageMode, scanSession?.body_part]);
+
+    const handleResetCurrentView = useCallback(() => {
+        if (imageMode === "2D") dicomViewerRef.current?.resetView();
+        else mprRef.current?.resetActiveView();
+        setIsResetSheetOpen(false);
+        showViewerNotice("已复位当前视图");
+    }, [imageMode, showViewerNotice]);
+
+    const handleRestoreDisplay = useCallback(() => {
+        restoreDisplayParameters();
+        setIsResetSheetOpen(false);
+        showViewerNotice("已恢复显示参数");
+    }, [restoreDisplayParameters, showViewerNotice]);
+
+    const confirmReset = useCallback((kind: "planes" | "all") => {
+        if (kind === "planes") {
+            mprRef.current?.resetPlanes();
+            setActiveMprOrientation("axial");
+            showViewerNotice("已复位三维切面");
+        } else {
+            if (imageMode === "2D") dicomViewerRef.current?.resetView();
+            else {
+                mprRef.current?.resetPlanes();
+                mprRef.current?.resetAllViews();
+                setSelectedLayout(threeDDisplayMode === "MPR" ? "mpr" : "four-up");
+                setActiveMprOrientation(threeDDisplayMode === "MPR" ? "axial" : "volume");
+            }
+            restoreDisplayParameters();
+            setFocusedMprPanel(null);
+            showViewerNotice("已完成全部复位");
+        }
+        setPendingReset(null);
+        setIsResetSheetOpen(false);
+    }, [imageMode, restoreDisplayParameters, showViewerNotice, threeDDisplayMode]);
 
     const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
     const currentSliceIndex = clampSliceIndex(sliceIndex);
@@ -1194,7 +1350,9 @@ const ViewScreen = () => {
     const canPageForward = currentSliceIndex < totalSlices - 1;
     const handleSliceStep = useCallback((delta: number) => {
         if (imageMode === "3D") {
-            mprRef.current?.advanceSlice(activeMprOrientation, delta);
+            if (activeMprOrientation !== "volume") {
+                mprRef.current?.advanceSlice(activeMprOrientation, delta);
+            }
             return;
         }
         setSliceIndex((prev) => clampSliceIndex(prev + delta));
@@ -1204,8 +1362,6 @@ const ViewScreen = () => {
     }, [clampSliceIndex]);
 
     useEffect(() => {
-        if (imageMode !== "2D") return;
-
         const frameId = window.requestAnimationFrame(() => {
             dicomViewerRef.current?.fit();
         });
@@ -1213,7 +1369,7 @@ const ViewScreen = () => {
         return () => {
             window.cancelAnimationFrame(frameId);
         };
-    }, [imageMode, selectedSeriesId]);
+    }, [selectedSeriesId]);
 
     // ─── 重建参数同步：当选中序列变化时,用该序列当前值回填表单 ──────────
     // 同时服务于「离线重建」入口和「扫描后浏览」入口，两条路径展示一致的参数面板。
@@ -1297,8 +1453,17 @@ const ViewScreen = () => {
 
     useEffect(() => {
         if (isToolSupportedInCurrentView(toolMode)) return;
-        setToolMode("wl");
-    }, [toolMode, isMprViewActive, isFourDMprViewActive]);
+        const fallback: ViewerToolMode = imageMode === "2D" ? "wl" : "pan";
+        setToolMode(fallback);
+        lastToolByModeRef.current[imageMode] = fallback;
+        showViewerNotice(`当前视口不支持该工具，已切换为${fallback === "wl" ? "窗宽/窗位" : "平移"}`);
+    }, [imageMode, isToolSupportedInCurrentView, showViewerNotice, toolMode]);
+
+    useEffect(() => {
+        if (!viewerNotice) return;
+        const timer = window.setTimeout(() => setViewerNotice(null), 2400);
+        return () => window.clearTimeout(timer);
+    }, [viewerNotice]);
 
     // Load 4D manifest + preload each phase's first frame (mid axial) so
     // phase switches are instant after the initial warm.
@@ -1539,22 +1704,61 @@ const ViewScreen = () => {
     useEffect(() => () => reconAbortRef.current?.abort(), []);
     const handleSeriesSelect = useCallback((seriesId: string) => {
         const nextSeries = safeSeriesList.find((series) => series.id === seriesId);
+        seriesBrowserStateRef.current.set(selectedSeriesId, {
+            sliceIndex,
+            imageMode,
+            toolMode,
+            lastTools: { ...lastToolByModeRef.current },
+            ww,
+            wl,
+            displayWw,
+            displayWl,
+            voiLutMode: selectedVoiLutMode,
+            interpolationMode: selectedInterpolationMode,
+            inverted: isImageInverted,
+            smoothing: imageSmoothing,
+            sharpening: imageSharpening,
+            layout: selectedLayout,
+            displayMode3D: threeDDisplayMode,
+            activeMprPanel: activeMprOrientation,
+        });
         setSelectedSeriesId(seriesId);
-        setSliceIndex(getSeriesMidSliceIndex(nextSeries?.count ?? effectiveLungSeries.count));
         dicomWindowAppliedSeriesRef.current = null;
-        setAnnotations([]);
         setDraftMeasure(null);
         measureStartRef.current = null;
         dragRef.current = { dragging: false, x: 0, y: 0 };
-        // Apply WW/WL preset defined by the series/recon
-        if (nextSeries?.defaultWw != null && nextSeries?.defaultWl != null) {
+        const savedState = seriesBrowserStateRef.current.get(seriesId);
+        if (savedState) {
+            setSliceIndex(savedState.sliceIndex);
+            setImageMode(savedState.imageMode);
+            setToolMode(savedState.toolMode);
+            lastToolByModeRef.current = { ...savedState.lastTools };
+            setWw(savedState.ww);
+            setWl(savedState.wl);
+            setDisplayWw(savedState.displayWw);
+            setDisplayWl(savedState.displayWl);
+            setSelectedVoiLutMode(savedState.voiLutMode);
+            setSelectedInterpolationMode(savedState.interpolationMode);
+            setIsImageInverted(savedState.inverted);
+            setImageSmoothing(savedState.smoothing);
+            setImageSharpening(savedState.sharpening);
+            setSelectedLayout(savedState.layout);
+            setThreeDDisplayMode(savedState.displayMode3D);
+            setActiveMprOrientation(savedState.activeMprPanel);
+        } else {
+            setSliceIndex(getSeriesMidSliceIndex(nextSeries?.count ?? effectiveLungSeries.count));
+        }
+        // 默认显示参数只用于首次进入；再次进入时恢复该序列的临时浏览状态。
+        if (!savedState && nextSeries?.defaultWw != null && nextSeries?.defaultWl != null) {
             setWw(nextSeries.defaultWw);
             setWl(nextSeries.defaultWl);
             setDisplayWw(nextSeries.defaultWw);
             setDisplayWl(nextSeries.defaultWl);
+        }
+        if (nextSeries?.defaultWw != null && nextSeries?.defaultWl != null) {
             defaultWindowRef.current = { ww: nextSeries.defaultWw, wl: nextSeries.defaultWl };
         }
-    }, [effectiveLungSeries.count, safeSeriesList]);
+    }, [activeMprOrientation, displayWl, displayWw, effectiveLungSeries.count, imageMode, imageSharpening, imageSmoothing, isImageInverted, safeSeriesList, selectedInterpolationMode, selectedLayout, selectedSeriesId, selectedVoiLutMode, sliceIndex, threeDDisplayMode, toolMode, wl, ww]);
     const screenPointInViewport = (clientX: number, clientY: number) => {
         const viewport = viewportRef.current;
         if (!viewport) return null;
@@ -1691,7 +1895,9 @@ const ViewScreen = () => {
                 // 3D MPR: advance the active panel's slice via the volume
                 // viewport API. Cornerstone's crosshairs tool keeps the
                 // reference lines in the other two panels in sync.
-                mprRef.current?.advanceSlice(activeMprOrientation, 1);
+                if (activeMprOrientation !== "volume") {
+                    mprRef.current?.advanceSlice(activeMprOrientation, 1);
+                }
             } else {
                 setSliceIndex((prev) => (prev >= totalSlices - 1 ? 0 : prev + 1));
             }
@@ -1842,17 +2048,22 @@ const ViewScreen = () => {
                                 {(isOfflineRecon || !isTopogramSeries) ? t("view.offlineRecon.title") : t("view.params")}
                             </span>
                         </div>
-                        {!isFourDLungReconSeries && !isTopogramSeries ? (
-                            <div className="flex items-center gap-1 rounded-full border border-[#DCE6F2] bg-[#F1F5F9] p-[3px] shadow-sm overflow-hidden">
+                        {!isFourDLungReconSeries ? (
+                            <div className="flex items-center gap-1 rounded-xl border border-[#B7D5FF] bg-[#EAF2FF] p-1 shadow-sm overflow-hidden">
                                 {(["2D", "3D"] as const).map((mode) => {
                                     const active = imageMode === mode;
+                                    const disabled = mode === "3D" && !canUse3D;
                                     return (
                                         <button
                                             key={mode}
-                                            onClick={() => setImageMode(mode)}
-                                            className={`min-w-[40px] h-[24px] px-2 rounded-full text-[10px] font-black transition-all ${active
-                                                ? "bg-white text-[#4D94FF] shadow-[0_2px_4px_rgba(0,0,0,0.05)] border border-[#DCE6F2]/50"
-                                                : "text-[#94A3B8] hover:text-[#4D94FF]"
+                                            type="button"
+                                            onClick={() => handleImageModeChange(mode)}
+                                            disabled={disabled}
+                                            aria-pressed={active}
+                                            title={disabled ? (isTopogramSeries ? "定位像仅支持 2D 浏览" : "图像层数不足，无法进入 3D") : `${mode} 模式`}
+                                            className={`min-w-[52px] h-[44px] px-3 rounded-lg text-[12px] font-black transition-all ${active
+                                                ? "bg-[#2563EB] text-white shadow-[0_4px_10px_rgba(37,99,235,0.28)]"
+                                                : disabled ? "cursor-not-allowed text-[#94A3B8]/55" : "bg-white text-[#475569] active:bg-[#DBEAFE]"
                                                 }`}
                                         >
                                             {mode}
@@ -1941,6 +2152,60 @@ const ViewScreen = () => {
                                 )
                             ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
+                                    {!isFourDLungReconSeries && (
+                                        <PanelSection title="三维显示">
+                                            <div className="grid grid-cols-5 gap-1.5">
+                                                {(["MPR", "MIP", "MinIP", "Avg", "VR"] as const).map((mode) => (
+                                                    <button
+                                                        key={mode}
+                                                        type="button"
+                                                        onClick={() => handleThreeDDisplayModeChange(mode)}
+                                                        aria-pressed={threeDDisplayMode === mode}
+                                                        className={`h-[44px] rounded-lg border text-[10px] font-black transition-colors ${threeDDisplayMode === mode
+                                                            ? "border-[#2563EB] bg-[#2563EB] text-white"
+                                                            : "border-[#DCE6F2] bg-white text-[#475569] active:bg-[#DBEAFE]"
+                                                            }`}
+                                                    >
+                                                        {mode}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="grid grid-cols-4 gap-1.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setSelectedLayout("four-up"); setFocusedMprPanel(null); }}
+                                                    className={`flex h-[44px] flex-col items-center justify-center rounded-lg border text-[9px] font-bold ${selectedLayout === "four-up" && !focusedMprPanel ? "border-[#2563EB] bg-[#EBF3FF] text-[#2563EB]" : "border-[#DCE6F2] bg-white text-[#546E7A]"}`}
+                                                >
+                                                    <LayoutGrid size={16} />
+                                                    <span className="mt-0.5">四窗</span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setSelectedLayout("mpr"); setFocusedMprPanel(null); setActiveMprOrientation((current) => current === "volume" ? "axial" : current); }}
+                                                    className={`flex h-[44px] flex-col items-center justify-center rounded-lg border text-[9px] font-bold ${selectedLayout === "mpr" && !focusedMprPanel ? "border-[#2563EB] bg-[#EBF3FF] text-[#2563EB]" : "border-[#DCE6F2] bg-white text-[#546E7A]"}`}
+                                                >
+                                                    <Layers3 size={16} />
+                                                    <span className="mt-0.5">MPR</span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFocusedMprPanel((current) => current ? null : activeMprOrientation)}
+                                                    className={`flex h-[44px] flex-col items-center justify-center rounded-lg border text-[9px] font-bold ${focusedMprPanel ? "border-[#2563EB] bg-[#EBF3FF] text-[#2563EB]" : "border-[#DCE6F2] bg-white text-[#546E7A]"}`}
+                                                >
+                                                    <Focus size={16} />
+                                                    <span className="mt-0.5">{focusedMprPanel ? "恢复布局" : "当前视口"}</span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { handleThreeDDisplayModeChange("VR"); setFocusedMprPanel("volume"); }}
+                                                    className={`flex h-[44px] flex-col items-center justify-center rounded-lg border text-[9px] font-bold ${focusedMprPanel === "volume" ? "border-[#2563EB] bg-[#EBF3FF] text-[#2563EB]" : "border-[#DCE6F2] bg-white text-[#546E7A]"}`}
+                                                >
+                                                    <Orbit size={16} />
+                                                    <span className="mt-0.5">三维主视图</span>
+                                                </button>
+                                            </div>
+                                        </PanelSection>
+                                    )}
                                     {/* Layout Dropdown */}
                                     <div className="hidden items-center gap-2 relative">
                                         <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.layout")}</span>
@@ -2046,7 +2311,7 @@ const ViewScreen = () => {
                                                          </div>
                                                      )}
                                                  </div>
-                                                 <div className="flex items-center gap-2 relative">
+                                                 {!isOfflineRecon && <div className="flex items-center gap-2 relative">
                                                     <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.voiCurve")}</span>
                                                     <div
                                                         onClick={() => {
@@ -2081,8 +2346,8 @@ const ViewScreen = () => {
                                                             ))}
                                                         </div>
                                                     )}
-                                                </div>
-                                                <div className="flex items-center gap-2 relative">
+                                                </div>}
+                                                {!isOfflineRecon && <div className="flex items-center gap-2 relative">
                                                     <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.interpolation")}</span>
                                                     <div
                                                         onClick={() => {
@@ -2117,7 +2382,7 @@ const ViewScreen = () => {
                                                             ))}
                                                         </div>
                                                     )}
-                                                </div>
+                                                </div>}
                                                 <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                     <span className="text-[11px] font-semibold text-[#546E7A]">{t("view.controls.invert")}</span>
                                                     <input
@@ -2127,7 +2392,7 @@ const ViewScreen = () => {
                                                         className="h-4 w-4 accent-[#4D94FF]"
                                                     />
                                                 </div>
-                                                <div className="flex items-start gap-2">
+                                                 {!isOfflineRecon && <div className="flex items-start gap-2">
                                                     <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.smoothing")}</span>
                                                     <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                         <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
@@ -2135,8 +2400,8 @@ const ViewScreen = () => {
                                                             <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSmoothing.toFixed(2)}</span>
                                                         </div>
                                                     </div>
-                                                </div>
-                                                <div className="flex items-start gap-2">
+                                                 </div>}
+                                                 {!isOfflineRecon && <div className="flex items-start gap-2">
                                                     <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.sharpening")}</span>
                                                     <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                         <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
@@ -2144,7 +2409,7 @@ const ViewScreen = () => {
                                                             <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSharpening.toFixed(2)}</span>
                                                         </div>
                                                     </div>
-                                                </div>
+                                                </div>}
                                             </PanelSection>
 
                                             <PanelSection title={t("view.controls.volumeRendering")}>
@@ -2244,7 +2509,7 @@ const ViewScreen = () => {
                                                         {(["MIP", "MinIP"] as const).map((opt) => (
                                                             <div
                                                                 key={opt}
-                                                                onClick={() => { setSelectedRenderMode(opt); setIsRenderModeOpen(false); }}
+                                                                onClick={() => { setSelectedRenderMode(opt); handleThreeDDisplayModeChange(opt); setIsRenderModeOpen(false); }}
                                                                 className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedRenderMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
                                                             >
                                                                 {opt}
@@ -2372,20 +2637,20 @@ const ViewScreen = () => {
 
                 <div className="flex-1 min-w-0 flex flex-col overflow-hidden rounded-lg border border-[#B0C4DE]">
                 <div className="flex flex-1 min-h-0 overflow-hidden">
-                <div className={viewportContainerClassName}>
+                <div className={`${viewportContainerClassName} relative`}>
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
-                    {!isTopogramSeries && imageMode === "3D" && (
-                        <div className="relative flex-1 min-w-0 overflow-hidden">
+                    {!isTopogramSeries && hasMounted3D && (
+                        <div className={`absolute inset-0 min-w-0 overflow-hidden ${imageMode === "3D" ? "visible pointer-events-auto" : "invisible pointer-events-none"}`}>
                             {isFourDLungReconSeries ? (
                                 <CornerstoneMPRViewport
                                     ref={mprRef}
                                     imageUrls={fourDDicomImageUrls}
                                     preloadImageUrlsList={fourDAllPhaseDicomUrls}
-                                    onStatusChange={setViewerLoadStatus}
+                                    onStatusChange={handleViewerStatusChange}
                                     windowCenter={wl}
                                     windowWidth={ww}
                                     activeTool={mapCornerstoneTool(toolMode)}
-                                    renderMode={(phaseMipMode === "Avg" ? "MPR" : phaseMipMode) as 'MPR' | 'MIP' | 'VR' | 'MinIP'}
+                                    renderMode={phaseMipMode}
                                     layoutMode="three-up"
                                     slabThickness={slabThickness}
                                     showPhaseBadge={true}
@@ -2393,6 +2658,10 @@ const ViewScreen = () => {
                                     phaseOptions={fourDPhaseOptions}
                                     selectedPhaseIndex={selectedPhaseIndex}
                                     onPhaseChange={setSelectedPhaseIndex}
+                                    activeOrientation={activeMprOrientation === "volume" ? "axial" : activeMprOrientation}
+                                    onActiveOrientationChange={setActiveMprOrientation}
+                                    showAnnotations={showAnnotations}
+                                    stateKey={selectedSeriesId}
                                     onWindowLevelChange={(wc, wwidth) => {
                                         setDisplayWl(Math.round(wc));
                                         setDisplayWw(Math.round(wwidth));
@@ -2405,15 +2674,16 @@ const ViewScreen = () => {
                                 <CornerstoneMPRViewport
                                     ref={mprRef}
                                     imageUrls={seriesImageUrls}
-                                    onStatusChange={setViewerLoadStatus}
+                                    onStatusChange={handleViewerStatusChange}
                                     windowCenter={wl}
                                     windowWidth={ww}
                                     activeTool={mapCornerstoneTool(toolMode)}
-                                    renderMode={selectedRenderMode}
-                                    layoutMode="four-up"
+                                    renderMode={threeDDisplayMode}
+                                    layoutMode={selectedLayout === "mpr" ? "three-up" : "four-up"}
                                     volumePanelMode="volume3d"
                                     activeOrientation={activeMprOrientation}
                                     onActiveOrientationChange={setActiveMprOrientation}
+                                    focusedPanel={focusedMprPanel}
                                     volumePreset={selectedVolumePreset}
                                     volumeSampleDistanceMultiplier={volumeSampleDistanceMultiplier}
                                     slabThickness={slabThickness}
@@ -2422,6 +2692,8 @@ const ViewScreen = () => {
                                     voiLutMode={selectedVoiLutMode}
                                     smoothing={imageSmoothing}
                                     sharpening={imageSharpening}
+                                    showAnnotations={showAnnotations}
+                                    stateKey={selectedSeriesId}
                                     onWindowLevelChange={(wc, wwidth) => {
                                         setDisplayWl(Math.round(wc));
                                         setDisplayWw(Math.round(wwidth));
@@ -2434,16 +2706,15 @@ const ViewScreen = () => {
                         </div>
                     )}
                     {/* ── 2D mode: single Cornerstone stack viewport ── */}
-                    {(imageMode === "2D" || isTopogramSeries) && (
                         <section
                             ref={viewportRef}
-                            className={`flex-1 min-w-0 bg-black overflow-hidden relative ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : "cursor-default"}`}
+                            className={`absolute inset-0 min-w-0 bg-black overflow-hidden ${imageMode === "2D" || isTopogramSeries ? "visible pointer-events-auto" : "invisible pointer-events-none"} ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : "cursor-default"}`}
                         >
                             {/* Cornerstone DICOM viewer */}
                             <DicomViewer
                                 ref={dicomViewerRef}
                                 imageUrls={seriesImageUrls}
-                                onStatusChange={setViewerLoadStatus}
+                                onStatusChange={handleViewerStatusChange}
                                 currentImageIndex={currentSliceIndex}
                                 onImageIndexChange={setSliceIndex}
                                 activeTool={mapCornerstoneTool(toolMode)}
@@ -2454,6 +2725,8 @@ const ViewScreen = () => {
                                 voiLutMode={selectedVoiLutMode}
                                 smoothing={imageSmoothing}
                                 sharpening={imageSharpening}
+                                showAnnotations={showAnnotations}
+                                stateKey={selectedSeriesId}
                                 onWindowLevelChange={(wc, wwidth) => {
                                     setDisplayWl(Math.round(wc));
                                     setDisplayWw(Math.round(wwidth));
@@ -2492,17 +2765,20 @@ const ViewScreen = () => {
                                         const xPct = ((e.clientX - rect.left) / rect.width) * 100;
                                         const yPct = ((e.clientY - rect.top) / rect.height) * 100;
                                         const noteCount = annotations.filter(
-                                            (a) => a.slice === sliceIndex && a.kind === "text" && a.mode === "2d"
+                                            (a) => a.seriesId === selectedSeriesId && a.slice === sliceIndex && a.kind === "text" && a.mode === "2d"
                                         ).length;
+                                        const text = window.prompt("请输入标注文字", `标注 ${noteCount + 1}`)?.trim();
+                                        if (!text) return;
                                         setAnnotations((prev) => [
                                             ...prev,
                                             {
                                                 id: `anno-text-${Date.now()}-${Math.random()}`,
+                                                seriesId: selectedSeriesId,
                                                 kind: "text" as const,
                                                 slice: sliceIndex,
                                                 x: xPct,
                                                 y: yPct,
-                                                text: `Note ${noteCount + 1}`,
+                                                text,
                                                 mode: "2d" as const,
                                             },
                                         ]);
@@ -2510,17 +2786,23 @@ const ViewScreen = () => {
                                 />
                             )}
                             {/* ── Text annotation label overlays ── */}
-                            {annotations
-                                .filter((a): a is TextAnnotation => a.slice === sliceIndex && a.kind === "text" && a.mode === "2d")
+                            {showAnnotations && annotations
+                                .filter((a): a is TextAnnotation => a.seriesId === selectedSeriesId && a.slice === sliceIndex && a.kind === "text" && a.mode === "2d")
                                 .map((a) => (
                                     <div
                                         key={a.id}
-                                        className={`absolute z-10 flex items-center gap-1 ${toolMode === "eraser" ? "cursor-pointer" : "pointer-events-none"}`}
+                                        className={`absolute z-10 flex items-center gap-1 ${toolMode === "eraser" || toolMode === "annotate" ? "cursor-pointer" : "pointer-events-none"}`}
                                         style={{ left: `${a.x}%`, top: `${a.y}%`, transform: "translate(-50%, -50%)" }}
                                         onClick={(e) => {
-                                            if (toolMode !== "eraser") return;
                                             e.stopPropagation();
-                                            setAnnotations((prev) => prev.filter((item) => item.id !== a.id));
+                                            if (toolMode === "eraser") {
+                                                setAnnotations((prev) => prev.filter((item) => item.id !== a.id));
+                                                return;
+                                            }
+                                            if (toolMode === "annotate") {
+                                                const text = window.prompt("请输入标注文字", a.text)?.trim();
+                                                if (text) setAnnotations((prev) => prev.map((item) => item.id === a.id ? { ...item, text } : item));
+                                            }
                                         }}
                                     >
                                         <div className="w-1.5 h-1.5 rounded-full bg-[#FFD54F] shrink-0" />
@@ -2555,9 +2837,135 @@ const ViewScreen = () => {
                                 <div>{meta.institution} | {meta.manufacturer}</div>
                             </div>
                         </section>
-                    )}
                 </div>
-                <aside className="w-[72px] bg-[#0F172A] border-l border-white/10 overflow-hidden shrink-0 flex flex-col">
+                <aside className="flex w-[96px] shrink-0 flex-col overflow-hidden border-l border-white/10 bg-[#0F172A]">
+                    <div className="border-b border-white/10 px-2 py-2 text-center">
+                        <div className="text-[9px] font-black uppercase tracking-[0.12em] text-[#60A5FA]">
+                            {imageMode === "2D" ? "2D" : activeMprOrientation === "volume" ? threeDDisplayMode : activeMprOrientation}
+                        </div>
+                        <div className="mt-0.5 truncate text-[9px] font-bold text-white">
+                            {([
+                                ["browse", "层面浏览"], ["pan", "平移"], ["wl", "窗宽/窗位"], ["measure", "长度测量"],
+                                ["annotate", "文字标注"], ["eraser", "删除标注"], ["crosshairs", "三平面定位"],
+                                ["imageRotate", "图像旋转"], ["planeRotate", "切面旋转"], ["rotate3d", "三维旋转"],
+                            ] as const).find(([mode]) => mode === toolMode)?.[1]}
+                        </div>
+                        <div className={`mx-auto mt-1 h-1.5 w-1.5 rounded-full ${viewerLoadStatus === "ready" ? "bg-emerald-400" : viewerLoadStatus === "loading" ? "animate-pulse bg-amber-400" : "bg-red-400"}`} />
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto px-2 py-2" onPointerDown={(event) => event.stopPropagation()}>
+                        <div className="flex flex-col items-center gap-1.5">
+                            {([
+                                { mode: "browse" as const, label: "层面浏览", icon: <ScanLine size={18} /> },
+                                { mode: "pan" as const, label: "平移", icon: <Move size={18} /> },
+                                { mode: "wl" as const, label: "窗宽/窗位", icon: <WindowLevelIcon size={18} /> },
+                                { mode: "measure" as const, label: "长度测量", icon: <Ruler size={18} /> },
+                                { mode: "annotate" as const, label: "文字标注", icon: <Pencil size={18} /> },
+                                { mode: "eraser" as const, label: "删除标注", icon: <X size={18} /> },
+                                { mode: "imageRotate" as const, label: "图像旋转", icon: <RotateCw size={18} /> },
+                                { mode: "crosshairs" as const, label: "三平面定位", icon: <Crosshair size={18} /> },
+                                { mode: "planeRotate" as const, label: "切面旋转", icon: <Orbit size={18} /> },
+                                { mode: "rotate3d" as const, label: "三维旋转", icon: <Orbit size={18} /> },
+                            ]).filter(({ mode }) => isToolSupportedInCurrentView(mode)).map(({ mode, label, icon }) => {
+                                const active = toolMode === mode;
+                                return (
+                                    <button
+                                        key={mode}
+                                        type="button"
+                                        aria-pressed={active}
+                                        onClick={() => {
+                                            setToolMode(mode);
+                                            lastToolByModeRef.current[imageMode] = mode;
+                                            if (mode === "measure" || mode === "annotate") setShowAnnotations(true);
+                                            if (mode === "planeRotate") showViewerNotice("拖动彩色参考线旋转 MPR 切面");
+                                            if (mode === "imageRotate") showViewerNotice("仅旋转当前画面，不改变切面");
+                                            if (mode === "rotate3d") showViewerNotice("拖动当前三维视口改变观察方向");
+                                        }}
+                                        className={`flex h-[50px] w-[72px] flex-col items-center justify-center rounded-[10px] border text-[9px] font-bold transition-colors ${active
+                                            ? "border-[#60A5FA] bg-[#2563EB] text-white shadow-[0_0_12px_rgba(59,130,246,0.45)]"
+                                            : "border-white/10 bg-white/5 text-[#CBD5E1] active:bg-white/15"
+                                            }`}
+                                    >
+                                        {icon}
+                                        <span className="mt-1 leading-none">{label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <div className="my-2 h-px bg-white/10" />
+
+                        <div className="grid grid-cols-2 gap-1">
+                            <button
+                                type="button"
+                                aria-label="放大"
+                                onClick={() => imageMode === "2D" ? dicomViewerRef.current?.zoomIn() : mprRef.current?.zoomIn()}
+                                className="flex h-[44px] items-center justify-center rounded-lg bg-white/5 text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15"
+                            ><ZoomIn size={18} /></button>
+                            <button
+                                type="button"
+                                aria-label="缩小"
+                                onClick={() => imageMode === "2D" ? dicomViewerRef.current?.zoomOut() : mprRef.current?.zoomOut()}
+                                className="flex h-[44px] items-center justify-center rounded-lg bg-white/5 text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15"
+                            ><ZoomOut size={18} /></button>
+                            <button
+                                type="button"
+                                aria-label="上一层"
+                                disabled={!canBrowseSlicesInActiveViewport || (imageMode === "2D" && !canPageBackward)}
+                                onClick={() => handleSliceStep(-1)}
+                                className="flex h-[44px] items-center justify-center rounded-lg bg-white/5 text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15 disabled:opacity-30"
+                            ><ChevronUp size={18} /></button>
+                            <button
+                                type="button"
+                                aria-label="下一层"
+                                disabled={!canBrowseSlicesInActiveViewport || (imageMode === "2D" && !canPageForward)}
+                                onClick={() => handleSliceStep(1)}
+                                className="flex h-[44px] items-center justify-center rounded-lg bg-white/5 text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15 disabled:opacity-30"
+                            ><ChevronDown size={18} /></button>
+                        </div>
+
+                        <div className="mt-1.5 flex flex-col gap-1.5">
+                            <button
+                                type="button"
+                                onClick={handleFitActiveViewport}
+                                className="flex h-[44px] items-center justify-center gap-1.5 rounded-lg bg-white/5 px-1 text-[9px] font-bold text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15"
+                            ><Maximize size={16} /><span>适合窗口</span></button>
+                            <button
+                                type="button"
+                                onClick={() => setShowAnnotations((current) => !current)}
+                                className={`flex h-[44px] items-center justify-center gap-1.5 rounded-lg px-1 text-[9px] font-bold ring-1 ${showAnnotations ? "bg-white/5 text-[#CBD5E1] ring-white/10" : "bg-[#1E3A8A] text-[#93C5FD] ring-[#3B82F6]"}`}
+                            >{showAnnotations ? <Eye size={16} /> : <EyeOff size={16} />}<span>{showAnnotations ? "隐藏标注" : "显示标注"}</span></button>
+                            {isReaderModeSupported && (
+                                <button
+                                    type="button"
+                                    onClick={() => setReaderMode((current) => !current)}
+                                    className={`flex h-[44px] items-center justify-center gap-1.5 rounded-lg px-1 text-[9px] font-bold ring-1 ${isReaderModeActive ? "bg-[#2563EB] text-white ring-[#60A5FA]" : "bg-white/5 text-[#CBD5E1] ring-white/10"}`}
+                                >{isReaderModeActive ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}<span>{isReaderModeActive ? "退出阅片" : "阅片模式"}</span></button>
+                            )}
+                            <button
+                                type="button"
+                                disabled={!isPlaybackEnabled}
+                                onClick={() => setIsPlaying((current) => !current)}
+                                className={`flex h-[44px] items-center justify-center gap-1.5 rounded-lg px-1 text-[9px] font-bold ring-1 disabled:opacity-30 ${isPlaying ? "bg-[#2563EB] text-white ring-[#60A5FA]" : "bg-white/5 text-[#CBD5E1] ring-white/10"}`}
+                            >{isPlaying ? <Pause size={16} /> : <Play size={16} />}<span>{isPlaying ? "暂停" : isFourDLungReconSeries ? "播放时相" : "连续播放"}</span></button>
+                            <button
+                                type="button"
+                                onClick={() => setIsResetSheetOpen(true)}
+                                className="flex h-[44px] items-center justify-center gap-1.5 rounded-lg bg-white/5 px-1 text-[9px] font-bold text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15"
+                            ><RefreshCw size={16} /><span>复位</span></button>
+                        </div>
+
+                        {isFourDLungReconSeries && (
+                            <button
+                                type="button"
+                                onClick={cyclePhaseCineSpeed}
+                                className="mt-1.5 flex h-[44px] w-full items-center justify-center rounded-lg bg-white/5 text-[10px] font-black text-white ring-1 ring-white/10"
+                            >速度 {phaseCineSpeed}×</button>
+                        )}
+                    </div>
+                </aside>
+
+                <aside className="hidden w-[72px] bg-[#0F172A] border-l border-white/10 overflow-hidden shrink-0 flex-col">
                         <div className="flex-1 flex flex-col gap-1 p-2 pt-3" onPointerDown={(e) => e.stopPropagation()}>
                             {(["pan", "wl", "measure", "annotate", "crosshairs"] as const).map((mode, i) => {
                                 const icons = [
@@ -2760,6 +3168,63 @@ const ViewScreen = () => {
                 </div>
                 </div>
             </main>
+
+            {viewerNotice && (
+                <div className="pointer-events-none absolute left-1/2 top-[82px] z-[90] -translate-x-1/2 rounded-full border border-[#93C5FD] bg-[#0F172A]/95 px-4 py-2 text-[11px] font-bold text-white shadow-xl">
+                    {viewerNotice}
+                </div>
+            )}
+
+            {isResetSheetOpen && !pendingReset && (
+                <div className="absolute inset-0 z-[70] flex items-end justify-center bg-[#0F172A]/40 p-4" onPointerDown={() => setIsResetSheetOpen(false)}>
+                    <div className="w-[620px] rounded-2xl border border-[#B7D5FF] bg-white p-4 shadow-2xl" onPointerDown={(event) => event.stopPropagation()}>
+                        <div className="mb-3 flex items-center justify-between">
+                            <div>
+                                <div className="text-[15px] font-black text-[#1E293B]">复位</div>
+                                <div className="mt-0.5 text-[10px] text-[#64748B]">选择复位范围；任何复位都不会删除标注或切换序列。</div>
+                            </div>
+                            <button type="button" aria-label="关闭" onClick={() => setIsResetSheetOpen(false)} className="flex h-[44px] w-[44px] items-center justify-center rounded-xl bg-[#F1F5F9] text-[#475569]"><X size={20} /></button>
+                        </div>
+                        <div className={`grid gap-2 ${imageMode === "3D" ? "grid-cols-4" : "grid-cols-3"}`}>
+                            <button type="button" onClick={handleResetCurrentView} className="min-h-[66px] rounded-xl border border-[#DCE6F2] bg-[#F8FAFC] px-3 text-left active:bg-[#DBEAFE]">
+                                <div className="text-[11px] font-black text-[#1E293B]">复位当前视图</div>
+                                <div className="mt-1 text-[9px] leading-[1.35] text-[#64748B]">恢复当前视口的位置、缩放和画面旋转</div>
+                            </button>
+                            <button type="button" onClick={handleRestoreDisplay} className="min-h-[66px] rounded-xl border border-[#DCE6F2] bg-[#F8FAFC] px-3 text-left active:bg-[#DBEAFE]">
+                                <div className="text-[11px] font-black text-[#1E293B]">恢复显示参数</div>
+                                <div className="mt-1 text-[9px] leading-[1.35] text-[#64748B]">恢复窗值、反色、平滑、锐化等设置</div>
+                            </button>
+                            {imageMode === "3D" && (
+                                <button type="button" onClick={() => setPendingReset("planes")} className="min-h-[66px] rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3 text-left active:bg-[#FEF3C7]">
+                                    <div className="text-[11px] font-black text-[#92400E]">复位三维切面</div>
+                                    <div className="mt-1 text-[9px] leading-[1.35] text-[#A16207]">恢复正交切面与中心定位</div>
+                                </button>
+                            )}
+                            <button type="button" onClick={() => setPendingReset("all")} className="min-h-[66px] rounded-xl border border-[#FCA5A5] bg-[#FEF2F2] px-3 text-left active:bg-[#FEE2E2]">
+                                <div className="text-[11px] font-black text-[#991B1B]">全部复位</div>
+                                <div className="mt-1 text-[9px] leading-[1.35] text-[#B91C1C]">恢复当前模式的布局、视图与显示参数</div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {pendingReset && (
+                <div className="absolute inset-0 z-[80] flex items-center justify-center bg-[#0F172A]/55 p-4">
+                    <div className="w-[420px] rounded-2xl border border-[#FCD34D] bg-white p-5 shadow-2xl">
+                        <div className="text-[16px] font-black text-[#1E293B]">确认{pendingReset === "planes" ? "复位三维切面" : "全部复位"}？</div>
+                        <div className="mt-2 text-[11px] leading-relaxed text-[#64748B]">
+                            {pendingReset === "planes"
+                                ? "轴状面、冠状面和矢状面将恢复默认正交关系，定位点回到初始位置。窗宽/窗位和标注保持不变。"
+                                : "当前模式下的布局、视图、显示参数和空间位置将恢复默认。标注、选中序列和原始数据不会改变。"}
+                        </div>
+                        <div className="mt-5 grid grid-cols-2 gap-3">
+                            <button type="button" onClick={() => setPendingReset(null)} className="flex h-[52px] items-center justify-center gap-2 rounded-xl border border-[#CBD5E1] bg-white text-[12px] font-black text-[#475569]"><X size={18} />取消</button>
+                            <button type="button" onClick={() => confirmReset(pendingReset)} className="flex h-[52px] items-center justify-center gap-2 rounded-xl bg-[#2563EB] text-[12px] font-black text-white shadow-lg"><Check size={18} />确认复位</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {!isReaderModeActive && (
                 <footer className="h-[80px] bg-[#E8EAF1] border-t border-[#B0C4DE] flex items-center shrink-0 px-8 z-10">

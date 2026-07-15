@@ -16,9 +16,10 @@ import {
     AlertTriangle,
     Info,
     CircleDot,
-    Zap,
     Radio
 } from "lucide-react";
+import PhysicalControlPanelSvg from "../components/PhysicalControlPanelSvg";
+import { PhysicalButtonStatusDot } from "../components/SimulatedPhysicalButton";
 import SystemMenuButton from "../components/SystemMenuButton";
 import iconTable from "../assets/icon-table.svg";
 import iconGantry from "../assets/icon-gantry.svg";
@@ -89,6 +90,15 @@ const MockScanScreen = () => {
         if (!isEnabled || isExposing) return;
         setIsExposing(true);
         setTimeout(() => setIsExposing(false), 1200);
+    };
+
+    const handlePhysicalButtonPress = () => {
+        if (isExposing) return;
+        if (!isEnabled) {
+            handleEnableToggle();
+            return;
+        }
+        handleExpose();
     };
 
     return (
@@ -301,32 +311,32 @@ const MockScanScreen = () => {
                             </div>
                         </div>
 
-                        <div className={`absolute top-1/2 -translate-y-1/2 right-3 w-[160px] rounded-xl border shadow-xl transition-all duration-300 ${isPatientConfirmed ? "translate-x-0 opacity-100 border-[#9EB5CC] bg-[#F8FAFC]" : "translate-x-[180px] opacity-0 pointer-events-none border-[#B0C4DE] bg-white"}`}>
+                        <div className={`absolute top-1/2 -translate-y-1/2 right-3 w-[180px] rounded-xl border shadow-xl transition-all duration-300 ${isPatientConfirmed ? "translate-x-0 opacity-100 border-[#9EB5CC] bg-[#F8FAFC]" : "translate-x-[200px] opacity-0 pointer-events-none border-[#B0C4DE] bg-white"}`}>
                             <div className="h-[34px] px-3 border-b border-[#DCE6F2] flex items-center justify-between">
                                 <span className="text-[10px] font-black text-[#546E7A] tracking-wide">模拟物理按键</span>
                                 <Radio size={12} className={isEnabled ? "text-[#4D94FF]" : "text-[#90A4AE]"} />
                             </div>
-                            <div className="p-3 flex flex-col gap-2">
-                                <button
-                                    onClick={handleEnableToggle}
-                                    disabled={interactionLocked}
-                                    className={`h-[44px] rounded-md border text-[12px] font-black transition-all ${isEnabled ? "bg-[#E3F2FD] border-[#4D94FF] text-[#1565C0]" : "bg-white border-[#B0C4DE] text-[#607D8B] hover:border-[#4D94FF]"}`}
-                                >
-                                    {isEnabled ? "使能: 开" : "使能: 关"}
-                                </button>
-                                <button
-                                    onClick={handleExpose}
-                                    disabled={!isEnabled || isExposing}
-                                    className={`h-[54px] rounded-md border text-[13px] font-black transition-all flex items-center justify-center gap-1.5 ${!isEnabled
-                                        ? "bg-[#ECEFF1] border-[#CFD8DC] text-[#90A4AE] cursor-not-allowed"
-                                        : isExposing
-                                            ? "bg-[#E8F5E9] border-[#66BB6A] text-[#2E7D32]"
-                                            : "bg-[#4D94FF] border-[#4D94FF] text-white hover:bg-blue-600"
-                                        }`}
-                                >
-                                    <Zap size={14} />
-                                    {isExposing ? "曝光中" : "曝光"}
-                                </button>
+                            <div className="flex flex-col items-center px-3 py-4">
+                                <div className="mb-3 flex items-center gap-2">
+                                    <PhysicalButtonStatusDot active={isEnabled || isExposing} size="small" />
+                                    <span className="text-[9px] font-black tracking-[0.1em] text-[#607D8B]">
+                                        {isExposing ? "模拟曝光中" : isEnabled ? "使能已建立" : "等待使能"}
+                                    </span>
+                                </div>
+                                <PhysicalControlPanelSvg
+                                    active={isEnabled || isExposing}
+                                    className="w-[55px]"
+                                    lampOn
+                                    onPressStart={handlePhysicalButtonPress}
+                                    panelLabel="模拟物理按键"
+                                    triggerLabel={isEnabled ? "曝光键" : "使能键"}
+                                />
+                                <div className="mt-3 text-[12px] font-black text-[#0F5130]">
+                                    {isExposing ? "曝光中" : isEnabled ? "曝光键" : "使能键"}
+                                </div>
+                                <div className="mt-1 text-center text-[9px] font-semibold leading-tight text-[#90A4AE]">
+                                    {isEnabled ? "按一下开始模拟曝光" : "按一下建立模拟使能"}
+                                </div>
                             </div>
                         </div>
                     </section>

@@ -1,6 +1,7 @@
 import { AlertTriangle, Square, X } from "lucide-react";
 
-import SimulatedPhysicalButton, { PhysicalButtonStatusDot } from "../../../../components/SimulatedPhysicalButton";
+import PhysicalControlPanelSvg from "../../../../components/PhysicalControlPanelSvg";
+import { PhysicalButtonStatusDot } from "../../../../components/SimulatedPhysicalButton";
 import { useI18n } from "../../../../lib/i18nContext";
 import type { WarmupPhase, WarmupStatus } from "../types";
 
@@ -63,23 +64,27 @@ export function WarmupOverlays({
               </div>
             </div>
 
-            <div className="mt-7 flex flex-col items-center rounded-2xl border border-[#D6E0EA] bg-slate-50 px-6 py-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
-              <div className="mb-4 flex items-center gap-2">
-                <PhysicalButtonStatusDot />
-                <span className="text-[11px] font-black tracking-[0.12em] text-slate-500">
-                  {t("service.tubeWarmup.physicalGuideWaiting")}
-                </span>
-              </div>
-              <SimulatedPhysicalButton
-                ariaLabel={t("service.tubeWarmup.exposureButton")}
+            <div className="mt-7 flex items-center justify-center gap-8 rounded-2xl border border-[#D6E0EA] bg-slate-50 px-8 py-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+              <PhysicalControlPanelSvg
+                className="w-[62px] shrink-0"
+                lampOn
                 onPressStart={handlePhysicalTrigger}
-                size="compact"
+                panelLabel={t("service.tubeWarmup.physicalGuideTitle")}
+                triggerLabel={t("service.tubeWarmup.exposureButton")}
               />
-              <div className="mt-4 text-[14px] font-black text-[#0F5130]">
-                {t("service.tubeWarmup.exposureButton")}
-              </div>
-              <div className="mt-1 text-[10px] font-semibold text-slate-400">
-                {t("service.tubeWarmup.simulationOnly")}
+              <div className="min-w-0">
+                <div className="mb-4 flex items-center gap-2">
+                  <PhysicalButtonStatusDot />
+                  <span className="text-[11px] font-black tracking-[0.12em] text-slate-500">
+                    {t("service.tubeWarmup.physicalGuideWaiting")}
+                  </span>
+                </div>
+                <div className="text-[16px] font-black text-[#0F5130]">
+                  {t("service.tubeWarmup.exposureButton")}
+                </div>
+                <div className="mt-2 max-w-[220px] text-[11px] font-semibold leading-relaxed text-slate-400">
+                  {t("service.tubeWarmup.simulationOnly")}
+                </div>
               </div>
             </div>
           </div>

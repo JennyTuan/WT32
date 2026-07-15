@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Enums, RenderingEngine, type StackViewport } from '@cornerstonejs/core';
+import { Enums, RenderingEngine, type StackViewport, type Types } from '@cornerstonejs/core';
 import { annotation } from '@cornerstonejs/tools';
 
 import {
@@ -14,7 +14,7 @@ import { fromVoiRange, getVoiLutFunction, toVoiRange, type VoiLutMode } from '..
 import { FeedbackViewportOverlay } from './FeedbackNotice';
 import { useI18n } from '../lib/i18nContext';
 
-type ActiveTool = 'pan' | 'zoom' | 'zoomin' | 'window' | 'ruler' | 'eraser' | 'zoomout' | 'fit' | 'flip' | 'reset' | 'annotate';
+type ActiveTool = 'pan' | 'zoom' | 'zoomin' | 'window' | 'ruler' | 'eraser' | 'zoomout' | 'fit' | 'flip' | 'reset' | 'annotate' | 'stackScroll' | 'planarRotate';
 type InterpolationMode = 'NEAREST' | 'LINEAR' | 'FAST_LINEAR';
 type AppliedDisplayProperties = {
   lower: number;
@@ -30,6 +30,7 @@ export type CornerstoneViewportHandle = {
   zoomIn: () => void;
   zoomOut: () => void;
   fit: () => void;
+  resetView: () => void;
   reset: () => void;
   clearAnnotations: () => void;
 };
@@ -51,6 +52,8 @@ interface CornerstoneStackViewportProps {
   voiLutMode?: VoiLutMode;
   smoothing?: number;
   sharpening?: number;
+  showAnnotations?: boolean;
+  stateKey?: string;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -116,7 +119,9 @@ function isSupportedActiveTool(value: string | undefined): value is ActiveTool {
     value === 'fit' ||
     value === 'flip' ||
     value === 'reset' ||
-    value === 'annotate'
+    value === 'annotate' ||
+    value === 'stackScroll' ||
+    value === 'planarRotate'
   );
 }
 
@@ -139,6 +144,8 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       voiLutMode = 'LINEAR',
       smoothing = 0,
       sharpening = 0,
+      showAnnotations = true,
+      stateKey = 'default',
     },
     ref
   ) {
@@ -157,6 +164,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
     const lastSentVoiRef = useRef<{ lower: number; upper: number } | null>(null);
     const lastEmittedVoiRef = useRef<{ lower: number; upper: number } | null>(null);
     const lastAppliedDisplayRef = useRef<AppliedDisplayProperties | null>(null);
+    const cameraByStateKeyRef = useRef<Map<string, Types.ICamera>>(new Map());
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [errorMsg, setErrorMsg] = useState('');
 
@@ -181,6 +189,24 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       fit: () => {
         const viewport = viewportRef.current;
         if (!viewport) return;
+        const camera = viewport.getCamera();
+        viewport.resetCamera();
+        viewport.setCamera({
+          viewPlaneNormal: camera.viewPlaneNormal,
+          viewUp: camera.viewUp,
+          flipHorizontal: camera.flipHorizontal,
+          flipVertical: camera.flipVertical,
+        });
+        viewport.render();
+      },
+      resetView: () => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+        const toolGroup = getOrCreateToolGroup(toolGroupIdRef.current);
+        const rotateTool = toolGroup.getToolInstance(TOOL_NAMES.planarRotate) as {
+          setAngle?: (target: StackViewport, angle: number) => void;
+        } | undefined;
+        rotateTool?.setAngle?.(viewport, 0);
         viewport.resetCamera();
         viewport.render();
       },
@@ -200,6 +226,16 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       },
     }));
 
+    useEffect(() => {
+      const allAnnotations = annotation.state.getAllAnnotations();
+      allAnnotations.forEach((item) => {
+        if (item.annotationUID) {
+          annotation.visibility.setAnnotationVisibility(item.annotationUID, showAnnotations);
+        }
+      });
+      viewportRef.current?.render();
+    }, [showAnnotations]);
+
     // ─── Viewport setup (only reruns when the image URLs change, NOT on every slice) ───
     useEffect(() => {
       const urls = imageUrls?.length ? imageUrls : dicomUrl ? [dicomUrl] : [];
@@ -211,6 +247,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
 
       let disposed = false;
       const toolGroupId = toolGroupIdRef.current;
+      const cameraByStateKey = cameraByStateKeyRef.current;
 
       const setupViewport = async () => {
         try {
@@ -248,6 +285,10 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
 
           // Start at index 0; the separate currentImageIndex effect will jump to the right position
           await viewport.setStack(urls.map(buildWadoImageId), 0);
+          const savedCamera = cameraByStateKey.get(stateKey);
+          if (savedCamera) {
+            try { viewport.setCamera(savedCamera); } catch { /* series geometry may differ */ }
+          }
           viewport.render();
 
           resizeObserverRef.current = new ResizeObserver(() => {
@@ -272,6 +313,8 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
 
       return () => {
         disposed = true;
+        const camera = viewportRef.current?.getCamera();
+        if (camera) cameraByStateKey.set(stateKey, camera);
         resizeObserverRef.current?.disconnect();
         resizeObserverRef.current = null;
         destroyToolGroup(toolGroupId);
@@ -283,7 +326,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       };
       // currentImageIndex intentionally excluded — handled by the effect below
        
-    }, [dicomUrl, imageUrls, t]);
+    }, [dicomUrl, imageUrls, stateKey, t]);
 
     // ─── Slice navigation (lightweight, no teardown) ───
     useEffect(() => {
@@ -365,9 +408,19 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
         toolGroup.setToolPassive(TOOL_NAMES.length);
         toolGroup.setToolPassive(TOOL_NAMES.eraser);
+        toolGroup.setToolPassive(TOOL_NAMES.stackScroll);
+        toolGroup.setToolPassive(TOOL_NAMES.planarRotate);
         toolGroup.setToolActive(toolName, {
-          bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Primary }],
+          bindings: [
+            { mouseButton: CornerstoneToolsEnums.MouseBindings.Primary },
+            { numTouchPoints: 1 },
+          ],
         });
+        if (toolName !== TOOL_NAMES.stackScroll) {
+          toolGroup.setToolActive(TOOL_NAMES.stackScroll, {
+            bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Wheel }],
+          });
+        }
       };
 
       switch (isSupportedActiveTool(activeTool) ? activeTool : 'pan') {
@@ -385,6 +438,24 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
           break;
         case 'eraser':
           setPrimaryTool(TOOL_NAMES.eraser);
+          break;
+        case 'stackScroll':
+          toolGroup.setToolPassive(TOOL_NAMES.pan);
+          toolGroup.setToolPassive(TOOL_NAMES.zoom);
+          toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
+          toolGroup.setToolPassive(TOOL_NAMES.length);
+          toolGroup.setToolPassive(TOOL_NAMES.eraser);
+          toolGroup.setToolPassive(TOOL_NAMES.planarRotate);
+          toolGroup.setToolActive(TOOL_NAMES.stackScroll, {
+            bindings: [
+              { mouseButton: CornerstoneToolsEnums.MouseBindings.Primary },
+              { mouseButton: CornerstoneToolsEnums.MouseBindings.Wheel },
+              { numTouchPoints: 1 },
+            ],
+          });
+          break;
+        case 'planarRotate':
+          setPrimaryTool(TOOL_NAMES.planarRotate);
           break;
         case 'zoomin':
           viewport.setZoom(clamp(viewport.getZoom() * 1.15, 0.2, 20));
@@ -419,9 +490,71 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
           toolGroup.setToolPassive(TOOL_NAMES.windowLevel);
           toolGroup.setToolPassive(TOOL_NAMES.length);
           toolGroup.setToolPassive(TOOL_NAMES.eraser);
+          toolGroup.setToolPassive(TOOL_NAMES.stackScroll);
+          toolGroup.setToolPassive(TOOL_NAMES.planarRotate);
           break;
       }
     }, [activeTool, status]);
+
+    // 双指手势同时支持缩放和移动，避免平板上依赖鼠标滚轮或右键。
+    useEffect(() => {
+      const element = elementRef.current;
+      if (!element || status !== 'ready') return;
+
+      let gesture: {
+        distance: number;
+        midpoint: [number, number];
+        zoom: number;
+        pan: [number, number];
+      } | null = null;
+
+      const readPair = (event: TouchEvent) => {
+        if (event.touches.length < 2) return null;
+        const first = event.touches[0];
+        const second = event.touches[1];
+        return {
+          distance: Math.max(1, Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY)),
+          midpoint: [(first.clientX + second.clientX) / 2, (first.clientY + second.clientY) / 2] as [number, number],
+        };
+      };
+
+      const handleTouchStart = (event: TouchEvent) => {
+        const pair = readPair(event);
+        const viewport = viewportRef.current;
+        if (!pair || !viewport) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const pan = viewport.getPan();
+        gesture = { ...pair, zoom: viewport.getZoom(), pan: [pan[0], pan[1]] };
+      };
+      const handleTouchMove = (event: TouchEvent) => {
+        const pair = readPair(event);
+        const viewport = viewportRef.current;
+        if (!pair || !viewport || !gesture) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        viewport.setZoom(clamp(gesture.zoom * (pair.distance / gesture.distance), 0.2, 20));
+        viewport.setPan([
+          gesture.pan[0] + pair.midpoint[0] - gesture.midpoint[0],
+          gesture.pan[1] + pair.midpoint[1] - gesture.midpoint[1],
+        ]);
+        viewport.render();
+      };
+      const handleTouchEnd = (event: TouchEvent) => {
+        if (event.touches.length < 2) gesture = null;
+      };
+
+      element.addEventListener('touchstart', handleTouchStart, { passive: false, capture: true });
+      element.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true });
+      element.addEventListener('touchend', handleTouchEnd, { capture: true });
+      element.addEventListener('touchcancel', handleTouchEnd, { capture: true });
+      return () => {
+        element.removeEventListener('touchstart', handleTouchStart, true);
+        element.removeEventListener('touchmove', handleTouchMove, true);
+        element.removeEventListener('touchend', handleTouchEnd, true);
+        element.removeEventListener('touchcancel', handleTouchEnd, true);
+      };
+    }, [status]);
 
     // ─── Report WW/WL changes back to parent (e.g. after user drags WL tool) ───
     useEffect(() => {
@@ -526,7 +659,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
     return (
       <div
         ref={elementRef}
-        className={className ?? 'w-full h-full relative overflow-hidden bg-black'}
+        className={className ?? 'w-full h-full relative overflow-hidden bg-black touch-none'}
       >
         {status === 'loading' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#4D94FF]/40">

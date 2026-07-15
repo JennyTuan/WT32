@@ -12,6 +12,7 @@ import {
   init as initCornerstoneTools,
   LengthTool,
   PanTool,
+  PlanarRotateTool,
   StackScrollTool,
   TrackballRotateTool,
   ToolGroupManager,
@@ -32,6 +33,7 @@ const TOOL_NAMES = {
   length: 'Length',
   eraser: 'Eraser',
   stackScroll: 'StackScroll',
+  planarRotate: 'PlanarRotate',
   crosshairs: 'Crosshairs',
   trackballRotate: 'TrackballRotate',
 } as const;
@@ -47,6 +49,7 @@ function registerTools() {
   addTool(LengthTool);
   addTool(EraserTool);
   addTool(StackScrollTool);
+  addTool(PlanarRotateTool);
   addTool(CrosshairsTool);
   addTool(TrackballRotateTool);
   toolsRegistered = true;
@@ -94,6 +97,7 @@ export function getOrCreateToolGroup(toolGroupId: string) {
   toolGroup.addTool(TOOL_NAMES.length);
   toolGroup.addTool(TOOL_NAMES.eraser);
   toolGroup.addTool(TOOL_NAMES.stackScroll);
+  toolGroup.addTool(TOOL_NAMES.planarRotate);
   toolGroup.addTool(TOOL_NAMES.trackballRotate);
   toolGroup.addTool(TOOL_NAMES.crosshairs, {
     getReferenceLineColor: (viewportId: string) => {
@@ -120,6 +124,12 @@ export function getOrCreateToolGroup(toolGroupId: string) {
       color: 'rgba(255, 255, 255, 0.8)',
       size: 3,
     },
+    mobile: {
+      enabled: true,
+      opacity: 0.92,
+      handleRadius: 12,
+      referenceLinesCenterGapRatio: 0.08,
+    },
   });
   toolGroup.setToolPassive(TOOL_NAMES.pan);
   toolGroup.setToolPassive(TOOL_NAMES.zoom);
@@ -127,6 +137,7 @@ export function getOrCreateToolGroup(toolGroupId: string) {
   toolGroup.setToolPassive(TOOL_NAMES.length);
   toolGroup.setToolPassive(TOOL_NAMES.eraser);
   toolGroup.setToolPassive(TOOL_NAMES.trackballRotate);
+  toolGroup.setToolPassive(TOOL_NAMES.planarRotate);
   toolGroup.setToolEnabled(TOOL_NAMES.crosshairs);
   toolGroup.setToolActive(TOOL_NAMES.stackScroll, {
     bindings: [{ mouseButton: CornerstoneToolsEnums.MouseBindings.Wheel }],

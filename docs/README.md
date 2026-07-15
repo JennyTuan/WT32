@@ -8,6 +8,7 @@ This directory holds project notes that are too detailed for the root README.
 - [database-migrations.md](database-migrations.md): PostgreSQL configuration, Alembic migration, rollback, and verification.
 - [agents/](agents/): AI assistant configuration for issue tracking, triage labels, domain docs, and testing baseline.
 - [常规扫描模块测试用例.md](常规扫描模块测试用例.md): Smoke, P0/P1/P2 test cases for the regular scan module, excluding gating, 4D, and DOM.
+- [图像浏览模块功能说明.md](图像浏览模块功能说明.md): 图像浏览的 2D/3D 模式、工具适用矩阵、平板触屏交互、切换与复位规则。
 - [4D-image-viewer-plan.md](4D-image-viewer-plan.md): 4D-Lung preprocessing and `/image-viewer` data integration plan.
 - [4D工程师IMG数据接入说明.md](4D工程师IMG数据接入说明.md): Engineer-provided 4D `.img` data parsing, preview generation, phase filtering, and formal frontend integration contract.
 - [reconstruction-service-integration.md](reconstruction-service-integration.md): 离线重建任务服务、Provider 接口、新序列接入、错误码与后续扩展说明。

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, X } from "lucide-react";
 import { FeedbackNotice } from "../components/FeedbackNotice";
 import { calcAgeFromBirthDate, createPatient } from "../lib/patientsApi";
@@ -74,6 +75,13 @@ interface AddPatientModalProps {
     onCreated?: () => void;
 }
 
+type ScreenBounds = {
+    height: number;
+    left: number;
+    top: number;
+    width: number;
+};
+
 const generateDefaultPatientId = (): string => {
     const now = new Date();
     const y = now.getFullYear();
@@ -100,6 +108,7 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
     const [formData, setFormData] = useState(emptyForm);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [screenBounds, setScreenBounds] = useState<ScreenBounds | null>(null);
 
     // Reset form whenever the modal is reopened so each new entry starts clean.
     useEffect(() => {
@@ -110,7 +119,34 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
         }
     }, [isOpen]);
 
-    if (!isOpen) return null;
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const screenRoot = document.getElementById("wt32-screen-root");
+        if (!screenRoot) return;
+
+        const updateBounds = () => {
+            const rect = screenRoot.getBoundingClientRect();
+            setScreenBounds({
+                height: Math.round(rect.height),
+                left: Math.round(rect.left),
+                top: Math.round(rect.top),
+                width: Math.round(rect.width),
+            });
+        };
+
+        updateBounds();
+        const resizeObserver = new ResizeObserver(updateBounds);
+        resizeObserver.observe(screenRoot);
+        window.addEventListener("resize", updateBounds);
+
+        return () => {
+            resizeObserver.disconnect();
+            window.removeEventListener("resize", updateBounds);
+        };
+    }, [isOpen]);
+
+    if (!isOpen || !screenBounds) return null;
 
     const update = (key: keyof ReturnType<typeof emptyForm>) => (value: string) => {
         setFormData((prev) => ({ ...prev, [key]: value }));
@@ -181,13 +217,26 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
         }
     };
 
-    return (
-        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-[2px] rounded-md overflow-hidden">
+    return createPortal(
+        <div
+            className="fixed z-[1000] flex items-center justify-center overflow-hidden rounded-[20px] bg-black/40 p-4 backdrop-blur-[2px]"
+            style={{
+                height: screenBounds.height,
+                left: screenBounds.left,
+                top: screenBounds.top,
+                width: screenBounds.width,
+            }}
+        >
             {/* Modal Container */}
-            <div className="w-[840px] bg-white rounded-xl border border-[#B0C4DE] shadow-2xl overflow-hidden flex flex-col transition-all duration-200">
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="add-patient-title"
+                className="flex max-h-full w-full max-w-[840px] flex-col overflow-hidden rounded-xl border border-[#B0C4DE] bg-white shadow-2xl"
+            >
                 {/* Tab-like Title Area */}
-                <div className="h-[64px] bg-[#F8FAFC] border-b border-[#EEF2F9] px-8 flex items-center justify-between">
-                    <h2 className="text-[24px] font-bold text-[#263238] tracking-tight">{t("addPatient.title")}</h2>
+                <div className="flex h-[64px] shrink-0 items-center justify-between border-b border-[#EEF2F9] bg-[#F8FAFC] px-8">
+                    <h2 id="add-patient-title" className="text-[24px] font-bold tracking-tight text-[#263238]">{t("addPatient.title")}</h2>
                     <button
                         onClick={onClose}
                         className="p-2 text-[#90A4AE] hover:text-[#D32F2F] hover:bg-red-50 rounded-full transition-all"
@@ -197,7 +246,7 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
                 </div>
 
                 {/* Form Body */}
-                <div className="p-10 flex flex-col gap-6 bg-white">
+                <div className="flex min-h-0 flex-col gap-6 overflow-y-auto bg-white p-10">
                     <div className="grid grid-cols-2 gap-x-12 gap-y-6">
                         <InputBox label={t("addPatient.lastName")} value={formData.lastName} onChange={update("lastName")} placeholder={t("addPatient.lastNamePlaceholder")} required />
                         <InputBox label={t("addPatient.firstName")} value={formData.firstName} onChange={update("firstName")} placeholder={t("addPatient.firstNamePlaceholder")} required />
@@ -247,7 +296,8 @@ const AddPatientScreen = ({ isOpen, onClose, onCreated }: AddPatientModalProps) 
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body,
     );
 };
 

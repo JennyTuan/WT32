@@ -124,6 +124,7 @@ export default function App() {
           </div>
 
           <div
+            id="wt32-screen-root"
             className="absolute left-1/2 top-1/2 origin-center overflow-hidden rounded-[24px] bg-[#0B1220] ring-1 ring-black/30 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]"
             style={{
               width: TABLET_WIDTH,
