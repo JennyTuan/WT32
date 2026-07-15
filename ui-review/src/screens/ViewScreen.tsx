@@ -681,8 +681,6 @@ const ViewScreen = () => {
     const [isVolumePresetOpen, setIsVolumePresetOpen] = useState(false);
     const [isRenderModeOpen, setIsRenderModeOpen] = useState(false);
     const [isWindowPresetOpen, setIsWindowPresetOpen] = useState(false);
-    const [isVoiLutOpen, setIsVoiLutOpen] = useState(false);
-    const [isInterpolationOpen, setIsInterpolationOpen] = useState(false);
     const [isVolumeQualityOpen, setIsVolumeQualityOpen] = useState(false);
     // ─── 离线重建参数状态 (仅 isOfflineRecon 模式使用) ──────────────────────────
     type ReconParams = {
@@ -2049,7 +2047,7 @@ const ViewScreen = () => {
                             </span>
                         </div>
                         {!isFourDLungReconSeries ? (
-                            <div className="flex items-center gap-1 rounded-xl border border-[#B7D5FF] bg-[#EAF2FF] p-1 shadow-sm overflow-hidden">
+                            <div className="flex items-center gap-px overflow-hidden rounded-md border border-[#B7D5FF] bg-[#EAF2FF] p-0.5 shadow-sm">
                                 {(["2D", "3D"] as const).map((mode) => {
                                     const active = imageMode === mode;
                                     const disabled = mode === "3D" && !canUse3D;
@@ -2061,8 +2059,8 @@ const ViewScreen = () => {
                                             disabled={disabled}
                                             aria-pressed={active}
                                             title={disabled ? (isTopogramSeries ? "定位像仅支持 2D 浏览" : "图像层数不足，无法进入 3D") : `${mode} 模式`}
-                                            className={`min-w-[52px] h-[44px] px-3 rounded-lg text-[12px] font-black transition-all ${active
-                                                ? "bg-[#2563EB] text-white shadow-[0_4px_10px_rgba(37,99,235,0.28)]"
+                                            className={`h-7 min-w-10 rounded px-1.5 text-[10px] font-black transition-all ${active
+                                                ? "bg-[#2563EB] text-white shadow-[0_2px_5px_rgba(37,99,235,0.22)]"
                                                 : disabled ? "cursor-not-allowed text-[#94A3B8]/55" : "bg-white text-[#475569] active:bg-[#DBEAFE]"
                                                 }`}
                                         >
@@ -2080,21 +2078,19 @@ const ViewScreen = () => {
                                 !isTopogramSeries ? (
                                     <div className="col-span-2 flex flex-col gap-2">
                                         {/* 顶部窗值 + 窗模板 — 平板设备使用频率最高，置顶便于一键调整 */}
-                                        <div className="rounded-md border border-[#B7D5FF] bg-[linear-gradient(135deg,#F0F7FF_0%,#F4FFFB_100%)] px-2.5 py-2 shadow-[0_8px_18px_-16px_rgba(37,99,235,0.75)] flex flex-col gap-2">
-                                            <WindowValueStrip ww={Math.round(displayWw)} wl={Math.round(displayWl)} />
+                                        <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1.4fr)] gap-1.5 rounded-md border border-[#B7D5FF] bg-[linear-gradient(135deg,#F0F7FF_0%,#F4FFFB_100%)] px-2 py-2 shadow-[0_8px_18px_-16px_rgba(37,99,235,0.75)]">
+                                            <WindowValueStrip ww={Math.round(displayWw)} wl={Math.round(displayWl)} inline />
                                             <div className="relative">
                                                 <div
                                                     onClick={() => {
                                                         setIsWindowPresetOpen(!isWindowPresetOpen);
-                                                        setIsVoiLutOpen(false);
-                                                        setIsInterpolationOpen(false);
                                                         setIsVolumePresetOpen(false);
                                                         setIsRenderModeOpen(false);
                                                         setIsVolumeQualityOpen(false);
                                                     }}
-                                                    className={`h-[30px] w-full bg-white/90 border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isWindowPresetOpen ? 'border-[#2563EB] ring-2 ring-[#60A5FA]/20' : 'border-[#BFDBFE] hover:border-[#60A5FA]'}`}
+                                                    className={`flex h-full min-h-[44px] w-full cursor-pointer items-center justify-between rounded-md border bg-white/90 px-1.5 transition-all ${isWindowPresetOpen ? 'border-[#2563EB] ring-2 ring-[#60A5FA]/20' : 'border-[#BFDBFE] hover:border-[#60A5FA]'}`}
                                                 >
-                                                    <span className="text-[12px] font-semibold text-[#1E3A8A] truncate">
+                                                    <span className="truncate text-[10px] font-semibold text-[#1E3A8A]">
                                                         {activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}
                                                     </span>
                                                     <ChevronDown size={13} className={`text-[#60A5FA] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#2563EB]' : ''}`} />
@@ -2273,8 +2269,6 @@ const ViewScreen = () => {
                                                      <div
                                                          onClick={() => {
                                                              setIsWindowPresetOpen(!isWindowPresetOpen);
-                                                             setIsVoiLutOpen(false);
-                                                             setIsInterpolationOpen(false);
                                                              setIsVolumePresetOpen(false);
                                                              setIsRenderModeOpen(false);
                                                              setIsVolumeQualityOpen(false);
@@ -2311,78 +2305,6 @@ const ViewScreen = () => {
                                                          </div>
                                                      )}
                                                  </div>
-                                                 {!isOfflineRecon && <div className="flex items-center gap-2 relative">
-                                                    <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.voiCurve")}</span>
-                                                    <div
-                                                        onClick={() => {
-                                                             setIsVoiLutOpen(!isVoiLutOpen);
-                                                             setIsWindowPresetOpen(false);
-                                                            setIsInterpolationOpen(false);
-                                                            setIsVolumePresetOpen(false);
-                                                            setIsRenderModeOpen(false);
-                                                            setIsVolumeQualityOpen(false);
-                                                        }}
-                                                        className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVoiLutOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
-                                                    >
-                                                        <span className="text-[12px] font-medium text-[#37474F] truncate">
-                                                            {selectedVoiLutMode === "SIGMOID" ? "Sigmoid" : selectedVoiLutMode === "LINEAR_EXACT" ? "Linear Exact" : "Linear"}
-                                                        </span>
-                                                        <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVoiLutOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
-                                                    </div>
-                                                    {isVoiLutOpen && (
-                                                        <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                                                            {([
-                                                                { value: "LINEAR" as const, label: "Linear" },
-                                                                { value: "LINEAR_EXACT" as const, label: "Linear Exact" },
-                                                                { value: "SIGMOID" as const, label: "Sigmoid" },
-                                                            ]).map((opt) => (
-                                                                <div
-                                                                    key={opt.value}
-                                                                    onClick={() => { setSelectedVoiLutMode(opt.value); setIsVoiLutOpen(false); }}
-                                                                    className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedVoiLutMode === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
-                                                                >
-                                                                    {opt.label}
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>}
-                                                {!isOfflineRecon && <div className="flex items-center gap-2 relative">
-                                                    <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.interpolation")}</span>
-                                                    <div
-                                                        onClick={() => {
-                                                             setIsInterpolationOpen(!isInterpolationOpen);
-                                                             setIsWindowPresetOpen(false);
-                                                            setIsVoiLutOpen(false);
-                                                            setIsVolumePresetOpen(false);
-                                                            setIsRenderModeOpen(false);
-                                                            setIsVolumeQualityOpen(false);
-                                                        }}
-                                                        className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isInterpolationOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
-                                                    >
-                                                        <span className="text-[12px] font-medium text-[#37474F] truncate">
-                                                            {selectedInterpolationMode === "FAST_LINEAR" ? "Fast Linear" : selectedInterpolationMode === "NEAREST" ? "Nearest" : "Linear"}
-                                                        </span>
-                                                        <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isInterpolationOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
-                                                    </div>
-                                                    {isInterpolationOpen && (
-                                                        <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                                                            {([
-                                                                { value: "LINEAR" as const, label: "Linear" },
-                                                                { value: "NEAREST" as const, label: "Nearest" },
-                                                                { value: "FAST_LINEAR" as const, label: "Fast Linear" },
-                                                            ]).map((opt) => (
-                                                                <div
-                                                                    key={opt.value}
-                                                                    onClick={() => { setSelectedInterpolationMode(opt.value); setIsInterpolationOpen(false); }}
-                                                                    className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedInterpolationMode === opt.value ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
-                                                                >
-                                                                    {opt.label}
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>}
                                                 <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
                                                     <span className="text-[11px] font-semibold text-[#546E7A]">{t("view.controls.invert")}</span>
                                                     <input
@@ -2392,24 +2314,6 @@ const ViewScreen = () => {
                                                         className="h-4 w-4 accent-[#4D94FF]"
                                                     />
                                                 </div>
-                                                 {!isOfflineRecon && <div className="flex items-start gap-2">
-                                                    <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.smoothing")}</span>
-                                                    <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
-                                                        <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
-                                                            <input type="range" min={0} max={1} step={0.05} value={imageSmoothing} onChange={(event) => setImageSmoothing(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
-                                                            <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSmoothing.toFixed(2)}</span>
-                                                        </div>
-                                                    </div>
-                                                 </div>}
-                                                 {!isOfflineRecon && <div className="flex items-start gap-2">
-                                                    <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.sharpening")}</span>
-                                                    <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
-                                                        <div className="grid grid-cols-[minmax(0,1fr)_36px] items-center gap-2">
-                                                            <input type="range" min={0} max={1} step={0.05} value={imageSharpening} onChange={(event) => setImageSharpening(Number(event.target.value))} className="h-[18px] w-full max-w-[120px] accent-[#4D94FF]" />
-                                                            <span className="text-right text-[10px] font-black tabular-nums text-[#37474F]">{imageSharpening.toFixed(2)}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>}
                                             </PanelSection>
 
                                             <PanelSection title={t("view.controls.volumeRendering")}>
@@ -2420,8 +2324,6 @@ const ViewScreen = () => {
                                                         setIsVolumePresetOpen(!isVolumePresetOpen);
                                                         setIsWindowPresetOpen(false);
                                                         setIsRenderModeOpen(false);
-                                                        setIsVoiLutOpen(false);
-                                                        setIsInterpolationOpen(false);
                                                         setIsVolumeQualityOpen(false);
                                                     }}
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVolumePresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
@@ -2454,8 +2356,6 @@ const ViewScreen = () => {
                                                         setIsWindowPresetOpen(false);
                                                         setIsVolumePresetOpen(false);
                                                         setIsRenderModeOpen(false);
-                                                        setIsVoiLutOpen(false);
-                                                        setIsInterpolationOpen(false);
                                                     }}
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVolumeQualityOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
                                                 >
@@ -2493,8 +2393,6 @@ const ViewScreen = () => {
                                                         setIsRenderModeOpen(!isRenderModeOpen);
                                                         setIsWindowPresetOpen(false);
                                                         setIsVolumePresetOpen(false);
-                                                        setIsVoiLutOpen(false);
-                                                        setIsInterpolationOpen(false);
                                                         setIsVolumeQualityOpen(false);
                                                     }}
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
@@ -2853,7 +2751,10 @@ const ViewScreen = () => {
                         <div className={`mx-auto mt-1 h-1.5 w-1.5 rounded-full ${viewerLoadStatus === "ready" ? "bg-emerald-400" : viewerLoadStatus === "loading" ? "animate-pulse bg-amber-400" : "bg-red-400"}`} />
                     </div>
 
-                    <div className="flex-1 overflow-y-auto px-2 py-2" onPointerDown={(event) => event.stopPropagation()}>
+                    <div
+                        className="flex-1 touch-pan-y overflow-y-auto overscroll-contain px-2 py-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                        onPointerDown={(event) => event.stopPropagation()}
+                    >
                         <div className="flex flex-col items-center gap-1.5">
                             {([
                                 { mode: "browse" as const, label: "层面浏览", icon: <ScanLine size={18} /> },
@@ -3264,8 +3165,8 @@ const Param = ({ label, value }: { label: string; value: string }) => (
     </div>
 );
 
-const WindowValueStrip = ({ ww, wl }: { ww: number | string; wl: number | string }) => (
-    <div className="grid grid-cols-2 gap-2">
+const WindowValueStrip = ({ ww, wl, inline = false }: { ww: number | string; wl: number | string; inline?: boolean }) => (
+    <div className={inline ? "contents" : "grid grid-cols-2 gap-2"}>
         <div className="rounded-md border border-[#BFDBFE] bg-[#EFF6FF] px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
             <div className="text-[8px] font-black uppercase tracking-[0.12em] text-[#2563EB]">WW</div>
             <div className="mt-0.5 text-[14px] font-black tabular-nums text-[#1E3A8A]">{ww}</div>
@@ -3357,45 +3258,47 @@ const OfflineReconPanel = ({
     return (
         <div className="col-span-2 flex flex-col gap-2">
             <PanelSection>
-                <OfflineReconField label={t("view.offlineRecon.thickness")}>
-                    <input
-                        type="text"
-                        value={params.thickness}
-                        onChange={(e) => update("thickness", e.target.value)}
-                        className={RECON_INPUT_CLASS}
-                    />
-                </OfflineReconField>
+                <div className="grid grid-cols-2 gap-2">
+                    <OfflineReconField label={t("view.offlineRecon.thickness")}>
+                        <input
+                            type="text"
+                            value={params.thickness}
+                            onChange={(e) => update("thickness", e.target.value)}
+                            className={RECON_INPUT_CLASS}
+                        />
+                    </OfflineReconField>
 
-                <OfflineReconField
-                    label={t("view.offlineRecon.spacing")}
-                    hint={isHelical ? undefined : t("view.offlineRecon.spacingHelicalOnly")}
-                >
-                    <input
-                        type="text"
-                        value={params.spacing}
-                        onChange={(e) => update("spacing", e.target.value)}
-                        disabled={!isHelical}
-                        className={RECON_INPUT_CLASS}
-                    />
-                </OfflineReconField>
+                    <OfflineReconField
+                        label={t("view.offlineRecon.spacing")}
+                        hint={isHelical ? undefined : t("view.offlineRecon.spacingHelicalOnly")}
+                    >
+                        <input
+                            type="text"
+                            value={params.spacing}
+                            onChange={(e) => update("spacing", e.target.value)}
+                            disabled={!isHelical}
+                            className={RECON_INPUT_CLASS}
+                        />
+                    </OfflineReconField>
 
-                <OfflineReconField label={t("view.offlineRecon.kernel")}>
-                    <input
-                        type="text"
-                        value={params.kernel}
-                        onChange={(e) => update("kernel", e.target.value)}
-                        className={RECON_INPUT_CLASS}
-                    />
-                </OfflineReconField>
+                    <OfflineReconField label={t("view.offlineRecon.kernel")}>
+                        <input
+                            type="text"
+                            value={params.kernel}
+                            onChange={(e) => update("kernel", e.target.value)}
+                            className={RECON_INPUT_CLASS}
+                        />
+                    </OfflineReconField>
 
-                <OfflineReconField label={t("view.offlineRecon.fov")}>
-                    <input
-                        type="text"
-                        value={params.fov}
-                        onChange={(e) => update("fov", e.target.value)}
-                        className={RECON_INPUT_CLASS}
-                    />
-                </OfflineReconField>
+                    <OfflineReconField label={t("view.offlineRecon.fov")}>
+                        <input
+                            type="text"
+                            value={params.fov}
+                            onChange={(e) => update("fov", e.target.value)}
+                            className={RECON_INPUT_CLASS}
+                        />
+                    </OfflineReconField>
+                </div>
 
                 <OfflineReconField label={t("view.offlineRecon.center")}>
                     <div className="grid grid-cols-2 gap-2">
@@ -3479,16 +3382,6 @@ const OfflineReconPanel = ({
                         className="h-4 w-4 accent-[#4D94FF]"
                     />
                 </label>
-
-                <OfflineReconField label={t("view.offlineRecon.mode")}>
-                    <input
-                        type="text"
-                        value={params.reconMode}
-                        onChange={(e) => update("reconMode", e.target.value)}
-                        placeholder={t("view.offlineRecon.modeTbd")}
-                        className={RECON_INPUT_CLASS}
-                    />
-                </OfflineReconField>
 
                 {!hideWindowValue && (
                     <OfflineReconField label={t("view.offlineRecon.windowValue")}>
