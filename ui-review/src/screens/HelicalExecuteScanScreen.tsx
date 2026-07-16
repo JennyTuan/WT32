@@ -7,12 +7,21 @@ import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import DibhStatusRow from "../components/DibhStatusRow";
 import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/useBreathHoldStateMachine";
-import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, cancelScanSession, updateScanSessionSeriesExecution, type ApiScanSessionDetail } from "../lib/scanSession";
+import { clearSelectedScanSessionId, fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, updateScanSessionSeriesExecution, type ApiScanSeriesImageSourceId, type ApiScanSessionDetail, type ApiScanSessionSeries } from "../lib/scanSession";
+import { applyScanWorkflowAction, createActionId } from "../lib/scanWorkflowActions";
 import { loadSelectedPatient } from "../lib/patientSession";
+import {
+    buildScanSessionExecutionContext,
+    isTerminalScanSessionStatus,
+    matchesScanExecutionBinding,
+} from "../lib/scanSeriesPrerequisites";
+import type { DependentScanSeriesType, ScanExecutionBinding } from "../lib/scanSeriesPrerequisites";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
-import { getLimbsDicomSeries, isLimbsHelicalScanSession, loadLimbsDicomDemoManifest } from "../lib/limbsDicomDemo";
+import { getLimbsDicomSeries, loadLimbsDicomDemoManifest } from "../lib/limbsDicomDemo";
 import { useI18n } from "../lib/i18nContext";
 import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceErrorEvents";
+import { hasVerifiedSeriesImageSource, resolveHelicalResultImageSource } from "../lib/scanSeriesImageSource";
+import { resolvePostExecutionDestination } from "../lib/scanExecutionFlow";
 
 type HelicalResultSeriesConfig = {
     basePath?: string;
@@ -36,8 +45,70 @@ const BRAIN_HELICAL_RESULT_SERIES: HelicalResultSeriesConfig = {
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 
 type ScanStage = "idle" | "positioning" | "positioned" | "enabled" | "exposing" | "paused" | "rendering" | "completed";
-type ExecuteMode = "helical" | "gated_helical" | "gated_axial";
+type ExecuteMode = "helical" | "axial" | "gated_helical" | "gated_axial";
 type PhysicalTriggerAction = "position" | "exposure";
+type FinalizationState = "idle" | "saving" | "succeeded" | "failed" | "blocked";
+
+const validateBoundExecutionSession = (
+    scanSession: ApiScanSessionDetail | null,
+    binding: ScanExecutionBinding | null,
+    targetType: DependentScanSeriesType,
+    selectedSessionId: number | null,
+    selectedPatientId: number | null,
+): ApiScanSessionSeries => {
+    if (!binding) {
+        throw new Error("执行页缺少完整的已确认扫描绑定，请返回范围确认页");
+    }
+    if (!scanSession || selectedSessionId !== binding.scanSessionId || scanSession.id !== binding.scanSessionId) {
+        throw new Error("患者或扫描会话已切换，请返回患者列表重新选择");
+    }
+    if (selectedPatientId === null || scanSession.patient_id !== selectedPatientId) {
+        throw new Error("患者与扫描会话不一致，请返回患者列表重新选择");
+    }
+    if (isTerminalScanSessionStatus(scanSession.status)) {
+        throw new Error("当前扫描会话已结束，不能再次执行；请返回患者列表重新创建或选择会话");
+    }
+
+    const context = buildScanSessionExecutionContext(scanSession, targetType);
+    if (!matchesScanExecutionBinding(context, binding)) {
+        throw new Error("扫描会话结构已更新，请重新进入范围确认页");
+    }
+
+    const targetSeries = scanSession.series.find(
+        (series) => series.id === binding.targetSeriesId && series.series_type === targetType,
+    );
+    if (!targetSeries) throw new Error("当前扫描会话缺少已确认的待执行序列");
+
+    if (binding.requiredTopogramId !== null) {
+        const topogram = scanSession.series.find(
+            (series) => series.id === binding.requiredTopogramId && series.series_type === "topogram",
+        );
+        if (!topogram || topogram.execution_status !== "image_ready" || !topogram.range_confirmed) {
+            throw new Error("已确认的定位像或扫描范围不再可用，请返回范围确认页");
+        }
+    }
+
+    return targetSeries;
+};
+
+const validateExecuteModeForSession = (
+    scanSession: ApiScanSessionDetail | null,
+    executeMode: ExecuteMode,
+    hasValidExecuteMode: boolean,
+) => {
+    if (!hasValidExecuteMode) {
+        throw new Error("执行页扫描模式参数无效，请从扫描确认页重新进入");
+    }
+    if (!scanSession) {
+        throw new Error("未找到当前扫描会话，请返回患者列表重新选择");
+    }
+    const expectedAcquisitionType = executeMode === "helical" || executeMode === "axial"
+        ? "regular"
+        : "gating";
+    if (scanSession.acquisition_type !== expectedAcquisitionType) {
+        throw new Error("扫描会话类型与执行页模式不一致，请从对应的扫描确认页重新进入");
+    }
+};
 
 const HOLD_DURATION_MS = 3000;
 const POSITIONING_TIMEOUT_MS = 8000;
@@ -158,6 +229,7 @@ function HelicalLiveViewport({
 }
 
 function AxialRealtimeViewport({
+    gated,
     stage,
     completedBeds,
     currentSlice,
@@ -169,6 +241,7 @@ function AxialRealtimeViewport({
     waitTimeoutMs,
     waitTimedOut = false,
 }: {
+    gated: boolean;
     stage: ScanStage;
     completedBeds: number;
     currentSlice: number;
@@ -223,7 +296,7 @@ function AxialRealtimeViewport({
                     </div>
                 </div>
 
-                {showDicom ? (
+                {showDicom && gated ? (
                     <div className="absolute inset-0">
                         <DicomViewer
                             imageUrls={imageUrls}
@@ -232,6 +305,23 @@ function AxialRealtimeViewport({
                             windowCenter={HELICAL_RESULT_SERIES.fallbackWindowLevel}
                             windowWidth={HELICAL_RESULT_SERIES.fallbackWindowWidth}
                         />
+                    </div>
+                ) : !gated ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_center,#1E293B_0%,#020617_68%)]">
+                        <div className="relative flex h-[250px] w-[250px] items-center justify-center rounded-full border border-cyan-300/25 bg-slate-900/80 shadow-[0_0_70px_rgba(14,165,233,0.18)]">
+                            <div
+                                className="absolute rounded-full border border-cyan-200/30 bg-[radial-gradient(ellipse_at_46%_48%,rgba(226,232,240,0.5),rgba(71,85,105,0.38)_34%,rgba(15,23,42,0.92)_68%)] transition-all duration-150"
+                                style={{
+                                    width: `${148 + (currentSlice % 5) * 5}px`,
+                                    height: `${190 - (currentSlice % 4) * 4}px`,
+                                }}
+                            />
+                            <div className="absolute h-px w-[230px] bg-cyan-300/25" />
+                            <div className="absolute h-[230px] w-px bg-cyan-300/25" />
+                            <div className="relative z-10 rounded border border-cyan-300/30 bg-slate-950/75 px-3 py-1 text-[10px] font-black tracking-[0.2em] text-cyan-100">
+                                {t("scanFlow.physicalGuide.referenceSimulated")}
+                            </div>
+                        </div>
                     </div>
                 ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-black">
@@ -263,22 +353,34 @@ function AxialRealtimeViewport({
                     </div>
                 </div>
             </div>
-            <div className="h-[178px] shrink-0 border-t border-[#B0C4DE]/70">
-                <GatingMonitorPanel
-                    threshold={threshold}
-                    direction={direction}
-                    bedStrip={{
-                        total: totalBeds,
-                        completed: completedBeds,
-                    }}
-                    scanActive={scanActive && completedBeds < totalBeds}
-                    exposing={stage === "exposing"}
-                    bedPhase={currentSlice / GATED_AXIAL_SLICES_PER_BED}
-                    waitingForStableBreath={waitingForBreath}
-                    showScanMarkers={false}
-                    readOnly
-                />
-            </div>
+            {gated ? (
+                <div className="h-[178px] shrink-0 border-t border-[#B0C4DE]/70">
+                    <GatingMonitorPanel
+                        threshold={threshold}
+                        direction={direction}
+                        bedStrip={{
+                            total: totalBeds,
+                            completed: completedBeds,
+                        }}
+                        scanActive={scanActive && completedBeds < totalBeds}
+                        exposing={stage === "exposing"}
+                        bedPhase={currentSlice / GATED_AXIAL_SLICES_PER_BED}
+                        waitingForStableBreath={waitingForBreath}
+                        showScanMarkers={false}
+                        readOnly
+                    />
+                </div>
+            ) : (
+                <div className="flex h-[72px] shrink-0 items-center justify-between border-t border-[#B0C4DE]/70 bg-slate-50 px-5">
+                    <div>
+                        <div className="text-[11px] font-black text-slate-700">{t("scanFlow.postScout.axial")}</div>
+                        <div className="mt-1 text-[10px] text-slate-500">{t("scanFlow.physicalGuide.referenceSimulated")}</div>
+                    </div>
+                    <div className="text-right text-[11px] font-bold tabular-nums text-[#1D4ED8]">
+                        {t("scanFlow.live.tablePosition")} {displayBed} / {totalBeds || 1}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -286,30 +388,114 @@ function AxialRealtimeViewport({
 export default function HelicalExecuteScanScreen() {
     const navigate = useNavigate();
     const { t } = useI18n();
-    const [params] = useSearchParams();
-    const executeMode = (params.get("mode") ?? "helical") as ExecuteMode;
+    const [currentParams] = useSearchParams();
+    const initialParamsRef = useRef<URLSearchParams | null>(null);
+    if (initialParamsRef.current === null) {
+        initialParamsRef.current = new URLSearchParams(currentParams);
+    }
+    const params = initialParamsRef.current;
+    const routeContextChanged = currentParams.toString() !== params.toString();
+    const requestedExecuteMode = params.get("mode");
+    const hasValidExecuteMode = requestedExecuteMode === null
+        || requestedExecuteMode === "helical"
+        || requestedExecuteMode === "axial"
+        || requestedExecuteMode === "gated_helical"
+        || requestedExecuteMode === "gated_axial";
+    const executeMode: ExecuteMode = hasValidExecuteMode
+        ? (requestedExecuteMode ?? "helical")
+        : "helical";
     const isGated = executeMode === "gated_helical" || executeMode === "gated_axial";
     const isGatedAxial = executeMode === "gated_axial";
+    const isAxial = executeMode === "axial" || isGatedAxial;
+    // 所有正式模拟执行模式都必须固定绑定同一患者、会话、目标序列和前置定位像。
+    const isBoundExecution = true;
     const isHelicalDIBH = executeMode === "gated_helical";
+    const parsedExpectedScanSessionId = Number(params.get("scanSessionId"));
+    const expectedScanSessionId = isBoundExecution
+        && Number.isInteger(parsedExpectedScanSessionId)
+        && parsedExpectedScanSessionId > 0
+        ? parsedExpectedScanSessionId
+        : null;
+    const targetSeriesIdParam = params.get("targetSeriesId");
+    const parsedExpectedTargetSeriesId = Number(targetSeriesIdParam);
+    const expectedTargetSeriesId = isBoundExecution
+        && targetSeriesIdParam !== null
+        && Number.isInteger(parsedExpectedTargetSeriesId)
+        && parsedExpectedTargetSeriesId > 0
+        ? parsedExpectedTargetSeriesId
+        : null;
+    const topogramIdParam = params.get("topogramId");
+    const parsedExpectedTopogramId = Number(topogramIdParam);
+    const expectedTopogramId: number | null | undefined = !isBoundExecution
+        ? undefined
+        : topogramIdParam === "none"
+            ? null
+            : topogramIdParam !== null
+                && Number.isInteger(parsedExpectedTopogramId)
+                && parsedExpectedTopogramId > 0
+                ? parsedExpectedTopogramId
+                : undefined;
+    const targetType: DependentScanSeriesType = isAxial ? "axial" : "helical";
+    const expectedExecutionBinding = useMemo<ScanExecutionBinding | null>(() => {
+        if (
+            !isBoundExecution
+            || expectedScanSessionId === null
+            || expectedTargetSeriesId === null
+            || expectedTopogramId === undefined
+        ) {
+            return null;
+        }
+        return {
+            scanSessionId: expectedScanSessionId,
+            targetSeriesId: expectedTargetSeriesId,
+            requiredTopogramId: expectedTopogramId,
+        };
+    }, [expectedScanSessionId, expectedTargetSeriesId, expectedTopogramId, isBoundExecution]);
 
     const [limbsHelicalResultSeries, setLimbsHelicalResultSeries] = useState<HelicalResultSeriesConfig | null>(null);
 
-    // Regular (non-gated) helical execution plays protocol-specific demo data
-    // when available. Gated paths intentionally keep their own result series.
-    const helicalResultOverride = useMemo<HelicalResultSeriesConfig | undefined>(() => {
-        if (executeMode !== "helical") return undefined;
-        if (limbsHelicalResultSeries) return limbsHelicalResultSeries;
-        return BRAIN_HELICAL_RESULT_SERIES;
-    }, [executeMode, limbsHelicalResultSeries]);
     const [stage, setStage] = useState<ScanStage>("idle");
     const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
     const [guideVisible, setGuideVisible] = useState(false);
     const [showCombinedPatientConfirm, setShowCombinedPatientConfirm] = useState(false);
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const helicalResultImageSourceId = useMemo<ApiScanSeriesImageSourceId | null>(() => {
+        if (executeMode !== "helical") return null;
+        const persistedTarget = scanSession?.series.find((series) => series.id === expectedTargetSeriesId);
+        if (
+            persistedTarget?.image_source_version === 1
+            && (
+                persistedTarget.image_source_id === "brain-helical-demo"
+                || persistedTarget.image_source_id === "limbs-helical-demo"
+                || persistedTarget.image_source_id === "qin-lung-helical-demo"
+            )
+        ) {
+            return persistedTarget.image_source_id;
+        }
+        if (expectedTopogramId === null) return null;
+        const topogramSource = scanSession?.series.find((series) => series.id === expectedTopogramId);
+        if (!hasVerifiedSeriesImageSource(topogramSource)) return null;
+        return resolveHelicalResultImageSource(topogramSource.image_source_id);
+    }, [executeMode, expectedTargetSeriesId, expectedTopogramId, scanSession]);
+    const helicalResultOverride = useMemo<HelicalResultSeriesConfig | undefined>(() => {
+        if (helicalResultImageSourceId === "brain-helical-demo") return BRAIN_HELICAL_RESULT_SERIES;
+        if (helicalResultImageSourceId === "limbs-helical-demo") return limbsHelicalResultSeries ?? undefined;
+        return undefined;
+    }, [helicalResultImageSourceId, limbsHelicalResultSeries]);
+    const helicalResultImageSourceReady = executeMode !== "helical"
+        || helicalResultImageSourceId === "brain-helical-demo"
+        || helicalResultImageSourceId === "qin-lung-helical-demo"
+        || (helicalResultImageSourceId === "limbs-helical-demo" && limbsHelicalResultSeries !== null);
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const [completedBeds, setCompletedBeds] = useState(0);
     const [executionError, setExecutionError] = useState<string | null>(null);
+    const [finalizationState, setFinalizationState] = useState<FinalizationState>("idle");
+    const [postExecutionDestination, setPostExecutionDestination] = useState<"viewer" | "next_series" | null>(null);
+    const [postExecutionRoute, setPostExecutionRoute] = useState<"/image-viewer" | "/helical-confirm" | "/sequence-confirm" | "/fourd-confirm" | null>(null);
+    const [finalizationAttempt, setFinalizationAttempt] = useState(0);
+    const [sessionValidationState, setSessionValidationState] = useState<"loading" | "ready" | "error">("loading");
+    const [isCancelling, setIsCancelling] = useState(false);
     const [triggerFailure, setTriggerFailure] = useState<{ title: string; message: string } | null>(null);
     const [currentSlice, setCurrentSlice] = useState(0);
     const [axialWaitingForBreath, setAxialWaitingForBreath] = useState(false);
@@ -345,12 +531,34 @@ export default function HelicalExecuteScanScreen() {
     const pendingBedIndexRef = useRef<number | null>(null);
     const bedAttemptsRef = useRef<Map<number, number>>(new Map());
     const dibhMidScanPauseFiredRef = useRef(false);
+    const cancellationInFlightRef = useRef(false);
+    const terminateActionIdRef = useRef<string | null>(null);
+    const retryActionIdRef = useRef<string | null>(null);
+    const returnToEditActionIdRef = useRef<string | null>(null);
+    const [isRecoveryActionRunning, setIsRecoveryActionRunning] = useState(false);
 
-    const scanLengthMm = Number(params.get("scanLengthMm") ?? measurements.scanLength);
+    const boundTargetSeries = scanSession?.series.find(
+        (series) => series.series_type === targetType
+            && (!isBoundExecution || series.id === expectedExecutionBinding?.targetSeriesId),
+    ) ?? null;
+    const axialStepCount = boundTargetSeries?.axial_param?.step_count;
+    const scanLengthMm = Number(
+        isAxial
+            ? boundTargetSeries?.axial_param?.scan_length ?? measurements.scanLength
+            : params.get("scanLengthMm") ?? measurements.scanLength,
+    );
     const totalBeds = useMemo(() => {
+        if (isAxial && axialStepCount && Number.isFinite(axialStepCount) && axialStepCount > 0) {
+            return Math.max(1, Math.round(axialStepCount));
+        }
         if (!Number.isFinite(scanLengthMm) || scanLengthMm <= 0) return 1;
+        if (executeMode === "axial") {
+            const sliceInterval = boundTargetSeries?.axial_param?.slice_interval;
+            if (!sliceInterval || !Number.isFinite(sliceInterval) || sliceInterval <= 0) return 1;
+            return Math.max(1, Math.ceil(scanLengthMm / sliceInterval));
+        }
         return Math.max(1, Math.ceil(scanLengthMm / GATED_AXIAL_BED_STEP_MM));
-    }, [scanLengthMm]);
+    }, [axialStepCount, boundTargetSeries?.axial_param?.slice_interval, executeMode, isAxial, scanLengthMm]);
     const threshold = Number(params.get("threshold") ?? "1.0");
     const direction = (params.get("direction") ?? "rising") as "rising" | "falling";
     const effectiveThreshold = activeThresholdOverride ?? threshold;
@@ -369,18 +577,126 @@ export default function HelicalExecuteScanScreen() {
         }
     };
 
-    const returnToExecuteConfirm = () => {
-        navigate(isGatedAxial ? "/gated-axial-confirm" : isHelicalDIBH ? "/gated-helical-confirm" : "/helical-confirm");
-    };
-
-    const exitTriggerFlowWithFailure = (failure: { title: string; message: string }) => {
-        triggerRequestIdRef.current += 1;
+    const clearExecutionTimers = () => {
         clearHoldRaf();
         clearPositioningTimeout();
         if (positioningTimerRef.current !== null) {
             window.clearTimeout(positioningTimerRef.current);
             positioningTimerRef.current = null;
         }
+        if (exposureTimerRef.current !== null) {
+            window.clearTimeout(exposureTimerRef.current);
+            exposureTimerRef.current = null;
+        }
+        if (dibhMidScanPauseTimerRef.current !== null) {
+            window.clearTimeout(dibhMidScanPauseTimerRef.current);
+            dibhMidScanPauseTimerRef.current = null;
+        }
+        if (axialProgressTimerRef.current !== null) {
+            window.clearInterval(axialProgressTimerRef.current);
+            axialProgressTimerRef.current = null;
+        }
+        if (axialWaitTimerRef.current !== null) {
+            window.clearTimeout(axialWaitTimerRef.current);
+            axialWaitTimerRef.current = null;
+        }
+        if (autoNavigateTimerRef.current !== null) {
+            window.clearTimeout(autoNavigateTimerRef.current);
+            autoNavigateTimerRef.current = null;
+        }
+        if (bedWaitTickRef.current !== null) {
+            window.clearInterval(bedWaitTickRef.current);
+            bedWaitTickRef.current = null;
+        }
+        pendingBedIndexRef.current = null;
+    };
+
+    useEffect(() => {
+        if (!routeContextChanged) return;
+        setSessionValidationState("error");
+        setGuideVisible(false);
+        setShowCombinedPatientConfirm(false);
+        setExecutionError("执行页地址参数已变化；为避免跨会话写入，请从扫描确认页重新进入");
+    }, [routeContextChanged]);
+
+    const returnToExecuteConfirm = () => {
+        navigate(
+            isGatedAxial
+                ? "/gated-axial-confirm"
+                : isHelicalDIBH
+                    ? "/gated-helical-confirm"
+                    : isAxial
+                        ? "/sequence-confirm"
+                        : "/helical-confirm",
+        );
+    };
+
+    const recoverTargetForRetry = async (returnToConfirmAfterRecovery = false) => {
+        if (!expectedExecutionBinding?.scanSessionId || isRecoveryActionRunning) return;
+        setIsRecoveryActionRunning(true);
+        setExecutionError(null);
+        try {
+            const latestSession = await fetchSelectedScanSession({ preferCache: false });
+            const targetSeries = validateBoundExecutionSession(
+                latestSession,
+                expectedExecutionBinding,
+                targetType,
+                loadSelectedScanSessionId(),
+                loadSelectedPatient()?.id ?? null,
+            );
+            let recoveredSession = latestSession;
+            let mustReturnToRangeConfirm = returnToConfirmAfterRecovery;
+            if (targetSeries.execution_status === "running") {
+                const actionId = returnToEditActionIdRef.current ?? createActionId();
+                returnToEditActionIdRef.current = actionId;
+                const result = await applyScanWorkflowAction(expectedExecutionBinding.scanSessionId, {
+                    action_id: actionId,
+                    action: "return_to_edit",
+                    target_series_id: targetSeries.id,
+                    reason: "Recover simulated execution after an uncertain or failed trigger request",
+                });
+                recoveredSession = result.scan_session;
+                returnToEditActionIdRef.current = null;
+                // return_to_edit invalidates the persisted topogram range confirmation.
+                mustReturnToRangeConfirm = true;
+            } else if (
+                targetSeries.execution_status === "failed"
+                || targetSeries.execution_status === "interrupted"
+            ) {
+                const actionId = retryActionIdRef.current ?? createActionId();
+                retryActionIdRef.current = actionId;
+                const result = await applyScanWorkflowAction(expectedExecutionBinding.scanSessionId, {
+                    action_id: actionId,
+                    action: "retry_series",
+                    target_series_id: targetSeries.id,
+                    reason: "User requested another simulated series attempt",
+                });
+                recoveredSession = result.scan_session;
+                retryActionIdRef.current = null;
+            } else if (targetSeries.execution_status !== "pending") {
+                throw new Error("目标序列当前不能返回待执行状态");
+            }
+
+            setTriggerFailure(null);
+            setScanSession(recoveredSession);
+            setStage("idle");
+            setPhysicalTriggerAction("position");
+            setGuideVisible(true);
+            if (mustReturnToRangeConfirm) {
+                returnToExecuteConfirm();
+            } else {
+                setShowCombinedPatientConfirm(true);
+            }
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : "序列状态恢复失败，请重试或终止检查");
+        } finally {
+            setIsRecoveryActionRunning(false);
+        }
+    };
+
+    const exitTriggerFlowWithFailure = (failure: { title: string; message: string }) => {
+        triggerRequestIdRef.current += 1;
+        clearExecutionTimers();
         setGuideVisible(false);
         setShowCombinedPatientConfirm(false);
         setPhysicalTriggerAction("position");
@@ -392,7 +708,8 @@ export default function HelicalExecuteScanScreen() {
         const handleDeviceError = (event: Event) => {
             const deviceError = (event as CustomEvent<DeviceErrorEvent>).detail;
             if (!deviceError || deviceError.error.severity === "warning") return;
-            const selectedSessionId = loadSelectedScanSessionId();
+            const selectedSessionId = isBoundExecution ? expectedScanSessionId : loadSelectedScanSessionId();
+            if (isBoundExecution && selectedSessionId === null) return;
             if (deviceError.scan_session_id !== null && deviceError.scan_session_id !== selectedSessionId) return;
             exitTriggerFlowWithFailure({
                 title: `设备异常：${deviceError.error.code}`,
@@ -420,40 +737,111 @@ export default function HelicalExecuteScanScreen() {
         const loadSessionMeasurements = async () => {
             try {
                 const loadedScanSession = await fetchSelectedScanSession({ preferCache: false });
-                if (!cancelled) setScanSession(loadedScanSession);
-                if (executeMode === "helical" && isLimbsHelicalScanSession(loadedScanSession)) {
-                    const manifest = await loadLimbsDicomDemoManifest();
-                    const liveSeries = getLimbsDicomSeries(manifest, "thin-soft");
-                    if (!cancelled && liveSeries) {
-                        setLimbsHelicalResultSeries({
-                            count: liveSeries.count,
-                            urls: liveSeries.urls,
-                            fallbackWindowWidth: liveSeries.windowWidth ?? manifest.defaultWindowWidth,
-                            fallbackWindowLevel: liveSeries.windowCenter ?? manifest.defaultWindowLevel,
-                        });
+                validateExecuteModeForSession(loadedScanSession, executeMode, hasValidExecuteMode);
+                if (!expectedExecutionBinding) {
+                    throw new Error("执行页缺少完整的已确认扫描绑定，请返回范围确认页");
+                }
+                if (
+                    !loadedScanSession
+                    || loadSelectedScanSessionId() !== expectedExecutionBinding.scanSessionId
+                    || loadedScanSession.id !== expectedExecutionBinding.scanSessionId
+                    || loadedScanSession.patient_id !== (loadSelectedPatient()?.id ?? null)
+                    || !matchesScanExecutionBinding(
+                        buildScanSessionExecutionContext(loadedScanSession, targetType),
+                        expectedExecutionBinding,
+                    )
+                ) {
+                    throw new Error("患者、扫描会话或目标序列已切换，请返回患者列表重新选择");
+                }
+                if (loadedScanSession.status === "cancelled") {
+                    throw new Error("当前扫描会话已终止，不能再次执行");
+                }
+                const boundTargetSeries = loadedScanSession.status === "completed"
+                    ? loadedScanSession.series.find(
+                        (series) => series.id === expectedExecutionBinding.targetSeriesId
+                            && series.series_type === targetType,
+                    ) ?? null
+                    : validateBoundExecutionSession(
+                        loadedScanSession,
+                        expectedExecutionBinding,
+                        targetType,
+                        loadSelectedScanSessionId(),
+                        loadSelectedPatient()?.id ?? null,
+                    );
+                if (!boundTargetSeries) throw new Error("当前扫描会话缺少已绑定的目标序列");
+                if (boundTargetSeries.execution_status === "running") {
+                    throw new Error("扫描序列仍标记为运行中；请先执行状态恢复或明确终止，不能重复触发");
+                }
+                if (boundTargetSeries.execution_status === "failed") {
+                    throw new Error("扫描序列已失败；请通过明确的重试当前序列动作继续");
+                }
+                if (loadedScanSession.status === "completed" && boundTargetSeries.execution_status !== "image_ready") {
+                    throw new Error("已完成会话的目标序列没有可用结果，不能进入查看");
+                }
+                const boundTopogram = expectedExecutionBinding.requiredTopogramId === null
+                    ? null
+                    : loadedScanSession.series.find(
+                        (series) => series.id === expectedExecutionBinding.requiredTopogramId,
+                    ) ?? null;
+                if (executeMode === "helical" && boundTopogram) {
+                    if (!boundTopogram.image_source_id || boundTopogram.image_source_version !== 1) {
+                        throw new Error("定位像缺少可验证的模拟影像来源，请返回定位像步骤重新出图");
+                    }
+                    if (![
+                        "head-stroke-topogram",
+                        "head-dual-scout-demo",
+                        "limbs-helical-demo",
+                        "qin-lung-topogram",
+                    ].includes(boundTopogram.image_source_id)) {
+                        throw new Error("定位像影像来源与当前螺旋模拟不匹配，请返回定位像步骤重新确认");
                     }
                 }
-
-                if (isGatedAxial) {
-                    const axialParam = loadedScanSession?.series.find((series) => series.series_type === "axial")?.axial_param;
-                    if (!axialParam || cancelled) return;
-
-                    setMeasurements({
-                        scanLength: params.get("scanLengthMm") ?? String(axialParam.scan_length),
-                        scoutFov: params.get("scoutFov") ?? String(axialParam.fov),
+                if (executeMode === "helical" && boundTopogram?.image_source_id === "limbs-helical-demo") {
+                    const manifest = await loadLimbsDicomDemoManifest();
+                    const liveSeries = getLimbsDicomSeries(manifest, "thin-soft");
+                    if (!liveSeries) throw new Error("下肢螺旋模拟影像清单缺少 thin-soft 序列");
+                    if (cancelled) return;
+                    setLimbsHelicalResultSeries({
+                        count: liveSeries.count,
+                        urls: liveSeries.urls,
+                        fallbackWindowWidth: liveSeries.windowWidth ?? manifest.defaultWindowWidth,
+                        fallbackWindowLevel: liveSeries.windowCenter ?? manifest.defaultWindowLevel,
                     });
-                    return;
                 }
 
-                const helicalParam = loadedScanSession?.series.find((series) => series.series_type === "helical")?.helical_param;
-                if (!helicalParam || cancelled) return;
+                if (isAxial) {
+                    const axialParam = (boundTargetSeries
+                        ?? loadedScanSession?.series.find((series) => series.series_type === "axial"))?.axial_param;
+                    if (!axialParam) throw new Error("当前断层扫描序列缺少执行参数");
+                    if (cancelled) return;
 
-                setMeasurements({
-                    scanLength: String(helicalParam.scan_length),
-                    scoutFov: String(helicalParam.fov),
-                });
+                    setMeasurements({
+                        scanLength: String(axialParam.scan_length),
+                        scoutFov: String(axialParam.fov),
+                    });
+                } else {
+                    const helicalParam = (boundTargetSeries
+                        ?? loadedScanSession?.series.find((series) => series.series_type === "helical"))?.helical_param;
+                    if (!helicalParam) throw new Error("当前螺旋扫描序列缺少执行参数");
+                    if (cancelled) return;
+
+                    setMeasurements({
+                        scanLength: String(helicalParam.scan_length),
+                        scoutFov: String(helicalParam.fov),
+                    });
+                }
+                if (!cancelled) {
+                    setScanSession(loadedScanSession);
+                    setSessionValidationState("ready");
+                    if (boundTargetSeries.execution_status === "image_ready") setStage("completed");
+                }
             } catch (error) {
                 console.error("Failed to load helical execute parameters.", error);
+                if (!cancelled) {
+                    setScanSession(null);
+                    setSessionValidationState("error");
+                    setExecutionError(error instanceof Error ? error.message : "扫描会话加载失败");
+                }
             }
         };
 
@@ -462,7 +850,7 @@ export default function HelicalExecuteScanScreen() {
         return () => {
             cancelled = true;
         };
-    }, [executeMode, isGatedAxial, params]);
+    }, [executeMode, expectedExecutionBinding, hasValidExecuteMode, isAxial, isBoundExecution, params, targetType]);
 
     // DIBH exposure progress: starts at 0 when exposure begins, climbs to 1
     // over DIBH_EXPOSURE_DURATION_MS, then stays at 1 through rendering /
@@ -485,20 +873,96 @@ export default function HelicalExecuteScanScreen() {
         if (stage !== "completed") return;
         let cancelled = false;
         const finish = async () => {
+            setFinalizationState("saving");
+            setPostExecutionDestination(null);
+            setPostExecutionRoute(null);
+            setExecutionError(null);
             try {
-                const targetType = isGatedAxial ? "axial" : "helical";
-                const targetSeries = scanSession?.series.find((series) => series.series_type === targetType);
-                if (targetSeries) {
-                    await updateScanSessionSeriesExecution(targetSeries.id, { execution_status: "image_ready" });
+                const sessionId = expectedExecutionBinding?.scanSessionId ?? null;
+                if (!sessionId || loadSelectedScanSessionId() !== sessionId) {
+                    throw new Error("患者或扫描会话已切换，不能写回本次模拟扫描结果");
                 }
-                const sessionId = loadSelectedScanSessionId();
-                if (sessionId) await completeScanSession(sessionId);
+                const latestScanSession = await fetchSelectedScanSession({ preferCache: false });
+                validateExecuteModeForSession(latestScanSession, executeMode, hasValidExecuteMode);
+                if (!latestScanSession || latestScanSession.patient_id !== (loadSelectedPatient()?.id ?? null)) {
+                    throw new Error("患者与扫描会话不一致，不能写回本次模拟扫描结果");
+                }
+                if (!matchesScanExecutionBinding(
+                    buildScanSessionExecutionContext(latestScanSession, targetType),
+                    expectedExecutionBinding,
+                )) {
+                    throw new Error("扫描会话结构已更新，不能写回本次模拟扫描结果");
+                }
+                const targetSeries = latestScanSession.status === "completed"
+                    ? latestScanSession.series.find(
+                        (series) => series.id === expectedExecutionBinding?.targetSeriesId
+                            && series.series_type === targetType,
+                    ) ?? null
+                    : validateBoundExecutionSession(
+                        latestScanSession,
+                        expectedExecutionBinding,
+                        targetType,
+                        loadSelectedScanSessionId(),
+                        loadSelectedPatient()?.id ?? null,
+                    );
+                if (!targetSeries) throw new Error("当前扫描会话缺少已绑定的目标序列");
+                if (targetSeries.execution_status === "running") {
+                    if (targetType === "helical" && (!helicalResultImageSourceId || !helicalResultImageSourceReady)) {
+                        throw new Error("螺旋模拟影像来源尚未完成验证，不能登记为可查看结果");
+                    }
+                    await updateScanSessionSeriesExecution(targetSeries.id, {
+                        execution_status: "image_ready",
+                        ...(targetType === "helical" && helicalResultImageSourceId ? {
+                            image_source_id: helicalResultImageSourceId,
+                            image_source_version: 1 as const,
+                        } : {}),
+                    });
+                } else if (targetSeries.execution_status !== "image_ready") {
+                    throw new Error("目标序列未处于可完成状态，请先处理扫描失败或重试动作");
+                }
+                const sessionAfterImageReady = await fetchSelectedScanSession({ preferCache: false });
+                if (!sessionAfterImageReady) throw new Error("结果已登记，但无法重新读取扫描会话状态");
+                const destination = resolvePostExecutionDestination(sessionAfterImageReady);
+                if (destination.kind === "blocked") {
+                    if (cancelled) return;
+                    setScanSession(sessionAfterImageReady);
+                    setFinalizationState("blocked");
+                    setExecutionError("当前序列已出图，但会话仍有未完成序列；当前版本不能自动衔接该组合，请终止本次模拟检查，系统不会提前完成整个会话");
+                    return;
+                }
+                if (destination.kind === "next_series") {
+                    if (cancelled) return;
+                    setScanSession(sessionAfterImageReady);
+                    setPostExecutionDestination("next_series");
+                    setPostExecutionRoute(destination.route);
+                    setFinalizationState("succeeded");
+                    autoNavigateTimerRef.current = window.setTimeout(() => {
+                        navigate(destination.route);
+                    }, AUTO_NAVIGATE_DELAY_MS);
+                    return;
+                }
+                const completedSession = sessionAfterImageReady.status === "completed"
+                    ? sessionAfterImageReady
+                    : await completeScanSession(sessionId);
+                if (completedSession.status !== "completed") {
+                    throw new Error("扫描会话已结束或状态已变化，未覆盖原有终态");
+                }
+                if (loadSelectedScanSessionId() !== sessionId) {
+                    throw new Error("当前选择已切换；原扫描会话已完成，请从患者列表重新打开结果");
+                }
                 if (cancelled) return;
+                setScanSession(completedSession);
+                setPostExecutionDestination("viewer");
+                setPostExecutionRoute(destination.route);
+                setFinalizationState("succeeded");
                 autoNavigateTimerRef.current = window.setTimeout(() => {
-                    navigate("/image-viewer");
+                    navigate(destination.route);
                 }, AUTO_NAVIGATE_DELAY_MS);
             } catch (error) {
-                if (!cancelled) setExecutionError(error instanceof Error ? error.message : "扫描结果状态更新失败");
+                if (!cancelled) {
+                    setFinalizationState("failed");
+                    setExecutionError(error instanceof Error ? error.message : "扫描结果状态更新失败");
+                }
             }
         };
         void finish();
@@ -510,12 +974,15 @@ export default function HelicalExecuteScanScreen() {
                 autoNavigateTimerRef.current = null;
             }
         };
-    }, [isGatedAxial, navigate, scanSession, stage]);
+    }, [executeMode, expectedExecutionBinding, finalizationAttempt, hasValidExecuteMode, helicalResultImageSourceId, helicalResultImageSourceReady, navigate, stage, targetType]);
 
     useEffect(() => {
         return () => {
             clearHoldRaf();
             clearDibhTimers();
+            if (exposureTimerRef.current !== null) {
+                window.clearTimeout(exposureTimerRef.current);
+            }
             if (axialProgressTimerRef.current !== null) {
                 window.clearInterval(axialProgressTimerRef.current);
             }
@@ -596,7 +1063,7 @@ export default function HelicalExecuteScanScreen() {
                 });
                 return 0;
             });
-        }, GATED_AXIAL_SLICE_INTERVAL_MS);
+        }, isGatedAxial ? GATED_AXIAL_SLICE_INTERVAL_MS : 55);
     };
 
     const scheduleBedExposure = (targetIndex: number) => {
@@ -607,13 +1074,22 @@ export default function HelicalExecuteScanScreen() {
         }
         stopBedWaitTick();
 
-        setStage("enabled");
-        setAxialWaitingForBreath(true);
+        setStage(isGatedAxial ? "enabled" : "exposing");
+        setAxialWaitingForBreath(isGatedAxial);
         setBedWaitTimedOut(false);
         setBedWaitElapsedMs(0);
         setCurrentSlice(0);
         pendingBedIndexRef.current = targetIndex;
         setPendingBedIndex(targetIndex);
+
+        if (!isGatedAxial) {
+            setGuideVisible(false);
+            axialWaitTimerRef.current = window.setTimeout(() => {
+                axialWaitTimerRef.current = null;
+                beginBedExposure();
+            }, 180);
+            return;
+        }
 
         const attemptCount = bedAttemptsRef.current.get(targetIndex) ?? 0;
         // Demo branch: on a fresh run, the 2nd bed's first attempt never receives
@@ -671,6 +1147,45 @@ export default function HelicalExecuteScanScreen() {
         handleTimeoutRetry();
     };
 
+    const cancelBoundGatedSessionAndReturn = async () => {
+        const sessionId = expectedExecutionBinding?.scanSessionId;
+        if (!sessionId) {
+            setExecutionError("执行页缺少完整的已确认扫描绑定，无法终止当前检查");
+            return;
+        }
+        if (cancellationInFlightRef.current) return;
+        cancellationInFlightRef.current = true;
+        setIsCancelling(true);
+        try {
+            const latestScanSession = await fetchSelectedScanSession({ preferCache: false });
+            validateExecuteModeForSession(latestScanSession, executeMode, hasValidExecuteMode);
+            const targetSeries = validateBoundExecutionSession(
+                latestScanSession,
+                expectedExecutionBinding,
+                targetType,
+                loadSelectedScanSessionId(),
+                loadSelectedPatient()?.id ?? null,
+            );
+            const actionId = terminateActionIdRef.current ?? createActionId();
+            terminateActionIdRef.current = actionId;
+            const { scan_session: cancelledSession } = await applyScanWorkflowAction(sessionId, {
+                action_id: actionId,
+                action: "terminate_exam",
+                target_series_id: targetSeries.id,
+                reason: "User terminated the simulated acquisition before completion",
+            });
+            if (cancelledSession.status !== "cancelled") {
+                throw new Error("当前扫描会话已经结束，未覆盖原有终态");
+            }
+            clearSelectedScanSessionId();
+            navigate("/patients");
+        } catch (error) {
+            cancellationInFlightRef.current = false;
+            setIsCancelling(false);
+            setExecutionError(error instanceof Error ? error.message : "终止扫描会话失败，请重试");
+        }
+    };
+
     const handleTimeoutAbort = () => {
         if (axialWaitTimerRef.current !== null) {
             window.clearTimeout(axialWaitTimerRef.current);
@@ -686,9 +1201,7 @@ export default function HelicalExecuteScanScreen() {
         setPendingBedIndex(null);
         setStage("idle");
         setPhysicalTriggerAction("position");
-        const sessionId = loadSelectedScanSessionId();
-        if (sessionId) void cancelScanSession(sessionId);
-        navigate("/gated-axial-confirm");
+        void cancelBoundGatedSessionAndReturn();
     };
 
     const triggerPositioningSequence = () => {
@@ -699,17 +1212,50 @@ export default function HelicalExecuteScanScreen() {
     };
 
     const triggerScanSequence = async () => {
+        if (routeContextChanged || sessionValidationState !== "ready") {
+            setExecutionError("扫描执行上下文尚未通过校验，请从扫描确认页重新进入");
+            return;
+        }
+        if (executeMode === "helical" && (!helicalResultImageSourceId || !helicalResultImageSourceReady)) {
+            setExecutionError("螺旋模拟影像来源尚未完成验证，请返回扫描确认页检查定位像来源");
+            return;
+        }
+        if (cancellationInFlightRef.current) {
+            setExecutionError("正在终止当前扫描会话，请等待处理完成");
+            return;
+        }
         const requestId = ++triggerRequestIdRef.current;
-        const sessionId = loadSelectedScanSessionId();
+        const sessionId = isBoundExecution ? expectedExecutionBinding?.scanSessionId ?? null : loadSelectedScanSessionId();
         setExecutionError(null);
         try {
             await Promise.race([
                 (async () => {
-                    if (sessionId) await startScanSession(sessionId);
-                    const activeScanSession = scanSession ?? await fetchSelectedScanSession({ preferCache: false });
-                    const targetType = isGatedAxial ? "axial" : "helical";
-                    const targetSeries = activeScanSession?.series.find((series) => series.series_type === targetType);
+                    if (isBoundExecution) {
+                        if (!sessionId || loadSelectedScanSessionId() !== sessionId) {
+                            throw new Error("患者或扫描会话已切换，扫描未启动");
+                        }
+                    }
+                    const activeScanSession = isBoundExecution
+                        ? await fetchSelectedScanSession({ preferCache: false })
+                        : scanSession ?? await fetchSelectedScanSession({ preferCache: false });
+                    validateExecuteModeForSession(activeScanSession, executeMode, hasValidExecuteMode);
+                    const targetSeries = isBoundExecution
+                        ? validateBoundExecutionSession(
+                            activeScanSession,
+                            expectedExecutionBinding,
+                            targetType,
+                            loadSelectedScanSessionId(),
+                            loadSelectedPatient()?.id ?? null,
+                        )
+                        : activeScanSession?.series.find((series) => series.series_type === "helical");
                     if (sessionId && !targetSeries) throw new Error("当前扫描会话缺少待执行序列");
+                    if (targetSeries && targetSeries.execution_status !== "pending") {
+                        throw new Error("目标序列已被执行或需要先走明确的重试动作，不能重复启动");
+                    }
+                    const startedSession = sessionId ? await startScanSession(sessionId) : null;
+                    if (isBoundExecution && startedSession?.status !== "in_progress") {
+                        throw new Error("当前扫描会话已结束，扫描未启动");
+                    }
                     if (targetSeries) await updateScanSessionSeriesExecution(targetSeries.id, { execution_status: "running" });
                 })(),
                 new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("扫描下发超时")), EXPOSURE_REQUEST_TIMEOUT_MS)),
@@ -722,6 +1268,7 @@ export default function HelicalExecuteScanScreen() {
         if (requestId !== triggerRequestIdRef.current) return;
         clearHoldRaf();
         setShowCombinedPatientConfirm(false);
+        setFinalizationState("idle");
         setStage("enabled");
         setCompletedBeds(0);
         setCurrentSlice(0);
@@ -730,11 +1277,13 @@ export default function HelicalExecuteScanScreen() {
         setBedWaitElapsedMs(0);
         setPendingBedIndex(null);
 
-        if (isGatedAxial) {
-            // Fresh run resets per-bed attempt history and any threshold override.
-            bedAttemptsRef.current = new Map();
-            setActiveThresholdOverride(null);
-            setThresholdLowered(false);
+        if (isAxial) {
+            if (isGatedAxial) {
+                // Fresh gated run resets per-bed attempt history and any threshold override.
+                bedAttemptsRef.current = new Map();
+                setActiveThresholdOverride(null);
+                setThresholdLowered(false);
+            }
 
             if (axialProgressTimerRef.current !== null) {
                 window.clearInterval(axialProgressTimerRef.current);
@@ -840,9 +1389,7 @@ export default function HelicalExecuteScanScreen() {
         setPhysicalTriggerAction("position");
         setDibhExposureProgress(0);
         setGuideVisible(true);
-        const sessionId = loadSelectedScanSessionId();
-        if (sessionId) void cancelScanSession(sessionId);
-        navigate("/gated-helical-confirm");
+        void cancelBoundGatedSessionAndReturn();
     };
 
     const handleDibhRestartFromPause = (savePartialData: boolean) => {
@@ -864,9 +1411,7 @@ export default function HelicalExecuteScanScreen() {
         setPhysicalTriggerAction("position");
         setDibhExposureProgress(0);
         setGuideVisible(true);
-        const sessionId = loadSelectedScanSessionId();
-        if (sessionId) void cancelScanSession(sessionId);
-        navigate("/gated-helical-confirm");
+        void cancelBoundGatedSessionAndReturn();
     };
 
     // DIBH state machine — drives the compact status row + waveform overlay
@@ -884,19 +1429,41 @@ export default function HelicalExecuteScanScreen() {
     });
 
     const handleExecuteScanClick = () => {
+        if (routeContextChanged || sessionValidationState !== "ready") {
+            setExecutionError("扫描执行上下文尚未通过校验，请从扫描确认页重新进入");
+            return;
+        }
+        if (cancellationInFlightRef.current) {
+            setExecutionError("正在终止当前扫描会话，请等待处理完成");
+            return;
+        }
         if (stage === "completed") {
-            navigate("/image-viewer");
+            if (finalizationState === "succeeded" && postExecutionRoute) navigate(postExecutionRoute);
             return;
         }
 
         if (stage === "idle" || stage === "positioned") {
+            if (isBoundExecution) {
+                try {
+                    validateBoundExecutionSession(
+                        scanSession,
+                        expectedExecutionBinding,
+                        targetType,
+                        loadSelectedScanSessionId(),
+                        loadSelectedPatient()?.id ?? null,
+                    );
+                } catch (error) {
+                    setExecutionError(error instanceof Error ? error.message : "扫描执行上下文校验失败");
+                    return;
+                }
+            }
             setGuideVisible(false);
             setShowCombinedPatientConfirm(true);
         }
     };
 
     const startHold = () => {
-        if ((!guideVisible && !showCombinedPatientConfirm) || stage === "positioning" || stage === "enabled" || stage === "exposing" || stage === "paused" || stage === "rendering" || stage === "completed") {
+        if (routeContextChanged || sessionValidationState !== "ready" || cancellationInFlightRef.current || (!guideVisible && !showCombinedPatientConfirm) || stage === "positioning" || stage === "enabled" || stage === "exposing" || stage === "paused" || stage === "rendering" || stage === "completed") {
             return;
         }
 
@@ -958,7 +1525,12 @@ export default function HelicalExecuteScanScreen() {
     const showLiveViewport = stage === "exposing" || stage === "paused" || stage === "rendering" || stage === "completed";
 
     const executeButtonLabel = (() => {
-        if (stage === "completed") return t("scanFlow.imageBrowser");
+        if (stage === "completed") {
+            if (finalizationState === "failed") return t("scanFlow.finalization.retry");
+            if (finalizationState !== "succeeded") return t("scanFlow.finalization.saving");
+            if (postExecutionDestination === "next_series") return t("common.nextStep");
+            return t("scanFlow.imageBrowser");
+        }
         if (bedWaitTimedOut) return t("scanFlow.live.waitingTechnician");
         if (dibhTimedOut) return t("scanFlow.live.waitingTechnician");
         if (dibhMidScanPaused) return t("scanFlow.scanPausedWaiting");
@@ -983,10 +1555,13 @@ export default function HelicalExecuteScanScreen() {
     // open, the button must be inert so it can't be mistaken for "click again
     // to trigger another scan".
     const executeButtonClickable =
+        !routeContextChanged &&
+        sessionValidationState === "ready" &&
+        !isCancelling &&
         !bedWaitTimedOut &&
         !dibhTimedOut &&
         !dibhMidScanPaused &&
-        (stage === "idle" || stage === "positioned" || stage === "completed");
+        (stage === "idle" || stage === "positioned" || (stage === "completed" && finalizationState === "succeeded"));
     const physicalTriggerSteps: PhysicalTriggerStep[] = [
         {
             id: "position",
@@ -1007,11 +1582,16 @@ export default function HelicalExecuteScanScreen() {
         },
     ];
     const patientConfirmScanData = useMemo(() => {
-        const targetSeries = scanSession?.series.find((series) => series.series_type === (isGatedAxial ? "axial" : "helical"));
-        const targetParam = isGatedAxial ? targetSeries?.axial_param : targetSeries?.helical_param;
+        const targetSeries = scanSession?.series.find(
+            (series) => series.series_type === targetType
+                && (!isBoundExecution || series.id === expectedExecutionBinding?.targetSeriesId),
+        );
+        const targetParam = isAxial ? targetSeries?.axial_param : targetSeries?.helical_param;
         const formatDose = (value: number | null | undefined) => value == null ? "--" : value.toFixed(2);
-        const fallbackSequence = isGatedAxial
-            ? t("scanFlow.postScout.gatedAxial")
+        const fallbackSequence = isAxial
+            ? isGatedAxial
+                ? t("scanFlow.postScout.gatedAxial")
+                : t("scanFlow.postScout.axial")
             : isHelicalDIBH
                 ? t("scanFlow.postScout.gatedHelical")
                 : t("scanFlow.postScout.helical");
@@ -1022,12 +1602,13 @@ export default function HelicalExecuteScanScreen() {
             protocol: scanSession?.name ?? "--",
             sequence: targetSeries?.series_label ?? fallbackSequence,
         };
-    }, [isGatedAxial, isHelicalDIBH, scanSession, t]);
+    }, [expectedExecutionBinding, isAxial, isBoundExecution, isGatedAxial, isHelicalDIBH, scanSession, t, targetType]);
     const timeoutDirectionLabel = direction === "rising"
         ? t("scanFlow.gatingTimeout.directionRising")
         : t("scanFlow.gatingTimeout.directionFalling");
-    const rightViewport = isGatedAxial ? (
+    const rightViewport = isAxial ? (
         <AxialRealtimeViewport
+            gated={isGatedAxial}
             stage={stage}
             completedBeds={completedBeds}
             currentSlice={currentSlice}
@@ -1100,11 +1681,11 @@ export default function HelicalExecuteScanScreen() {
             <ScanConfirmScreen
                 activeSequenceId="s2"
                 activeSequenceStepIndex={stage === "completed" ? 2 : 1}
-                parameterPanelMode={isGatedAxial ? "tomographicScan" : "helicalScan"}
-                helicalParamOverrides={isGatedAxial ? undefined : measurements}
-                tomographicParamOverrides={isGatedAxial ? measurements : undefined}
+                parameterPanelMode={isAxial ? "tomographicScan" : "helicalScan"}
+                helicalParamOverrides={isAxial ? undefined : measurements}
+                tomographicParamOverrides={isAxial ? measurements : undefined}
                 rightViewportContent={rightViewport}
-                rightViewportClassName={isGatedAxial ? "flex-1 rounded-lg border border-[#B0C4DE] bg-white shadow-sm flex flex-col overflow-hidden relative" : undefined}
+                rightViewportClassName={isAxial ? "flex-1 rounded-lg border border-[#B0C4DE] bg-white shadow-sm flex flex-col overflow-hidden relative" : undefined}
                 readOnlyMode
                 onExecuteScan={executeButtonClickable ? handleExecuteScanClick : undefined}
                 executeButtonLabel={executeButtonLabel}
@@ -1114,7 +1695,11 @@ export default function HelicalExecuteScanScreen() {
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
                 <PhysicalTriggerGuide
                     title={t("scanFlow.physicalGuide.title")}
-                    description={isGated ? t("scanFlow.physicalGuide.gatedTwoStepDescription") : t("scanFlow.physicalGuide.helicalTwoStepDescription")}
+                    description={isGated
+                        ? t("scanFlow.physicalGuide.gatedTwoStepDescription")
+                        : isAxial
+                            ? t("scanFlow.physicalGuide.twoStepDescription")
+                            : t("scanFlow.physicalGuide.helicalTwoStepDescription")}
                     guideTitle={guideTitle}
                     triggerLabel={t("scanFlow.physicalGuide.triggerLabel")}
                     emergencyLabel={t("scanFlow.physicalGuide.referenceEmergency")}
@@ -1150,7 +1735,11 @@ export default function HelicalExecuteScanScreen() {
                 scanData={patientConfirmScanData}
                 physicalGuide={{
                     title: t("scanFlow.physicalGuide.title"),
-                    description: isGated ? t("scanFlow.physicalGuide.gatedTwoStepDescription") : t("scanFlow.physicalGuide.helicalTwoStepDescription"),
+                    description: isGated
+                        ? t("scanFlow.physicalGuide.gatedTwoStepDescription")
+                        : isAxial
+                            ? t("scanFlow.physicalGuide.twoStepDescription")
+                            : t("scanFlow.physicalGuide.helicalTwoStepDescription"),
                     guideTitle,
                     triggerLabel: t("scanFlow.physicalGuide.triggerLabel"),
                     emergencyLabel: t("scanFlow.physicalGuide.referenceEmergency"),
@@ -1167,14 +1756,47 @@ export default function HelicalExecuteScanScreen() {
                     <div className="w-[440px] rounded-xl border border-[#EF4444]/60 bg-white shadow-2xl">
                         <div className="border-b border-red-100 bg-red-50 px-6 py-4 text-[15px] font-black text-red-800">扫描无法继续</div>
                         <div className="px-6 py-5 text-[13px] leading-relaxed text-slate-600">{executionError}</div>
-                        <div className="flex justify-end border-t border-slate-100 bg-slate-50 px-6 py-4">
-                            <button
-                                type="button"
-                                onClick={() => setExecutionError(null)}
-                                className="rounded-md bg-[#1D4ED8] px-5 py-2 text-[12px] font-bold text-white"
-                            >
-                                返回确认
-                            </button>
+                        <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4">
+                            {finalizationState === "failed" ? (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setExecutionError(null);
+                                        setFinalizationAttempt((attempt) => attempt + 1);
+                                    }}
+                                    className="rounded-md bg-[#1D4ED8] px-5 py-2 text-[12px] font-bold text-white"
+                                >
+                                    {t("scanFlow.finalization.retry")}
+                                </button>
+                            ) : finalizationState === "blocked" ? (
+                                <button
+                                    type="button"
+                                    onClick={() => { void cancelBoundGatedSessionAndReturn(); }}
+                                    disabled={isRecoveryActionRunning || isCancelling}
+                                    className="rounded-md bg-[#B91C1C] px-5 py-2 text-[12px] font-bold text-white disabled:opacity-50"
+                                >
+                                    终止检查
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => { void recoverTargetForRetry(true); }}
+                                        disabled={isRecoveryActionRunning || isCancelling}
+                                        className="rounded-md border border-blue-300 bg-white px-4 py-2 text-[12px] font-bold text-blue-700 disabled:opacity-50"
+                                    >
+                                        返回确认
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { void cancelBoundGatedSessionAndReturn(); }}
+                                        disabled={isRecoveryActionRunning || isCancelling}
+                                        className="rounded-md bg-[#B91C1C] px-4 py-2 text-[12px] font-bold text-white disabled:opacity-50"
+                                    >
+                                        终止检查
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1182,15 +1804,8 @@ export default function HelicalExecuteScanScreen() {
 
             <ScanTriggerFailureDialog
                 failure={triggerFailure}
-                onRetry={() => {
-                    setTriggerFailure(null);
-                    setExecutionError(null);
-                    setPhysicalTriggerAction("position");
-                    setStage("idle");
-                    setGuideVisible(false);
-                    setShowCombinedPatientConfirm(true);
-                }}
-                onReturnToConfirm={returnToExecuteConfirm}
+                onRetry={() => { void recoverTargetForRetry(false); }}
+                onReturnToConfirm={() => { void recoverTargetForRetry(true); }}
             />
 
             {isGatedAxial && bedWaitTimedOut && (

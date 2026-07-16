@@ -20,6 +20,7 @@ import { loadSelectedPatient } from "../lib/patientSession";
 import NetworkStatusButton from "../components/NetworkStatusButton";
 import SystemMenuButton from "../components/SystemMenuButton";
 import type { FourDPostScanState, RescanChoices } from "../lib/fourDTypes";
+import { fetchSelectedFourDPostScanState, saveFourDResult, toFourDPostScanState } from "../lib/fourDResult";
 import { useI18n } from "../lib/i18nContext";
 import iconTable from "../assets/icon-table.svg";
 import iconGantry from "../assets/icon-gantry.svg";
@@ -1020,23 +1021,58 @@ export default function FourDRescanSelectScreen() {
   const { locale, t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
-  const state = location.state as FourDPostScanState | null;
+  const routeState = location.state as FourDPostScanState | null;
+  const [state, setState] = useState<FourDPostScanState | null>(routeState);
+  const [isStateVerified, setIsStateVerified] = useState(false);
+  const [stateError, setStateError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const scanResult = state?.scanResult;
   const selectedPatient = useMemo(() => loadSelectedPatient(), []);
   const rescanRange = scanResult?.rescanBedRange ?? null;
   const bedCount = scanResult?.bedCount ?? 0;
 
-  const [choices, setChoices] = useState<RescanChoices>(() => {
-    if (!rescanRange) return {};
-
-    const initialChoices: RescanChoices = {};
-    for (let bedIdx = rescanRange[0]; bedIdx <= rescanRange[1]; bedIdx += 1) {
-      initialChoices[bedIdx] = "rescan";
-    }
-    return initialChoices;
-  });
+  const [choices, setChoices] = useState<RescanChoices>(() => routeState?.rescanChoices ?? {});
 
   const [laserActive, setLaserActive] = useState(false);
+
+  useEffect(() => {
+    if (!selectedPatient) return;
+    let cancelled = false;
+    fetchSelectedFourDPostScanState(selectedPatient.id)
+      .then((persistedState) => {
+        if (!cancelled) {
+          setState(persistedState);
+          setIsStateVerified(true);
+          setStateError(null);
+          if (persistedState.workflowStage === "rescan_selected") {
+            navigate("/image-load", { replace: true, state: persistedState });
+          } else if (
+            persistedState.workflowStage === "phase_selected"
+            || persistedState.workflowStage === "ready"
+          ) {
+            navigate("/phase-filter", { replace: true, state: persistedState });
+          }
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setIsStateVerified(false);
+        if (!cancelled) setStateError(error instanceof Error ? error.message : "4D 结果恢复失败");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate, selectedPatient]);
+
+  useEffect(() => {
+    if (!rescanRange) return;
+    const restored = state?.rescanChoices;
+    const initialChoices: RescanChoices = {};
+    for (let bedIdx = rescanRange[0]; bedIdx <= rescanRange[1]; bedIdx += 1) {
+      initialChoices[bedIdx] = restored?.[bedIdx] ?? "rescan";
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setChoices(initialChoices);
+  }, [rescanRange, state?.rescanChoices]);
   const displayDate = useMemo(
     () => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", weekday: "short" }).format(new Date()),
     [locale],
@@ -1085,23 +1121,44 @@ export default function FourDRescanSelectScreen() {
 
   const rescanCount = rescanRange ? rescanRange[1] - rescanRange[0] + 1 : 0;
 
-  const handleConfirm = () => {
-    if (!scanResult) return;
-
-    navigate("/image-load", {
-      state: {
-        ...state,
-        scanResult,
-        rescanChoices: choices,
-        showSliceLoadingBeforeImageLoad: false,
-      } as FourDPostScanState,
-    });
+  const handleConfirm = async () => {
+    if (
+      !isStateVerified
+      || !scanResult
+      || state?.scanSessionId === undefined
+      || state.targetSeriesId === undefined
+      || state.resultVersion === undefined
+      || !selectedPatient
+    ) return;
+    setIsSaving(true);
+    setStateError(null);
+    try {
+      const persisted = await saveFourDResult({
+        scanSessionId: state.scanSessionId,
+        patientId: selectedPatient.id,
+        targetSeriesId: state.targetSeriesId,
+        expectedVersion: state.resultVersion,
+        workflowStage: "rescan_selected",
+        state: { scanResult, rescanChoices: choices },
+      });
+      navigate("/image-load", { state: toFourDPostScanState(persisted) });
+    } catch (error) {
+      try {
+        const latest = await fetchSelectedFourDPostScanState(selectedPatient.id);
+        setState(latest);
+        setIsStateVerified(true);
+      } catch {
+        setIsStateVerified(false);
+      }
+      setStateError(error instanceof Error ? error.message : "4D 重扫选择保存失败");
+      setIsSaving(false);
+    }
   };
 
   if (!scanResult || !rescanRange) {
     return (
       <div className="flex h-full items-center justify-center bg-[#0F172A] text-[13px] text-white">
-        {t("scanFlow.rescan.invalidState")}
+        {stateError ?? t("scanFlow.rescan.invalidState")}
       </div>
     );
   }
@@ -1181,15 +1238,16 @@ export default function FourDRescanSelectScreen() {
         </button>
 
         <div className="text-center text-[11px] text-slate-400">
-          {t("scanFlow.rescan.allSelected", { count: rescanCount })}
+          {stateError ?? t("scanFlow.rescan.allSelected", { count: rescanCount })}
         </div>
 
         <button
           type="button"
-          onClick={handleConfirm}
-          className="flex h-[52px] items-center gap-2 rounded-md bg-[#4D94FF] px-10 text-[13px] font-bold uppercase text-white shadow-lg transition-all hover:bg-blue-600 active:scale-95"
+          onClick={() => { void handleConfirm(); }}
+          disabled={isSaving || !isStateVerified}
+          className="flex h-[52px] items-center gap-2 rounded-md bg-[#4D94FF] px-10 text-[13px] font-bold uppercase text-white shadow-lg transition-all hover:bg-blue-600 active:scale-95 disabled:cursor-wait disabled:opacity-60"
         >
-          {t("scanFlow.rescan.imageBrowser")} <ChevronRight size={20} />
+          {isSaving ? t("scanFlow.finalization.saving") : t("scanFlow.rescan.imageBrowser")} <ChevronRight size={20} />
         </button>
       </footer>
     </div>

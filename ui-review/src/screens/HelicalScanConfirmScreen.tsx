@@ -35,19 +35,17 @@ import { useI18n } from "../lib/i18nContext";
 import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
 import {
     getLimbsDicomSeries,
-    isLimbsHelicalScanSession,
-    isLimbsHelicalWorkflow,
     loadLimbsDicomDemoManifest,
     type LimbsDicomDemoManifest,
 } from "../lib/limbsDicomDemo";
 import {
     getHeadDualScoutSeries,
-    isHeadDualScoutSession,
-    isHeadDualScoutWorkflow,
     loadHeadDualScoutManifest,
     type HeadDualScoutManifest,
     type HeadDualScoutSeries,
 } from "../lib/headDualScoutDemo";
+import { buildScanSessionExecutionContext, isTerminalScanSessionStatus, resolveTopogramImageSource } from "../lib/scanSeriesPrerequisites";
+import { ScanParamWriteCoordinator } from "../lib/scanParamWriteCoordinator";
 
 type ProtocolSeedHelicalParam = {
     ma?: number | null;
@@ -326,6 +324,7 @@ function HeadDualScoutConfirmViewport({
     onScanPositionRatioChange,
     onMeasurementChange,
     onCropBoxChange,
+    onLoadStateChange,
 }: {
     apSeries: HeadDualScoutSeries;
     latSeries: HeadDualScoutSeries;
@@ -337,6 +336,7 @@ function HeadDualScoutConfirmViewport({
     onScanPositionRatioChange: (ratio: number) => void;
     onMeasurementChange: (values: { scanLength: string; scoutFov: string }) => void;
     onCropBoxChange: (cropBox: HeadDualScoutCropBox) => void;
+    onLoadStateChange: (state: "loading" | "ready" | "error") => void;
 }) {
     const apViewportRef = useRef<HTMLDivElement | null>(null);
     const latViewportRef = useRef<HTMLDivElement | null>(null);
@@ -355,6 +355,18 @@ function HeadDualScoutConfirmViewport({
         ap: DEFAULT_SCOUT_CROP_BOX,
         lat: DEFAULT_SCOUT_CROP_BOX,
     });
+    const [apLoadState, setApLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const [latLoadState, setLatLoadState] = useState<"loading" | "ready" | "error">("loading");
+
+    useEffect(() => {
+        if (apLoadState === "error" || latLoadState === "error") {
+            onLoadStateChange("error");
+        } else if (apLoadState === "ready" && latLoadState === "ready") {
+            onLoadStateChange("ready");
+        } else {
+            onLoadStateChange("loading");
+        }
+    }, [apLoadState, latLoadState, onLoadStateChange]);
 
     const apMeta = useMemo(
         () => buildHeadDualScoutMeta(apSeries, defaultWindowWidth, defaultWindowLevel),
@@ -819,6 +831,7 @@ function HeadDualScoutConfirmViewport({
                     windowCenter={meta.windowCenter}
                     windowWidth={meta.windowWidth}
                     interpolationMode="LINEAR"
+                    onStatusChange={view === "ap" ? setApLoadState : setLatLoadState}
                 />
                 <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-black/60 to-transparent" />
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-gradient-to-t from-black/65 to-transparent" />
@@ -841,6 +854,7 @@ function HeadDualScoutConfirmViewport({
 export interface FourDScoutViewportProps {
     onCropBoxChange?: (box: { width: number; height: number }) => void;
     onRectChange?: (rect: { x: number; y: number; width: number; height: number }) => void;
+    onLoadStateChange?: (state: "loading" | "ready" | "error") => void;
     isScanning?: boolean;
     revealY?: number; // 0 to 1
     enableImageTools?: boolean;
@@ -849,6 +863,7 @@ export interface FourDScoutViewportProps {
 export function FourDScoutViewport({
     onCropBoxChange,
     onRectChange,
+    onLoadStateChange,
     isScanning,
     revealY = 1,
     enableImageTools = false,
@@ -859,6 +874,8 @@ export function FourDScoutViewport({
     const projectionRef = useRef<Float32Array | null>(null);
     const projectionSizeRef = useRef<{ width: number; height: number } | null>(null);
     const metaRef = useRef<{ ww: number; wl: number; kvp: string; mas: string; thickness: string } | null>(null);
+    const onCropBoxChangeRef = useRef(onCropBoxChange);
+    const onRectChangeRef = useRef(onRectChange);
 
     const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
     const [loadError, setLoadError] = useState<DicomLoadFailure | null>(null);
@@ -870,6 +887,15 @@ export function FourDScoutViewport({
     const [zoomScale, setZoomScale] = useState(1);
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [cropBox, setCropBox] = useState({ x: 0.2, y: 0.18, width: 0.56, height: 0.48 });
+
+    useEffect(() => {
+        onLoadStateChange?.(loadState);
+    }, [loadState, onLoadStateChange]);
+
+    useEffect(() => {
+        onCropBoxChangeRef.current = onCropBoxChange;
+        onRectChangeRef.current = onRectChange;
+    }, [onCropBoxChange, onRectChange]);
 
     const dragStateRef = useRef<{ startX: number; startY: number; startWw: number; startWl: number } | null>(null);
     const panDragStateRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
@@ -1032,8 +1058,8 @@ export function FourDScoutViewport({
                     case "right": next.width = clamp(cropDragState.initialBox.width + dx, minSize, 1 - cropDragState.initialBox.x); break;
                 }
                 setCropBox(next);
-                if (onCropBoxChange) onCropBoxChange({ width: next.width, height: next.height });
-                if (onRectChange) onRectChange(next);
+                onCropBoxChangeRef.current?.({ width: next.width, height: next.height });
+                onRectChangeRef.current?.(next);
                 return;
             }
             if (panDragStateRef.current) {
@@ -1216,6 +1242,38 @@ export interface HelicalScanPreviewViewportProps {
     revealY?: number;
 }
 
+const buildCoronalProjection = (slices: FourDLoadedSlice[], windowWidth: number, windowLevel: number) => {
+    const totalSlices = slices.length;
+    const rows = slices[0].rows;
+    const cols = slices[0].cols;
+    const projectionCanvas = document.createElement("canvas");
+    projectionCanvas.width = cols;
+    projectionCanvas.height = totalSlices;
+    const context = projectionCanvas.getContext("2d");
+    if (!context) return null;
+
+    const imageData = context.createImageData(cols, totalSlices);
+    const pixels = imageData.data;
+    const minValue = windowLevel - windowWidth / 2;
+    const range = windowWidth;
+    const row = Math.floor(rows / 2);
+
+    for (let z = 0; z < totalSlices; z += 1) {
+        const slice = slices[z];
+        for (let x = 0; x < cols; x += 1) {
+            const value = clamp01((slice.hu[row * cols + x] - minValue) / range) * 255;
+            const offset = (z * cols + x) * 4;
+            pixels[offset] = value;
+            pixels[offset + 1] = value;
+            pixels[offset + 2] = value;
+            pixels[offset + 3] = 255;
+        }
+    }
+
+    context.putImageData(imageData, 0, 0);
+    return projectionCanvas;
+};
+
 export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: HelicalScanPreviewViewportProps) {
     const { t } = useI18n();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1224,9 +1282,7 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
     const coronalProjectionRef = useRef<HTMLCanvasElement | null>(null);
     const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
     const [loadError, setLoadError] = useState<DicomLoadFailure | null>(null);
-    const [windowWidth] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowWidth);
-    const [windowLevel] = useState(FOUR_D_SCOUT_SERIES.fallbackWindowLevel);
-    const [forceRender, setForceRender] = useState(0);
+    const [slicePositions, setSlicePositions] = useState<number[]>([]);
 
     // Load slices once
     useEffect(() => {
@@ -1286,6 +1342,12 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
                 if (cancelled) return;
                 loadedSlices.sort((a, b) => b.positionZ - a.positionZ);
                 slicesRef.current = loadedSlices;
+                coronalProjectionRef.current = buildCoronalProjection(
+                    loadedSlices,
+                    FOUR_D_SCOUT_SERIES.fallbackWindowWidth,
+                    FOUR_D_SCOUT_SERIES.fallbackWindowLevel,
+                );
+                setSlicePositions(loadedSlices.map((slice) => slice.positionZ));
                 setLoadState("ready");
             } catch (err) {
                 console.error(err);
@@ -1300,48 +1362,12 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
         return () => { cancelled = true; };
     }, []);
 
-    // Determine current slice index for metadata overlay based on revealY
-    const currentSliceIdx = useMemo(() => {
-        if (loadState !== "ready" || slicesRef.current.length === 0) return 0;
-        const total = slicesRef.current.length;
-        return Math.min(Math.floor(revealY * total), total - 1);
-    }, [revealY, loadState]);
-
-    // Build Coronal projection once slices ready
-    useEffect(() => {
-        if (loadState !== "ready" || slicesRef.current.length === 0) return;
-        
-        const slices = slicesRef.current;
-        const totalSlices = slices.length;
-        const rows = slices[0].rows;
-        const cols = slices[0].cols;
-
-        // Generate a Coronal projection (using a middle row across all slices)
-        const projectionCanvas = document.createElement("canvas");
-        projectionCanvas.width = cols;
-        projectionCanvas.height = totalSlices;
-        const pCtx = projectionCanvas.getContext("2d")!;
-        const pImgData = pCtx.createImageData(cols, totalSlices);
-        const pData = pImgData.data;
-
-        const minVal = windowLevel - windowWidth / 2, maxVal = windowLevel + windowWidth / 2, range = maxVal - minVal;
-        
-        // Take a middle Coronal slice (Y=256) across the volume
-        const yCoord = Math.floor(rows / 2);
-        
-        for (let z = 0; z < totalSlices; z++) {
-            const slice = slices[z];
-            for (let x = 0; x < cols; x++) {
-                const hu = slice.hu[yCoord * cols + x];
-                const val = clamp01((hu - minVal) / range) * 255;
-                const offset = (z * cols + x) * 4;
-                pData[offset] = val; pData[offset+1] = val; pData[offset+2] = val; pData[offset+3] = 255;
-            }
-        }
-        pCtx.putImageData(pImgData, 0, 0);
-        coronalProjectionRef.current = projectionCanvas;
-        setForceRender(f => f + 1);
-    }, [loadState, windowWidth, windowLevel]);
+    // Determine current slice position for metadata overlay based on revealY.
+    const currentSlicePosition = useMemo(() => {
+        if (loadState !== "ready" || slicePositions.length === 0) return null;
+        const index = Math.min(Math.floor(revealY * slicePositions.length), slicePositions.length - 1);
+        return slicePositions[index];
+    }, [loadState, revealY, slicePositions]);
 
     // Draw Coronal Reconstruction with vertical reveal
     useEffect(() => {
@@ -1367,11 +1393,7 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
             const destH = dh * revealFactor;
             ctx.drawImage(coronal, 0, 0, cw, srcH, dx, dy, dw, destH);
         }
-    }, [forceRender, active, isScanning, revealY]);
-
-    const currentSliceInfo = loadState === "ready" && slicesRef.current.length > 0
-        ? slicesRef.current[currentSliceIdx]
-        : null;
+    }, [active, isScanning, loadState, revealY]);
 
     return (
         <div ref={viewportRef} className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden">
@@ -1411,13 +1433,13 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
                                     {isScanning ? "SCANNING..." : "READY"}
                                 </div>
                             </div>
-                            {isScanning && currentSliceInfo && (
+                            {isScanning && currentSlicePosition !== null && (
                                 <div className="pointer-events-none absolute bottom-4 left-4 flex flex-col gap-0.5">
                                     <div className="px-1.5 py-0.5 bg-[#34D399]/20 border border-[#34D399]/40 rounded text-[9px] font-black text-[#34D399] uppercase tracking-widest">
                                         Real-time Reconstruction
                                     </div>
                                     <div className="text-[10px] font-mono text-white/50">
-                                        Pos: {currentSliceInfo.positionZ.toFixed(1)} mm
+                                        Pos: {currentSlicePosition.toFixed(1)} mm
                                     </div>
                                 </div>
                             )}
@@ -1561,6 +1583,12 @@ const GatingHelicalConfirmScreen = () => {
         }, 1500); // Exposure duration
     };
 
+    const handleScanComplete = useCallback(() => {
+        setScanStarted(false);
+        setScanCompleted(true);
+        setBreathingBedIndex(BREATHING_BED_POSITION_COUNT);
+    }, []);
+
     // Drive scan progress
     useEffect(() => {
         if (!scanStarted) return;
@@ -1587,7 +1615,7 @@ const GatingHelicalConfirmScreen = () => {
         return () => {
             if (rafRef.current) cancelAnimationFrame(rafRef.current);
         };
-    }, [scanStarted]);
+    }, [handleScanComplete, scanStarted]);
 
     const startHold = () => {
         if (scanStage === "positioning" || scanStage === "enabled" || scanStage === "exposing" || scanStage === "completed") return;
@@ -1686,17 +1714,6 @@ const GatingHelicalConfirmScreen = () => {
             fov: Math.round(width * 892.86),
         });
     };
-
-    const handleScanComplete = useCallback(() => {
-        setScanStarted(false);
-        setScanCompleted(true);
-        setBreathingBedIndex(BREATHING_BED_POSITION_COUNT);
-    }, []);
-
-    // Bed progress is now driven by HelicalScanPreviewViewport via onBedProgress callback
-    useEffect(() => {
-        if (!scanStarted) setBreathingBedIndex(0);
-    }, [scanStarted]);
 
     // Waveform animation
     useEffect(() => {
@@ -2096,21 +2113,20 @@ const HelicalScanConfirmScreen = () => {
     }, []);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
-    const isLimbsHelicalSession =
-        isLimbsHelicalScanSession(scanSession) ||
-        isLimbsHelicalWorkflow(loadSelectedScanWorkflowPlans());
-    const isHeadDualScoutFlow =
-        isHeadDualScoutSession(scanSession) ||
-        isHeadDualScoutWorkflow(loadSelectedScanWorkflowPlans());
+    const [scoutSourceError, setScoutSourceError] = useState<string | null>(null);
+    const helicalSeries = scanSession?.series.find((series) => series.series_type === "helical") ?? null;
+    const requiredTopogram = scanSession?.series
+        .filter((series) => series.series_type === "topogram" && (!helicalSeries || series.series_order < helicalSeries.series_order))
+        .sort((a, b) => b.series_order - a.series_order)[0] ?? null;
+    const topogramImageSource = resolveTopogramImageSource(requiredTopogram);
+    const isLimbsHelicalSession = topogramImageSource === "limbs-helical-demo";
+    const isHeadDualScoutFlow = topogramImageSource === "head-dual-scout-demo";
     const helicalParamId = helicalParam?.id ?? null;
-    const updateTimerRef = useRef<number | null>(null);
+    const [paramWrites] = useState(() => new ScanParamWriteCoordinator());
     const thresholdGuard = useDoseThresholdGuard();
     const navigate = useNavigate();
+    const selectedPatient = useMemo(() => loadSelectedPatient(), []);
 
-    // Regular (non-gating) protocols use the Head Stroke Demo topogram as the
-    // scout / 定位像 source. Limbs helical uses the lower-extremity topogram so
-    // the scout matches the body part being scanned. Gating protocols render
-    // GatingHelicalConfirmScreen above and are unaffected by this override.
     const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(
         () => {
             if (isLimbsHelicalSession && limbsDicomManifest) {
@@ -2128,10 +2144,19 @@ const HelicalScanConfirmScreen = () => {
                     };
                 }
             }
-            return BRAIN_HELICAL_SCOUT_OVERRIDE;
+            if (topogramImageSource === "head-stroke-topogram") return BRAIN_HELICAL_SCOUT_OVERRIDE;
+            // qin-lung-topogram intentionally uses the built-in QIN projection.
+            return undefined;
         },
-        [isLimbsHelicalSession, limbsDicomManifest],
+        [isLimbsHelicalSession, limbsDicomManifest, topogramImageSource],
     );
+
+    useEffect(() => () => paramWrites.dispose(), [paramWrites]);
+
+    useEffect(() => {
+        setScoutSourceError(null);
+        setScoutLoadState("loading");
+    }, [topogramImageSource]);
 
     useEffect(() => {
         if (!isLimbsHelicalSession) return;
@@ -2142,6 +2167,7 @@ const HelicalScanConfirmScreen = () => {
             })
             .catch((error) => {
                 console.error("Failed to load limbs DICOM demo manifest for scout override.", error);
+                if (!cancelled) setScoutSourceError(error instanceof Error ? error.message : "四肢定位像清单加载失败");
             });
         return () => { cancelled = true; };
     }, [isLimbsHelicalSession]);
@@ -2155,6 +2181,7 @@ const HelicalScanConfirmScreen = () => {
             })
             .catch((error) => {
                 console.error("Failed to load head dual scout manifest.", error);
+                if (!cancelled) setScoutSourceError(error instanceof Error ? error.message : "头部双定位像清单加载失败");
             });
         return () => { cancelled = true; };
     }, [isHeadDualScoutFlow]);
@@ -2221,9 +2248,7 @@ const HelicalScanConfirmScreen = () => {
         const scoutFov = Number(measurements.scoutFov);
         if (!Number.isFinite(scanLength) || !Number.isFinite(scoutFov)) return;
 
-        if (updateTimerRef.current !== null) window.clearTimeout(updateTimerRef.current);
-
-        updateTimerRef.current = window.setTimeout(() => {
+        paramWrites.schedule(() => {
             const patch: Record<string, number> = {
                 scan_length: Number(scanLength.toFixed(1)),
                 fov: Number(scoutFov.toFixed(1)),
@@ -2245,13 +2270,11 @@ const HelicalScanConfirmScreen = () => {
                 patch.ctdi_vol = estimated.ctdi_vol;
                 patch.dlp = estimated.dlp;
             }
-            void updateSelectedScanSessionHelicalParam(helicalParamId, patch).catch((error) => {
+            return updateSelectedScanSessionHelicalParam(helicalParamId, patch);
+        }, 180, (error) => {
                 console.error("Failed to persist helical crop measurements.", error);
-            });
-        }, 180);
-
-        return () => { if (updateTimerRef.current !== null) window.clearTimeout(updateTimerRef.current); };
-    }, [isGatingWorkflow, helicalParamId, measurements.scanLength, measurements.scoutFov]);
+        });
+    }, [helicalParam, helicalParamId, isGatingWorkflow, measurements.scanLength, measurements.scoutFov, paramWrites, protocolHelicalSeed]);
 
     useEffect(() => {
         const preventBackNavigation = () => {
@@ -2267,7 +2290,7 @@ const HelicalScanConfirmScreen = () => {
         if (noise_level !== undefined) setNoiseLevel(noise_level);
         if (!helicalParam || Object.keys(rest).length === 0) return;
         setHelicalParam((prev) => (prev ? { ...prev, ...rest } : prev));
-        void updateSelectedScanSessionHelicalParam(helicalParam.id, rest).catch((error) => {
+        void paramWrites.write(() => updateSelectedScanSessionHelicalParam(helicalParam.id, rest)).catch((error) => {
             console.error("Failed to persist Auto mA settings.", error);
         });
     };
@@ -2298,27 +2321,73 @@ const HelicalScanConfirmScreen = () => {
         }
     }, [showAutoMaPanel, scoutHu, scoutCropBox, helicalParam]);
 
-    const helicalSeries = scanSession?.series.find((series) => series.series_type === "helical") ?? null;
-    const requiredTopogram = scanSession?.series
-        .filter((series) => series.series_type === "topogram" && (!helicalSeries || series.series_order < helicalSeries.series_order))
-        .sort((a, b) => b.series_order - a.series_order)[0] ?? null;
-    const scoutDisplayReady = isHeadDualScoutFlow
-        ? Boolean(headDualScoutManifest && headDualApSeries && headDualLatSeries)
-        : scoutLoadState === "ready";
-    const topogramDependencyReady = sessionResolved && (
-        !requiredTopogram || (requiredTopogram.execution_status === "image_ready" && scoutDisplayReady)
+    const scoutManifestReady = isLimbsHelicalSession
+        ? Boolean(getLimbsDicomSeries(limbsDicomManifest, "topogram")?.urls[0])
+        : isHeadDualScoutFlow
+            ? Boolean(headDualScoutManifest && headDualApSeries && headDualLatSeries)
+            : topogramImageSource !== null;
+    const scoutDisplayReady = topogramImageSource !== null
+        && scoutManifestReady
+        && !scoutSourceError
+        && scoutLoadState === "ready";
+    const topogramDependencyReady = Boolean(
+        sessionResolved
+        && requiredTopogram
+        && requiredTopogram.execution_status === "image_ready"
+        && scoutDisplayReady,
     );
 
     const handleExecuteScan = useCallback(async () => {
         setExecutionError(null);
-        if (!topogramDependencyReady) {
-            setExecutionError("定位像未成功出图，无法执行后续螺旋扫描");
-            return;
-        }
+        let executeRoute: string;
         try {
-            if (requiredTopogram) {
-                await updateScanSessionSeriesExecution(requiredTopogram.id, { range_confirmed: true });
+            await paramWrites.flush();
+            if (!topogramDependencyReady) {
+                throw new Error("定位像未成功出图或未登记受支持的影像来源，无法执行后续螺旋扫描");
             }
+            const latestScanSession = await fetchSelectedScanSession({ preferCache: false });
+            if (!latestScanSession || latestScanSession.acquisition_type !== "regular") {
+                throw new Error("当前扫描会话与常规螺旋扫描不匹配，请返回患者列表重新选择");
+            }
+            if (!selectedPatient || latestScanSession.patient_id !== selectedPatient.id) {
+                throw new Error("患者与扫描会话不一致，请返回患者列表重新选择");
+            }
+            if (isTerminalScanSessionStatus(latestScanSession.status)) {
+                throw new Error("当前扫描会话已结束，不能再次执行");
+            }
+            const helicalTargets = latestScanSession.series.filter((series) => series.series_type === "helical");
+            if (helicalTargets.length !== 1) {
+                throw new Error("当前版本仅支持单个螺旋扫描目标，请返回协议配置检查序列");
+            }
+            if (helicalTargets[0].execution_status !== "pending") {
+                throw new Error("螺旋扫描序列不是待执行状态；请通过明确的重试或结果查看入口继续");
+            }
+            const executionContext = buildScanSessionExecutionContext(latestScanSession, "helical");
+            if (!executionContext) throw new Error("当前扫描会话缺少待执行的螺旋扫描序列");
+            const latestTopogram = executionContext.requiredTopogramId === null
+                ? null
+                : latestScanSession.series.find((series) => series.id === executionContext.requiredTopogramId) ?? null;
+            if (latestTopogram) {
+                const latestImageSource = resolveTopogramImageSource(latestTopogram);
+                if (
+                    latestTopogram.execution_status !== "image_ready"
+                    || latestImageSource === null
+                    || latestImageSource !== topogramImageSource
+                    || !scoutDisplayReady
+                ) {
+                    throw new Error("定位像未成功出图，无法执行后续螺旋扫描");
+                }
+                await updateScanSessionSeriesExecution(latestTopogram.id, { range_confirmed: true });
+            }
+            const query = new URLSearchParams({
+                mode: "helical",
+                scanSessionId: String(executionContext.scanSessionId),
+                targetSeriesId: String(executionContext.targetSeriesId),
+                topogramId: executionContext.requiredTopogramId === null
+                    ? "none"
+                    : String(executionContext.requiredTopogramId),
+            });
+            executeRoute = `/helical-execute?${query.toString()}`;
         } catch (error) {
             setExecutionError(error instanceof Error ? error.message : "螺旋扫描前置条件校验失败");
             return;
@@ -2347,9 +2416,9 @@ const HelicalScanConfirmScreen = () => {
                 ctdi_vol: estimated?.ctdi_vol ?? helicalParam?.ctdi_vol ?? null,
                 dlp: estimated?.dlp ?? helicalParam?.dlp ?? null,
             },
-            () => navigate("/helical-execute"),
+            () => navigate(executeRoute),
         );
-    }, [thresholdGuard, scanSession, helicalParam, protocolHelicalSeed, measurements.scanLength, navigate, requiredTopogram, topogramDependencyReady]);
+    }, [thresholdGuard, scanSession, helicalParam, protocolHelicalSeed, measurements.scanLength, navigate, paramWrites, scoutDisplayReady, selectedPatient, topogramDependencyReady, topogramImageSource]);
 
     // 4D gets a completely different layout. Keep this after all hooks so
     // React sees the same hook order for gated and non-gated workflows.
@@ -2371,9 +2440,10 @@ const HelicalScanConfirmScreen = () => {
             executeDisabled={!topogramDependencyReady}
             rightViewportContent={
                 <>
-                    {sessionResolved ? (
+                    {sessionResolved && topogramImageSource && scoutManifestReady && !scoutSourceError ? (
                         isHeadDualScoutFlow && headDualScoutManifest && headDualApSeries && headDualLatSeries ? (
                             <HeadDualScoutConfirmViewport
+                                key={`${headDualApSeries.url}:${headDualLatSeries.url}`}
                                 apSeries={headDualApSeries}
                                 latSeries={headDualLatSeries}
                                 defaultWindowWidth={headDualScoutManifest.defaultWindowWidth}
@@ -2384,9 +2454,11 @@ const HelicalScanConfirmScreen = () => {
                                 onScanPositionRatioChange={setScanPositionRatio}
                                 onMeasurementChange={handleMeasurementChangeIdem}
                                 onCropBoxChange={setScoutCropBox}
+                                onLoadStateChange={setScoutLoadState}
                             />
                         ) : (
                             <TomographicScoutViewport
+                                key={topogramImageSource}
                                 onMeasurementChange={setMeasurements}
                                 initialMeasurements={measurements}
                                 scanPositionRatio={scanPositionRatio}
@@ -2400,8 +2472,14 @@ const HelicalScanConfirmScreen = () => {
                             />
                         )
                     ) : (
-                        <div className="flex flex-1 items-center justify-center rounded-lg bg-[#05080d] text-[14px] font-bold text-white/70">
-                            {t("scanFlow.scoutLoading")}
+                        <div className="flex flex-1 items-center justify-center rounded-lg bg-[#05080d] px-8 text-center text-[14px] font-bold text-white/70">
+                            {!sessionResolved || (topogramImageSource && !scoutManifestReady && !scoutSourceError)
+                                ? t("scanFlow.scoutLoading")
+                                : scoutSourceError
+                                    ? `定位像来源加载失败：${scoutSourceError}`
+                                    : requiredTopogram
+                                        ? "定位像未登记受支持的 v1 影像来源，无法确认扫描范围"
+                                        : "当前扫描序列未配置定位像依赖"}
                         </div>
                     )}
                     {helicalParam && showAutoMaPanel && (

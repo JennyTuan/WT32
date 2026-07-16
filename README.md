@@ -16,7 +16,7 @@ The app simulates a 1024 x 768 touch-console workflow:
 ### Requirements
 
 - Python 3.13+ recommended
-- Node.js 18+
+- Node.js 20.19+ or 22.12+ (required by Vite 7)
 - Windows PowerShell or Command Prompt
 
 Python 3.14 works locally if Pydantic is installed with a Python 3.14 compatible version. The pinned project dependency is still documented in `backend/requirements.txt`.
@@ -88,6 +88,40 @@ URLs:
 - Frontend: <http://localhost:5175>
 - Backend health check: <http://localhost:8000>
 - API docs: <http://localhost:8000/docs>
+
+### RespiraScope-compatible local simulator
+
+Starting the WT32 backend also starts a prototype-only RespiraScope-compatible simulator. It emits simulated respiratory samples for UI and workflow validation; it does not connect to or control a real device.
+
+| Client location | Simulator base URL |
+| --- | --- |
+| Frontend and backend on the same computer | `http://127.0.0.1:8000` |
+| Frontend opened from another device on the same trusted LAN | `http://<development-computer-ip>:8000` |
+
+For LAN access, bind Uvicorn to all local interfaces:
+
+```powershell
+cd C:\STN\projects\WT32
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+The client computer or tablet must be able to reach port 8000 through the local network and host firewall. The frontend normally derives the simulator host from the page hostname; set `VITE_RESPIRASCOPE_API_BASE_URL` when the simulator runs at a different address.
+
+Simulator contract:
+
+- `GET /health`: compatibility health check; the response includes `"simulated": true`.
+- `POST /startReceive`: starts the simulated receive contract.
+- `WS /socket.io/?EIO=4&transport=websocket`: Engine.IO 4-compatible WebSocket using the `/breath` namespace, with server ping/client pong timeout handling.
+
+### Verify
+
+Run the complete local quality gate from the repository root:
+
+```powershell
+.\scripts\verify.ps1
+```
+
+This runs backend tests, frontend tests, lint, and the production build. Use `-SkipBuild` only for a focused local iteration.
 
 ## Tech Stack
 

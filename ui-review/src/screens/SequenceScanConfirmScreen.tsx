@@ -11,6 +11,11 @@ import ScanConfirmScreen from "./ScanConfirmScreen";
 import { buildWadoImageId, initCornerstone } from "../lib/cornerstone/initCornerstone";
 import { computeDoseModulation, type ScoutHuData } from "../lib/doseModulation";
 import { useI18n } from "../lib/i18nContext";
+import { loadSelectedPatient } from "../lib/patientSession";
+import { buildScanSessionExecutionContext, isTerminalScanSessionStatus, resolveTopogramImageSource } from "../lib/scanSeriesPrerequisites";
+import { ScanParamWriteCoordinator } from "../lib/scanParamWriteCoordinator";
+import { getLimbsDicomSeries, loadLimbsDicomDemoManifest, type LimbsDicomDemoManifest } from "../lib/limbsDicomDemo";
+import { getHeadDualScoutSeries, loadHeadDualScoutManifest, type HeadDualScoutManifest } from "../lib/headDualScoutDemo";
 
 // Optional cornerstone-backed loading source. When provided, TomographicScoutViewport
 // loads via cornerstone (so JPEG Lossless / other compressed transfer syntaxes work).
@@ -188,6 +193,7 @@ export function TomographicScoutViewport({
         initialOffsetY: number;
     } | null>(null);
     const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const [projectionMeta, setProjectionMeta] = useState<ProjectionMeta | null>(null);
     useEffect(() => {
         onLoadStateChange?.(loadState);
     }, [loadState, onLoadStateChange]);
@@ -214,6 +220,7 @@ export function TomographicScoutViewport({
         initializedCropRef.current = false;
         projectionRef.current = null;
         metaRef.current = null;
+        setProjectionMeta(null);
         huRef.current = null;
         onScoutHuChangeRef.current?.(null);
         setLoadState("loading");
@@ -456,6 +463,7 @@ export function TomographicScoutViewport({
                     if (cancelled) return;
                     projectionRef.current = output;
                     metaRef.current = meta;
+                    setProjectionMeta(meta);
                     huRef.current = hu;
                     onScoutHuChangeRef.current?.(hu);
                     setLoadState("ready");
@@ -500,12 +508,14 @@ export function TomographicScoutViewport({
 
                 if (cancelled) return;
                 projectionRef.current = output;
-                metaRef.current = {
+                const nextProjectionMeta = {
                     width: cols,
                     height: slices.length,
                     pixelSpacingX: slices[0].pixelSpacingX,
                     sliceThickness: slices[0].sliceThickness,
                 };
+                metaRef.current = nextProjectionMeta;
+                setProjectionMeta(nextProjectionMeta);
                 setLoadState("ready");
             } catch (error) {
                 console.warn("Failed to load scout DICOM.", error);
@@ -710,11 +720,10 @@ export function TomographicScoutViewport({
     const isReconCenterAtIso = Math.abs(reconCenterRatio.x - 0.5) < 1e-4 && Math.abs(reconCenterRatio.y - 0.5) < 1e-4;
 
     const reconCenterDelta = useMemo<ReconCenterDelta | null>(() => {
-        const meta = metaRef.current;
-        if (!meta) return null;
-        const physW = meta.width * meta.pixelSpacingX;
+        if (!projectionMeta) return null;
+        const physW = projectionMeta.width * projectionMeta.pixelSpacingX;
         return computeReconCenterDelta(reconCenterRatio.x, physW);
-    }, [reconCenterRatio.x, loadState]);
+    }, [projectionMeta, reconCenterRatio.x]);
 
     useEffect(() => {
         if (reconCenterDelta) onReconCenterChangeRef.current?.(reconCenterDelta);
@@ -984,12 +993,78 @@ const SequenceScanConfirmScreen = () => {
     const [, setReconCenterDelta] = useState<ReconCenterDelta | null>(null);
     const [topogramTubeAngle, setTopogramTubeAngle] = useState<number>(180);
     const [topogramSeries, setTopogramSeries] = useState<ApiScanSessionSeries | null>(null);
-    const [axialSeries, setAxialSeries] = useState<ApiScanSessionSeries | null>(null);
     const [scoutLoadState, setScoutLoadState] = useState<"loading" | "ready" | "error">("loading");
     const [executionError, setExecutionError] = useState<string | null>(null);
     const [sessionResolved, setSessionResolved] = useState(false);
+    const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
+    const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
+    const [scoutSourceError, setScoutSourceError] = useState<string | null>(null);
     const axialParamId = axialParam?.id ?? null;
-    const updateTimerRef = useRef<number | null>(null);
+    const [paramWrites] = useState(() => new ScanParamWriteCoordinator());
+    const topogramImageSource = resolveTopogramImageSource(topogramSeries);
+
+    useEffect(() => () => paramWrites.dispose(), [paramWrites]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setScoutSourceError(null);
+        setScoutLoadState("loading");
+
+        if (topogramImageSource === "limbs-helical-demo") {
+            loadLimbsDicomDemoManifest()
+                .then((manifest) => {
+                    if (!cancelled) setLimbsDicomManifest(manifest);
+                })
+                .catch((error) => {
+                    if (!cancelled) setScoutSourceError(error instanceof Error ? error.message : "四肢定位像清单加载失败");
+                });
+        } else if (topogramImageSource === "head-dual-scout-demo") {
+            loadHeadDualScoutManifest()
+                .then((manifest) => {
+                    if (!cancelled) setHeadDualScoutManifest(manifest);
+                })
+                .catch((error) => {
+                    if (!cancelled) setScoutSourceError(error instanceof Error ? error.message : "头部双定位像清单加载失败");
+                });
+        }
+
+        return () => { cancelled = true; };
+    }, [topogramImageSource]);
+
+    const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(() => {
+        if (topogramImageSource === "head-stroke-topogram") return HEAD_STROKE_DEMO_SCOUT_OVERRIDE;
+        if (topogramImageSource === "limbs-helical-demo") {
+            const topogram = getLimbsDicomSeries(limbsDicomManifest, "topogram");
+            const url = topogram?.urls[0];
+            return url ? {
+                kind: "topogram",
+                url,
+                fallbackWindowWidth: topogram.windowWidth ?? undefined,
+                fallbackWindowLevel: topogram.windowCenter ?? undefined,
+            } : undefined;
+        }
+        if (topogramImageSource === "head-dual-scout-demo") {
+            const apSeries = getHeadDualScoutSeries(headDualScoutManifest, "scout-ap");
+            return apSeries ? {
+                kind: "topogram",
+                url: apSeries.url,
+                fallbackWindowWidth: apSeries.windowWidth ?? headDualScoutManifest?.defaultWindowWidth,
+                fallbackWindowLevel: apSeries.windowCenter ?? headDualScoutManifest?.defaultWindowLevel,
+            } : undefined;
+        }
+        // qin-lung-topogram is the only registered source that intentionally
+        // uses TomographicScoutViewport's built-in QIN axial-stack projection.
+        return undefined;
+    }, [headDualScoutManifest, limbsDicomManifest, topogramImageSource]);
+
+    const scoutManifestReady = topogramImageSource === "limbs-helical-demo"
+        ? Boolean(getLimbsDicomSeries(limbsDicomManifest, "topogram")?.urls[0])
+        : topogramImageSource === "head-dual-scout-demo"
+            ? Boolean(
+                getHeadDualScoutSeries(headDualScoutManifest, "scout-ap")
+                && getHeadDualScoutSeries(headDualScoutManifest, "scout-lat"),
+            )
+            : topogramImageSource !== null;
 
     useEffect(() => {
         let cancelled = false;
@@ -1005,7 +1080,6 @@ const SequenceScanConfirmScreen = () => {
                 const topogram = loadedTopogramSeries?.topogram_param;
                 if (!cancelled) {
                     setTopogramSeries(loadedTopogramSeries);
-                    setAxialSeries(loadedAxialSeries);
                 }
                 if (topogram && !cancelled) {
                     setTopogramTubeAngle(topogram.tube_angle ?? 180);
@@ -1035,7 +1109,7 @@ const SequenceScanConfirmScreen = () => {
         if (noise_level !== undefined) setNoiseLevel(noise_level);
         if (!axialParam || Object.keys(rest).length === 0) return;
         setAxialParam((prev) => (prev ? { ...prev, ...rest } : prev));
-        void updateSelectedScanSessionAxialParam(axialParam.id, rest).catch((error) => {
+        void paramWrites.write(() => updateSelectedScanSessionAxialParam(axialParam.id, rest)).catch((error) => {
             console.error("Failed to persist Auto mA settings.", error);
         });
     };
@@ -1046,25 +1120,17 @@ const SequenceScanConfirmScreen = () => {
         const scoutFov = Number(measurements.scoutFov);
         if (!Number.isFinite(scanLength) || !Number.isFinite(scoutFov)) return;
 
-        if (updateTimerRef.current !== null) {
-            window.clearTimeout(updateTimerRef.current);
-        }
-
-        updateTimerRef.current = window.setTimeout(() => {
-            void updateSelectedScanSessionAxialParam(axialParamId, {
+        paramWrites.schedule(
+            () => updateSelectedScanSessionAxialParam(axialParamId, {
                 scan_length: Number(scanLength.toFixed(1)),
                 fov: Number(scoutFov.toFixed(1)),
-            }).catch((error) => {
+            }),
+            180,
+            (error) => {
                 console.error("Failed to persist axial crop measurements.", error);
-            });
-        }, 180);
-
-        return () => {
-            if (updateTimerRef.current !== null) {
-                window.clearTimeout(updateTimerRef.current);
-            }
-        };
-    }, [axialParamId, measurements.scanLength, measurements.scoutFov]);
+            },
+        );
+    }, [axialParamId, measurements.scanLength, measurements.scoutFov, paramWrites]);
 
     const scanLengthNum = Number(measurements.scanLength);
     const scanLengthForCurve = Number.isFinite(scanLengthNum) ? scanLengthNum : (axialParam?.scan_length ?? 0);
@@ -1102,21 +1168,71 @@ const SequenceScanConfirmScreen = () => {
         }
     }, [showAutoMaPanel, scoutHu, scoutCropBox, axialParam, axialBedCount]);
 
-    const topogramDependencyReady = sessionResolved && (
-        !topogramSeries || (topogramSeries.execution_status === "image_ready" && scoutLoadState === "ready")
+    const scoutDisplayReady = topogramImageSource !== null
+        && scoutManifestReady
+        && !scoutSourceError
+        && scoutLoadState === "ready";
+    const topogramDependencyReady = Boolean(
+        sessionResolved
+        && topogramSeries
+        && topogramSeries.execution_status === "image_ready"
+        && scoutDisplayReady,
     );
 
     const handleExecuteScan = async () => {
         setExecutionError(null);
         try {
-            if (topogramSeries) {
-                if (!topogramDependencyReady) throw new Error("定位像未成功出图，无法执行后续断层扫描");
-                await updateScanSessionSeriesExecution(topogramSeries.id, { range_confirmed: true });
+            await paramWrites.flush();
+            if (!topogramDependencyReady) {
+                throw new Error("定位像未成功出图或未登记受支持的影像来源，无法执行后续断层扫描");
             }
-            if (axialSeries) {
-                await updateScanSessionSeriesExecution(axialSeries.id, { execution_status: "running" });
+            const latestScanSession = await fetchSelectedScanSession({ preferCache: false });
+            if (!latestScanSession || latestScanSession.acquisition_type !== "regular") {
+                throw new Error("当前扫描会话与常规断层扫描不匹配，请返回患者列表重新选择");
             }
-            navigate("/image-viewer");
+            const selectedPatient = loadSelectedPatient();
+            if (!selectedPatient || latestScanSession.patient_id !== selectedPatient.id) {
+                throw new Error("患者与扫描会话不一致，请返回患者列表重新选择");
+            }
+            if (isTerminalScanSessionStatus(latestScanSession.status)) {
+                throw new Error("当前扫描会话已结束，不能再次执行");
+            }
+            const axialTargets = latestScanSession.series.filter((series) => series.series_type === "axial");
+            if (axialTargets.length !== 1) {
+                throw new Error("当前版本仅支持单个断层扫描目标，请返回协议配置检查序列");
+            }
+            if (axialTargets[0].execution_status !== "pending") {
+                throw new Error("断层扫描序列不是待执行状态；请通过明确的重试或结果查看入口继续");
+            }
+
+            const executionContext = buildScanSessionExecutionContext(latestScanSession, "axial");
+            if (!executionContext) throw new Error("当前扫描会话缺少待执行的断层扫描序列");
+
+            const requiredTopogram = executionContext.requiredTopogramId === null
+                ? null
+                : latestScanSession.series.find((series) => series.id === executionContext.requiredTopogramId) ?? null;
+            if (requiredTopogram) {
+                const latestImageSource = resolveTopogramImageSource(requiredTopogram);
+                if (
+                    requiredTopogram.execution_status !== "image_ready"
+                    || latestImageSource === null
+                    || latestImageSource !== topogramImageSource
+                    || !scoutDisplayReady
+                ) {
+                    throw new Error("定位像未成功出图，无法执行后续断层扫描");
+                }
+                await updateScanSessionSeriesExecution(requiredTopogram.id, { range_confirmed: true });
+            }
+
+            const query = new URLSearchParams({
+                mode: "axial",
+                scanSessionId: String(executionContext.scanSessionId),
+                targetSeriesId: String(executionContext.targetSeriesId),
+                topogramId: executionContext.requiredTopogramId === null
+                    ? "none"
+                    : String(executionContext.requiredTopogramId),
+            });
+            navigate(`/helical-execute?${query.toString()}`);
         } catch (error) {
             setExecutionError(error instanceof Error ? error.message : "断层扫描前置条件校验失败");
         }
@@ -1132,23 +1248,35 @@ const SequenceScanConfirmScreen = () => {
             autoMaEnabled={showAutoMaPanel}
             onAutoMaEnabledChange={(value) => handleAutoMaChange({ auto_ma: value })}
             onExecuteScan={() => { void handleExecuteScan(); }}
-            patientConfirmBeforeExecute
             executeDisabled={!topogramDependencyReady}
             rightViewportContent={
                 <>
-                    <TomographicScoutViewport
-                        onMeasurementChange={setMeasurements}
-                        initialMeasurements={measurements}
-                        scanPositionRatio={scanPositionRatio}
-                        showScanPositionGuide={showAutoMaPanel}
-                        onScanPositionRatioChange={setAxialScanPositionRatio}
-                        seriesOverride={HEAD_STROKE_DEMO_SCOUT_OVERRIDE}
-                        onScoutHuChange={setScoutHu}
-                        onCropBoxChange={setScoutCropBox}
-                        tubeAngle={topogramTubeAngle}
-                        onReconCenterChange={setReconCenterDelta}
-                        onLoadStateChange={setScoutLoadState}
-                    />
+                    {sessionResolved && topogramImageSource && scoutManifestReady && !scoutSourceError ? (
+                        <TomographicScoutViewport
+                            key={topogramImageSource}
+                            onMeasurementChange={setMeasurements}
+                            initialMeasurements={measurements}
+                            scanPositionRatio={scanPositionRatio}
+                            showScanPositionGuide={showAutoMaPanel}
+                            onScanPositionRatioChange={setAxialScanPositionRatio}
+                            seriesOverride={scoutSeriesOverride}
+                            onScoutHuChange={setScoutHu}
+                            onCropBoxChange={setScoutCropBox}
+                            tubeAngle={topogramTubeAngle}
+                            onReconCenterChange={setReconCenterDelta}
+                            onLoadStateChange={setScoutLoadState}
+                        />
+                    ) : (
+                        <div className="flex h-full flex-1 items-center justify-center rounded-lg bg-[#05080d] px-8 text-center text-[14px] font-bold text-white/70">
+                            {!sessionResolved
+                                ? t("scanFlow.scoutLoading")
+                                : scoutSourceError
+                                    ? `定位像来源加载失败：${scoutSourceError}`
+                                    : topogramSeries
+                                        ? "定位像未登记受支持的 v1 影像来源，无法确认扫描范围"
+                                        : "当前扫描序列未配置定位像依赖"}
+                        </div>
+                    )}
                     {(executionError || (topogramSeries && !topogramDependencyReady)) && (
                         <div className="absolute bottom-3 left-3 right-3 z-30 rounded border border-[#EF4444]/60 bg-[#2A1115]/95 px-3 py-2 text-[12px] font-bold text-[#FCA5A5]">
                             {executionError ?? t("scanFlow.localizerPrerequisiteBlocked")}

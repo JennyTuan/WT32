@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
-import { fetchSelectedScanSession } from "../lib/scanSession";
+import { fetchSelectedScanSession, loadSelectedScanSessionId, updateScanSessionSeriesExecution } from "../lib/scanSession";
+import type { ApiScanSessionSeries } from "../lib/scanSession";
+import {
+    buildScanSessionExecutionContext,
+    findRequiredTopogram,
+    isScanExecutionReady,
+    isSameScanSessionExecutionContext,
+    isTerminalScanSessionStatus,
+    isTopogramDependencyReady,
+} from "../lib/scanSeriesPrerequisites";
+import type { ScanSessionExecutionContext } from "../lib/scanSeriesPrerequisites";
+import { loadSelectedPatient } from "../lib/patientSession";
 import { useI18n } from "../lib/i18nContext";
 
 type BreathingMode = "breath_hold_inspiration" | "breath_hold_expiration";
@@ -23,6 +34,7 @@ type BreathingMode = "breath_hold_inspiration" | "breath_hold_expiration";
  */
 export default function GatedHelicalConfirmScreen() {
     const { t } = useI18n();
+    const navigate = useNavigate();
     const [params] = useSearchParams();
     const initialBreathingMode = (params.get("breathingMode") ?? "breath_hold_inspiration") as BreathingMode;
 
@@ -30,14 +42,31 @@ export default function GatedHelicalConfirmScreen() {
     // DIBH gating params. Defaults follow CONTEXT: timeout 25 s, tolerance ±2 mm.
     const [breathHoldTimeoutS, setBreathHoldTimeoutS] = useState<number>(25);
     const [amplitudeToleranceMm, setAmplitudeToleranceMm] = useState<number>(2.0);
+    const [requiredTopogram, setRequiredTopogram] = useState<ApiScanSessionSeries | null>(null);
+    const [executionContext, setExecutionContext] = useState<ScanSessionExecutionContext | null>(null);
+    const [scoutLoadState, setScoutLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const [executionError, setExecutionError] = useState<string | null>(null);
+    const [isConfirming, setIsConfirming] = useState(false);
 
     // Read gating defaults from the active scan session if present.
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
-                const session = await fetchSelectedScanSession();
-                if (cancelled || !session) return;
+                const session = await fetchSelectedScanSession({ preferCache: false });
+                if (cancelled) return;
+                if (!session) throw new Error("未找到当前扫描会话，请返回患者列表重新选择");
+                if (isTerminalScanSessionStatus(session.status)) {
+                    throw new Error("当前扫描会话已结束，不能再次确认范围；请返回患者列表重新创建或选择会话");
+                }
+                const selectedPatient = loadSelectedPatient();
+                const context = buildScanSessionExecutionContext(session, "helical");
+                if (!selectedPatient || selectedPatient.id !== session.patient_id) {
+                    throw new Error("患者与扫描会话不一致，请返回患者列表重新选择");
+                }
+                if (!context) throw new Error("当前扫描会话缺少门控螺旋序列");
+                setExecutionContext(context);
+                setRequiredTopogram(findRequiredTopogram(session.series, "helical"));
                 const helicalSeries = session.series.find((s) => s.series_type === "helical");
                 const gating = helicalSeries?.gating_config;
                 if (!gating) return;
@@ -55,6 +84,11 @@ export default function GatedHelicalConfirmScreen() {
                 }
             } catch (err) {
                 console.error("Failed to load DIBH gating defaults.", err);
+                if (!cancelled) {
+                    setExecutionContext(null);
+                    setRequiredTopogram(null);
+                    setExecutionError(err instanceof Error ? err.message : "扫描会话加载失败，请重试");
+                }
             }
         })();
         return () => { cancelled = true; };
@@ -132,6 +166,58 @@ export default function GatedHelicalConfirmScreen() {
         `&breathHoldTimeoutS=${breathHoldTimeoutS}` +
         `&amplitudeToleranceMm=${amplitudeToleranceMm}`;
 
+    const topogramDependencyReady = isScanExecutionReady(
+        executionContext,
+        requiredTopogram,
+        scoutLoadState === "ready",
+    );
+
+    const handleExecuteScan = async () => {
+        setExecutionError(null);
+        if (!executionContext || !topogramDependencyReady) {
+            setExecutionError("定位像未成功出图，无法执行后续门控螺旋扫描");
+            return;
+        }
+
+        setIsConfirming(true);
+        try {
+            const selectedSessionId = loadSelectedScanSessionId();
+            const selectedPatient = loadSelectedPatient();
+            if (selectedSessionId !== executionContext.scanSessionId || selectedPatient?.id !== executionContext.patientId) {
+                throw new Error("患者或扫描会话已切换，请返回患者列表重新选择");
+            }
+
+            const latestSession = await fetchSelectedScanSession({ preferCache: false });
+            if (!latestSession) throw new Error("未找到当前扫描会话，请返回患者列表重新选择");
+            if (isTerminalScanSessionStatus(latestSession.status)) {
+                throw new Error("当前扫描会话已结束，不能再次确认范围；请返回患者列表重新创建或选择会话");
+            }
+            const latestContext = buildScanSessionExecutionContext(latestSession, "helical");
+            if (!latestContext || !isSameScanSessionExecutionContext(executionContext, latestContext)) {
+                throw new Error("扫描会话结构已更新，请重新进入范围确认页");
+            }
+            const latestTopogram = findRequiredTopogram(latestSession.series, "helical");
+            if (!isTopogramDependencyReady(latestTopogram, scoutLoadState === "ready")) {
+                throw new Error("定位像未成功出图，无法执行后续门控螺旋扫描");
+            }
+            if (latestTopogram) {
+                await updateScanSessionSeriesExecution(latestTopogram.id, { range_confirmed: true });
+            }
+            if (loadSelectedScanSessionId() !== latestSession.id || loadSelectedPatient()?.id !== latestSession.patient_id) {
+                throw new Error("患者或扫描会话已切换，已停止进入执行页");
+            }
+            navigate(
+                `${nextRoute}&scanSessionId=${latestContext.scanSessionId}`
+                + `&targetSeriesId=${latestContext.targetSeriesId}`
+                + `&topogramId=${latestContext.requiredTopogramId ?? "none"}`,
+            );
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : "门控螺旋扫描前置条件校验失败");
+        } finally {
+            setIsConfirming(false);
+        }
+    };
+
     return (
         <ScanConfirmScreen
             activeSequenceId="s2"
@@ -140,6 +226,8 @@ export default function GatedHelicalConfirmScreen() {
             helicalParamOverrides={helicalParamOverrides}
             extraParamSection={gatingParamCard}
             nextRoute={nextRoute}
+            onExecuteScan={() => { void handleExecuteScan(); }}
+            executeDisabled={!topogramDependencyReady || isConfirming}
             allowBackNavigation={false}
             rightViewportContent={
                 <div className="relative h-full w-full overflow-hidden bg-black">
@@ -148,6 +236,7 @@ export default function GatedHelicalConfirmScreen() {
                         <FourDScoutViewport
                             enableImageTools
                             onRectChange={handleRectChange}
+                            onLoadStateChange={setScoutLoadState}
                         />
                     </div>
                     {/* Bottom: respiratory waveform + Z bed-position strip, pinned to bottom. */}
@@ -163,6 +252,11 @@ export default function GatedHelicalConfirmScreen() {
                             }}
                         />
                     </div>
+                    {(executionError || (requiredTopogram && !topogramDependencyReady)) && (
+                        <div className="absolute bottom-3 left-3 right-3 z-30 rounded border border-[#EF4444]/60 bg-[#2A1115]/95 px-3 py-2 text-[12px] font-bold text-[#FCA5A5]">
+                            {executionError ?? t("scanFlow.localizerPrerequisiteBlocked")}
+                        </div>
+                    )}
                 </div>
             }
             rightViewportClassName="flex-1 rounded-lg border border-[#B0C4DE] bg-white shadow-sm flex flex-col overflow-hidden relative"

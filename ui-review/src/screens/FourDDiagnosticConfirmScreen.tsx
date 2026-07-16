@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
+import { buildEngineerScanResult, loadFourDEngineerManifest } from "../lib/fourDEngineerImageSource";
 import {
     AlertTriangle,
     Check,
@@ -15,7 +16,22 @@ import {
 } from "lucide-react";
 
 import { loadSelectedPatient } from "../lib/patientSession";
-import { loadSelectedScanSessionId } from "../lib/scanSession";
+import {
+    clearSelectedScanSessionId,
+    fetchSelectedScanSession,
+    loadSelectedScanSessionId,
+    startScanSession,
+    updateScanSessionSeriesExecution,
+    type ApiScanSessionDetail,
+    type ApiScanSessionSeries,
+} from "../lib/scanSession";
+import { applyScanWorkflowAction, createActionId } from "../lib/scanWorkflowActions";
+import {
+    buildScanSessionExecutionContext,
+    isTerminalScanSessionStatus,
+    matchesScanExecutionBinding,
+    type ScanExecutionBinding,
+} from "../lib/scanSeriesPrerequisites";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { PatientConfirmationModal } from "./ScanConfirmScreen";
@@ -24,6 +40,11 @@ import type { PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
 import ScanTriggerFailureDialog from "../components/ScanTriggerFailureDialog";
 import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceErrorEvents";
 import { useI18n } from "../lib/i18nContext";
+import { fetchFourDResult, FourDResultRequestError, saveFourDResult, toFourDPostScanState } from "../lib/fourDResult";
+import {
+    loadAuthoritativeFourDRecovery,
+    resolveLoadedFourDRecoveryDestination,
+} from "../lib/fourDRecovery";
 
 const HOLD_DURATION_MS = 3000;
 const POSITIONING_TIMEOUT_MS = 8000;
@@ -45,12 +66,52 @@ const FOURD_PARAMS = {
     acquisitionTime: "30 s",
     breathingMode: "free_breathing",
     triggerThreshold: "50%",
-    ctdiVol: "40.95",
-    dlp: "1334.97",
+    ctdiVol: "--",
+    dlp: "--",
 };
 
 type ScanStage = "idle" | "positioning" | "positioned" | "enabled" | "exposing" | "paused" | "completed";
 type PhysicalTriggerAction = "position" | "exposure";
+
+const validateFourDExecutionSession = (
+    scanSession: ApiScanSessionDetail | null,
+    binding: ScanExecutionBinding | null,
+    selectedSessionId: number | null,
+    selectedPatientId: number | null,
+): ApiScanSessionSeries => {
+    if (!binding) throw new Error("4D 执行页缺少已确认的扫描绑定，请返回定位像流程");
+    if (!scanSession || scanSession.id !== binding.scanSessionId || selectedSessionId !== binding.scanSessionId) {
+        throw new Error("患者或扫描会话已切换，请返回患者列表重新选择");
+    }
+    if (selectedPatientId === null || scanSession.patient_id !== selectedPatientId) {
+        throw new Error("患者与扫描会话不一致，请返回患者列表重新选择");
+    }
+    if (scanSession.acquisition_type !== "four_d") {
+        throw new Error("当前扫描会话不是 4D 采集会话");
+    }
+    if (isTerminalScanSessionStatus(scanSession.status)) {
+        throw new Error("当前扫描会话已结束，不能再次执行 4D 模拟采集");
+    }
+    if (!matchesScanExecutionBinding(
+        buildScanSessionExecutionContext(scanSession, "4d"),
+        binding,
+    )) {
+        throw new Error("4D 扫描会话结构已更新，请返回定位像流程重新进入");
+    }
+    const targetSeries = scanSession.series.find(
+        (series) => series.id === binding.targetSeriesId && series.series_type === "4d",
+    );
+    if (!targetSeries) throw new Error("当前扫描会话缺少已绑定的 4D 目标序列");
+    const topogram = binding.requiredTopogramId === null
+        ? null
+        : scanSession.series.find(
+            (series) => series.id === binding.requiredTopogramId && series.series_type === "topogram",
+        ) ?? null;
+    if (binding.requiredTopogramId !== null && (!topogram || topogram.execution_status !== "image_ready")) {
+        throw new Error("前置定位像尚未成功出图，不能执行 4D 模拟采集");
+    }
+    return targetSeries;
+};
 
 interface Sequence {
     id: string;
@@ -70,6 +131,12 @@ export default function FourDDiagnosticConfirmScreen() {
     const navigate = useNavigate();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
+    const [executionBinding, setExecutionBinding] = useState<ScanExecutionBinding | null>(null);
+    const [sessionValidationState, setSessionValidationState] = useState<"loading" | "ready" | "error">("loading");
+    const [executionError, setExecutionError] = useState<string | null>(null);
+    const [isStartingScan, setIsStartingScan] = useState(false);
+    const [isAbortingScan, setIsAbortingScan] = useState(false);
+    const [isApplyingRecoveryAction, setIsApplyingRecoveryAction] = useState(false);
 
     const [laserActive, setLaserActive] = useState(false);
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
@@ -110,10 +177,86 @@ export default function FourDDiagnosticConfirmScreen() {
     const scanProgressRef = useRef(0);
     const autoNextTimerRef = useRef<number | null>(null);
     const postScanNavigationStartedRef = useRef(false);
+    const terminateActionIdRef = useRef<string | null>(null);
+    const returnToEditActionIdRef = useRef<string | null>(null);
     const waveRafRef = useRef<number | null>(null);
     const waveTimeRef = useRef(0);
-    // eslint-disable-next-line react-hooks/purity
     const breathingDemoStartRef = useRef(Date.now());
+
+    useEffect(() => {
+        let cancelled = false;
+        const loadExecutionBinding = async () => {
+            try {
+                const scanSession = await fetchSelectedScanSession({ preferCache: false });
+                if (!scanSession || scanSession.acquisition_type !== "four_d") {
+                    throw new Error("未找到当前 4D 扫描会话，请返回患者列表重新选择");
+                }
+                const fourDTargets = scanSession.series.filter((series) => series.series_type === "4d");
+                if (fourDTargets.length !== 1) {
+                    throw new Error("当前版本仅支持单个 4D 目标序列，请检查协议配置");
+                }
+                const context = buildScanSessionExecutionContext(scanSession, "4d");
+                if (!context) throw new Error("当前扫描会话缺少 4D 目标序列");
+                const binding: ScanExecutionBinding = {
+                    scanSessionId: context.scanSessionId,
+                    targetSeriesId: context.targetSeriesId,
+                    requiredTopogramId: context.requiredTopogramId,
+                };
+                const targetSeries = validateFourDExecutionSession(
+                    scanSession,
+                    binding,
+                    loadSelectedScanSessionId(),
+                    loadSelectedPatient()?.id ?? null,
+                );
+                if (!cancelled) setExecutionBinding(binding);
+                if (targetSeries.execution_status !== "pending") {
+                    if (targetSeries.execution_status === "running") {
+                        try {
+                            const recovery = await loadAuthoritativeFourDRecovery(scanSession.patient_id);
+                            const destination = resolveLoadedFourDRecoveryDestination(recovery);
+                            if (destination !== "blocked") {
+                                const state = toFourDPostScanState(recovery.result);
+                                const route = destination === "rescan"
+                                    ? "/fourd-rescan-select"
+                                    : destination === "image-load"
+                                        ? "/image-load"
+                                        : destination === "phase-filter"
+                                            ? "/phase-filter"
+                                            : "/image-viewer";
+                                navigate(route, {
+                                    replace: true,
+                                    state: destination === "viewer"
+                                        ? { ...state, initialBrowseMode: "phase" as const }
+                                        : state,
+                                });
+                                return;
+                            }
+                        } catch {
+                            // 尚无持久化结果时，下面展示显式“返回编辑 / 终止检查”恢复入口。
+                        }
+                    }
+                    throw new Error(
+                        targetSeries.execution_status === "running"
+                            ? "4D 序列仍标记为运行中；刷新后不能重复触发，请先执行状态恢复或终止"
+                            : "4D 序列不是待执行状态，请从明确的结果恢复或重试入口继续",
+                    );
+                }
+                if (!cancelled) {
+                    setSessionValidationState("ready");
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    setExecutionBinding(null);
+                    setSessionValidationState("error");
+                    setExecutionError(error instanceof Error ? error.message : "4D 扫描会话加载失败");
+                }
+            }
+        };
+        void loadExecutionBinding();
+        return () => {
+            cancelled = true;
+        };
+    }, [navigate]);
 
     const buildGroups = useCallback((): ProtocolGroup[] => {
         if (workflowPlans.length === 0) {
@@ -221,34 +364,79 @@ export default function FourDDiagnosticConfirmScreen() {
     }, [bedSegmentCount]);
 
     /** 扫描完成后点击"下一步"时的路由决策 */
-    const handlePostScanNavigate = useCallback(() => {
+    const handlePostScanNavigate = useCallback(async () => {
         if (postScanNavigationStartedRef.current) return;
         postScanNavigationStartedRef.current = true;
+        setExecutionError(null);
+        try {
+            if (!executionBinding || !selectedPatient) {
+                throw new Error("4D 结果缺少患者或扫描会话绑定，无法进入后处理");
+            }
+            const acquisitionSnapshot = generateMockScanResult(
+                bedSegmentCount,
+                Number(FOURD_PARAMS.phases),
+                dynamicParams.scanLength,
+            );
+            const engineerManifest = await loadFourDEngineerManifest();
+            if (
+                !engineerManifest
+                || engineerManifest.bedCount !== acquisitionSnapshot.bedCount
+                || engineerManifest.phaseCount !== acquisitionSnapshot.phaseCount
+            ) {
+                throw new Error("本次 4D 模拟结果缺少匹配的影像清单，不能进入后处理。");
+            }
+            const scanResult = buildEngineerScanResult(engineerManifest, acquisitionSnapshot);
+            let persistedResult;
+            try {
+                persistedResult = await saveFourDResult({
+                    scanSessionId: executionBinding.scanSessionId,
+                    patientId: selectedPatient.id,
+                    targetSeriesId: executionBinding.targetSeriesId,
+                    expectedVersion: 0,
+                    workflowStage: "acquired",
+                    state: { scanResult },
+                });
+            } catch (saveError) {
+                const mayBeUncertainCommit = saveError instanceof TypeError
+                    || (saveError instanceof FourDResultRequestError && saveError.status === 409);
+                if (!mayBeUncertainCommit) throw saveError;
+                // 只接受与本次采集快照完全一致的 acquired 结果，避免采用旧 attempt 的结果。
+                const recovered = await fetchFourDResult({
+                    scanSessionId: executionBinding.scanSessionId,
+                    patientId: selectedPatient.id,
+                    targetSeriesId: executionBinding.targetSeriesId,
+                }).catch(() => {
+                    throw saveError;
+                });
+                if (
+                    recovered.workflowStage !== "acquired"
+                    || recovered.imageSourceId !== "fourd-engineer"
+                    || recovered.imageSourceVersion !== 1
+                    || recovered.sourceAttemptId === undefined
+                    || JSON.stringify(recovered.scanResult) !== JSON.stringify(scanResult)
+                ) {
+                    throw saveError;
+                }
+                persistedResult = recovered;
+            }
+            const postScanState: FourDPostScanState = toFourDPostScanState(persistedResult);
 
-        const scanResult = generateMockScanResult(
-            bedSegmentCount,
-            Number(FOURD_PARAMS.phases),
-            dynamicParams.scanLength
-        );
-        const postScanState: FourDPostScanState = {
-            scanResult,
-            showSliceLoadingBeforeImageLoad: false,
-        };
-
-        if (scanResult.rescanOccurred) {
-            // 先做重扫区域选择，再进图像浏览
-            navigate("/fourd-rescan-select", { state: postScanState });
-        } else {
-            // 直接进入图像加载流程第一步
-            navigate("/image-load", { state: postScanState });
+            if (postScanState.scanResult.rescanOccurred) {
+                navigate("/fourd-rescan-select", { state: postScanState });
+            } else {
+                navigate("/image-load", { state: postScanState });
+            }
+        } catch (error) {
+            postScanNavigationStartedRef.current = false;
+            setExecutionError(error instanceof Error ? error.message : "4D 模拟结果持久化失败");
         }
-    }, [bedSegmentCount, dynamicParams.scanLength, navigate]);
+    }, [bedSegmentCount, dynamicParams.scanLength, executionBinding, navigate, selectedPatient]);
 
     useEffect(() => {
         if (!scanCompleted) return;
 
         autoNextTimerRef.current = window.setTimeout(() => {
-            handlePostScanNavigate();
+            void handlePostScanNavigate();
         }, FOUR_D_AUTO_NEXT_STEP_DELAY_MS);
 
         return () => {
@@ -322,37 +510,67 @@ export default function FourDDiagnosticConfirmScreen() {
         setScanStage("positioned");
     }, [physicalWorkflowReady]);
 
-    const triggerScanSequence = useCallback(() => {
-        if (!physicalWorkflowReady) return;
-        clearHoldRaf();
-        setShowPatientConfirm(false);
-        setPhysicalWorkflowReady(false);
-        setScanStage("enabled");
-
-        window.setTimeout(() => {
-            setScanStage("exposing");
-        }, 180);
-
-        window.setTimeout(() => {
-            setScanStarted(true);
-            setScanPaused(false);
-            setScanCompleted(false);
-            postScanNavigationStartedRef.current = false;
-            if (autoNextTimerRef.current !== null) {
-                window.clearTimeout(autoNextTimerRef.current);
-                autoNextTimerRef.current = null;
+    const triggerScanSequence = async () => {
+        if (!physicalWorkflowReady || !executionBinding || sessionValidationState !== "ready" || isStartingScan) return;
+        setIsStartingScan(true);
+        setExecutionError(null);
+        try {
+            const latestScanSession = await fetchSelectedScanSession({ preferCache: false });
+            const targetSeries = validateFourDExecutionSession(
+                latestScanSession,
+                executionBinding,
+                loadSelectedScanSessionId(),
+                loadSelectedPatient()?.id ?? null,
+            );
+            if (targetSeries.execution_status !== "pending") {
+                throw new Error("4D 目标序列不是待执行状态，不能重复触发模拟采集");
             }
-            scanProgressRef.current = 0;
-            setScanProgress(0);
-            setBedProgress(0);
-        }, 1200);
-    }, [physicalWorkflowReady]);
+            if (executionBinding.requiredTopogramId !== null) {
+                await updateScanSessionSeriesExecution(executionBinding.requiredTopogramId, { range_confirmed: true });
+            }
+            const startedSession = await startScanSession(executionBinding.scanSessionId);
+            if (startedSession.status !== "in_progress") {
+                throw new Error("4D 扫描会话未进入运行状态，模拟采集未启动");
+            }
+            await updateScanSessionSeriesExecution(targetSeries.id, { execution_status: "running" });
+
+            clearHoldRaf();
+            setShowPatientConfirm(false);
+            setPhysicalWorkflowReady(false);
+            setScanStage("enabled");
+
+            window.setTimeout(() => {
+                setScanStage("exposing");
+            }, 180);
+
+            window.setTimeout(() => {
+                setScanStarted(true);
+                setScanPaused(false);
+                setScanCompleted(false);
+                postScanNavigationStartedRef.current = false;
+                if (autoNextTimerRef.current !== null) {
+                    window.clearTimeout(autoNextTimerRef.current);
+                    autoNextTimerRef.current = null;
+                }
+                scanProgressRef.current = 0;
+                setScanProgress(0);
+                setBedProgress(0);
+            }, 1200);
+        } catch (error) {
+            exitTriggerFlowWithFailure({
+                title: "4D 模拟采集未启动",
+                message: error instanceof Error ? error.message : "4D 扫描前置条件校验失败",
+            });
+        } finally {
+            setIsStartingScan(false);
+        }
+    };
 
     const startHold = () => {
         if (!showPatientConfirm || !physicalWorkflowReady || scanStage === "positioning" || scanStage === "enabled" || scanStage === "exposing" || scanStage === "completed") return;
 
         if (physicalTriggerAction === "exposure") {
-            triggerScanSequence();
+            void triggerScanSequence();
             return;
         }
 
@@ -394,6 +612,82 @@ export default function FourDDiagnosticConfirmScreen() {
             setScanStage(nextPaused ? "paused" : "exposing");
             return nextPaused;
         });
+    };
+
+    const handleReturnToEdit = async () => {
+        if (!executionBinding || isApplyingRecoveryAction) return;
+        setIsApplyingRecoveryAction(true);
+        try {
+            const latestScanSession = await fetchSelectedScanSession({ preferCache: false });
+            const targetSeries = validateFourDExecutionSession(
+                latestScanSession,
+                executionBinding,
+                loadSelectedScanSessionId(),
+                loadSelectedPatient()?.id ?? null,
+            );
+            const actionId = returnToEditActionIdRef.current ?? createActionId();
+            returnToEditActionIdRef.current = actionId;
+            const { scan_session: updatedSession } = await applyScanWorkflowAction(
+                executionBinding.scanSessionId,
+                {
+                    action_id: actionId,
+                    action: "return_to_edit",
+                    target_series_id: targetSeries.id,
+                    reason: "User requested recovery from an interrupted simulated 4D workflow",
+                },
+            );
+            const updatedTarget = updatedSession.series.find((series) => series.id === targetSeries.id);
+            if (updatedTarget?.execution_status !== "pending") {
+                throw new Error("4D 目标序列未成功返回待执行状态。");
+            }
+            setExecutionError(null);
+            setSessionValidationState("ready");
+            setScanStarted(false);
+            setScanPaused(false);
+            setScanCompleted(false);
+            setScanStage("idle");
+            setPhysicalWorkflowReady(true);
+            returnToEditActionIdRef.current = null;
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : "返回编辑失败，请重试。");
+        } finally {
+            setIsApplyingRecoveryAction(false);
+        }
+    };
+
+    const handleAbortScan = async () => {
+        if (!executionBinding || isAbortingScan) return;
+        setIsAbortingScan(true);
+        setExecutionError(null);
+        try {
+            const latestScanSession = await fetchSelectedScanSession({ preferCache: false });
+            const targetSeries = validateFourDExecutionSession(
+                latestScanSession,
+                executionBinding,
+                loadSelectedScanSessionId(),
+                loadSelectedPatient()?.id ?? null,
+            );
+            const actionId = terminateActionIdRef.current ?? createActionId();
+            terminateActionIdRef.current = actionId;
+            const { scan_session: cancelledSession } = await applyScanWorkflowAction(
+                executionBinding.scanSessionId,
+                {
+                    action_id: actionId,
+                    action: "terminate_exam",
+                    target_series_id: targetSeries.id,
+                    reason: "User terminated the simulated 4D acquisition before completion",
+                },
+            );
+            if (cancelledSession.status !== "cancelled") {
+                throw new Error("4D 扫描会话未成功终止");
+            }
+            clearSelectedScanSessionId();
+            navigate("/patients");
+        } catch (error) {
+            setShowAbortConfirm(false);
+            setExecutionError(error instanceof Error ? error.message : "终止 4D 扫描失败，请重试");
+            setIsAbortingScan(false);
+        }
     };
 
     useEffect(() => {
@@ -537,8 +831,12 @@ export default function FourDDiagnosticConfirmScreen() {
             y: point.y,
         }];
     });
-    const canExecuteScan = scanCompleted || scanStarted || breathingStability.stable;
-    const primaryActionLabel = scanCompleted
+    const canExecuteScan = sessionValidationState === "ready"
+        && !isStartingScan
+        && (scanCompleted || scanStarted || breathingStability.stable);
+    const primaryActionLabel = isStartingScan
+        ? t("scanFlow.finalization.saving")
+        : scanCompleted
         ? t("scanFlow.fourD.completeScan")
         : scanStarted
             ? (scanPaused ? t("scanFlow.continueExam") : t("scanFlow.fourD.pauseScan"))
@@ -896,7 +1194,8 @@ export default function FourDDiagnosticConfirmScreen() {
                 <div className="flex-1">
                     <button
                         onClick={() => navigate(-1)}
-                        className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95"
+                        disabled={scanStarted || scanCompleted || isStartingScan}
+                        className="flex items-center gap-2 px-10 h-[52px] bg-white text-[#4D94FF] font-bold rounded-md border-2 border-[#4D94FF] hover:bg-solid shadow-sm transition-all uppercase text-[13px] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                         <ChevronLeft size={20} /> {t("common.previousStep")}                    </button>
                 </div>
@@ -916,7 +1215,7 @@ export default function FourDDiagnosticConfirmScreen() {
                         disabled={!canExecuteScan}
                         onClick={() => {
                             if (scanCompleted) {
-                                handlePostScanNavigate();
+                                void handlePostScanNavigate();
                                 return;
                             }
                             if (scanStarted) {
@@ -995,6 +1294,49 @@ export default function FourDDiagnosticConfirmScreen() {
                 onReturnToConfirm={() => navigate("/scout-execute")}
             />
 
+            {executionError && (
+                <div className="absolute inset-0 z-[70] flex items-center justify-center bg-slate-900/55 backdrop-blur-[1px]">
+                    <div className="w-[440px] rounded-xl border border-red-300 bg-white shadow-2xl">
+                        <div className="border-b border-red-100 bg-red-50 px-6 py-4 text-[15px] font-black text-red-800">4D 扫描无法继续</div>
+                        <div className="px-6 py-5 text-[13px] leading-relaxed text-slate-600">{executionError}</div>
+                        <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4">
+                            {scanCompleted ? (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setExecutionError(null);
+                                        postScanNavigationStartedRef.current = false;
+                                        void handlePostScanNavigate();
+                                    }}
+                                    className="rounded-md bg-[#1D4ED8] px-5 py-2 text-[12px] font-bold text-white"
+                                >
+                                    {t("scanFlow.finalization.retry")}
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => { void handleReturnToEdit(); }}
+                                        disabled={!executionBinding || isApplyingRecoveryAction || isAbortingScan}
+                                        className="rounded-md border border-blue-300 bg-white px-4 py-2 text-[12px] font-bold text-blue-700 disabled:opacity-50"
+                                    >
+                                        返回编辑
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { void handleAbortScan(); }}
+                                        disabled={!executionBinding || isApplyingRecoveryAction || isAbortingScan}
+                                        className="rounded-md bg-[#B91C1C] px-4 py-2 text-[12px] font-bold text-white disabled:opacity-50"
+                                    >
+                                        终止检查
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {showAbortConfirm && (
                 <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-50">
                     <div className="bg-white rounded-xl shadow-2xl border border-[#FFE082] w-[360px] overflow-hidden">
@@ -1019,10 +1361,11 @@ export default function FourDDiagnosticConfirmScreen() {
                                 {t("common.cancel")}
                             </button>
                             <button
-                                onClick={() => navigate("/patients")}
-                                className="flex-1 h-[40px] bg-[#F57C00] text-white font-bold rounded-lg text-[13px] hover:bg-orange-600 shadow-md transition-all active:scale-95"
+                                onClick={() => { void handleAbortScan(); }}
+                                disabled={isAbortingScan}
+                                className="flex-1 h-[40px] bg-[#F57C00] text-white font-bold rounded-lg text-[13px] hover:bg-orange-600 shadow-md transition-all active:scale-95 disabled:cursor-wait disabled:opacity-60"
                             >
-                                {t("scanFlow.confirmAbort")}
+                                {isAbortingScan ? t("scanFlow.finalization.saving") : t("scanFlow.confirmAbort")}
                             </button>
                         </div>
                     </div>

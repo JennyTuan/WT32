@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -314,6 +314,24 @@ class ScanSession(Base):
         cascade="all, delete-orphan",
         order_by="ScanSessionSeries.series_order",
     )
+    fourd_result = relationship(
+        "ScanSessionFourDResult",
+        back_populates="scan_session",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    workflow_actions = relationship(
+        "ScanSessionWorkflowAction",
+        back_populates="scan_session",
+        cascade="all, delete-orphan",
+        order_by="ScanSessionWorkflowAction.id",
+    )
+    series_attempts = relationship(
+        "ScanSessionSeriesAttempt",
+        back_populates="scan_session",
+        cascade="all, delete-orphan",
+        order_by="ScanSessionSeriesAttempt.id",
+    )
 
 
 class ScanSessionContrastConfig(Base):
@@ -334,7 +352,46 @@ class ScanSessionContrastConfig(Base):
 
 class ScanSessionSeries(Base):
     __tablename__ = "scan_session_series"
-    __table_args__ = (UniqueConstraint("scan_session_id", "series_order", name="uq_scan_session_series_order"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_session_id",
+            "series_order",
+            name="uq_scan_session_series_order",
+        ),
+        CheckConstraint(
+            "(image_source_id IS NULL AND image_source_version IS NULL) OR "
+            "(image_source_id IS NOT NULL AND image_source_version IS NOT NULL)",
+            name="ck_scan_session_series_image_source_pair",
+        ),
+        CheckConstraint(
+            "image_source_id IS NULL OR image_source_id IN ("
+            "'head-stroke-topogram', "
+            "'head-dual-scout-demo', "
+            "'brain-helical-demo', "
+            "'limbs-helical-demo', "
+            "'qin-lung-topogram', "
+            "'fourd-scout-demo', "
+            "'qin-lung-helical-demo'"
+            ")",
+            name="ck_scan_session_series_image_source_allowlist",
+        ),
+        CheckConstraint(
+            "image_source_version IS NULL OR image_source_version = 1",
+            name="ck_scan_session_series_image_source_version",
+        ),
+        CheckConstraint(
+            "image_source_id IS NULL OR ("
+            "(series_type = 'topogram' AND image_source_id IN ("
+            "'head-stroke-topogram', 'head-dual-scout-demo', "
+            "'limbs-helical-demo', 'qin-lung-topogram', 'fourd-scout-demo'"
+            ")) OR "
+            "(series_type = 'helical' AND image_source_id IN ("
+            "'brain-helical-demo', 'limbs-helical-demo', 'qin-lung-helical-demo'"
+            "))"
+            ")",
+            name="ck_scan_session_series_image_source_type",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     scan_session_id = Column(Integer, ForeignKey("scan_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -348,6 +405,8 @@ class ScanSessionSeries(Base):
     execution_status = Column(String(20), nullable=False, default="pending", server_default="pending", index=True)
     failure_reason = Column(Text, nullable=True)
     range_confirmed = Column(Boolean, nullable=False, default=False, server_default=false())
+    image_source_id = Column(String(100), nullable=True)
+    image_source_version = Column(Integer, nullable=True)
 
     scan_session = relationship("ScanSession", back_populates="series")
     topogram_param = relationship(
@@ -385,6 +444,155 @@ class ScanSessionSeries(Base):
         back_populates="session_series",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    fourd_result = relationship(
+        "ScanSessionFourDResult",
+        back_populates="target_series",
+        passive_deletes=True,
+        uselist=False,
+    )
+    attempts = relationship(
+        "ScanSessionSeriesAttempt",
+        back_populates="series",
+        cascade="all, delete-orphan",
+        order_by="ScanSessionSeriesAttempt.attempt_number",
+    )
+
+
+class ScanSessionFourDResult(Base):
+    __tablename__ = "scan_session_fourd_results"
+    __table_args__ = (
+        UniqueConstraint("scan_session_id", name="uq_scan_session_fourd_results_scan_session"),
+        UniqueConstraint("target_series_id", name="uq_scan_session_fourd_results_target_series"),
+        CheckConstraint("version >= 1", name="ck_scan_session_fourd_results_version_positive"),
+        CheckConstraint("source_kind = 'simulation'", name="ck_scan_session_fourd_results_source_simulation"),
+        CheckConstraint(
+            "image_source_id = 'fourd-engineer'",
+            name="ck_scan_session_fourd_results_image_source",
+        ),
+        CheckConstraint(
+            "image_source_version = 1",
+            name="ck_scan_session_fourd_results_image_source_version",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    scan_session_id = Column(Integer, ForeignKey("scan_sessions.id", ondelete="CASCADE"), nullable=False)
+    target_series_id = Column(Integer, ForeignKey("scan_session_series.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+    workflow_stage = Column(String(30), nullable=False)
+    # 仅保存明确标识的模拟结果，不把它描述为真实设备采集结果。
+    source_kind = Column(String(20), nullable=False, default="simulation", server_default="simulation")
+    image_source_id = Column(
+        String(100),
+        nullable=False,
+        default="fourd-engineer",
+        server_default="fourd-engineer",
+    )
+    image_source_version = Column(Integer, nullable=False, default=1, server_default="1")
+    source_attempt_id = Column(
+        Integer,
+        ForeignKey("scan_session_series_attempts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    scan_result_json = Column(Text, nullable=False)
+    rescan_choices_json = Column(Text, nullable=True)
+    phase_selections_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    scan_session = relationship("ScanSession", back_populates="fourd_result")
+    target_series = relationship("ScanSessionSeries", back_populates="fourd_result")
+    source_attempt = relationship("ScanSessionSeriesAttempt")
+
+
+class ScanSessionWorkflowAction(Base):
+    __tablename__ = "scan_session_workflow_actions"
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_session_id",
+            "action_id",
+            name="uq_scan_session_workflow_actions_session_action_id",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    action_id = Column(String(100), nullable=False)
+    scan_session_id = Column(
+        Integer,
+        ForeignKey("scan_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # 审计快照：即使后续删除可编辑序列，也保留动作当时指向的序列 ID。
+    target_series_id = Column(Integer, nullable=True, index=True)
+    action_type = Column(String(40), nullable=False, index=True)
+    reason = Column(Text, nullable=False)
+    resulting_session_status = Column(String(20), nullable=False)
+    resulting_series_status = Column(String(20), nullable=True)
+    next_entry = Column(String(40), nullable=False)
+    # 工作流动作不生成剂量数据；已有剂量记录也不会因动作被覆盖或删除。
+    dose_log_disposition = Column(
+        String(30),
+        nullable=False,
+        default="not_emitted",
+        server_default="not_emitted",
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    scan_session = relationship("ScanSession", back_populates="workflow_actions")
+    ended_attempts = relationship(
+        "ScanSessionSeriesAttempt",
+        back_populates="ended_by_action",
+        passive_deletes=True,
+    )
+
+
+class ScanSessionSeriesAttempt(Base):
+    __tablename__ = "scan_session_series_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_session_series_id",
+            "attempt_number",
+            name="uq_scan_session_series_attempts_series_number",
+        ),
+        CheckConstraint(
+            "attempt_number >= 1",
+            name="ck_scan_session_series_attempts_number_positive",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    scan_session_id = Column(
+        Integer,
+        ForeignKey("scan_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    scan_session_series_id = Column(
+        Integer,
+        ForeignKey("scan_session_series.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    attempt_number = Column(Integer, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    outcome = Column(String(30), nullable=True, index=True)
+    end_reason = Column(Text, nullable=True)
+    ended_by_action_id = Column(
+        Integer,
+        ForeignKey("scan_session_workflow_actions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    scan_session = relationship("ScanSession", back_populates="series_attempts")
+    series = relationship("ScanSessionSeries", back_populates="attempts")
+    ended_by_action = relationship(
+        "ScanSessionWorkflowAction",
+        back_populates="ended_attempts",
     )
 
 

@@ -118,11 +118,10 @@ export function buildEngineerScanResult(
   return {
     bedCount: manifest.bedCount,
     phaseCount: manifest.phaseCount,
-    scanLength: manifest.bedCount * 19.2,
+    scanLength: baseScanResult?.scanLength ?? manifest.bedCount * 19.2,
     phaseMatrix,
-    // The provided engineer dataset demonstrates duplicate phase candidates,
-    // not a second complete exposure set for a rescan region.
-    rescanOccurred: baseScanResult?.rescanOccurred ?? false,
-    rescanBedRange: baseScanResult?.rescanBedRange ?? null,
+    // 当前工程数据只包含相位候选冗余，不包含第二套重扫采集，不能伪造重扫选择。
+    rescanOccurred: false,
+    rescanBedRange: null,
   };
 }

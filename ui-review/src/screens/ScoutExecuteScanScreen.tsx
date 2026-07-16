@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as dicomParser from "dicom-parser";
 import { useLocation, useNavigate } from "react-router-dom";
-import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, updateScanSessionSeriesExecution, type ApiScanSessionDetail } from "../lib/scanSession";
+import { fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, updateScanSessionSeriesExecution, type ApiScanSeriesImageSourceId, type ApiScanSessionDetail } from "../lib/scanSession";
+import { applyScanWorkflowAction, createActionId } from "../lib/scanWorkflowActions";
 import { loadSelectedPatient } from "../lib/patientSession";
-import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
+import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
 import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
 import {
@@ -11,6 +12,7 @@ import {
     isLimbsHelicalScanSession,
     isLimbsHelicalWorkflow,
     loadLimbsDicomDemoManifest,
+    resetLimbsDicomDemoManifestCache,
     type LimbsDicomDemoManifest,
 } from "../lib/limbsDicomDemo";
 import {
@@ -19,6 +21,7 @@ import {
     isHeadDualScoutWorkflow,
     loadHeadDualScoutManifest,
     mergeDualScoutPlanSequences,
+    resetHeadDualScoutManifestCache,
     type HeadDualScoutManifest,
 } from "../lib/headDualScoutDemo";
 import DicomViewer from "../components/DicomViewer";
@@ -29,6 +32,13 @@ import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
 import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceErrorEvents";
+import {
+    canStartScoutExecution,
+    resolvePostScoutScanTypeFromSession,
+    resolveSeriesRecoveryAction,
+    selectScoutExecutionSeries,
+    type PostScoutScanType,
+} from "../lib/scanExecutionFlow";
 
 const HOLD_DURATION_MS = 3000;
 const POSITIONING_TIMEOUT_MS = 8000;
@@ -104,8 +114,6 @@ type LoadedSlice = {
     hu: Float32Array;
 };
 
-type PostScoutScanType = Extract<WorkflowSequenceType, "helical" | "axial" | "4d"> | "gated_helical" | "gated_axial";
-
 const DEFAULT_POST_SCOUT_SCAN_TYPE: PostScoutScanType = "helical";
 
 const POST_SCOUT_SCAN_CONFIG: Record<PostScoutScanType, { labelKey: TranslationKey; route: string }> = {
@@ -143,20 +151,6 @@ const resolvePostScoutScanTypeFromWorkflowPlans = (): PostScoutScanType | null =
     }
 
     return null;
-};
-
-const SCAN_SESSION_DETAIL_CACHE_KEY = "selectedScanSessionDetail";
-
-
-const loadCachedBrainHelicalSession = () => {
-    try {
-        const raw = localStorage.getItem(SCAN_SESSION_DETAIL_CACHE_KEY);
-        if (!raw) return null;
-        const session = JSON.parse(raw) as ApiScanSessionDetail;
-        return isBrainHelicalScanSession(session) ? session : null;
-    } catch {
-        return null;
-    }
 };
 
 const hasBrainHelicalWorkflow = () => isBrainHelicalWorkflow(loadSelectedScanWorkflowPlans());
@@ -585,14 +579,18 @@ export default function ScoutExecuteScanScreen() {
     const [latImageLoadState, setLatImageLoadState] = useState<ScoutImageLoadState>("loading");
     const [imageLoadAttempt, setImageLoadAttempt] = useState(0);
     const [executionError, setExecutionError] = useState<string | null>(null);
+    const [isRecoveryActionRunning, setIsRecoveryActionRunning] = useState(false);
     const [triggerFailure, setTriggerFailure] = useState<{ title: string; message: string } | null>(null);
     const [postScoutScanType, setPostScoutScanType] = useState<PostScoutScanType>(
         () => resolvePostScoutScanTypeFromWorkflowPlans() ?? DEFAULT_POST_SCOUT_SCAN_TYPE
     );
-    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(() => loadCachedBrainHelicalSession());
+    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const [sessionAuthorityState, setSessionAuthorityState] = useState<"loading" | "session" | "fallback">("loading");
     const [gatingBreathingMode, setGatingBreathingMode] = useState<string | null>(null);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
+    const [scoutManifestError, setScoutManifestError] = useState<string | null>(null);
+    const [manifestLoadAttempt, setManifestLoadAttempt] = useState(0);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const thresholdGuard = useDoseThresholdGuard();
     const rafRef = useRef<number | null>(null);
@@ -603,8 +601,8 @@ export default function ScoutExecuteScanScreen() {
     const positioningTimeoutRef = useRef<number | null>(null);
     const triggerRequestIdRef = useRef(0);
     const autoNextTimerRef = useRef<number | null>(null);
+    const recoveryActionIdsRef = useRef<Map<string, string>>(new Map());
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
-    const topogramSeries = scanSession?.series.find((series) => series.series_type === "topogram") ?? null;
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -654,39 +652,32 @@ export default function ScoutExecuteScanScreen() {
         let cancelled = false;
 
         const workflowType = resolvePostScoutScanTypeFromWorkflowPlans();
-        // Always fetch session so we can detect gating, even when workflowType is non-null.
 
         const resolveFromSession = async () => {
             try {
-                const scanSession = await fetchSelectedScanSession();
+                const scanSession = await fetchSelectedScanSession({ preferCache: false });
                 if (cancelled || !scanSession) {
                     if (workflowType) setPostScoutScanType(workflowType);
+                    if (!cancelled) setSessionAuthorityState("fallback");
                     return;
                 }
                 setScanSession(scanSession);
+                setSessionAuthorityState("session");
 
-                const nextSeries = scanSession.series.find(
-                    (series) => series.series_type === "helical" || series.series_type === "axial" || series.series_type === "4d"
-                );
-
-                if (scanSession.acquisition_type === "gating") {
-                    const cfg = (nextSeries as { gating_config?: { breathing_mode?: string } } | undefined)?.gating_config;
-                    if (cfg?.breathing_mode) setGatingBreathingMode(cfg.breathing_mode);
-                    if (nextSeries?.series_type === "helical") setPostScoutScanType("gated_helical");
-                    else setPostScoutScanType("gated_axial");
-                    return;
-                }
-
-                if (workflowType) {
-                    setPostScoutScanType(workflowType);
-                    return;
-                }
-                if (nextSeries?.series_type === "helical" || nextSeries?.series_type === "axial" || nextSeries?.series_type === "4d") {
-                    setPostScoutScanType(nextSeries.series_type);
-                }
+                const sessionType = resolvePostScoutScanTypeFromSession(scanSession);
+                if (sessionType) setPostScoutScanType(sessionType);
+                const nextSeries = [...scanSession.series]
+                    .sort((left, right) => left.series_order - right.series_order)
+                    .find((series) => series.series_type !== "topogram" && series.execution_status !== "image_ready");
+                const cfg = (nextSeries as { gating_config?: { breathing_mode?: string } } | undefined)?.gating_config;
+                setGatingBreathingMode(cfg?.breathing_mode ?? null);
             } catch (error) {
                 console.error("Failed to resolve post-scout scan type.", error);
-                if (workflowType) setPostScoutScanType(workflowType);
+                if (!cancelled) {
+                    setScanSession(null);
+                    setSessionAuthorityState("fallback");
+                    if (workflowType) setPostScoutScanType(workflowType);
+                }
             }
         };
 
@@ -698,10 +689,21 @@ export default function ScoutExecuteScanScreen() {
     }, []);
 
     const postScoutAction = POST_SCOUT_SCAN_CONFIG[postScoutScanType];
-    const isFourDScoutWorkflow = postScoutScanType === "4d";
-    const isBrainHelicalScoutWorkflow = hasBrainHelicalWorkflow() || isBrainHelicalScanSession(scanSession);
-    const isLimbsHelicalScoutWorkflow = hasLimbsHelicalWorkflow() || isLimbsHelicalScanSession(scanSession);
-    const isHeadDualScoutFlow = hasHeadDualScoutWorkflow() || isHeadDualScoutSession(scanSession);
+    const hasResolvedSessionAuthority = sessionAuthorityState !== "loading";
+    const isFourDScoutWorkflow = hasResolvedSessionAuthority && postScoutScanType === "4d";
+    const isBrainHelicalScoutWorkflow = sessionAuthorityState === "session"
+        ? isBrainHelicalScanSession(scanSession)
+        : sessionAuthorityState === "fallback" && hasBrainHelicalWorkflow();
+    const isLimbsHelicalScoutWorkflow = sessionAuthorityState === "session"
+        ? isLimbsHelicalScanSession(scanSession)
+        : sessionAuthorityState === "fallback" && hasLimbsHelicalWorkflow();
+    const isHeadDualScoutFlow = sessionAuthorityState === "session"
+        ? isHeadDualScoutSession(scanSession)
+        : sessionAuthorityState === "fallback" && hasHeadDualScoutWorkflow();
+    const scoutExecutionSeries = useMemo(
+        () => selectScoutExecutionSeries(scanSession, isHeadDualScoutFlow),
+        [isHeadDualScoutFlow, scanSession],
+    );
     const limbsScoutExecuteSeries = useMemo<ScoutDicomSeries | null>(
         () => (limbsDicomManifest ? buildLimbsScoutExecuteSeries(limbsDicomManifest) : null),
         [limbsDicomManifest],
@@ -714,16 +716,43 @@ export default function ScoutExecuteScanScreen() {
         () => (headDualScoutManifest ? buildHeadDualScoutSeries(headDualScoutManifest, "scout-lat") : null),
         [headDualScoutManifest],
     );
-    const scoutResultSeries = isFourDScoutWorkflow
+    const scoutResultSeries: ScoutDicomSeries | null = !hasResolvedSessionAuthority
+        ? null
+        : isFourDScoutWorkflow
         ? FOUR_D_SCOUT_SERIES
         : isBrainHelicalScoutWorkflow
             ? BRAIN_HELICAL_SCOUT_EXECUTE_SERIES
-            : (isLimbsHelicalScoutWorkflow && limbsScoutExecuteSeries)
+            : isLimbsHelicalScoutWorkflow
                 ? limbsScoutExecuteSeries
-                : (isHeadDualScoutFlow && headDualApSeries)
+                : isHeadDualScoutFlow
                     ? headDualApSeries
                     : SCOUT_SERIES;
-    const currentProtocolName = workflowPlans[0]?.title ?? scanSession?.name ?? t("scanFlow.scout");
+    const scoutImageSourceId: ApiScanSeriesImageSourceId | null = !hasResolvedSessionAuthority
+        ? null
+        : isFourDScoutWorkflow
+        ? "fourd-scout-demo"
+        : isBrainHelicalScoutWorkflow
+            ? "head-stroke-topogram"
+            : isLimbsHelicalScoutWorkflow
+                ? "limbs-helical-demo"
+                : isHeadDualScoutFlow
+                    ? "head-dual-scout-demo"
+                    : "qin-lung-topogram";
+    const scoutImageSourceReady = hasResolvedSessionAuthority && scoutImageSourceId !== null && (isLimbsHelicalScoutWorkflow
+        ? limbsScoutExecuteSeries !== null
+        : isHeadDualScoutFlow
+            ? headDualApSeries !== null && headDualLatSeries !== null
+            : true);
+    const scoutTriggerReady = canStartScoutExecution(
+        hasResolvedSessionAuthority,
+        scoutImageSourceReady,
+        scanSession !== null,
+        scoutExecutionSeries.length,
+        isHeadDualScoutFlow ? 2 : 1,
+    );
+    const currentProtocolName = sessionAuthorityState === "session"
+        ? scanSession?.name ?? t("scanFlow.scout")
+        : workflowPlans[0]?.title ?? scanSession?.name ?? t("scanFlow.scout");
     const currentScanSequenceName = (() => {
         for (const plan of workflowPlans) {
             const sequence = mergeDualScoutPlanSequences(plan).sequences.find((item) => item.type === "scout");
@@ -752,9 +781,13 @@ export default function ScoutExecuteScanScreen() {
             })
             .catch((error) => {
                 console.error("Failed to load limbs DICOM demo manifest for scout execute.", error);
+                if (!cancelled) {
+                    setScoutManifestError(error instanceof Error ? error.message : "四肢定位像清单加载失败");
+                    setScoutImageLoadState("error");
+                }
             });
         return () => { cancelled = true; };
-    }, [isLimbsHelicalScoutWorkflow]);
+    }, [isLimbsHelicalScoutWorkflow, manifestLoadAttempt]);
 
     useEffect(() => {
         if (!isHeadDualScoutFlow) return;
@@ -765,9 +798,14 @@ export default function ScoutExecuteScanScreen() {
             })
             .catch((error) => {
                 console.error("Failed to load head dual scout manifest.", error);
+                if (!cancelled) {
+                    setScoutManifestError(error instanceof Error ? error.message : "头部双定位像清单加载失败");
+                    setApImageLoadState("error");
+                    setLatImageLoadState("error");
+                }
             });
         return () => { cancelled = true; };
-    }, [isHeadDualScoutFlow]);
+    }, [isHeadDualScoutFlow, manifestLoadAttempt]);
 
     const postScoutRoute = useMemo(() => {
         if ((postScoutScanType === "gated_helical" || postScoutScanType === "gated_axial") && gatingBreathingMode) {
@@ -809,14 +847,22 @@ export default function ScoutExecuteScanScreen() {
         let cancelled = false;
 
         const finish = async () => {
-            if (!scoutImagesReady) {
-                const message = t("scanFlow.scoutLoadError");
-                if (topogramSeries) {
-                    await updateScanSessionSeriesExecution(topogramSeries.id, {
+            const targetCountValid = !scanSession
+                || scoutExecutionSeries.length === (isHeadDualScoutFlow ? 2 : 1);
+            if (!scoutImagesReady || !scoutImageSourceReady || !scoutImageSourceId || !targetCountValid) {
+                const message = scoutManifestError
+                    ? `${t("scanFlow.scoutLoadError")}：${scoutManifestError}`
+                    : !targetCountValid
+                        ? "头部双定位会话缺少独立的 AP/LAT 定位像序列"
+                        : t("scanFlow.scoutLoadError");
+                await Promise.all(scoutExecutionSeries
+                    .filter((series) => series.execution_status !== "image_ready")
+                    .map((series) => (
+                    updateScanSessionSeriesExecution(series.id, {
                         execution_status: "failed",
                         failure_reason: message,
-                    }).catch(() => undefined);
-                }
+                    }).catch(() => undefined)
+                )));
                 if (!cancelled) {
                     setExecutionError(message);
                     setStage("failed");
@@ -825,8 +871,21 @@ export default function ScoutExecuteScanScreen() {
             }
 
             try {
-                if (topogramSeries) {
-                    await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "image_ready" });
+                for (const series of scoutExecutionSeries) {
+                    if (series.execution_status === "image_ready") {
+                        if (
+                            series.image_source_id !== scoutImageSourceId
+                            || series.image_source_version !== 1
+                        ) {
+                            throw new Error("已完成的定位像序列来源与本次双定位流程不匹配");
+                        }
+                        continue;
+                    }
+                    await updateScanSessionSeriesExecution(series.id, {
+                        execution_status: "image_ready",
+                        image_source_id: scoutImageSourceId,
+                        image_source_version: 1,
+                    });
                 }
                 if (!cancelled) setStage("completed");
             } catch (error) {
@@ -838,23 +897,25 @@ export default function ScoutExecuteScanScreen() {
         };
         void finish();
         return () => { cancelled = true; };
-    }, [renderFinished, scoutImagesFailed, scoutImagesReady, stage, t, topogramSeries]);
+    }, [isHeadDualScoutFlow, renderFinished, scanSession, scoutExecutionSeries, scoutImageSourceId, scoutImageSourceReady, scoutImagesFailed, scoutImagesReady, scoutManifestError, stage, t]);
 
     useEffect(() => {
         if (stage !== "rendering" || !renderFinished || scoutImagesReady || scoutImagesFailed) return;
         const timer = window.setTimeout(() => {
             const message = t("scanFlow.scoutLoadError");
-            if (topogramSeries) {
-                void updateScanSessionSeriesExecution(topogramSeries.id, {
+            scoutExecutionSeries
+                .filter((series) => series.execution_status !== "image_ready")
+                .forEach((series) => {
+                void updateScanSessionSeriesExecution(series.id, {
                     execution_status: "failed",
                     failure_reason: message,
-                });
-            }
+                }).catch(() => undefined);
+            });
             setExecutionError(message);
             setStage("failed");
         }, 10000);
         return () => window.clearTimeout(timer);
-    }, [renderFinished, scoutImagesFailed, scoutImagesReady, stage, t, topogramSeries]);
+    }, [renderFinished, scoutExecutionSeries, scoutImagesFailed, scoutImagesReady, stage, t]);
 
     useEffect(() => {
         return () => {
@@ -914,8 +975,18 @@ export default function ScoutExecuteScanScreen() {
         try {
             await Promise.race([
                 (async () => {
+                    if (sessionAuthorityState === "loading") throw new Error("正在核验当前扫描会话，请稍后重试");
+                    if (!scoutTriggerReady) {
+                        throw new Error(scoutManifestError || "定位像模拟影像来源尚未就绪，请等待加载完成后重试");
+                    }
+                    if (scanSession && scoutExecutionSeries.length !== 2) {
+                        throw new Error("头部双定位会话缺少独立的 AP/LAT 定位像序列");
+                    }
                     if (sessionId) await startScanSession(sessionId);
-                    if (topogramSeries) await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "running" });
+                    for (const series of scoutExecutionSeries) {
+                        if (series.execution_status === "image_ready") continue;
+                        await updateScanSessionSeriesExecution(series.id, { execution_status: "running" });
+                    }
                 })(),
                 new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("扫描下发超时")), EXPOSURE_REQUEST_TIMEOUT_MS)),
             ]);
@@ -970,8 +1041,18 @@ export default function ScoutExecuteScanScreen() {
         try {
             await Promise.race([
                 (async () => {
+                    if (sessionAuthorityState === "loading") throw new Error("正在核验当前扫描会话，请稍后重试");
+                    if (!scoutTriggerReady) {
+                        throw new Error(scoutManifestError || "定位像模拟影像来源尚未就绪，请等待加载完成后重试");
+                    }
+                    if (scanSession && scoutExecutionSeries.length !== 1) {
+                        throw new Error("当前扫描会话缺少唯一的定位像执行序列");
+                    }
                     if (sessionId) await startScanSession(sessionId);
-                    if (topogramSeries) await updateScanSessionSeriesExecution(topogramSeries.id, { execution_status: "running" });
+                    for (const series of scoutExecutionSeries) {
+                        if (series.execution_status === "image_ready") continue;
+                        await updateScanSessionSeriesExecution(series.id, { execution_status: "running" });
+                    }
                 })(),
                 new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("扫描下发超时")), EXPOSURE_REQUEST_TIMEOUT_MS)),
             ]);
@@ -1025,20 +1106,72 @@ export default function ScoutExecuteScanScreen() {
         thresholdGuard.guard(buildThresholdInput(), performTriggerScan);
     };
 
+    const resetScoutExecutionUi = () => {
+        resetLimbsDicomDemoManifestCache();
+        resetHeadDualScoutManifestCache();
+        setLimbsDicomManifest(null);
+        setHeadDualScoutManifest(null);
+        setScoutManifestError(null);
+        setManifestLoadAttempt((attempt) => attempt + 1);
+        setTriggerFailure(null);
+        setExecutionError(null);
+        setRenderProgress(0);
+        setApRenderProgress(0);
+        setLatRenderProgress(0);
+        setDualPhase(null);
+        setScoutImageLoadState("loading");
+        setApImageLoadState("loading");
+        setLatImageLoadState("loading");
+        setPhysicalTriggerAction("position");
+        setImageLoadAttempt((attempt) => attempt + 1);
+        setStage("idle");
+        setGuideVisible(true);
+    };
+
+    const recoverScoutSeries = async (returnToConfirmAfterRecovery: boolean) => {
+        if (isRecoveryActionRunning) return;
+        setIsRecoveryActionRunning(true);
+        try {
+            const latestSession = await fetchSelectedScanSession({ preferCache: false });
+            if (latestSession) {
+                const dualScout = isHeadDualScoutSession(latestSession);
+                const targets = selectScoutExecutionSeries(latestSession, dualScout);
+                if (dualScout && targets.length !== 2) {
+                    throw new Error("头部双定位会话缺少独立的 AP/LAT 定位像序列");
+                }
+                let latest = latestSession;
+                for (const target of targets) {
+                    if (target.execution_status === "image_ready" && dualScout) continue;
+                    const action = resolveSeriesRecoveryAction(target.execution_status);
+                    if (!action) continue;
+                    const actionKey = `${action}:${target.id}`;
+                    const actionId = recoveryActionIdsRef.current.get(actionKey) ?? createActionId();
+                    recoveryActionIdsRef.current.set(actionKey, actionId);
+                    const result = await applyScanWorkflowAction(latestSession.id, {
+                        action_id: actionId,
+                        action,
+                        target_series_id: target.id,
+                        reason: action === "retry_series"
+                            ? "User requested another simulated scout attempt"
+                            : "Recover an uncertain simulated scout trigger before retry",
+                    });
+                    recoveryActionIdsRef.current.delete(actionKey);
+                    latest = result.scan_session;
+                }
+                setScanSession(latest);
+            }
+            resetScoutExecutionUi();
+            if (returnToConfirmAfterRecovery) navigate(combinedPatientReturnRoute);
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : "定位像序列状态恢复失败，请重试");
+        } finally {
+            setIsRecoveryActionRunning(false);
+        }
+    };
+
     const handleExecuteScanClick = () => {
         if (stage === "failed") {
-            setExecutionError(null);
-            setRenderProgress(0);
-            setApRenderProgress(0);
-            setLatRenderProgress(0);
-            setDualPhase(null);
-            setScoutImageLoadState("loading");
-            setApImageLoadState("loading");
-            setLatImageLoadState("loading");
-            setPhysicalTriggerAction("position");
-            setImageLoadAttempt((attempt) => attempt + 1);
-            setStage("idle");
-            setGuideVisible(true);
+            void recoverScoutSeries(false);
             return;
         }
         if (stage === "completed") {
@@ -1198,7 +1331,7 @@ export default function ScoutExecuteScanScreen() {
                                         </div>
                                     </div>
                                 </div>
-                            ) : (
+                            ) : scoutResultSeries ? (
                                 <ScoutProjectionViewport
                                     key={`single-${imageLoadAttempt}`}
                                     renderProgress={renderProgress}
@@ -1206,6 +1339,12 @@ export default function ScoutExecuteScanScreen() {
                                     series={scoutResultSeries}
                                     onLoadStateChange={setScoutImageLoadState}
                                 />
+                            ) : (
+                                <div className="flex h-full items-center justify-center bg-[#05080C] px-8 text-center text-[12px] font-bold text-[#9FB2C5]">
+                                    {scoutManifestError
+                                        ? `${t("scanFlow.scoutLoadError")}：${scoutManifestError}`
+                                        : t("scanFlow.scoutLoadingData")}
+                                </div>
                             )}
                         </div>
                     </div>
@@ -1265,14 +1404,8 @@ export default function ScoutExecuteScanScreen() {
             />
             <ScanTriggerFailureDialog
                 failure={triggerFailure}
-                onRetry={() => {
-                    setTriggerFailure(null);
-                    setExecutionError(null);
-                    setPhysicalTriggerAction("position");
-                    setStage("idle");
-                    setGuideVisible(true);
-                }}
-                onReturnToConfirm={() => navigate(combinedPatientReturnRoute)}
+                onRetry={() => { void recoverScoutSeries(false); }}
+                onReturnToConfirm={() => { void recoverScoutSeries(true); }}
             />
         </div>
     );

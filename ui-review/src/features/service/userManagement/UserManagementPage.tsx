@@ -309,7 +309,7 @@ export default function UserManagementPage() {
     loadSnapshot();
   }, [loadSnapshot]);
 
-  const users = snapshot?.users ?? [];
+  const users = useMemo(() => snapshot?.users ?? [], [snapshot?.users]);
   const roles = snapshot?.roles ?? [];
   const selectedUser = users.find((user) => user.id === selectedUserId) ?? users[0] ?? null;
   const selectedRole = roles.find((role) => role.code === selectedRoleCode) ?? roles[0] ?? null;

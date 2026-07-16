@@ -110,6 +110,17 @@ export type ApiScanSessionGatingConfig = {
     breath_hold_amplitude_tolerance_mm?: number | null;
 };
 
+export type ApiScanSeriesImageSourceId =
+    | "head-stroke-topogram"
+    | "head-dual-scout-demo"
+    | "brain-helical-demo"
+    | "limbs-helical-demo"
+    | "qin-lung-topogram"
+    | "qin-lung-helical-demo"
+    | "fourd-scout-demo";
+
+export type ApiScanSeriesImageSourceVersion = 1;
+
 export type ApiScanSessionSeries = {
     id: number;
     scan_session_id: number;
@@ -120,9 +131,11 @@ export type ApiScanSessionSeries = {
     contrast_delay?: number | null;
     trigger_mode?: "manual" | "auto_timing" | "bolus_tracking" | null;
     tracking_threshold?: number | null;
-    execution_status: "pending" | "running" | "image_ready" | "failed";
+    execution_status: "pending" | "running" | "image_ready" | "failed" | "interrupted";
     failure_reason?: string | null;
     range_confirmed: boolean;
+    image_source_id?: ApiScanSeriesImageSourceId | null;
+    image_source_version?: ApiScanSeriesImageSourceVersion | null;
     topogram_param?: ApiScanSessionTopogramParam | null;
     helical_param?: ApiScanSessionHelicalParam | null;
     axial_param?: ApiScanSessionAxialParam | null;
@@ -239,6 +252,12 @@ const readCachedSelectedScanSession = () => {
 const cacheSelectedScanSession = (scanSession: ApiScanSessionDetail) => {
     saveSelectedScanSessionId(scanSession.id);
     localStorage.setItem(DETAIL_CACHE_KEY, JSON.stringify(scanSession));
+};
+
+export const cacheScanSessionIfSelected = (scanSession: ApiScanSessionDetail) => {
+    if (loadSelectedScanSessionId() === scanSession.id) {
+        cacheSelectedScanSession(scanSession);
+    }
 };
 
 const cacheBackendPatientId = (patientId: string, backendPatientId: number) => {
@@ -429,9 +448,11 @@ export const updateSelectedScanSessionSeries = async (sessionSeriesId: number, p
 export const updateScanSessionSeriesExecution = async (
     sessionSeriesId: number,
     payload: {
-        execution_status?: "pending" | "running" | "image_ready" | "failed";
+        execution_status?: "pending" | "running" | "image_ready" | "failed" | "interrupted";
         failure_reason?: string | null;
         range_confirmed?: boolean;
+        image_source_id?: ApiScanSeriesImageSourceId | null;
+        image_source_version?: ApiScanSeriesImageSourceVersion | null;
     },
 ) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/series/${sessionSeriesId}/execution`), {
@@ -443,7 +464,15 @@ export const updateScanSessionSeriesExecution = async (
         const body = await response.json().catch(() => null) as { detail?: string } | null;
         throw new Error(body?.detail || `Failed to update scan series execution: ${response.status}`);
     }
-    return (await response.json()) as ApiScanSessionSeries;
+    const updatedSeries = (await response.json()) as ApiScanSessionSeries;
+    const cachedSession = readCachedSelectedScanSession();
+    if (cachedSession?.id === updatedSeries.scan_session_id) {
+        cacheSelectedScanSession({
+            ...cachedSession,
+            series: cachedSession.series.map((series) => series.id === updatedSeries.id ? updatedSeries : series),
+        });
+    }
+    return updatedSeries;
 };
 
 export const duplicateSelectedScanSessionSeries = async (sessionSeriesId: number) => {
@@ -526,22 +555,37 @@ export const startScanSession = async (scanSessionId: number) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/${scanSessionId}/start`), {
         method: "POST",
     });
-    if (!response.ok) throw new Error(`Failed to start scan session: ${response.status}`);
-    return (await response.json()) as ApiScanSessionDetail;
+    if (!response.ok) {
+        const body = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(body?.detail || `Failed to start scan session: ${response.status}`);
+    }
+    const scanSession = (await response.json()) as ApiScanSessionDetail;
+    if (loadSelectedScanSessionId() === scanSession.id) cacheSelectedScanSession(scanSession);
+    return scanSession;
 };
 
 export const completeScanSession = async (scanSessionId: number) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/${scanSessionId}/complete`), {
         method: "POST",
     });
-    if (!response.ok) throw new Error(`Failed to complete scan session: ${response.status}`);
-    return (await response.json()) as ApiScanSessionDetail;
+    if (!response.ok) {
+        const body = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(body?.detail || `Failed to complete scan session: ${response.status}`);
+    }
+    const scanSession = (await response.json()) as ApiScanSessionDetail;
+    if (loadSelectedScanSessionId() === scanSession.id) cacheSelectedScanSession(scanSession);
+    return scanSession;
 };
 
 export const cancelScanSession = async (scanSessionId: number) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/${scanSessionId}/cancel`), {
         method: "POST",
     });
-    if (!response.ok) throw new Error(`Failed to cancel scan session: ${response.status}`);
-    return (await response.json()) as ApiScanSessionDetail;
+    if (!response.ok) {
+        const body = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(body?.detail || `Failed to cancel scan session: ${response.status}`);
+    }
+    const scanSession = (await response.json()) as ApiScanSessionDetail;
+    if (loadSelectedScanSessionId() === scanSession.id) cacheSelectedScanSession(scanSession);
+    return scanSession;
 };

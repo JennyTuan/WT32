@@ -28,8 +28,8 @@ import {
     mapStatusToZh,
     type ApiPatient,
 } from '../lib/patientsApi';
-import { generateMockScanResult } from '../lib/fourDTypes';
 import { saveSelectedScanSessionId } from '../lib/scanSession';
+import { resolveCompletedExamViewerState } from '../lib/completedExamViewerState';
 import { clearSelectedExamWorkflowState } from '../lib/workflowNavigationState';
 import { useI18n } from '../lib/i18nContext';
 import type { TranslationKey } from '../lib/i18n';
@@ -82,6 +82,29 @@ const PatientListScreen = () => {
     const [loadError, setLoadError] = useState<string | null>(null);
     const [sortKey, setSortKey] = useState<SortKey>('serial');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+    const openCompletedExam = useCallback(async (patient: PatientRecord) => {
+        saveSelectedPatient({
+            id: patient.id,
+            serial: patient.serial,
+            patientId: patient.patientId,
+            name: patient.name,
+            gender: patient.gender,
+            age: patient.age,
+        });
+        clearSelectedExamWorkflowState();
+        if (patient.latestSessionId) {
+            saveSelectedScanSessionId(patient.latestSessionId);
+        }
+
+        const viewerState = await resolveCompletedExamViewerState({
+            patientId: patient.id,
+            scanSessionId: patient.latestSessionId,
+            acquisitionType: patient.latestAcquisitionType,
+            scanMode: patient.latestScanMode,
+        });
+        navigate('/image-viewer', { state: viewerState });
+    }, [navigate]);
 
     const handleSort = (key: SortKey) => {
         if (sortKey === key) {
@@ -422,24 +445,7 @@ const PatientListScreen = () => {
                                                             type="button"
                                                             onClick={(event) => {
                                                                 event.stopPropagation();
-                                                                if (patient.latestSessionId) {
-                                                                    saveSelectedScanSessionId(patient.latestSessionId);
-                                                                }
-                                                                const isFourD =
-                                                                    patient.latestAcquisitionType === 'four_d'
-                                                                    || patient.latestScanMode === '4d';
-                                                                if (isFourD) {
-                                                                    navigate('/image-viewer', {
-                                                                        state: {
-                                                                            scanResult: generateMockScanResult(9, 10, 165.0),
-                                                                            showSliceLoadingBeforeImageLoad: false,
-                                                                            initialBrowseMode: 'phase',
-                                                                            offlineRecon: true,
-                                                                        },
-                                                                    });
-                                                                } else {
-                                                                    navigate('/image-viewer', { state: { offlineRecon: true } });
-                                                                }
+                                                                void openCompletedExam(patient);
                                                             }}
                                                             className="inline-flex h-[24px] px-2 rounded-full items-center justify-center gap-1 text-[11px] font-bold bg-[#E3F2FD] text-[#1E88E5] border border-[#BBDEFB]"
                                                         >
@@ -503,34 +509,17 @@ const PatientListScreen = () => {
                         <button
                             onClick={() => {
                                 if (canProceed && selectedPatient) {
-                                    saveSelectedPatient({
-                                        id: selectedPatient.id,
-                                        serial: selectedPatient.serial,
-                                        patientId: selectedPatient.patientId,
-                                        name: selectedPatient.name,
-                                        gender: selectedPatient.gender,
-                                        age: selectedPatient.age,
-                                    });
                                     if (activeTab === 'completed') {
-                                        clearSelectedExamWorkflowState();
-                                        if (selectedPatient.latestSessionId) {
-                                            saveSelectedScanSessionId(selectedPatient.latestSessionId);
-                                        }
-                                        const isFourD = selectedPatient.latestAcquisitionType === 'four_d'
-                                            || selectedPatient.latestScanMode === '4d';
-                                        if (isFourD) {
-                                            navigate('/image-viewer', {
-                                                state: {
-                                                    scanResult: generateMockScanResult(9, 10, 165.0),
-                                                    showSliceLoadingBeforeImageLoad: false,
-                                                    initialBrowseMode: 'phase',
-                                                    offlineRecon: true,
-                                                },
-                                            });
-                                        } else {
-                                            navigate('/image-viewer', { state: { offlineRecon: true } });
-                                        }
+                                        void openCompletedExam(selectedPatient);
                                     } else {
+                                        saveSelectedPatient({
+                                            id: selectedPatient.id,
+                                            serial: selectedPatient.serial,
+                                            patientId: selectedPatient.patientId,
+                                            name: selectedPatient.name,
+                                            gender: selectedPatient.gender,
+                                            age: selectedPatient.age,
+                                        });
                                         clearSelectedExamWorkflowState();
                                         navigate('/protocol-select');
                                     }

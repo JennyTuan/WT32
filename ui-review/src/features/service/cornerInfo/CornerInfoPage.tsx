@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { CheckCircle2, AlertCircle, Save, RotateCcw } from "lucide-react";
 import { useI18n } from "../../../lib/i18nContext";
 import ServiceModeShell from "../shared/ServiceModeShell";
@@ -20,10 +20,18 @@ export default function CornerInfoPage() {
     const [isDirty, setIsDirty] = useState(false);
     const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
     const initialConfigRef = useRef<CornerConfigData | null>(null);
+    const translateRef = useRef(t);
 
-    useEffect(() => { loadConfig(); }, []);
+    useEffect(() => {
+        translateRef.current = t;
+    }, [t]);
 
-    const loadConfig = async () => {
+    const showToast = useCallback((msg: string, type: "success" | "error") => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3000);
+    }, []);
+
+    const loadConfig = useCallback(async () => {
         setLoading(true);
         try {
             const apiConfig = await fetchCornerConfig();
@@ -33,11 +41,13 @@ export default function CornerInfoPage() {
             setIsDirty(false);
         } catch(err) {
             console.error("Failed to load corner config", err);
-            showToast(t("service.corner.errorLoad"), "error");
+            showToast(translateRef.current("service.corner.errorLoad"), "error");
         } finally {
             setLoading(false);
         }
-    };
+    }, [showToast]);
+
+    useEffect(() => { void loadConfig(); }, [loadConfig]);
 
     const handleConfigUpdate = (newConfig: CornerConfigData) => {
         setConfig(newConfig);
@@ -74,11 +84,6 @@ export default function CornerInfoPage() {
         } finally {
             setLoading(false);
         }
-    };
-
-    const showToast = (msg: string, type: "success" | "error") => {
-        setToast({ msg, type });
-        setTimeout(() => setToast(null), 3000);
     };
 
     return (

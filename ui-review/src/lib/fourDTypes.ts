@@ -46,6 +46,18 @@ export type RescanChoices = Record<number, "first" | "rescan">; // key: bedIdx
 
 /** 贯穿整个后处理流程的完整状态（navigate state） */
 export interface FourDPostScanState {
+  /** 持久化结果所属的扫描会话；缺失时不得作为已关联结果进入查看器。 */
+  scanSessionId?: number;
+  /** 持久化结果对应的 4D 目标序列。 */
+  targetSeriesId?: number;
+  /** 后端乐观锁版本；用于刷新恢复和避免旧页面覆盖新选择。 */
+  resultVersion?: number;
+  /** 鏈嶅姟绔凡鎻愪氦鐨勫悗澶勭悊闃舵锛岀敤浜庡埛鏂版仮澶嶅拰闃叉闃舵鍥為€€銆?*/
+  workflowStage?: "acquired" | "rescan_selected" | "phase_selected" | "ready";
+  /** 鎵弿缁撴灉鏄惧紡缁戝畾鐨勬ā鎷熷奖鍍忔竻鍗曪紱涓嶅緱杩愯鏃舵帹鏂叾浠栨暟鎹泦銆?*/
+  imageSourceId?: "fourd-engineer";
+  imageSourceVersion?: 1;
+  sourceAttemptId?: number;
   scanResult: FourDScanResult;
   /** 相位筛选完成后填充 */
   phaseSelections?: PhaseSelections;

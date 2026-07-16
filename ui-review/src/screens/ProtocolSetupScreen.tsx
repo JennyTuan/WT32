@@ -1174,7 +1174,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         if (isAdHocScanSessionId(scanSession.id)) {
             setSelectedProtocolIds((prev) => prev.filter((id) => id !== scanSession.protocol_id));
         }
-    }, [protocolSummaryMap]);
+    }, []);
 
     useEffect(() => {
         if (!shouldResumePreviousSession || protocolSummaries.length === 0) return;
@@ -1346,7 +1346,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         } finally {
             setIsCreatingSession(false);
         }
-    }, [applySessionToScreen, ensureProtocolDetailLoaded, navigate, onOpenProtocolDetail, protocolDetailsById, protocolSummaryMap, scanPlans, scanSessionsByProtocolId, selectedProtocolIds, selectedSeqId]);
+    }, [applySessionToScreen, ensureProtocolDetailLoaded, navigate, onOpenProtocolDetail, protocolDetailsById, protocolSummaryMap, scanPlans, scanSessionsByProtocolId, selectedProtocolIds, selectedSeqId, t]);
 
     const handleProtocolSelect = async (protocolId: number) => {
         if (!protocolSummaryMap[protocolId]) return;

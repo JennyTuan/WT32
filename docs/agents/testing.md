@@ -15,11 +15,19 @@ Frontend:
 
 ```powershell
 cd C:\STN\projects\WT32\ui-review
+npm.cmd run test
 npm.cmd run lint
 npm.cmd run build
 ```
 
-There is no frontend test runner configured yet. Do not claim frontend automated tests exist until a real `test` script is added to `ui-review/package.json`.
+Full local quality gate:
+
+```powershell
+cd C:\STN\projects\WT32
+.\scripts\verify.ps1
+```
+
+Use `.\scripts\verify.ps1 -SkipBuild` only for a focused local iteration. The full gate still includes the production build.
 
 ## What To Add First
 

@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
-import { fetchSelectedScanSession } from "../lib/scanSession";
+import { fetchSelectedScanSession, loadSelectedScanSessionId, updateScanSessionSeriesExecution } from "../lib/scanSession";
+import type { ApiScanSessionSeries } from "../lib/scanSession";
+import {
+    buildScanSessionExecutionContext,
+    findRequiredTopogram,
+    isScanExecutionReady,
+    isSameScanSessionExecutionContext,
+    isTerminalScanSessionStatus,
+    isTopogramDependencyReady,
+} from "../lib/scanSeriesPrerequisites";
+import type { ScanSessionExecutionContext } from "../lib/scanSeriesPrerequisites";
+import { loadSelectedPatient } from "../lib/patientSession";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
 
@@ -29,6 +40,7 @@ const TARGET_PHASE_OPTIONS: { value: TargetPhase; labelKey: TranslationKey; thre
  */
 export default function GatedAxialConfirmScreen() {
     const { t } = useI18n();
+    const navigate = useNavigate();
     const [params] = useSearchParams();
     const breathingMode = (params.get("breathingMode") ?? "free_breathing") as BreathingMode;
     const isFreeBreathing = breathingMode === "free_breathing";
@@ -37,6 +49,11 @@ export default function GatedAxialConfirmScreen() {
     const [threshold, setThreshold] = useState<number>(1.0);
     const [direction, setDirection] = useState<TriggerDirection>("rising");
     const [waitTimeoutS, setWaitTimeoutS] = useState<number>(30);
+    const [requiredTopogram, setRequiredTopogram] = useState<ApiScanSessionSeries | null>(null);
+    const [executionContext, setExecutionContext] = useState<ScanSessionExecutionContext | null>(null);
+    const [scoutLoadState, setScoutLoadState] = useState<"loading" | "ready" | "error">("loading");
+    const [executionError, setExecutionError] = useState<string | null>(null);
+    const [isConfirming, setIsConfirming] = useState(false);
 
     // Live measurements driven by FourDScoutViewport. Initial values mirror the viewport's
     // default crop box (height 0.48, width 0.56) × FULL_RANGE_MM (500) so totalBeds and the
@@ -51,8 +68,20 @@ export default function GatedAxialConfirmScreen() {
         let cancelled = false;
         (async () => {
             try {
-                const session = await fetchSelectedScanSession();
-                if (cancelled || !session) return;
+                const session = await fetchSelectedScanSession({ preferCache: false });
+                if (cancelled) return;
+                if (!session) throw new Error("未找到当前扫描会话，请返回患者列表重新选择");
+                if (isTerminalScanSessionStatus(session.status)) {
+                    throw new Error("当前扫描会话已结束，不能再次确认范围；请返回患者列表重新创建或选择会话");
+                }
+                const selectedPatient = loadSelectedPatient();
+                const context = buildScanSessionExecutionContext(session, "axial");
+                if (!selectedPatient || selectedPatient.id !== session.patient_id) {
+                    throw new Error("患者与扫描会话不一致，请返回患者列表重新选择");
+                }
+                if (!context) throw new Error("当前扫描会话缺少门控断层序列");
+                setExecutionContext(context);
+                setRequiredTopogram(findRequiredTopogram(session.series, "axial"));
                 const axialSeries = session.series.find((s) => s.series_type === "axial");
                 if (!axialSeries) return;
 
@@ -73,6 +102,11 @@ export default function GatedAxialConfirmScreen() {
                 }
             } catch (err) {
                 console.error("Failed to load gating session defaults.", err);
+                if (!cancelled) {
+                    setExecutionContext(null);
+                    setRequiredTopogram(null);
+                    setExecutionError(err instanceof Error ? err.message : "扫描会话加载失败，请重试");
+                }
             }
         })();
         return () => {
@@ -105,6 +139,58 @@ export default function GatedAxialConfirmScreen() {
           `&waitTimeoutS=${waitTimeoutS}&scanLengthMm=${scanLengthMm || 320}&scoutFov=${scoutMeasurements.scoutFov}`
         : `/helical-execute?mode=gated_axial&breathingMode=${breathingMode}` +
           `&scanLengthMm=${scanLengthMm || 320}&scoutFov=${scoutMeasurements.scoutFov}`;
+
+    const topogramDependencyReady = isScanExecutionReady(
+        executionContext,
+        requiredTopogram,
+        scoutLoadState === "ready",
+    );
+
+    const handleExecuteScan = async () => {
+        setExecutionError(null);
+        if (!executionContext || !topogramDependencyReady) {
+            setExecutionError("定位像未成功出图，无法执行后续门控断层扫描");
+            return;
+        }
+
+        setIsConfirming(true);
+        try {
+            const selectedSessionId = loadSelectedScanSessionId();
+            const selectedPatient = loadSelectedPatient();
+            if (selectedSessionId !== executionContext.scanSessionId || selectedPatient?.id !== executionContext.patientId) {
+                throw new Error("患者或扫描会话已切换，请返回患者列表重新选择");
+            }
+
+            const latestSession = await fetchSelectedScanSession({ preferCache: false });
+            if (!latestSession) throw new Error("未找到当前扫描会话，请返回患者列表重新选择");
+            if (isTerminalScanSessionStatus(latestSession.status)) {
+                throw new Error("当前扫描会话已结束，不能再次确认范围；请返回患者列表重新创建或选择会话");
+            }
+            const latestContext = buildScanSessionExecutionContext(latestSession, "axial");
+            if (!latestContext || !isSameScanSessionExecutionContext(executionContext, latestContext)) {
+                throw new Error("扫描会话结构已更新，请重新进入范围确认页");
+            }
+            const latestTopogram = findRequiredTopogram(latestSession.series, "axial");
+            if (!isTopogramDependencyReady(latestTopogram, scoutLoadState === "ready")) {
+                throw new Error("定位像未成功出图，无法执行后续门控断层扫描");
+            }
+            if (latestTopogram) {
+                await updateScanSessionSeriesExecution(latestTopogram.id, { range_confirmed: true });
+            }
+            if (loadSelectedScanSessionId() !== latestSession.id || loadSelectedPatient()?.id !== latestSession.patient_id) {
+                throw new Error("患者或扫描会话已切换，已停止进入执行页");
+            }
+            navigate(
+                `${nextRoute}&scanSessionId=${latestContext.scanSessionId}`
+                + `&targetSeriesId=${latestContext.targetSeriesId}`
+                + `&topogramId=${latestContext.requiredTopogramId ?? "none"}`,
+            );
+        } catch (error) {
+            setExecutionError(error instanceof Error ? error.message : "门控断层扫描前置条件校验失败");
+        } finally {
+            setIsConfirming(false);
+        }
+    };
 
     // ---------- left-aside extras (free-breathing only) ----------
     const gatingParamCard = isFreeBreathing ? (
@@ -168,6 +254,7 @@ export default function GatedAxialConfirmScreen() {
                 <div className="absolute inset-0">
                     <FourDScoutViewport
                         enableImageTools
+                        onLoadStateChange={setScoutLoadState}
                         onCropBoxChange={({ width, height }) => {
                             // Box height (along Z) drives scan length; width drives scout FOV.
                             // FULL_RANGE_MM = nominal full-image axial extent used as the box→mm mapping.
@@ -204,6 +291,7 @@ export default function GatedAxialConfirmScreen() {
             <div className="absolute inset-x-0 top-0 bottom-[160px]">
                 <FourDScoutViewport
                     enableImageTools
+                    onLoadStateChange={setScoutLoadState}
                     onCropBoxChange={({ width, height }) => {
                         const FULL_RANGE_MM = 500;
                         setScoutMeasurements({
@@ -227,8 +315,19 @@ export default function GatedAxialConfirmScreen() {
             tomographicParamOverrides={scoutMeasurements}
             extraParamSection={gatingParamCard}
             nextRoute={nextRoute}
+            onExecuteScan={() => { void handleExecuteScan(); }}
+            executeDisabled={!topogramDependencyReady || isConfirming}
             allowBackNavigation={false}
-            rightViewportContent={rightContent}
+            rightViewportContent={
+                <>
+                    {rightContent}
+                    {(executionError || (requiredTopogram && !topogramDependencyReady)) && (
+                        <div className="absolute bottom-3 left-3 right-3 z-30 rounded border border-[#EF4444]/60 bg-[#2A1115]/95 px-3 py-2 text-[12px] font-bold text-[#FCA5A5]">
+                            {executionError ?? t("scanFlow.localizerPrerequisiteBlocked")}
+                        </div>
+                    )}
+                </>
+            }
             rightViewportClassName="flex-1 rounded-lg border border-[#B0C4DE] bg-white shadow-sm flex flex-col overflow-hidden relative"
         />
     );

@@ -50,8 +50,7 @@ export const isLimbsHelicalWorkflow = (plans: WorkflowPlan[]) =>
 export const isLimbsHelicalScanSession = (session: ApiScanSessionDetail | null) => {
     if (!session) return false;
     if (session.acquisition_type !== "regular") return false;
-    if (session.body_part !== "extremity") return false;
-    return isLimbsHelicalName(session.name);
+    return session.description?.includes("image-source:limbs-helical-demo-v1") === true;
 };
 
 let manifestPromise: Promise<LimbsDicomDemoManifest> | null = null;
@@ -66,6 +65,10 @@ export const loadLimbsDicomDemoManifest = () => {
         });
     }
     return manifestPromise;
+};
+
+export const resetLimbsDicomDemoManifestCache = () => {
+    manifestPromise = null;
 };
 
 export const getLimbsDicomSeries = (

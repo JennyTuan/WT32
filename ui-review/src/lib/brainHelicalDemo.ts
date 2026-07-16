@@ -22,5 +22,5 @@ export const isBrainHelicalWorkflow = (plans: WorkflowPlan[]) =>
 export const isBrainHelicalScanSession = (session: ApiScanSessionDetail | null) => {
     if (!session) return false;
     if (session.acquisition_type !== "regular") return false;
-    return session.body_part === "head";
+    return session.description?.includes("image-source:brain-helical-demo-v1") === true;
 };

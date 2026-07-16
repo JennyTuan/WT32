@@ -26,6 +26,19 @@ interface GatingMonitorPanelProps {
 
 const SAMPLES = 240;
 const CYCLE_SAMPLES = 48;
+const VIEWBOX_WIDTH = 800;
+const VIEWBOX_HEIGHT = 120;
+const AMPLITUDE_MIN = -1.5;
+const AMPLITUDE_MAX = 1.5;
+
+function ampToY(value: number) {
+    const clamped = Math.max(AMPLITUDE_MIN, Math.min(AMPLITUDE_MAX, value));
+    return ((AMPLITUDE_MAX - clamped) / (AMPLITUDE_MAX - AMPLITUDE_MIN)) * VIEWBOX_HEIGHT;
+}
+
+function yToAmp(y: number) {
+    return AMPLITUDE_MAX - (y / VIEWBOX_HEIGHT) * (AMPLITUDE_MAX - AMPLITUDE_MIN);
+}
 
 function generateRawWaveform(now: number, jitter: number, drift: number): number[] {
     const out: number[] = [];
@@ -171,17 +184,7 @@ export default function GatingMonitorPanel({
     }, [samples, tick]);
 
     // SVG: viewBox 800x120; y maps amplitude [-1.5, +1.5] to [0, 120]
-    const VBW = 800;
-    const VBH = 120;
-    const yMin = -1.5;
-    const yMax = 1.5;
-    const ampToY = (v: number) => {
-        const clamped = Math.max(yMin, Math.min(yMax, v));
-        return ((yMax - clamped) / (yMax - yMin)) * VBH;
-    };
-    const yToAmp = (y: number) => yMax - (y / VBH) * (yMax - yMin);
-
-    const stepX = VBW / (SAMPLES - 1);
+    const stepX = VIEWBOX_WIDTH / (SAMPLES - 1);
     const wavePath = useMemo(
         () => samples.map((v, i) => `${i === 0 ? "M" : "L"}${(i * stepX).toFixed(1)},${ampToY(v).toFixed(1)}`).join(" "),
         [samples, stepX]
@@ -191,7 +194,7 @@ export default function GatingMonitorPanel({
         [rawSamples, stepX]
     );
     const waveFill = useMemo(
-        () => `M 0,${VBH} L ${samples.map((v, i) => `${(i * stepX).toFixed(1)},${ampToY(v).toFixed(1)}`).join(" L ")} L ${VBW},${VBH} Z`,
+        () => `M 0,${VIEWBOX_HEIGHT} L ${samples.map((v, i) => `${(i * stepX).toFixed(1)},${ampToY(v).toFixed(1)}`).join(" L ")} L ${VIEWBOX_WIDTH},${VIEWBOX_HEIGHT} Z`,
         [samples, stepX]
     );
     const extrema = useMemo(() => findWaveExtrema(samples), [samples]);
@@ -212,7 +215,7 @@ export default function GatingMonitorPanel({
     const handlePointerMove = (e: React.PointerEvent) => {
         if (!draggingThreshold || !svgRef.current || !onThresholdChange) return;
         const rect = svgRef.current.getBoundingClientRect();
-        const localY = ((e.clientY - rect.top) / rect.height) * VBH;
+        const localY = ((e.clientY - rect.top) / rect.height) * VIEWBOX_HEIGHT;
         const v = yToAmp(localY);
         const rounded = Math.max(-2, Math.min(2, Math.round(v * 10) / 10));
         onThresholdChange(rounded);
@@ -257,7 +260,7 @@ export default function GatingMonitorPanel({
                 <div className="absolute left-0 right-0 top-6 bottom-2 px-3">
                     <svg
                         ref={svgRef}
-                        viewBox={`0 0 ${VBW} ${VBH}`}
+                        viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
                         className="w-full h-full overflow-visible"
                         preserveAspectRatio="none"
                         onPointerMove={handlePointerMove}
@@ -274,7 +277,7 @@ export default function GatingMonitorPanel({
                         <line
                             x1="0"
                             y1={thresholdY}
-                            x2={VBW}
+                            x2={VIEWBOX_WIDTH}
                             y2={thresholdY}
                             stroke={direction === "rising" ? "#EF4444" : "#F59E0B"}
                             strokeWidth="1.6"
@@ -338,7 +341,7 @@ export default function GatingMonitorPanel({
                                         x1={x}
                                         y1="0"
                                         x2={x}
-                                        y2={VBH}
+                                        y2={VIEWBOX_HEIGHT}
                                         stroke="#FACC15"
                                         strokeWidth="1.8"
                                         strokeDasharray="5 4"
@@ -359,9 +362,9 @@ export default function GatingMonitorPanel({
                             );
                         })}
 
-                        {showScanMarkers && currentPhaseX !== null && currentPhaseX >= 0 && currentPhaseX <= VBW && (
+                        {showScanMarkers && currentPhaseX !== null && currentPhaseX >= 0 && currentPhaseX <= VIEWBOX_WIDTH && (
                             <g>
-                                <line x1={currentPhaseX} y1="0" x2={currentPhaseX} y2={VBH} stroke="#06B6D4" strokeWidth="1.8" opacity="0.9" />
+                                <line x1={currentPhaseX} y1="0" x2={currentPhaseX} y2={VIEWBOX_HEIGHT} stroke="#06B6D4" strokeWidth="1.8" opacity="0.9" />
                                 <circle
                                     cx={currentPhaseX}
                                     cy={ampToY(samples[Math.max(0, Math.min(samples.length - 1, Math.round(currentPhaseX / stepX)))])}
@@ -378,7 +381,7 @@ export default function GatingMonitorPanel({
                             <rect
                                 x={0}
                                 y={thresholdY - 8}
-                                width={VBW}
+                                width={VIEWBOX_WIDTH}
                                 height={16}
                                 fill="transparent"
                                 style={{ cursor: "ns-resize" }}

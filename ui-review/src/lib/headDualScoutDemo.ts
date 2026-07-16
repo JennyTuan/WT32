@@ -47,7 +47,7 @@ export const isHeadDualScoutWorkflow = (plans: WorkflowPlan[]) =>
 
 export const isHeadDualScoutSession = (session: ApiScanSessionDetail | null) => {
     if (!session) return false;
-    return isHeadDualScoutName(session.name);
+    return session.description?.includes("image-source:head-dual-scout-demo-v1") === true;
 };
 
 let manifestPromise: Promise<HeadDualScoutManifest> | null = null;
@@ -62,6 +62,10 @@ export const loadHeadDualScoutManifest = () => {
         });
     }
     return manifestPromise;
+};
+
+export const resetHeadDualScoutManifestCache = () => {
+    manifestPromise = null;
 };
 
 export const getHeadDualScoutSeries = (

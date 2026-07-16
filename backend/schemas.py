@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ORMModel(BaseModel):
@@ -12,6 +12,16 @@ class ORMModel(BaseModel):
 
 FOV_MIN_MM = 50.0
 FOV_MAX_MM = 750.0
+PrototypeImageSourceId = Literal[
+    "head-stroke-topogram",
+    "head-dual-scout-demo",
+    "brain-helical-demo",
+    "limbs-helical-demo",
+    "qin-lung-topogram",
+    "fourd-scout-demo",
+    "qin-lung-helical-demo",
+]
+PrototypeImageSourceVersion = Literal[1]
 
 
 class PatientBase(BaseModel):
@@ -545,9 +555,27 @@ class ScanSessionSeriesUpdate(BaseModel):
 
 
 class ScanSessionSeriesExecutionUpdate(BaseModel):
-    execution_status: Optional[Literal["pending", "running", "image_ready", "failed"]] = None
+    execution_status: Optional[
+        Literal["pending", "running", "image_ready", "failed", "interrupted"]
+    ] = None
     failure_reason: Optional[str] = Field(default=None, max_length=500)
     range_confirmed: Optional[bool] = None
+    image_source_id: Optional[PrototypeImageSourceId] = Field(
+        default=None,
+        max_length=100,
+    )
+    image_source_version: Optional[PrototypeImageSourceVersion] = Field(
+        default=None,
+        ge=1,
+    )
+
+    @model_validator(mode="after")
+    def validate_image_source_pair(self) -> "ScanSessionSeriesExecutionUpdate":
+        if (self.image_source_id is None) != (self.image_source_version is None):
+            raise ValueError(
+                "image_source_id and image_source_version must be provided together"
+            )
+        return self
 
 
 class ScanSessionTopogramParamUpdate(BaseModel):
@@ -776,9 +804,13 @@ class ScanSessionSeries(ORMModel):
     contrast_delay: Optional[float] = None
     trigger_mode: Optional[Literal["manual", "auto_timing", "bolus_tracking"]] = None
     tracking_threshold: Optional[float] = None
-    execution_status: Literal["pending", "running", "image_ready", "failed"] = "pending"
+    execution_status: Literal[
+        "pending", "running", "image_ready", "failed", "interrupted"
+    ] = "pending"
     failure_reason: Optional[str] = None
     range_confirmed: bool = False
+    image_source_id: Optional[PrototypeImageSourceId] = None
+    image_source_version: Optional[PrototypeImageSourceVersion] = None
     topogram_param: Optional[ScanSessionTopogramParam] = None
     helical_param: Optional[ScanSessionHelicalParam] = None
     axial_param: Optional[ScanSessionAxialParam] = None
@@ -821,6 +853,208 @@ class ScanSessionSummary(ORMModel):
     scan_mode: Literal["plain", "contrast", "4d"]
     created_at: datetime
     started_at: Optional[datetime] = None
+
+
+ScanSessionWorkflowActionType = Literal[
+    "return_to_edit",
+    "retry_series",
+    "terminate_exam",
+    "finish_with_partial",
+]
+
+
+class ScanSessionWorkflowActionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action_id: str = Field(
+        min_length=8,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+    action: ScanSessionWorkflowActionType
+    target_series_id: Optional[int] = Field(default=None, ge=1)
+    reason: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_action_target_and_reason(self):
+        self.reason = self.reason.strip()
+        if not self.reason:
+            raise ValueError("reason must not be blank")
+        if self.action in {"return_to_edit", "retry_series"} and self.target_series_id is None:
+            raise ValueError(f"target_series_id is required for {self.action}")
+        return self
+
+
+class ScanSessionWorkflowAction(ORMModel):
+    id: int
+    action_id: str
+    scan_session_id: int
+    target_series_id: Optional[int] = None
+    action_type: ScanSessionWorkflowActionType
+    reason: str
+    resulting_session_status: Literal["draft", "in_progress", "completed", "cancelled"]
+    resulting_series_status: Optional[
+        Literal["pending", "running", "image_ready", "failed", "interrupted"]
+    ] = None
+    next_entry: Literal["series_edit", "series_confirm", "patient_list"]
+    dose_log_disposition: Literal["not_emitted"]
+    created_at: datetime
+
+
+class ScanSessionWorkflowActionResponse(BaseModel):
+    replayed: bool
+    action: ScanSessionWorkflowAction
+    scan_session: ScanSessionDetail
+
+
+class ScanSessionSeriesAttempt(ORMModel):
+    id: int
+    scan_session_id: int
+    scan_session_series_id: int
+    attempt_number: int
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    outcome: Optional[
+        Literal["image_ready", "failed", "interrupted", "returned_to_edit"]
+    ] = None
+    end_reason: Optional[str] = None
+    ended_by_action_id: Optional[int] = None
+
+
+FourDResultWorkflowStage = Literal["acquired", "rescan_selected", "phase_selected", "ready"]
+FOUR_D_RESULT_STAGE_ORDER: Dict[str, int] = {
+    "acquired": 0,
+    "rescan_selected": 1,
+    "phase_selected": 2,
+    "ready": 3,
+}
+
+
+class FourDBedPhaseCell(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    frame_count: int = Field(ge=1)
+    selected_frame: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_selected_frame(self) -> "FourDBedPhaseCell":
+        if self.selected_frame >= self.frame_count:
+            raise ValueError("selected_frame must be smaller than frame_count")
+        return self
+
+
+class FourDScanResultSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    bed_count: int = Field(ge=1)
+    phase_count: int = Field(ge=1)
+    scan_length: float = Field(gt=0)
+    phase_matrix: List[List[FourDBedPhaseCell]]
+    rescan_occurred: bool
+    rescan_bed_range: Optional[List[int]] = Field(default=None, min_length=2, max_length=2)
+
+    @model_validator(mode="after")
+    def validate_result_shape(self) -> "FourDScanResultSnapshot":
+        if len(self.phase_matrix) != self.bed_count:
+            raise ValueError("phase_matrix row count must equal bed_count")
+        if any(len(row) != self.phase_count for row in self.phase_matrix):
+            raise ValueError("each phase_matrix row must contain phase_count cells")
+
+        if self.rescan_occurred != (self.rescan_bed_range is not None):
+            raise ValueError("rescan_occurred must match rescan_bed_range availability")
+        if self.rescan_bed_range is not None:
+            start, end = self.rescan_bed_range
+            if start < 0 or end < start or end >= self.bed_count:
+                raise ValueError("rescan_bed_range must be within the scan bed range")
+        return self
+
+
+class ScanSessionFourDResultUpsert(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    patient_id: int = Field(gt=0)
+    target_series_id: int = Field(gt=0)
+    expected_version: int = Field(ge=0)
+    workflow_stage: FourDResultWorkflowStage
+    scan_result: FourDScanResultSnapshot
+    rescan_choices: Optional[Dict[str, Literal["first", "rescan"]]] = None
+    phase_selections: Optional[Dict[str, int]] = None
+
+    @model_validator(mode="after")
+    def validate_workflow_snapshot(self) -> "ScanSessionFourDResultUpsert":
+        stage_order = FOUR_D_RESULT_STAGE_ORDER[self.workflow_stage]
+        expected_rescan_keys: set[str] = set()
+        if self.scan_result.rescan_bed_range is not None:
+            start, end = self.scan_result.rescan_bed_range
+            expected_rescan_keys = {str(index) for index in range(start, end + 1)}
+
+        choice_keys = set(self.rescan_choices or {})
+        if not choice_keys.issubset(expected_rescan_keys):
+            raise ValueError("rescan_choices contains a bed outside rescan_bed_range")
+        if stage_order >= FOUR_D_RESULT_STAGE_ORDER["rescan_selected"] and expected_rescan_keys:
+            if self.rescan_choices is None or choice_keys != expected_rescan_keys:
+                raise ValueError("rescan_choices must cover every bed in rescan_bed_range")
+        if self.workflow_stage == "acquired" and self.rescan_choices is not None:
+            raise ValueError("acquired results cannot contain rescan_choices")
+
+        duplicate_cells = {
+            f"{bed_index}-{phase_index}"
+            for bed_index, row in enumerate(self.scan_result.phase_matrix)
+            for phase_index, cell in enumerate(row)
+            if cell.frame_count > 1
+        }
+        selection_keys = set(self.phase_selections or {})
+        if not selection_keys.issubset(duplicate_cells):
+            raise ValueError("phase_selections contains a non-duplicate or unknown cell")
+        for key, selected_frame in (self.phase_selections or {}).items():
+            bed_raw, phase_raw = key.split("-", 1)
+            bed_index = int(bed_raw)
+            phase_index = int(phase_raw)
+            frame_count = self.scan_result.phase_matrix[bed_index][phase_index].frame_count
+            if selected_frame < 0 or selected_frame >= frame_count:
+                raise ValueError("phase selection must reference an available frame")
+
+        if stage_order >= FOUR_D_RESULT_STAGE_ORDER["phase_selected"]:
+            if self.phase_selections is None or selection_keys != duplicate_cells:
+                raise ValueError("phase_selections must resolve every duplicate cell")
+        elif self.phase_selections is not None:
+            raise ValueError("phase_selections require phase_selected or ready workflow stage")
+        return self
+
+
+class ScanSessionFourDResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: int
+    scan_session_id: int
+    patient_id: int
+    target_series_id: int
+    version: int = Field(ge=1)
+    workflow_stage: FourDResultWorkflowStage
+    source_kind: Literal["simulation"]
+    image_source_id: Literal["fourd-engineer"]
+    image_source_version: Literal[1]
+    source_attempt_id: Optional[int] = Field(default=None, ge=1)
+    scan_result: FourDScanResultSnapshot
+    rescan_choices: Optional[Dict[str, Literal["first", "rescan"]]] = None
+    phase_selections: Optional[Dict[str, int]] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ScanSessionFourDResultFinalize(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    patient_id: int = Field(gt=0)
+    target_series_id: int = Field(gt=0)
+    expected_version: int = Field(ge=1)
+
+
+class ScanSessionFourDResultFinalizeResponse(BaseModel):
+    replayed: bool
+    result: ScanSessionFourDResult
+    scan_session: ScanSessionDetail
+
 
 class CornerConfigBase(BaseModel):
     template_name: str

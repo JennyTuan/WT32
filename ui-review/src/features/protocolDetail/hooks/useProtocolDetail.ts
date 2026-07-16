@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useI18n } from "../../../lib/i18nContext";
 import type { 
@@ -129,27 +129,23 @@ export function useProtocolDetail() {
         return () => { cancelled = true; };
     }, []);
 
-    const captureOriginalSnapshot = (mapped: ApiProtocolDetail) => {
-        const seriesIds = new Set<number>();
-        const reconIdsBySeriesId = new Map<number, Set<number>>();
-        for (const s of mapped.series) {
-            seriesIds.add(s.id);
-            reconIdsBySeriesId.set(s.id, new Set(s.recon_series.map((r) => r.id)));
-        }
-        originalSnapshotRef.current = { seriesIds, reconIdsBySeriesId };
-    };
-
-    const syncProtocolFromSession = async () => {
+    const syncProtocolFromSession = useCallback(async () => {
         const scanSession = await fetchSelectedScanSession();
         const mappedSession = mapScanSessionToProtocolDetail(scanSession);
         if (mappedSession) {
+            const seriesIds = new Set<number>();
+            const reconIdsBySeriesId = new Map<number, Set<number>>();
+            for (const seriesItem of mappedSession.series) {
+                seriesIds.add(seriesItem.id);
+                reconIdsBySeriesId.set(seriesItem.id, new Set(seriesItem.recon_series.map((recon) => recon.id)));
+            }
             setProtocol(mappedSession);
             setSelectedPos(mappedSession.patient_position || "HFS");
-            captureOriginalSnapshot(mappedSession);
+            originalSnapshotRef.current = { seriesIds, reconIdsBySeriesId };
             return true;
         }
         return false;
-    };
+    }, []);
 
     // Initial load: protocol source
     useEffect(() => {
@@ -196,7 +192,7 @@ export function useProtocolDetail() {
         };
         loadProtocolSource();
         return () => { cancelled = true; };
-    }, [isNewMode, isCatalogSource, protocolId, bodyPartOptions, t]);
+    }, [isNewMode, isCatalogSource, protocolId, bodyPartOptions, syncProtocolFromSession, t]);
 
     // Update basicDraft when protocol changes
     useEffect(() => {
@@ -208,6 +204,8 @@ export function useProtocolDetail() {
             patientWeight: protocol.patient_weight ?? "",
             patientPosition: protocol.patient_position ?? selectedPos,
         });
+        // 协议切换或选项加载时才重建草稿，避免系列编辑覆盖尚未保存的基础信息。
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [protocol?.id, bodyPartOptions, ageGroupOptions]);
 
     // Handle deep link selection

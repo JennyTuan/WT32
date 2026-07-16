@@ -31,19 +31,13 @@ import type { ChangeEvent, ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import type { FourDPostScanState } from "../lib/fourDTypes";
-import { loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
-import { isBrainHelicalScanSession, isBrainHelicalWorkflow } from "../lib/brainHelicalDemo";
 import {
-    isLimbsHelicalScanSession,
-    isLimbsHelicalWorkflow,
     loadLimbsDicomDemoManifest,
     type LimbsDicomDemoManifest,
     type LimbsDicomDemoSeries,
 } from "../lib/limbsDicomDemo";
 import {
     getHeadDualScoutSeries,
-    isHeadDualScoutSession,
-    isHeadDualScoutWorkflow,
     loadHeadDualScoutManifest,
     type HeadDualScoutManifest,
     type HeadDualScoutSeries,
@@ -56,28 +50,28 @@ import CornerstoneMPRViewport, {
     type MprActivePanelId,
 } from "../components/CornerstoneMPRViewport";
 import {
-    loadFourDManifest,
-    type FourDManifest,
-} from "../lib/fourDImageSource";
-import {
     getSelectedEngineerVolume,
     loadFourDEngineerManifest,
     type FourDEngineerManifest,
 } from "../lib/fourDEngineerImageSource";
+import { toFourDPostScanState } from "../lib/fourDResult";
 import {
-    FOUR_D_DICOM_PHASE_COUNT,
-    getFourDDicomSeriesUrls,
-    type FourDDicomMpId,
-} from "../lib/fourDDicomSource";
+    loadAuthoritativeFourDRecovery,
+    resolveLoadedFourDRecoveryDestination,
+} from "../lib/fourDRecovery";
+import { loadSelectedPatient } from "../lib/patientSession";
 import {
     clearSelectedScanSessionId,
-    completeScanSession,
     fetchSelectedScanSession,
     loadSelectedScanSessionId,
+    type ApiScanSeriesImageSourceId,
+    type ApiScanSeriesImageSourceVersion,
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
+import { hasVerifiedSeriesImageSource } from "../lib/scanSeriesImageSource";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
+import { buildViewerBindingKey, isViewerBindingKeyVerified } from "../lib/viewerBinding";
 import {
     createReconstructionJob,
     listReconstructionJobs,
@@ -100,6 +94,9 @@ type Series = {
     matrix: string;
     images: ImageItem[];
     seriesType: SeriesType;
+    sourceSeriesId?: number;
+    imageSourceId?: ApiScanSeriesImageSourceId | null;
+    imageSourceVersion?: ApiScanSeriesImageSourceVersion | null;
     /** WW/WL preset applied when this series is selected */
     defaultWw?: number;
     defaultWl?: number;
@@ -378,22 +375,11 @@ const BRAIN_HELICAL_RECON_SERIES = [
         defaultWl: HEAD_BRAIN_DEFAULT_WINDOW.wl,
     },
 ] as const;
-const BRAIN_HELICAL_VIEW_TOPOGRAM = {
-    seriesName: "topogram",
-    count: 1,
-    thickness: "2.0 mm",
-    kV: "120",
-    mAs: "50",
-    fov: "500.0 mm",
-    matrix: "512",
-    kernel: "FL03",
-    basePath: "/dicom-out/HeadStrokeDemo/Topogram",
-};
+const HEAD_STROKE_TOPOGRAM_URL = "/dicom-head-stroke-plain/Series%20001%20%5BTopogram%5D/1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.6.0.dcm";
+const FOUR_D_SCOUT_URL = "/daae3df7f522b56724aed7e3e544c0fe/series-000002/image-000002.dcm";
 
 const getSeriesDicomUrl = (
     sliceIndex: number,
-    seriesType?: SeriesType,
-    brainHelical?: boolean,
     series?: Pick<Series, "dicomBasePath" | "dicomFilePrefix" | "dicomUrls">,
 ) => {
     if (series?.dicomUrls?.length) {
@@ -403,17 +389,7 @@ const getSeriesDicomUrl = (
         const prefix = series.dicomFilePrefix === "lung" ? "1-" : "image-";
         return `${series.dicomBasePath}/${prefix}${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
     }
-    if (seriesType === "topogram") {
-        if (brainHelical) {
-            return `${BRAIN_HELICAL_VIEW_TOPOGRAM.basePath}/image-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
-        }
-        const imageNumber = REALISTIC_SCOUT_SERIES.firstImageNumber + sliceIndex;
-        return `${REALISTIC_SCOUT_SERIES.basePath}/image-${String(imageNumber).padStart(6, "0")}.dcm`;
-    }
-    if (brainHelical) {
-        return `${BRAIN_HELICAL_VIEW_SERIES.basePath}/image-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
-    }
-    return `${REAL_LUNG_SERIES.basePath}/1-${String(sliceIndex + 1).padStart(3, "0")}.dcm`;
+    return null;
 };
 
 type ViewerToolMode = "browse" | "pan" | "wl" | "measure" | "annotate" | "eraser" | "crosshairs" | "imageRotate" | "planeRotate" | "rotate3d";
@@ -471,6 +447,9 @@ const buildGeneratedReconSeries = (
         name: `Image ${index + 1}`,
     })),
     seriesType: sourceSeries.seriesType,
+    sourceSeriesId: sourceSeries.sourceSeriesId,
+    imageSourceId: sourceSeries.imageSourceId,
+    imageSourceVersion: sourceSeries.imageSourceVersion,
     defaultWw: output.window_width ?? fallbackWw,
     defaultWl: output.window_level ?? fallbackWl,
     dicomUrls: output.image_urls,
@@ -511,32 +490,40 @@ const ViewScreen = () => {
     const { locale, t } = useI18n();
 
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
-    const fourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode; offlineRecon?: boolean }) | null;
-    const isFourDEntry = !!fourDState?.scanResult;
+    const routeFourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode; offlineRecon?: boolean }) | null;
+    const selectedPatientId = loadSelectedPatient()?.id ?? null;
+    const selectedScanSessionId = loadSelectedScanSessionId();
+    const isFourDEntry = !!routeFourDState?.scanResult;
+    const viewerBindingKey = buildViewerBindingKey({
+        kind: isFourDEntry ? "4d" : "standard",
+        patientId: selectedPatientId,
+        scanSessionId: isFourDEntry ? routeFourDState?.scanSessionId : selectedScanSessionId,
+        targetSeriesId: isFourDEntry ? routeFourDState?.targetSeriesId : undefined,
+        resultVersion: isFourDEntry ? routeFourDState?.resultVersion : undefined,
+    });
+    const [loadedAuthoritativeFourDState, setLoadedAuthoritativeFourDState] = useState<typeof routeFourDState>(null);
     // ─── 离线重建模式 (从已完成患者列表进入) ────────────────────────────────────
-    const isOfflineRecon = !!fourDState?.offlineRecon;
+    const isOfflineRecon = !!routeFourDState?.offlineRecon;
 
-    // ─── 脑部螺旋 demo 数据切换 ───────────────────────────────────────────────
-    // Active only when the workflow protocol ID matches AND this is NOT a 4D entry,
-    // so 4D 浏览路径完全不受影响。
-    const isBrainHelicalWorkflowActive = useMemo(() => {
-        if (isFourDEntry) return false;
-        return isBrainHelicalWorkflow(loadSelectedScanWorkflowPlans());
-    }, [isFourDEntry]);
-    const isLimbsHelicalWorkflowActive = useMemo(() => {
-        if (isFourDEntry) return false;
-        return isLimbsHelicalWorkflow(loadSelectedScanWorkflowPlans());
-    }, [isFourDEntry]);
-    const isHeadDualScoutWorkflowActive = useMemo(() => {
-        if (isFourDEntry) return false;
-        return isHeadDualScoutWorkflow(loadSelectedScanWorkflowPlans());
-    }, [isFourDEntry]);
     // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
-    const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const [loadedScanSession, setLoadedScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const [verifiedViewerBindingKey, setVerifiedViewerBindingKey] = useState<string | null>(null);
+    const isViewerBindingVerified = isViewerBindingKeyVerified(verifiedViewerBindingKey, viewerBindingKey);
+    const authoritativeFourDState = isViewerBindingVerified ? loadedAuthoritativeFourDState : null;
+    const scanSession = isViewerBindingVerified ? loadedScanSession : null;
+    const fourDState = authoritativeFourDState ?? routeFourDState;
+    const isFourDVerified = !!authoritativeFourDState;
     const [generatedReconSeries, setGeneratedReconSeries] = useState<GeneratedReconSeries[]>([]);
-    const isBrainHelicalDemo = isBrainHelicalWorkflowActive || (!isFourDEntry && isBrainHelicalScanSession(scanSession));
-    const isLimbsDicomDemo = isLimbsHelicalWorkflowActive || (!isFourDEntry && isLimbsHelicalScanSession(scanSession));
-    const isHeadDualScoutDemo = isHeadDualScoutWorkflowActive || (!isFourDEntry && isHeadDualScoutSession(scanSession));
+    const isBrainHelicalDemo = !isFourDEntry && Boolean(scanSession?.series.some(
+        (series) => hasVerifiedSeriesImageSource(series)
+            && (series.image_source_id === "head-stroke-topogram" || series.image_source_id === "brain-helical-demo"),
+    ));
+    const isLimbsDicomDemo = !isFourDEntry && Boolean(scanSession?.series.some(
+        (series) => hasVerifiedSeriesImageSource(series) && series.image_source_id === "limbs-helical-demo",
+    ));
+    const isHeadDualScoutDemo = !isFourDEntry && Boolean(scanSession?.series.some(
+        (series) => hasVerifiedSeriesImageSource(series) && series.image_source_id === "head-dual-scout-demo",
+    ));
     const effectiveLungSeries = isBrainHelicalDemo ? BRAIN_HELICAL_VIEW_SERIES : REAL_LUNG_SERIES;
     /** "idle" → 非4D入口；"done" → 4D入口（相位筛选已在 PhaseFilterScreen 完成） */
     const fourDStage: "idle" | "done" = isFourDEntry ? "done" : "idle";
@@ -545,7 +532,6 @@ const ViewScreen = () => {
     // Will be updated to the first session series when session loads
     const [selectedSeriesId, setSelectedSeriesId] = useState(isFourDEntry ? "4d-preview-recon" : effectiveLungSeries.seriesId);
     const [selectedPhaseIndex, setSelectedPhaseIndex] = useState(0);
-    const [selectedFourDMpId, setSelectedFourDMpId] = useState<FourDDicomMpId>("MP1");
     const [fourDBrowseMode, setFourDBrowseMode] = useState<FourDBrowseMode>("phase");
     const [phaseCineSpeed, setPhaseCineSpeed] = useState<PhaseCineSpeed>(1); // multiplier; 1× = 500 ms/phase
     const phaseCineMode: PhaseCineMode = "forward";
@@ -583,8 +569,6 @@ const ViewScreen = () => {
     }, [imageMode]);
 
     // ─── 4D manifest (pre-rendered WebP dataset) ───────────────────────────
-    const [fourDManifest, setFourDManifest] = useState<FourDManifest | null>(null);
-    const [fourDManifestError, setFourDManifestError] = useState<string | null>(null);
     const [fourDEngineerManifest, setFourDEngineerManifest] = useState<FourDEngineerManifest | null>(null);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const [limbsDicomManifestError, setLimbsDicomManifestError] = useState<string | null>(null);
@@ -752,7 +736,10 @@ const ViewScreen = () => {
         // ── Helper: build an ImageItem array using the static DICOM dataset ──────
         const makeImages = (count: number, prefix: string): ImageItem[] =>
             Array.from({ length: count }, (_, i) => ({ id: `${prefix}-img-${i + 1}`, name: `Image ${i + 1}` }));
-        const makeBrainHelicalSeries = (seriesType: SeriesType): Series[] =>
+        const makeBrainHelicalSeries = (
+            seriesType: SeriesType,
+            sessionSeries?: ApiScanSessionDetail["series"][number],
+        ): Series[] =>
             BRAIN_HELICAL_RECON_SERIES.map((series) => ({
                 id: series.seriesId,
                 name: series.seriesName,
@@ -764,6 +751,9 @@ const ViewScreen = () => {
                 fov: series.fov,
                 matrix: series.matrix,
                 seriesType,
+                sourceSeriesId: sessionSeries?.id,
+                imageSourceId: sessionSeries?.image_source_id,
+                imageSourceVersion: sessionSeries?.image_source_version,
                 images: makeImages(series.count, series.seriesId),
                 defaultWw: series.defaultWw,
                 defaultWl: series.defaultWl,
@@ -772,7 +762,11 @@ const ViewScreen = () => {
             }));
 
         // ── Static fallback (no scan session in localStorage) ────────────────────
-        const makeLimbsDicomSeries = (series: LimbsDicomDemoSeries, seriesType: SeriesType): Series => {
+        const makeLimbsDicomSeries = (
+            series: LimbsDicomDemoSeries,
+            seriesType: SeriesType,
+            sessionSeries?: ApiScanSessionDetail["series"][number],
+        ): Series => {
             const windowWidth = series.windowWidth ?? limbsDicomManifest?.defaultWindowWidth;
             const windowLevel = series.windowCenter ?? limbsDicomManifest?.defaultWindowLevel;
             const thickness = series.sliceThickness && series.sliceThickness !== "N/A"
@@ -789,6 +783,9 @@ const ViewScreen = () => {
                 fov: series.fov,
                 matrix: series.matrix,
                 seriesType,
+                sourceSeriesId: sessionSeries?.id,
+                imageSourceId: sessionSeries?.image_source_id,
+                imageSourceVersion: sessionSeries?.image_source_version,
                 images: makeImages(series.count, `limbs-${series.key}`),
                 defaultWw: windowWidth ?? undefined,
                 defaultWl: windowLevel ?? undefined,
@@ -832,39 +829,15 @@ const ViewScreen = () => {
                 fov: fovLabel,
                 matrix: `${series.cols || 512}`,
                 seriesType,
+                sourceSeriesId: sessionSeries.id,
+                imageSourceId: sessionSeries.image_source_id,
+                imageSourceVersion: sessionSeries.image_source_version,
                 images: makeImages(1, `${prefix}-${series.key}`),
                 defaultWw: windowWidth ?? undefined,
                 defaultWl: windowLevel ?? undefined,
                 dicomUrls: [series.url],
             };
         };
-
-        if (isLimbsDicomDemo && limbsDicomManifest) {
-            const topogram = limbsDicomManifest.series.find((series) => series.key === "topogram");
-            const helicalSeries = (["thin-soft", "thin-bone"] as const)
-                .map((key) => limbsDicomManifest.series.find((series) => series.key === key))
-                .filter((series): series is LimbsDicomDemoSeries => !!series)
-                .map((series) => makeLimbsDicomSeries(series, "helical"));
-
-            return [{
-                id: limbsDicomManifest.studyId,
-                name: limbsDicomManifest.studyName,
-                scanGroups: [
-                    {
-                        id: "limbs-helical-group",
-                        label: "Lower Extremity Helical",
-                        type: "helical" as SeriesType,
-                        series: helicalSeries,
-                    },
-                    ...(topogram ? [{
-                        id: "limbs-topogram-group",
-                        label: "Scout",
-                        type: "topogram" as SeriesType,
-                        series: [makeLimbsDicomSeries(topogram, "topogram")],
-                    }] : []),
-                ],
-            }];
-        }
 
         if (!scanSession) {
             if (isFourDEntry) {
@@ -942,39 +915,74 @@ const ViewScreen = () => {
 
             if (s.series_type === "topogram") {
                 const p = s.topogram_param;
-                const headDualSeries = isHeadDualScoutDemo && headDualScoutManifest
+                const sourceVerified = s.execution_status === "image_ready" && hasVerifiedSeriesImageSource(s);
+                const headDualSeries = sourceVerified
+                    && s.image_source_id === "head-dual-scout-demo"
+                    && headDualScoutManifest
                     ? getHeadDualScoutSeries(headDualScoutManifest, resolveHeadDualScoutKey(s))
                     : null;
+                const limbsTopogram = sourceVerified
+                    && s.image_source_id === "limbs-helical-demo"
+                    && limbsDicomManifest
+                    ? limbsDicomManifest.series.find((series) => series.key === "topogram") ?? null
+                    : null;
+                const baseTopogramSeries: Series = {
+                    id: `${prefix}-topo`,
+                    name: s.series_label || t("view.fallback.topogram"),
+                    count: 1,
+                    kernel: REALISTIC_SCOUT_SERIES.kernel,
+                    thickness: REALISTIC_SCOUT_SERIES.thickness,
+                    kV: p ? String(p.kv) : "—",
+                    mAs: p ? String(p.ma) : "—",
+                    fov: p ? `${p.fov} mm` : "—",
+                    matrix: REALISTIC_SCOUT_SERIES.matrix,
+                    seriesType: type,
+                    sourceSeriesId: s.id,
+                    imageSourceId: s.image_source_id,
+                    imageSourceVersion: s.image_source_version,
+                    images: makeImages(1, `${prefix}-topo`),
+                    defaultWw: 500,
+                    defaultWl: 50,
+                    ...(sourceVerified && s.image_source_id === "head-stroke-topogram"
+                        ? { dicomUrls: [HEAD_STROKE_TOPOGRAM_URL], defaultWw: 130, defaultWl: 130 }
+                        : {}),
+                    ...(sourceVerified && s.image_source_id === "fourd-scout-demo"
+                        ? { dicomUrls: [FOUR_D_SCOUT_URL] }
+                        : {}),
+                };
                 scanGroups.push({
                     id: `group-${s.id}`,
                     label: s.series_label || t("view.fallback.topogram"),
                     type,
                     series: [headDualSeries
                         ? makeHeadDualScoutViewSeries(headDualSeries, s, type, prefix)
-                        : {
-                            id: `${prefix}-topo`,
-                            name: s.series_label || t("view.fallback.topogram"),
-                            count: REALISTIC_SCOUT_SERIES.count,
-                            kernel: REALISTIC_SCOUT_SERIES.kernel,
-                            thickness: REALISTIC_SCOUT_SERIES.thickness,
-                            kV: p ? String(p.kv) : "—",
-                            mAs: p ? String(p.ma) : "—",
-                            fov: p ? `${p.fov} mm` : "—",
-                            matrix: REALISTIC_SCOUT_SERIES.matrix,
-                            seriesType: type,
-                            images: makeImages(REALISTIC_SCOUT_SERIES.count, `${prefix}-topo`),
-                            defaultWw: 500,
-                            defaultWl: 50,
-                        }],
+                        : limbsTopogram
+                            ? makeLimbsDicomSeries(limbsTopogram, type, s)
+                            : baseTopogramSeries],
                 });
             } else {
                 // helical / axial / 4d — leaf items are the recon series
                 const p = s.helical_param ?? s.axial_param;
+                const sourceVerified = s.execution_status === "image_ready" && hasVerifiedSeriesImageSource(s);
                 const seriesCount = type === "4d" && fourDEngineerManifest
                     ? fourDEngineerManifest.bedCount * fourDEngineerManifest.sliceCountPerVolume
-                    : effectiveLungSeries.count;
-                const leafSeries: Series[] = isBrainHelicalDemo && type !== "4d"
-                    ? makeBrainHelicalSeries(type)
+                    : sourceVerified && s.image_source_id === "qin-lung-helical-demo"
+                        ? REAL_LUNG_SERIES.count
+                        : effectiveLungSeries.count;
+                const limbsResultSeries = sourceVerified
+                    && s.image_source_id === "limbs-helical-demo"
+                    && limbsDicomManifest
+                    ? (["thin-soft", "thin-bone"] as const)
+                        .map((key) => limbsDicomManifest.series.find((series) => series.key === key))
+                        .filter((series): series is LimbsDicomDemoSeries => Boolean(series))
+                        .map((series) => makeLimbsDicomSeries(series, type, s))
+                    : null;
+                const leafSeries: Series[] = sourceVerified
+                    && s.image_source_id === "brain-helical-demo"
+                    && type !== "4d"
+                    ? makeBrainHelicalSeries(type, s)
+                    : limbsResultSeries?.length
+                        ? limbsResultSeries
                     : s.recon_series.map((r) => ({
                     id: `${prefix}-recon${r.id}`,
                     name: r.recon_name,
@@ -986,9 +994,15 @@ const ViewScreen = () => {
                     fov: p ? `${p.fov} mm` : "—",
                     matrix: String(r.matrix),
                     seriesType: type,
+                    sourceSeriesId: s.id,
+                    imageSourceId: s.image_source_id,
+                    imageSourceVersion: s.image_source_version,
                     images: makeImages(seriesCount, `${prefix}-recon${r.id}`),
                     defaultWw: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.ww : r.window_width,
                     defaultWl: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : r.window_level,
+                    ...(sourceVerified && s.image_source_id === "qin-lung-helical-demo"
+                        ? { dicomBasePath: REAL_LUNG_SERIES.basePath, dicomFilePrefix: "lung" as const }
+                        : {}),
                     }));
 
                 // Fallback if protocol has no recon series configured
@@ -1004,9 +1018,15 @@ const ViewScreen = () => {
                         fov: p ? `${p.fov} mm` : "—",
                         matrix: "512",
                         seriesType: type,
+                        sourceSeriesId: s.id,
+                        imageSourceId: s.image_source_id,
+                        imageSourceVersion: s.image_source_version,
                         images: makeImages(seriesCount, `${prefix}-scan`),
                         defaultWw: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.ww : undefined,
                         defaultWl: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : undefined,
+                        ...(sourceVerified && s.image_source_id === "qin-lung-helical-demo"
+                            ? { dicomBasePath: REAL_LUNG_SERIES.basePath, dicomFilePrefix: "lung" as const }
+                            : {}),
                     });
                 }
 
@@ -1061,9 +1081,7 @@ const ViewScreen = () => {
         fourDEngineerManifest,
         isBrainHelicalDemo,
         effectiveLungSeries,
-        isLimbsDicomDemo,
         limbsDicomManifest,
-        isHeadDualScoutDemo,
         headDualScoutManifest,
         t,
     ]);
@@ -1082,7 +1100,6 @@ const ViewScreen = () => {
             }),
         }));
     }, [generatedReconSeries, studyTree]);
-    const seriesList = displayStudyTree.flatMap((study) => study.scanGroups.flatMap((g) => g.series));
     useEffect(() => {
         if (!scanSession?.id) return;
         const controller = new AbortController();
@@ -1121,20 +1138,27 @@ const ViewScreen = () => {
             });
         return () => controller.abort();
     }, [scanSession?.id, studyTree]);
-    // Guard: if seriesList is somehow still empty, always fall back to the static series
-    const safeSeriesList = seriesList.length > 0 ? seriesList : [{
-        id: effectiveLungSeries.seriesId,
-        name: effectiveLungSeries.seriesName,
-        count: effectiveLungSeries.count,
-        kernel: effectiveLungSeries.kernel,
-        thickness: effectiveLungSeries.thickness,
-        kV: effectiveLungSeries.kV,
-        mAs: effectiveLungSeries.mAs,
-        fov: effectiveLungSeries.fov,
-        matrix: effectiveLungSeries.matrix,
-        seriesType: "static" as SeriesType,
-        images: Array.from({ length: effectiveLungSeries.count }, (_, i) => ({ id: `${isBrainHelicalDemo ? "brain" : "qin"}-img-${i + 1}`, name: `Image ${i + 1}` })),
-    }];
+    // Guard: if the session tree is empty, keep a stable static fallback series.
+    const safeSeriesList = useMemo<Series[]>(() => {
+        const seriesList = displayStudyTree.flatMap((study) => study.scanGroups.flatMap((group) => group.series));
+        if (seriesList.length > 0) return seriesList;
+        return [{
+            id: effectiveLungSeries.seriesId,
+            name: effectiveLungSeries.seriesName,
+            count: effectiveLungSeries.count,
+            kernel: effectiveLungSeries.kernel,
+            thickness: effectiveLungSeries.thickness,
+            kV: effectiveLungSeries.kV,
+            mAs: effectiveLungSeries.mAs,
+            fov: effectiveLungSeries.fov,
+            matrix: effectiveLungSeries.matrix,
+            seriesType: "static",
+            images: Array.from({ length: effectiveLungSeries.count }, (_, index) => ({
+                id: `${isBrainHelicalDemo ? "brain" : "qin"}-img-${index + 1}`,
+                name: `Image ${index + 1}`,
+            })),
+        }];
+    }, [displayStudyTree, effectiveLungSeries, isBrainHelicalDemo]);
     const selectedSeries =
         safeSeriesList.find((s) => s.id === selectedSeriesId) ??
         (isFourDEntry
@@ -1144,7 +1168,37 @@ const ViewScreen = () => {
         safeSeriesList[0];
     const isTopogramSeries = selectedSeries.seriesType === "topogram";
     const isFourDLungReconSeries = selectedSeries.seriesType === "4d";
-    const windowPresetsForSelectedSeries = isBrainHelicalDemo && !isTopogramSeries
+    const selectedApiSeries = selectedSeries.sourceSeriesId == null
+        ? null
+        : scanSession?.series.find((series) => series.id === selectedSeries.sourceSeriesId) ?? null;
+    const hasVerifiedNonFourDImageSource = Boolean(
+        selectedApiSeries
+        && selectedApiSeries.execution_status === "image_ready"
+        && hasVerifiedSeriesImageSource(selectedApiSeries)
+        && selectedSeries.imageSourceId === selectedApiSeries.image_source_id
+        && selectedSeries.imageSourceVersion === selectedApiSeries.image_source_version
+        && (selectedSeries.dicomUrls?.length || selectedSeries.dicomBasePath),
+    );
+    const hasLinkedImageSource = Boolean(
+        isViewerBindingVerified
+        && scanSession
+        && (
+            hasVerifiedNonFourDImageSource
+            || (
+                isFourDEntry
+                && isFourDVerified
+                && isFourDLungReconSeries
+                && fourDState?.scanSessionId === scanSession.id
+                && fourDState.targetSeriesId === selectedSeries.sourceSeriesId
+                && fourDState.workflowStage === "ready"
+                && fourDState.imageSourceId === "fourd-engineer"
+                && fourDState.imageSourceVersion === 1
+                && Number.isFinite(fourDState.resultVersion)
+                && !!fourDEngineerManifest
+            )
+        ),
+    );
+    const windowPresetsForSelectedSeries = selectedSeries.imageSourceId === "brain-helical-demo" && !isTopogramSeries
         ? HEAD_WINDOW_PRESETS
         : WINDOW_PRESETS;
     const activeWindowPreset = useMemo(
@@ -1187,10 +1241,10 @@ const ViewScreen = () => {
     const fourDDicomImageUrls = useMemo(
         () => (
             isFourDLungReconSeries
-                ? getFourDEngineerMhaUrlsForPhase(selectedPhaseIndex) ?? getFourDDicomSeriesUrls(selectedPhaseIndex, selectedFourDMpId)
+                ? getFourDEngineerMhaUrlsForPhase(selectedPhaseIndex) ?? []
                 : []
         ),
-        [getFourDEngineerMhaUrlsForPhase, isFourDLungReconSeries, selectedFourDMpId, selectedPhaseIndex]
+        [getFourDEngineerMhaUrlsForPhase, isFourDLungReconSeries, selectedPhaseIndex]
     );
     // Full list of DICOM URL-sets (one per phase) so the MPR viewport can
     // warm every phase's cornerstone volume in the background — makes the
@@ -1204,13 +1258,10 @@ const ViewScreen = () => {
                         { length: fourDEngineerManifest.phaseCount },
                         (_, phase) => getFourDEngineerMhaUrlsForPhase(phase) ?? [],
                     )
-                    : Array.from(
-                        { length: FOUR_D_DICOM_PHASE_COUNT },
-                        (_, phase) => getFourDDicomSeriesUrls(phase, selectedFourDMpId),
-                    )
+                    : undefined
                 : undefined
         ),
-        [fourDEngineerManifest, getFourDEngineerMhaUrlsForPhase, isFourDLungReconSeries, selectedFourDMpId],
+        [fourDEngineerManifest, getFourDEngineerMhaUrlsForPhase, isFourDLungReconSeries],
     );
     const fourDPhaseOptions = useMemo(
         () => FOUR_D_PHASE_LABELS.map((label, index) => ({
@@ -1245,6 +1296,10 @@ const ViewScreen = () => {
 
     const handleImageModeChange = useCallback((nextMode: "2D" | "3D") => {
         if (nextMode === imageMode) return;
+        if (isFourDLungReconSeries && nextMode === "2D") {
+            showViewerNotice("当前 4D 工程模拟来源仅支持已验证的 3D/MPR 浏览");
+            return;
+        }
         if (nextMode === "3D" && !canUse3D) {
             showViewerNotice(isTopogramSeries ? "定位像仅支持 2D 浏览" : "图像层数不足，无法进入 3D");
             return;
@@ -1257,7 +1312,7 @@ const ViewScreen = () => {
         if (nextMode === "3D" && activeMprOrientation === "volume" && threeDDisplayMode === "MPR") {
             setActiveMprOrientation("axial");
         }
-    }, [activeMprOrientation, canUse3D, imageMode, isTopogramSeries, showViewerNotice, threeDDisplayMode, toolMode]);
+    }, [activeMprOrientation, canUse3D, imageMode, isFourDLungReconSeries, isTopogramSeries, showViewerNotice, threeDDisplayMode, toolMode]);
 
     const handleThreeDDisplayModeChange = useCallback((nextMode: ThreeDDisplayMode) => {
         setThreeDDisplayMode(nextMode);
@@ -1277,12 +1332,16 @@ const ViewScreen = () => {
     const handleViewerStatusChange = useCallback((status: "loading" | "ready" | "error") => {
         setViewerLoadStatus(status);
         if (status === "error" && imageMode === "3D") {
+            if (isFourDLungReconSeries) {
+                showViewerNotice("4D 3D/MPR 模拟影像加载失败；未回退到其他数据源");
+                return;
+            }
             setImageMode("2D");
             setToolMode(lastToolByModeRef.current["2D"]);
             setFocusedMprPanel(null);
             showViewerNotice("3D 加载失败，已保留并返回 2D 浏览");
         }
-    }, [imageMode, showViewerNotice]);
+    }, [imageMode, isFourDLungReconSeries, showViewerNotice]);
 
     const handleFitActiveViewport = useCallback(() => {
         if (imageMode === "2D") dicomViewerRef.current?.fit();
@@ -1392,7 +1451,6 @@ const ViewScreen = () => {
 
     useEffect(() => {
         setSelectedPhaseIndex(0);
-        setSelectedFourDMpId("MP1");
         setIsPlaying(false);
         setFourDBrowseMode("phase");
         phaseCineDirectionRef.current = 1;
@@ -1424,15 +1482,35 @@ const ViewScreen = () => {
     }, [fourDEngineerManifest, isFourDLungReconSeries]);
 
     useEffect(() => {
-        if (!isFourDEntry) return;
+        if (!isFourDEntry || !isFourDVerified || !fourDState?.scanResult) return;
         let cancelled = false;
         loadFourDEngineerManifest().then((manifest) => {
-            if (!cancelled && manifest) setFourDEngineerManifest(manifest);
+            if (cancelled) return;
+            const result = fourDState.scanResult;
+            const matchesResult = fourDState.imageSourceId === "fourd-engineer"
+                && fourDState.imageSourceVersion === 1
+                && !!manifest
+                && manifest.version === fourDState.imageSourceVersion
+                && manifest.bedCount === result.bedCount
+                && manifest.phaseCount === result.phaseCount
+                && result.phaseMatrix.every((row, bedIndex) =>
+                    row.every((cell, phaseIndex) => (
+                        manifest.volumes.filter(
+                            (volume) => volume.bedIndex === bedIndex && volume.phaseIndex === phaseIndex,
+                        ).length === cell.frameCount
+                    )),
+                );
+            if (matchesResult) {
+                setFourDEngineerManifest(manifest);
+            } else {
+                setFourDEngineerManifest(null);
+                setViewerLoadStatus("error");
+            }
         });
         return () => {
             cancelled = true;
         };
-    }, [isFourDEntry]);
+    }, [fourDState, isFourDEntry, isFourDVerified]);
 
     useEffect(() => {
         if (!isLimbsDicomDemo || !limbsDicomManifest) return;
@@ -1462,30 +1540,6 @@ const ViewScreen = () => {
         const timer = window.setTimeout(() => setViewerNotice(null), 2400);
         return () => window.clearTimeout(timer);
     }, [viewerNotice]);
-
-    // Load 4D manifest + preload each phase's first frame (mid axial) so
-    // phase switches are instant after the initial warm.
-    useEffect(() => {
-        if (!isFourDLungReconSeries) return;
-        if (fourDManifest || fourDManifestError) return;
-        let cancelled = false;
-        loadFourDManifest()
-            .then((m) => {
-                if (cancelled) return;
-                setFourDManifest(m);
-                // Apply baseline lung window from manifest
-                setWw(m.defaults.ww);
-                setWl(m.defaults.wl);
-                setDisplayWw(m.defaults.ww);
-                setDisplayWl(m.defaults.wl);
-            })
-            .catch((err: Error) => {
-                if (!cancelled) setFourDManifestError(err.message);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [isFourDLungReconSeries, fourDManifest, fourDManifestError]);
 
     useEffect(() => {
         if (!isLimbsDicomDemo) return;
@@ -1599,10 +1653,12 @@ const ViewScreen = () => {
         headDualScoutManifest,
     ]);
 
-    const seriesImageUrls = useMemo(
-        () => Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index, selectedSeries.seriesType, isBrainHelicalDemo, selectedSeries)),
-        [selectedSeries, totalSlices, isBrainHelicalDemo]
-    );
+    const seriesImageUrls = useMemo(() => {
+        if (!hasLinkedImageSource) return [];
+        if (isFourDLungReconSeries) return fourDDicomImageUrls;
+        return Array.from({ length: totalSlices }, (_, index) => getSeriesDicomUrl(index, selectedSeries))
+            .filter((url): url is string => Boolean(url));
+    }, [fourDDicomImageUrls, hasLinkedImageSource, isFourDLungReconSeries, selectedSeries, totalSlices]);
     const handleOfflineReconstruction = useCallback(async () => {
         if (["submitting", "queued", "running"].includes(reconStatus)) return;
 
@@ -1778,19 +1834,109 @@ const ViewScreen = () => {
     }, [buildClock, buildDate]);
 
     useEffect(() => {
-        fetchSelectedScanSession({ preferCache: true })
-            .then((session) => {
-                if (!session) return;
-                setScanSession(session);
-            })
-            .catch(() => { /* fall back to static data */ });
-    }, []);
+        let cancelled = false;
+        setVerifiedViewerBindingKey(null);
+        setLoadedAuthoritativeFourDState(null);
+        setLoadedScanSession(null);
+        setViewerLoadStatus("loading");
+        if (isFourDEntry) {
+            const expectedSessionId = routeFourDState?.scanSessionId;
+            const expectedTargetSeriesId = routeFourDState?.targetSeriesId;
+            const expectedResultVersion = routeFourDState?.resultVersion;
+            if (
+                selectedPatientId === null
+                || !Number.isFinite(expectedSessionId)
+                || !Number.isFinite(expectedTargetSeriesId)
+                || !Number.isFinite(expectedResultVersion)
+            ) {
+                setViewerLoadStatus("error");
+                return;
+            }
+            loadAuthoritativeFourDRecovery(selectedPatientId)
+                .then((recovery) => {
+                    if (cancelled) return;
+                    if (resolveLoadedFourDRecoveryDestination(recovery) !== "viewer") {
+                        throw new Error("The 4D result is not finalized for viewing.");
+                    }
+                    if (
+                        recovery.session.id !== expectedSessionId
+                        || recovery.target.id !== expectedTargetSeriesId
+                        || recovery.result.version !== expectedResultVersion
+                    ) {
+                        throw new Error("The recovered 4D result does not match the requested viewer binding.");
+                    }
+                    setLoadedScanSession(recovery.session);
+                    setLoadedAuthoritativeFourDState({
+                        ...toFourDPostScanState(recovery.result),
+                        initialBrowseMode: routeFourDState?.initialBrowseMode,
+                        offlineRecon: routeFourDState?.offlineRecon,
+                    });
+                    setVerifiedViewerBindingKey(viewerBindingKey);
+                    setViewerLoadStatus("ready");
+                })
+                .catch(() => {
+                    if (!cancelled) {
+                        setVerifiedViewerBindingKey(null);
+                        setLoadedAuthoritativeFourDState(null);
+                        setLoadedScanSession(null);
+                        setViewerLoadStatus("error");
+                    }
+                });
+        } else {
+            fetchSelectedScanSession({ preferCache: false })
+                .then((session) => {
+                    if (cancelled) return;
+                    if (!session) throw new Error("No selected scan session is available.");
+                    if (
+                        selectedPatientId === null
+                        || session.patient_id !== selectedPatientId
+                        || session.id !== selectedScanSessionId
+                        || session.status !== "completed"
+                    ) {
+                        throw new Error("The scan session is not finalized for the selected patient.");
+                    }
+                    setLoadedScanSession(session);
+                    setVerifiedViewerBindingKey(viewerBindingKey);
+                    setViewerLoadStatus("ready");
+                })
+                .catch(() => {
+                    if (!cancelled) {
+                        setVerifiedViewerBindingKey(null);
+                        setLoadedAuthoritativeFourDState(null);
+                        setLoadedScanSession(null);
+                        setViewerLoadStatus("error");
+                    }
+                });
+        }
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        isFourDEntry,
+        routeFourDState?.initialBrowseMode,
+        routeFourDState?.offlineRecon,
+        routeFourDState?.resultVersion,
+        routeFourDState?.scanSessionId,
+        routeFourDState?.targetSeriesId,
+        selectedPatientId,
+        selectedScanSessionId,
+        viewerBindingKey,
+    ]);
 
     useEffect(() => {
+        if (!hasLinkedImageSource) {
+            setViewerLoadStatus("error");
+            return;
+        }
+        if (isFourDLungReconSeries) {
+            setViewerLoadStatus(fourDDicomImageUrls.length > 0 ? "ready" : "error");
+            return;
+        }
         const controller = new AbortController();
         const loadSlice = async () => {
             try {
-                const url = getSeriesDicomUrl(clampSliceIndex(sliceIndex), selectedSeries.seriesType, isBrainHelicalDemo, selectedSeries);
+                const url = getSeriesDicomUrl(clampSliceIndex(sliceIndex), selectedSeries);
+                if (!url) throw new Error("Selected series has no verified DICOM URL.");
                 const response = await fetch(url, { signal: controller.signal });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch ${url}`);
@@ -1869,7 +2015,7 @@ const ViewScreen = () => {
 
         void loadSlice();
         return () => controller.abort();
-    }, [sliceIndex, selectedSeriesId, selectedSeries.id, selectedSeries.name, selectedSeries.seriesType, selectedSeries.count, clampSliceIndex, isBrainHelicalDemo]);
+    }, [clampSliceIndex, fourDDicomImageUrls.length, hasLinkedImageSource, isFourDLungReconSeries, selectedSeries, selectedSeriesId, sliceIndex]);
 
     // (3D canvas renderCurrentSlice removed — now handled by CornerstoneMPRViewport)
 
@@ -2536,8 +2682,17 @@ const ViewScreen = () => {
                 <div className="flex-1 min-w-0 flex flex-col overflow-hidden rounded-lg border border-[#B0C4DE]">
                 <div className="flex flex-1 min-h-0 overflow-hidden">
                 <div className={`${viewportContainerClassName} relative`}>
+                    {!hasLinkedImageSource && (
+                        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-[#020617] px-10 text-center">
+                            <div className="max-w-[460px] rounded-xl border border-slate-700 bg-slate-900/90 px-8 py-7 shadow-2xl">
+                                <div className="text-[15px] font-black text-slate-100">{t("view.imageUnavailable.title")}</div>
+                                <div className="mt-3 text-[12px] leading-relaxed text-slate-400">{t("view.imageUnavailable.body")}</div>
+                                <div className="mt-4 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">{t("scanFlow.physicalGuide.referenceSimulated")}</div>
+                            </div>
+                        </div>
+                    )}
                     {/* ── 3D MPR mode: full Cornerstone multi-planar viewport ── */}
-                    {!isTopogramSeries && hasMounted3D && (
+                    {hasLinkedImageSource && !isTopogramSeries && hasMounted3D && (
                         <div className={`absolute inset-0 min-w-0 overflow-hidden ${imageMode === "3D" ? "visible pointer-events-auto" : "invisible pointer-events-none"}`}>
                             {isFourDLungReconSeries ? (
                                 <CornerstoneMPRViewport
@@ -2609,7 +2764,7 @@ const ViewScreen = () => {
                             className={`absolute inset-0 min-w-0 bg-black overflow-hidden ${imageMode === "2D" || isTopogramSeries ? "visible pointer-events-auto" : "invisible pointer-events-none"} ${toolMode === "measure" ? "cursor-crosshair" : toolMode === "annotate" ? "cursor-cell" : "cursor-default"}`}
                         >
                             {/* Cornerstone DICOM viewer */}
-                            <DicomViewer
+                            {hasLinkedImageSource && <DicomViewer
                                 ref={dicomViewerRef}
                                 imageUrls={seriesImageUrls}
                                 onStatusChange={handleViewerStatusChange}
@@ -2631,8 +2786,8 @@ const ViewScreen = () => {
                                     setWl(Math.round(wc));
                                     setWw(Math.round(wwidth));
                                 }}
-                            />
-                            {hasMultipleSlices && (
+                            />}
+                            {hasLinkedImageSource && hasMultipleSlices && (
                             <div
                                 className="absolute bottom-6 left-1/2 z-20 w-[320px] max-w-[36%] -translate-x-1/2 rounded-full border border-white/10 bg-[#0B1120]/75 px-3 py-2 shadow-2xl backdrop-blur"
                                 onPointerDown={(e) => e.stopPropagation()}
@@ -3133,16 +3288,8 @@ const ViewScreen = () => {
                     <div className="flex-1" />
                     <div className="flex-1 flex justify-end">
                         <button
-                            onClick={async () => {
-                                const sessionId = loadSelectedScanSessionId();
-                                if (sessionId) {
-                                    try {
-                                        await completeScanSession(sessionId);
-                                    } catch (error) {
-                                        console.error("Failed to mark scan session completed.", error);
-                                    }
-                                    clearSelectedScanSessionId();
-                                }
+                            onClick={() => {
+                                if (loadSelectedScanSessionId()) clearSelectedScanSessionId();
                                 navigate("/patients", { replace: true, state: { backRoute: "/" } });
                             }}
                             className="flex items-center gap-2 px-10 h-[52px] bg-[#4D94FF] text-white font-bold rounded-md shadow-lg hover:bg-blue-600 transition-all uppercase text-[13px] active:scale-95"

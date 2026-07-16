@@ -6,27 +6,25 @@ import {
   ChevronRight,
   Database,
   LoaderCircle,
+  RefreshCw,
 } from "lucide-react";
 import { FeedbackNotice } from "../components/FeedbackNotice";
 import {
-  FOUR_D_DICOM_MP_IDS,
-  FOUR_D_DICOM_SLICES_PER_PHASE,
-  getFourDPreviewUrls,
-  type FourDDicomMpId,
-} from "../lib/fourDDicomSource";
-import {
   buildEngineerLoadPlan,
-  buildEngineerScanResult,
   loadFourDEngineerManifest,
+  resetFourDEngineerManifestCache,
   type FourDEngineerManifest,
   type FourDEngineerVolume,
 } from "../lib/fourDEngineerImageSource";
-import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
+import type { FourDPostScanState } from "../lib/fourDTypes";
+import { fetchSelectedFourDPostScanState } from "../lib/fourDResult";
+import { loadSelectedPatient } from "../lib/patientSession";
 import { useI18n } from "../lib/i18nContext";
+import { fetchSelectedScanSession } from "../lib/scanSession";
+import { applyScanWorkflowAction, createActionId } from "../lib/scanWorkflowActions";
 
 const PHASE_LABELS = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"] as const;
 const REQUEST_CONCURRENCY = 5;
-const PREVIEW_SLICE_INDEX = Math.floor(FOUR_D_DICOM_SLICES_PER_PHASE / 2);
 
 type LoadStatus = "waiting" | "loading" | "done" | "error";
 
@@ -51,48 +49,26 @@ interface FullscreenImageState {
   imageUrl: string;
 }
 
+const buildInitialPhaseLoads = (): PhaseLoadState[] => PHASE_LABELS.map((_, phaseIndex) => ({
+  phaseIndex,
+  completedBeds: 0,
+  totalTargets: 0,
+  activeBedNumber: null,
+  activeCandidateNumber: null,
+  activeFileCount: 0,
+  activeFileTotal: 0,
+  previewUrl: null,
+  latestSourceBedNumber: null,
+  status: "waiting",
+  errorMessage: null,
+}));
+
 async function fetchArrayBuffer(url: string, signal: AbortSignal) {
   const response = await fetch(url, { signal });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} for ${url}`);
   }
   return response.arrayBuffer();
-}
-
-async function loadBedPhaseSeries(
-  mpId: FourDDicomMpId,
-  phaseIndex: number,
-  signal: AbortSignal,
-  onProgress: (loadedFileCount: number) => void,
-) {
-  const urls = getFourDPreviewUrls(phaseIndex, mpId);
-  let loadedFileCount = 0;
-  let nextIndex = 0;
-  let previewUrl: string | null = null;
-
-  const worker = async () => {
-    while (nextIndex < urls.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      await fetchArrayBuffer(urls[currentIndex], signal);
-      if (currentIndex === PREVIEW_SLICE_INDEX) {
-        previewUrl = urls[currentIndex];
-      }
-      loadedFileCount += 1;
-      if (loadedFileCount === 1 || loadedFileCount === urls.length || loadedFileCount % 5 === 0) {
-        onProgress(loadedFileCount);
-      }
-    }
-  };
-
-  await Promise.all(
-    Array.from({ length: Math.min(REQUEST_CONCURRENCY, urls.length) }, () => worker()),
-  );
-
-  return {
-    previewUrl,
-    fileCount: urls.length,
-  };
 }
 
 async function loadEngineerVolumeSeries(
@@ -228,7 +204,7 @@ function PhaseThumbnail({
             <span className={`truncate text-[10px] font-bold ${statusConfig.text}`}>{statusConfig.label}</span>
             {phase.status === "loading" ? (
               <span className="font-mono text-[10px] font-bold text-slate-200">
-                {phase.activeFileCount}/{phase.activeFileTotal || FOUR_D_DICOM_SLICES_PER_PHASE}
+                {phase.activeFileCount}/{phase.activeFileTotal || 0}
               </span>
             ) : (
               <span className="font-mono text-[10px] font-bold text-slate-300">{phase.completedBeds}/{phaseTargetCount}</span>
@@ -257,39 +233,50 @@ export default function ImageLoadScreen() {
   const location = useLocation();
   const { t } = useI18n();
   const routeState = location.state as FourDPostScanState | null;
+  const selectedPatient = useMemo(() => loadSelectedPatient(), []);
+  const [resolvedState, setResolvedState] = useState<FourDPostScanState | null>(routeState);
+  const [isStateVerified, setIsStateVerified] = useState(false);
   const [engineerManifest, setEngineerManifest] = useState<FourDEngineerManifest | null | undefined>(undefined);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [isTerminating, setIsTerminating] = useState(false);
   const autoNavigatedRef = useRef(false);
+  const terminateActionIdRef = useRef<string | null>(null);
 
-  const phaseFilterState = useMemo<FourDPostScanState>(
-    () => ({
-      ...(engineerManifest
-        ? { scanResult: buildEngineerScanResult(engineerManifest, routeState?.scanResult) }
-        : routeState?.scanResult
-        ? routeState
-        : { scanResult: generateMockScanResult(FOUR_D_DICOM_MP_IDS.length, 10, 165.0) }),
-      showSliceLoadingBeforeImageLoad: false,
-    }),
-    [engineerManifest, routeState],
+  const phaseFilterState = useMemo<FourDPostScanState | null>(
+    () => resolvedState && isStateVerified
+      ? { ...resolvedState, showSliceLoadingBeforeImageLoad: false }
+      : null,
+    [isStateVerified, resolvedState],
   );
 
   const [fullscreenImage, setFullscreenImage] = useState<FullscreenImageState | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
-  const [phaseLoads, setPhaseLoads] = useState<PhaseLoadState[]>(
-    () =>
-      PHASE_LABELS.map((_, phaseIndex) => ({
-        phaseIndex,
-        completedBeds: 0,
-        totalTargets: FOUR_D_DICOM_MP_IDS.length,
-        activeBedNumber: null,
-        activeCandidateNumber: null,
-        activeFileCount: 0,
-        activeFileTotal: FOUR_D_DICOM_SLICES_PER_PHASE,
-        previewUrl: null,
-        latestSourceBedNumber: null,
-        status: "waiting",
-        errorMessage: null,
-      })),
-  );
+
+  useEffect(() => {
+    if (!selectedPatient) return;
+    let cancelled = false;
+    fetchSelectedFourDPostScanState(selectedPatient.id)
+      .then((state) => {
+        if (!cancelled) {
+          setResolvedState(state);
+          setIsStateVerified(true);
+          setGlobalError(null);
+          if (state.workflowStage === "acquired" && state.scanResult.rescanOccurred) {
+            navigate("/fourd-rescan-select", { replace: true, state });
+          } else if (state.workflowStage === "phase_selected" || state.workflowStage === "ready") {
+            navigate("/phase-filter", { replace: true, state });
+          }
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setIsStateVerified(false);
+        if (!cancelled) setGlobalError(error instanceof Error ? error.message : "4D 结果恢复失败");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAttempt, navigate, selectedPatient]);
+  const [phaseLoads, setPhaseLoads] = useState<PhaseLoadState[]>(buildInitialPhaseLoads);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,30 +286,51 @@ export default function ImageLoadScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
-    if (engineerManifest === undefined) return;
+    if (engineerManifest === undefined || !resolvedState || !isStateVerified) return;
 
     const controller = new AbortController();
     let cancelled = false;
 
     const run = async () => {
       setGlobalError(null);
-      const phaseTargetCounts = engineerManifest
-        ? PHASE_LABELS.map((_, phaseIndex) =>
-            engineerManifest.volumes.filter((volume) => volume.phaseIndex === phaseIndex).length,
-          )
-        : PHASE_LABELS.map(() => FOUR_D_DICOM_MP_IDS.length);
+      if (!engineerManifest) {
+        setGlobalError("本次 4D 模拟结果缺少已绑定的工程影像清单，不能继续后处理。");
+        setPhaseLoads((previous) => previous.map((phase) => ({ ...phase, status: "error" })));
+        return;
+      }
+      const scanResult = resolvedState.scanResult;
+      const manifestMatchesResult = resolvedState.imageSourceId === "fourd-engineer"
+        && resolvedState.imageSourceVersion === 1
+        && engineerManifest.version === resolvedState.imageSourceVersion
+        && engineerManifest.bedCount === scanResult.bedCount
+        && engineerManifest.phaseCount === scanResult.phaseCount
+        && scanResult.phaseMatrix.every((row, bedIndex) =>
+          row.every((cell, phaseIndex) => (
+            engineerManifest.volumes.filter(
+              (volume) => volume.bedIndex === bedIndex && volume.phaseIndex === phaseIndex,
+            ).length === cell.frameCount
+          )),
+        );
+      if (!manifestMatchesResult) {
+        setGlobalError("本次 4D 结果与工程影像清单不匹配，已停止加载以避免影像误配。");
+        setPhaseLoads((previous) => previous.map((phase) => ({ ...phase, status: "error" })));
+        return;
+      }
+      const phaseTargetCounts = PHASE_LABELS.map((_, phaseIndex) =>
+        engineerManifest.volumes.filter((volume) => volume.phaseIndex === phaseIndex).length,
+      );
       setPhaseLoads(
         PHASE_LABELS.map((_, phaseIndex) => ({
           phaseIndex,
           completedBeds: 0,
-          totalTargets: phaseTargetCounts[phaseIndex] ?? FOUR_D_DICOM_MP_IDS.length,
+          totalTargets: phaseTargetCounts[phaseIndex] ?? 0,
           activeBedNumber: null,
           activeCandidateNumber: null,
           activeFileCount: 0,
-          activeFileTotal: engineerManifest?.sliceCountPerVolume ?? FOUR_D_DICOM_SLICES_PER_PHASE,
+          activeFileTotal: engineerManifest.sliceCountPerVolume,
           previewUrl: null,
           latestSourceBedNumber: null,
           status: "waiting",
@@ -330,7 +338,7 @@ export default function ImageLoadScreen() {
         })),
       );
 
-      if (engineerManifest) {
+      {
         const loadPlan = buildEngineerLoadPlan(engineerManifest);
 
         for (const volume of loadPlan) {
@@ -425,99 +433,6 @@ export default function ImageLoadScreen() {
         return;
       }
 
-      for (let bedIndex = 0; bedIndex < FOUR_D_DICOM_MP_IDS.length; bedIndex += 1) {
-        const mpId = FOUR_D_DICOM_MP_IDS[bedIndex];
-        const bedNumber = bedIndex + 1;
-
-        for (let phaseIndex = 0; phaseIndex < PHASE_LABELS.length; phaseIndex += 1) {
-          if (cancelled) return;
-
-          setPhaseLoads((prev) =>
-            prev.map((phase) =>
-              phase.phaseIndex !== phaseIndex
-                ? phase
-                : {
-                    ...phase,
-                    activeBedNumber: bedNumber,
-                    activeCandidateNumber: null,
-                    activeFileCount: 0,
-                    activeFileTotal: FOUR_D_DICOM_SLICES_PER_PHASE,
-                    status: "loading",
-                    errorMessage: null,
-                  },
-            ),
-          );
-
-          try {
-            const result = await loadBedPhaseSeries(
-              mpId,
-              phaseIndex,
-              controller.signal,
-              (loadedFileCount) => {
-                if (cancelled) return;
-                setPhaseLoads((prev) =>
-                  prev.map((phase) =>
-                    phase.phaseIndex !== phaseIndex
-                      ? phase
-                      : {
-                          ...phase,
-                          activeBedNumber: bedNumber,
-                          activeCandidateNumber: null,
-                          activeFileCount: loadedFileCount,
-                          activeFileTotal: FOUR_D_DICOM_SLICES_PER_PHASE,
-                          status: "loading",
-                        },
-                  ),
-                );
-              },
-            );
-
-            if (cancelled) return;
-
-            setPhaseLoads((prev) =>
-              prev.map((phase) =>
-                phase.phaseIndex !== phaseIndex
-                  ? phase
-                  : {
-                      ...phase,
-                      completedBeds: phase.completedBeds + 1,
-                      activeBedNumber: null,
-                      activeCandidateNumber: null,
-                      activeFileCount: 0,
-                      activeFileTotal: result.fileCount,
-                      previewUrl: result.previewUrl ?? phase.previewUrl,
-                      latestSourceBedNumber: bedNumber,
-                      status: phase.completedBeds + 1 >= FOUR_D_DICOM_MP_IDS.length ? "done" : "waiting",
-                      errorMessage: null,
-                    },
-              ),
-            );
-          } catch (error) {
-            if (controller.signal.aborted) return;
-            const message = error instanceof Error ? error.message : String(error);
-            setGlobalError(t("scanFlow.imageLoad.globalError", {
-              bed: bedNumber,
-              phase: PHASE_LABELS[phaseIndex],
-              message,
-            }));
-            setPhaseLoads((prev) =>
-              prev.map((phase) =>
-                phase.phaseIndex !== phaseIndex
-                  ? phase
-                  : {
-                      ...phase,
-                      activeBedNumber: null,
-                      activeCandidateNumber: null,
-                      activeFileCount: 0,
-                      status: "error",
-                      errorMessage: message,
-                    },
-              ),
-            );
-            return;
-          }
-        }
-      }
     };
 
     void run();
@@ -526,17 +441,68 @@ export default function ImageLoadScreen() {
       cancelled = true;
       controller.abort();
     };
-  }, [engineerManifest, t]);
+  }, [engineerManifest, isStateVerified, resolvedState, t]);
 
-  const totalBeds = engineerManifest?.bedCount ?? FOUR_D_DICOM_MP_IDS.length;
+  const totalBeds = engineerManifest?.bedCount ?? 0;
   const completedTaskCount = phaseLoads.reduce((sum, phase) => sum + phase.completedBeds, 0);
   const totalTaskCount = phaseLoads.reduce((sum, phase) => sum + phase.totalTargets, 0);
-  const allLoaded = completedTaskCount === totalTaskCount && !globalError;
+  const allLoaded = !!engineerManifest
+    && isStateVerified
+    && totalTaskCount > 0
+    && completedTaskCount === totalTaskCount
+    && !globalError;
   const overallProgress = Math.round((completedTaskCount / Math.max(totalTaskCount, 1)) * 100);
   const donePhaseCount = phaseLoads.filter((phase) => phase.status === "done").length;
+  const hasLoadFailure = !!globalError || phaseLoads.some((phase) => phase.status === "error");
+
+  const retryLoad = () => {
+    resetFourDEngineerManifestCache();
+    autoNavigatedRef.current = false;
+    setFullscreenImage(null);
+    setGlobalError(null);
+    setEngineerManifest(undefined);
+    setIsStateVerified(false);
+    setPhaseLoads(buildInitialPhaseLoads());
+    setLoadAttempt((attempt) => attempt + 1);
+  };
+
+  const terminateFailedExam = async () => {
+    if (isTerminating) return;
+    const binding = resolvedState ?? routeState;
+    if (!binding?.scanSessionId || !binding.targetSeriesId || !selectedPatient) {
+      setGlobalError("缺少患者、扫描会话或 4D 目标序列绑定，无法安全终止检查");
+      return;
+    }
+    setIsTerminating(true);
+    try {
+      const latestSession = await fetchSelectedScanSession({ preferCache: false });
+      if (
+        !latestSession
+        || latestSession.id !== binding.scanSessionId
+        || latestSession.patient_id !== selectedPatient.id
+        || !latestSession.series.some((series) => series.id === binding.targetSeriesId && series.series_type === "4d")
+      ) {
+        throw new Error("患者、扫描会话或 4D 目标序列已切换，未执行终止动作");
+      }
+      const actionId = terminateActionIdRef.current ?? createActionId();
+      terminateActionIdRef.current = actionId;
+      await applyScanWorkflowAction(latestSession.id, {
+        action_id: actionId,
+        action: "terminate_exam",
+        target_series_id: binding.targetSeriesId,
+        reason: "User terminated the simulated 4D exam after image loading failed",
+      });
+      terminateActionIdRef.current = null;
+      navigate("/patients");
+    } catch (error) {
+      setGlobalError(error instanceof Error ? error.message : "终止检查失败，请重试或返回患者列表");
+    } finally {
+      setIsTerminating(false);
+    }
+  };
 
   useEffect(() => {
-    if (!allLoaded || autoNavigatedRef.current) return;
+    if (!allLoaded || !phaseFilterState || autoNavigatedRef.current) return;
     autoNavigatedRef.current = true;
     const timer = window.setTimeout(() => {
       navigate("/phase-filter", { state: phaseFilterState });
@@ -609,6 +575,33 @@ export default function ImageLoadScreen() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {hasLoadFailure && (
+            <>
+              <button
+                type="button"
+                onClick={() => { void terminateFailedExam(); }}
+                disabled={isTerminating}
+                className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-[12px] font-bold text-red-700 hover:bg-red-100 disabled:opacity-50"
+              >
+                {isTerminating ? "正在终止…" : "终止检查"}
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate("/patients")}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-[12px] font-bold text-slate-600 hover:bg-slate-50"
+              >
+                返回患者列表
+              </button>
+              <button
+                type="button"
+                onClick={retryLoad}
+                className="flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-4 py-2 text-[12px] font-bold text-[#1D4ED8] hover:bg-blue-100"
+              >
+                <RefreshCw size={13} />
+                重试加载
+              </button>
+            </>
+          )}
           {allLoaded && (
             <div className="flex items-center gap-1.5 text-[12px] font-bold text-emerald-600">
               <CheckCircle2 size={15} />
@@ -616,10 +609,12 @@ export default function ImageLoadScreen() {
             </div>
           )}
           <button
-            onClick={() => navigate("/phase-filter", { state: phaseFilterState })}
-            disabled={!allLoaded}
+            onClick={() => {
+              if (phaseFilterState) navigate("/phase-filter", { state: phaseFilterState });
+            }}
+            disabled={!allLoaded || !phaseFilterState}
             className={`flex items-center gap-1.5 rounded-md px-6 py-2 text-[12px] font-bold text-white shadow-sm ${
-              !allLoaded ? "cursor-not-allowed bg-slate-300" : "bg-[#4D94FF] hover:bg-blue-600"
+              !allLoaded || !phaseFilterState ? "cursor-not-allowed bg-slate-300" : "bg-[#4D94FF] hover:bg-blue-600"
             }`}
           >
             {t("scanFlow.imageLoad.nextPhaseFilter")} <ChevronRight size={14} />

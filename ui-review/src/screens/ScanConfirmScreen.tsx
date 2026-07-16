@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useNavigate } from "react-router-dom";
 import {
@@ -21,13 +21,13 @@ import {
 import { ensureBusinessSnapshotImported, loadProtocolCasesFromDb, type RawProtocolCase } from "../lib/protocolDb";
 import { loadSelectedPatient } from "../lib/patientSession";
 import {
-    cancelScanSession,
     clearSelectedScanSessionId,
     fetchSelectedScanSession,
     loadSelectedScanSessionId,
     updateSelectedScanSessionTopogramParam,
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
+import { applyScanWorkflowAction, createActionId } from "../lib/scanWorkflowActions";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { isHeadDualScoutWorkflow, mergeDualScoutPlanSequences } from "../lib/headDualScoutDemo";
 import AppHeader from "../components/AppHeader";
@@ -499,6 +499,9 @@ const ScanConfirmScreen = ({
     const [checkedSeqIds, setCheckedSeqIds] = useState<string[]>([]);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
+    const [abortError, setAbortError] = useState("");
+    const [isAborting, setIsAborting] = useState(false);
+    const abortActionIdRef = useRef<string | null>(null);
     const [showPatientConfirm, setShowPatientConfirm] = useState(false);
     const [laserActive, setLaserActive] = useState(false);
     const [scoutDoseDisplayParams, setScoutDoseDisplayParams] = useState<ScoutDoseDisplayParams>(DEFAULT_SCOUT_DOSE_PARAMS);
@@ -703,9 +706,14 @@ const ScanConfirmScreen = ({
                 : t("scanFlow.scout");
     const currentProtocolName = workflowPlans[0]?.title ?? scanSession?.name ?? currentProtocolLabel;
     const currentSequenceName = allSequences.find((sequence) => sequence.id === resolvedActiveSequenceId)?.name ?? currentProtocolLabel;
+    const currentDoseDisplayParams = parameterPanelMode === "helicalScan"
+        ? resolvedHelicalScanDisplayParams
+        : parameterPanelMode === "tomographicScan"
+            ? resolvedTomographicScanDisplayParams
+            : scoutDoseDisplayParams;
     const currentScanData = {
-        ctdi: scoutDoseDisplayParams.doseCtdiVol,
-        dlp: scoutDoseDisplayParams.doseDlp,
+        ctdi: currentDoseDisplayParams.doseCtdiVol,
+        dlp: currentDoseDisplayParams.doseDlp,
         protocol: currentProtocolName,
         sequence: currentSequenceName,
     };
@@ -1551,7 +1559,10 @@ const ScanConfirmScreen = ({
                 </div>
                 <div className="flex-1 flex justify-center">
                     <button
-                        onClick={() => setShowAbortConfirm(true)}
+                        onClick={() => {
+                            setAbortError("");
+                            setShowAbortConfirm(true);
+                        }}
                         disabled={readOnlyMode}
                         className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 transition-all uppercase text-[13px] shadow-sm ${readOnlyMode ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#F57C00] border-[#F57C00] hover:bg-orange-50 active:scale-95"}`}>
                         <AlertTriangle size={20} /> {t("scanFlow.abortExam")}
@@ -1644,6 +1655,7 @@ const ScanConfirmScreen = ({
                             <p className="text-[13px] text-[#546E7A] leading-relaxed">
                                 {t("scanFlow.abortBodyStart")}<span className="font-bold text-[#37474F]">{t("scanFlow.abortBodyStrong")}</span>{t("scanFlow.abortBodyEnd")}
                             </p>
+                            {abortError && <p className="mt-2 text-[11px] font-bold text-red-600">{abortError}</p>}
                         </div>
                         <div className="flex gap-2 px-5 pb-5">
                             <button
@@ -1654,21 +1666,33 @@ const ScanConfirmScreen = ({
                             </button>
                             <button
                                 onClick={async () => {
-                                    setShowAbortConfirm(false);
                                     const sessionId = loadSelectedScanSessionId();
-                                    if (sessionId) {
-                                        try {
-                                            await cancelScanSession(sessionId);
-                                        } catch (error) {
-                                            console.error("Failed to mark scan session cancelled.", error);
+                                    if (!sessionId || isAborting) return;
+                                    setIsAborting(true);
+                                    setAbortError("");
+                                    try {
+                                        const actionId = abortActionIdRef.current ?? createActionId();
+                                        abortActionIdRef.current = actionId;
+                                        const result = await applyScanWorkflowAction(sessionId, {
+                                            action_id: actionId,
+                                            action: "terminate_exam",
+                                            reason: "User terminated the simulated exam from scan confirmation",
+                                        });
+                                        if (result.scan_session.status !== "cancelled") {
+                                            throw new Error("检查会话未成功终止。");
                                         }
                                         clearSelectedScanSessionId();
+                                        navigate('/patients');
+                                    } catch (error) {
+                                        setAbortError(error instanceof Error ? error.message : "终止检查失败，请重试。");
+                                    } finally {
+                                        setIsAborting(false);
                                     }
-                                    navigate('/patients');
                                 }}
+                                disabled={isAborting}
                                 className="flex-1 h-[40px] bg-[#F57C00] text-white font-bold rounded-lg text-[13px] hover:bg-orange-600 shadow-md transition-all active:scale-95"
                             >
-                                {t("scanFlow.confirmAbort")}
+                                {isAborting ? t("scanFlow.finalization.saving") : t("scanFlow.confirmAbort")}
                             </button>
                         </div>
                     </div>
@@ -1706,7 +1730,7 @@ const ScanConfirmScreen = ({
  */
 interface PatientData {
     name: string;
-    age: number;
+    age: number | string;
     gender: string;
     idNumber: string;
     patientId: string;
@@ -1872,13 +1896,13 @@ const PatientConfirmationModalContent: React.FC<PatientConfirmationModalProps> =
     onConfirm,
     patientData = {
         name: "--",
-        age: 45,
+        age: "--",
         gender: "--",
-        idNumber: "11010119800101XXXX",
-        patientId: "P20260226001",
-        checkType: "Scout"
+        idNumber: "--",
+        patientId: "--",
+        checkType: "--",
     },
-    scanData = { ctdi: "12.45", dlp: "658.2", protocol: "CT Routine", sequence: "Scout" },
+    scanData = { ctdi: "--", dlp: "--", protocol: "--", sequence: "--" },
     physicalGuide,
 }) => {
     const { t } = useI18n();

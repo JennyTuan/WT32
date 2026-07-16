@@ -1,16 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, ChevronRight, Info } from "lucide-react";
-import { getFourDImageUrl } from "../lib/fourDImageSource";
 import {
-  buildEngineerScanResult,
   getEngineerVolumesForBedPhase,
   loadFourDEngineerManifest,
   type FourDEngineerManifest,
   type FourDEngineerVolume,
 } from "../lib/fourDEngineerImageSource";
-import { generateMockScanResult, type FourDPostScanState } from "../lib/fourDTypes";
+import {
+  fetchFourDResult,
+  fetchSelectedFourDPostScanState,
+  finalizeFourDResult,
+  saveFourDResult,
+  toFourDPostScanState,
+} from "../lib/fourDResult";
+import { loadSelectedPatient } from "../lib/patientSession";
+import {
+  fetchSelectedScanSession,
+} from "../lib/scanSession";
+import type { FourDPostScanState, FourDScanResult, PhaseSelections } from "../lib/fourDTypes";
 import { useI18n } from "../lib/i18nContext";
+import { arePhaseSelectionsEqual } from "../lib/fourDPhaseSelection";
 
 type PhaseStatus = "ok" | "duplicate" | "missing";
 
@@ -18,14 +28,9 @@ interface DataSegment {
   id: string;
   volumeId?: string;
   time: string;
-  quality: "excellent" | "good" | "fair";
   candidateIndex: number;
   range: string;
   sliceCount: number;
-  avgDose: string;
-  clarity: number;
-  noise: number;
-  motion: number;
   previewUrls?: {
     axial: string;
     coronal: string;
@@ -50,64 +55,14 @@ interface PhaseData {
 }
 
 const PHASE_LABELS = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"];
-const PREVIEW_SLICES = {
-  coronal: 256,
-  sagittal: 256,
-} as const;
-
 function makeSegment(idx: number, phaseIdx: number, bedIdx: number): DataSegment {
-  const times = ["12:34:56.78", "12:45:12.34", "12:55:45.67", "13:02:18.22"];
-  const qualities: DataSegment["quality"][] = ["excellent", "good", "fair"];
-  const clarities = [9, 7, 6];
-  const noises = [8, 7, 5];
-  const motions = [9, 7, 6];
-
   return {
     id: `seg-${phaseIdx}-${bedIdx}-${idx}`,
-    time: times[(idx + bedIdx) % times.length] ?? "--",
-    quality: qualities[idx] ?? "good",
+    time: "--",
     candidateIndex: idx + 1,
-    range: `${390 + bedIdx * 30}.0 - ${440 + bedIdx * 30}.0 mm`,
-    sliceCount: 280,
-    avgDose: `CTDIvol ${(8.2 + bedIdx * 0.3).toFixed(1)} mGy`,
-    clarity: clarities[idx] ?? 8,
-    noise: noises[idx] ?? 7,
-    motion: motions[idx] ?? 8,
+    range: "--",
+    sliceCount: 0,
   };
-}
-
-function buildMockPhases(): PhaseData[] {
-  const duplicateConfig: Record<number, Array<{ bedNo: number; count: number }>> = {
-    0: [
-      { bedNo: 3, count: 3 },
-      { bedNo: 7, count: 2 },
-    ],
-    3: [{ bedNo: 2, count: 2 }],
-    6: [
-      { bedNo: 5, count: 3 },
-      { bedNo: 8, count: 2 },
-    ],
-  };
-
-  return PHASE_LABELS.map((label, i) => {
-    const duplicateBeds = duplicateConfig[i] ?? [];
-    const status: PhaseStatus = duplicateBeds.length > 0 ? "duplicate" : "ok";
-    const beds: BedPhaseData[] = duplicateBeds.map(({ bedNo, count }) => {
-      const bedIdx = bedNo - 1;
-      const range = `${390 + bedIdx * 30}.0 - ${440 + bedIdx * 30}.0 mm`;
-      const segments = Array.from({ length: count }, (_, si) => makeSegment(si, i, bedIdx));
-
-      return {
-        id: `bed-${i}-${String(bedNo).padStart(2, "0")}`,
-        bedNo,
-        range,
-        segments,
-        selectedSegmentId: undefined,
-      };
-    });
-
-    return { label, status, beds };
-  });
 }
 
 function formatRangeMm(range: [number, number]) {
@@ -115,19 +70,13 @@ function formatRangeMm(range: [number, number]) {
 }
 
 function segmentFromVolume(volume: FourDEngineerVolume): DataSegment {
-  const quality: DataSegment["quality"] = volume.candidateIndex === 0 ? "excellent" : "good";
   return {
     id: volume.id,
     volumeId: volume.id,
     time: volume.acquisitionTime || "--",
-    quality,
     candidateIndex: volume.candidateIndex + 1,
     range: formatRangeMm(volume.rangeMm),
     sliceCount: volume.sliceCount,
-    avgDose: "reference",
-    clarity: volume.candidateIndex === 0 ? 9 : 8,
-    noise: volume.candidateIndex === 0 ? 8 : 7,
-    motion: volume.candidateIndex === 0 ? 9 : 8,
     previewUrls: {
       axial: volume.urls.axialPreview,
       coronal: volume.urls.coronalPreview,
@@ -138,20 +87,35 @@ function segmentFromVolume(volume: FourDEngineerVolume): DataSegment {
   };
 }
 
-function buildEngineerPhases(manifest: FourDEngineerManifest): PhaseData[] {
-  return manifest.phaseLabels.map((label, phaseIndex) => {
+function buildPersistedPhases(
+  scanResult: FourDScanResult,
+  phaseSelections: PhaseSelections | undefined,
+  manifest: FourDEngineerManifest | null | undefined,
+): PhaseData[] {
+  return Array.from({ length: scanResult.phaseCount }, (_, phaseIndex) => {
+    const label = manifest?.phaseLabels[phaseIndex]
+      ?? PHASE_LABELS[phaseIndex]
+      ?? `${Math.round((phaseIndex / scanResult.phaseCount) * 100)}%`;
     const beds: BedPhaseData[] = [];
 
-    for (let bedIndex = 0; bedIndex < manifest.bedCount; bedIndex += 1) {
-      const volumes = getEngineerVolumesForBedPhase(manifest, bedIndex, phaseIndex);
-      if (volumes.length <= 1) continue;
-      const first = volumes[0];
+    for (let bedIndex = 0; bedIndex < scanResult.bedCount; bedIndex += 1) {
+      const cell = scanResult.phaseMatrix[bedIndex]?.[phaseIndex];
+      if (!cell || cell.frameCount <= 1) continue;
+      const volumes = manifest ? getEngineerVolumesForBedPhase(manifest, bedIndex, phaseIndex) : [];
+      const segments = Array.from({ length: cell.frameCount }, (_, candidateIndex) => {
+        const volume = volumes[candidateIndex];
+        return volume ? segmentFromVolume(volume) : makeSegment(candidateIndex, phaseIndex, bedIndex);
+      });
+      const selectedCandidateIndex = phaseSelections?.[`${bedIndex}-${phaseIndex}`];
       beds.push({
         id: `bed-${phaseIndex}-${String(bedIndex + 1).padStart(2, "0")}`,
         bedNo: bedIndex + 1,
-        range: first ? formatRangeMm(first.rangeMm) : "--",
-        segments: volumes.map(segmentFromVolume),
-        selectedSegmentId: undefined,
+        range: volumes[0]
+          ? formatRangeMm(volumes[0].rangeMm)
+          : "--",
+        segments,
+        selectedSegmentId:
+          selectedCandidateIndex === undefined ? undefined : segments[selectedCandidateIndex]?.id,
       });
     }
 
@@ -161,6 +125,17 @@ function buildEngineerPhases(manifest: FourDEngineerManifest): PhaseData[] {
       beds,
     };
   });
+}
+
+function isBoundFourDState(state: FourDPostScanState | null): state is FourDPostScanState & {
+  scanSessionId: number;
+  targetSeriesId: number;
+  resultVersion: number;
+} {
+  return !!state
+    && Number.isFinite(state.scanSessionId)
+    && Number.isFinite(state.targetSeriesId)
+    && Number.isFinite(state.resultVersion);
 }
 
 function MprTile({
@@ -355,23 +330,17 @@ export default function PhaseFilterScreen() {
   const location = useLocation();
   const { t } = useI18n();
   const routeState = location.state as FourDPostScanState | null;
-  const [engineerManifest, setEngineerManifest] = useState<FourDEngineerManifest | null | undefined>(undefined);
-  const fourDViewerState = useMemo<FourDPostScanState & { initialBrowseMode: "phase" }>(
-    () => ({
-      ...(engineerManifest
-        ? { scanResult: buildEngineerScanResult(engineerManifest, routeState?.scanResult) }
-        : routeState?.scanResult
-        ? routeState
-        : { scanResult: generateMockScanResult(9, 10, 165.0) }),
-      showSliceLoadingBeforeImageLoad: false,
-      initialBrowseMode: "phase",
-    }),
-    [engineerManifest, routeState],
+  const [resolvedState, setResolvedState] = useState<FourDPostScanState | null>(() =>
+    isBoundFourDState(routeState) ? routeState : null,
   );
+  const [stateLoadStatus, setStateLoadStatus] = useState<"loading" | "ready" | "failed">("loading");
+  const [workflowError, setWorkflowError] = useState("");
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [engineerManifest, setEngineerManifest] = useState<FourDEngineerManifest | null | undefined>(undefined);
 
-  const [phases, setPhases] = useState<PhaseData[]>(() => buildMockPhases());
+  const [phases, setPhases] = useState<PhaseData[]>([]);
   const [selectedPhaseIdx, setSelectedPhaseIdx] = useState(0);
-  const [selectedBedId, setSelectedBedId] = useState("bed-0-03");
+  const [selectedBedId, setSelectedBedId] = useState("");
 
   const currentPhase = phases[selectedPhaseIdx] ?? null;
   const selectedBed = currentPhase?.beds.find((bed) => bed.id === selectedBedId) ?? currentPhase?.beds[0] ?? null;
@@ -380,11 +349,10 @@ export default function PhaseFilterScreen() {
     : null;
   const previewUrls = useMemo(
     () => ({
-      axial: selectedSegment?.previewUrls?.axial ?? getFourDImageUrl(selectedPhaseIdx, "axial", 50),
-      coronal: selectedSegment?.previewUrls?.coronal ?? getFourDImageUrl(selectedPhaseIdx, "coronal", PREVIEW_SLICES.coronal),
-      sagittal: selectedSegment?.previewUrls?.sagittal ?? getFourDImageUrl(selectedPhaseIdx, "sagittal", PREVIEW_SLICES.sagittal),
+      coronal: selectedSegment?.previewUrls?.coronal ?? null,
+      sagittal: selectedSegment?.previewUrls?.sagittal ?? null,
     }),
-    [selectedPhaseIdx, selectedSegment],
+    [selectedSegment],
   );
   const engineerStitchedPreviewRows = useMemo(() => {
     if (!engineerManifest) return null;
@@ -412,9 +380,26 @@ export default function PhaseFilterScreen() {
 
     return rows.every((row) => !!row) ? rows : null;
   }, [currentPhase, engineerManifest, selectedBed, selectedPhaseIdx, selectedSegment]);
+  const isManifestVerified = useMemo(() => {
+    if (!engineerManifest || !resolvedState) return false;
+    const result = resolvedState.scanResult;
+    return resolvedState.imageSourceId === "fourd-engineer"
+      && resolvedState.imageSourceVersion === 1
+      && engineerManifest.version === resolvedState.imageSourceVersion
+      && engineerManifest.bedCount === result.bedCount
+      && engineerManifest.phaseCount === result.phaseCount
+      && result.phaseMatrix.every((row, bedIndex) =>
+        row.every((cell, phaseIndex) => (
+          getEngineerVolumesForBedPhase(engineerManifest, bedIndex, phaseIndex).length === cell.frameCount
+        )),
+      );
+  }, [engineerManifest, resolvedState]);
   const activeBedNumber = selectedBed?.bedNo ?? null;
-  const bedCodeCount = Math.max(1, fourDViewerState.scanResult.bedCount);
-  const allDuplicatesResolved = phases
+  const bedCodeCount = Math.max(1, resolvedState?.scanResult.bedCount ?? 1);
+  const allDuplicatesResolved = !!resolvedState
+    && isManifestVerified
+    && phases.length === resolvedState.scanResult.phaseCount
+    && phases
     .filter((p) => p.status === "duplicate")
     .every((p) => p.beds.length > 0 && p.beds.every((bed) => !!bed.selectedSegmentId));
 
@@ -441,18 +426,48 @@ export default function PhaseFilterScreen() {
     };
   }, []);
 
-  // Manifest load seeds the editable phase/bed selection model.
-  /* eslint-disable react-hooks/set-state-in-effect */
+  // 路由状态仅作加速；刷新后必须从绑定到当前患者和会话的持久化结果恢复。
   useEffect(() => {
-    if (engineerManifest === undefined) return;
-    const nextPhases = engineerManifest ? buildEngineerPhases(engineerManifest) : buildMockPhases();
+    let cancelled = false;
+    const selectedPatient = loadSelectedPatient();
+    if (!selectedPatient) {
+      setStateLoadStatus("failed");
+      setWorkflowError("未找到当前患者，无法恢复 4D 后处理结果。");
+      return;
+    }
+
+    setStateLoadStatus("loading");
+    fetchSelectedFourDPostScanState(selectedPatient.id)
+      .then((state) => {
+        if (cancelled) return;
+        setResolvedState(state);
+        setStateLoadStatus("ready");
+        setWorkflowError("");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setStateLoadStatus("failed");
+        setWorkflowError(error instanceof Error ? error.message : "4D 后处理结果恢复失败。");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 工程影像清单只提供预览素材，筛选矩阵始终以持久化结果为准。
+  useEffect(() => {
+    if (!resolvedState) return;
+    const nextPhases = buildPersistedPhases(
+      resolvedState.scanResult,
+      resolvedState.phaseSelections,
+      engineerManifest,
+    );
     setPhases(nextPhases);
     const firstDuplicateIndex = nextPhases.findIndex((phase) => phase.status !== "ok" && phase.beds.length > 0);
     const nextPhaseIndex = firstDuplicateIndex >= 0 ? firstDuplicateIndex : 0;
     setSelectedPhaseIdx(nextPhaseIndex);
     setSelectedBedId(nextPhases[nextPhaseIndex]?.beds[0]?.id ?? "");
-  }, [engineerManifest]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  }, [engineerManifest, resolvedState]);
 
   const buildPhaseSelections = () => {
     const selections: Record<string, number> = {};
@@ -464,6 +479,98 @@ export default function PhaseFilterScreen() {
       });
     });
     return selections;
+  };
+
+  const openBoundViewer = async () => {
+    if (!isManifestVerified) {
+      setWorkflowError("4D 结果与工程影像清单未完成绑定核验，不能完成检查。");
+      return;
+    }
+    if (!isBoundFourDState(resolvedState)) {
+      setWorkflowError("4D 结果缺少患者、检查会话或目标序列绑定，不能进入查看器。");
+      return;
+    }
+    const selectedPatient = loadSelectedPatient();
+    if (!selectedPatient) {
+      setWorkflowError("未找到当前患者，不能完成本次检查。");
+      return;
+    }
+
+    setIsFinalizing(true);
+    setWorkflowError("");
+    try {
+      const session = await fetchSelectedScanSession({ preferCache: false });
+      if (!session || session.id !== resolvedState.scanSessionId || session.patient_id !== selectedPatient.id) {
+        throw new Error("当前患者与 4D 检查会话不匹配，请返回患者列表重新进入。");
+      }
+      const targets = session.series.filter((series) => series.series_type === "4d");
+      if (targets.length !== 1 || targets[0].id !== resolvedState.targetSeriesId) {
+        throw new Error("4D 结果与目标序列不匹配，不能完成本次检查。");
+      }
+      const target = targets[0];
+      if (session.status === "cancelled") {
+        throw new Error("本次检查已终止，不能进入结果查看。");
+      }
+
+      let persisted = await fetchFourDResult({
+        scanSessionId: session.id,
+        patientId: selectedPatient.id,
+        targetSeriesId: target.id,
+      });
+      const phaseSelections = buildPhaseSelections();
+
+      if (session.status !== "completed") {
+        if (
+          persisted.workflowStage !== "phase_selected"
+          || !arePhaseSelectionsEqual(persisted.phaseSelections, phaseSelections)
+        ) {
+          persisted = await saveFourDResult({
+            scanSessionId: session.id,
+            patientId: selectedPatient.id,
+            targetSeriesId: target.id,
+            expectedVersion: persisted.version,
+            workflowStage: "phase_selected",
+            state: {
+              scanResult: persisted.scanResult,
+              rescanChoices: persisted.rescanChoices,
+              phaseSelections,
+            },
+          });
+        }
+        const finalized = await finalizeFourDResult({
+          scanSessionId: session.id,
+          patientId: selectedPatient.id,
+          targetSeriesId: target.id,
+          expectedVersion: persisted.version,
+        });
+        if (finalized.scanSession.status !== "completed" || finalized.result.workflowStage !== "ready") {
+          throw new Error("检查会话未完成，不能进入结果查看。");
+        }
+        persisted = finalized.result;
+      } else if (target.execution_status !== "image_ready" || persisted.workflowStage !== "ready") {
+        throw new Error("已完成检查缺少可用的 4D 结果，不能进入结果查看。");
+      }
+
+      const viewerState = toFourDPostScanState(persisted);
+      setResolvedState(viewerState);
+      navigate("/image-viewer", {
+        state: {
+          ...viewerState,
+          showSliceLoadingBeforeImageLoad: false,
+          initialBrowseMode: "phase" as const,
+        },
+      });
+    } catch (error: unknown) {
+      try {
+        const latest = await fetchSelectedFourDPostScanState(selectedPatient.id);
+        setResolvedState(latest);
+      } catch {
+        // 保留当前可编辑选择，避免恢复失败掩盖原始错误。
+      }
+      setWorkflowError(error instanceof Error ? error.message : "4D 结果保存或检查完成失败，请重试。");
+    } finally {
+      setIsFinalizing(false);
+    }
   };
 
   return (
@@ -591,7 +698,7 @@ export default function PhaseFilterScreen() {
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
+        <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden p-2">
           <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-[#1E3A8A] bg-black shadow-[inset_0_0_0_2px_rgba(30,58,138,0.5)]">
             <div className="grid min-h-0 flex-1 grid-cols-2 gap-px bg-[#1E3A8A]">
               <div className="min-h-0 bg-black">
@@ -606,7 +713,7 @@ export default function PhaseFilterScreen() {
                         horizontalClass="bg-red-500/85"
                         verticalClass="bg-yellow-300/85"
                       />
-                    ) : (
+                    ) : previewUrls.coronal ? (
                       <PreviewFrame
                         src={previewUrls.coronal}
                         bedCount={bedCodeCount}
@@ -615,6 +722,10 @@ export default function PhaseFilterScreen() {
                         horizontalClass="bg-red-500/85"
                         verticalClass="bg-yellow-300/85"
                       />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-[12px] font-bold text-slate-500">
+                        预览影像不可用
+                      </div>
                     )}
                   </div>
                 </MprTile>
@@ -632,7 +743,7 @@ export default function PhaseFilterScreen() {
                         horizontalClass="bg-red-500/85"
                         verticalClass="bg-emerald-400/85"
                       />
-                    ) : (
+                    ) : previewUrls.sagittal ? (
                       <PreviewFrame
                         src={previewUrls.sagittal}
                         bedCount={bedCodeCount}
@@ -641,12 +752,23 @@ export default function PhaseFilterScreen() {
                         horizontalClass="bg-red-500/85"
                         verticalClass="bg-emerald-400/85"
                       />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-[12px] font-bold text-slate-500">
+                        预览影像不可用
+                      </div>
                     )}
                   </div>
                 </MprTile>
               </div>
             </div>
           </div>
+          {(stateLoadStatus !== "ready" || engineerManifest === undefined || !isManifestVerified) && (
+            <div className="absolute inset-2 z-20 flex items-center justify-center rounded-lg bg-black text-center text-[13px] font-bold text-white/85">
+              {stateLoadStatus === "loading" || engineerManifest === undefined
+                ? "正在核验本次 4D 结果与影像来源…"
+                : "本次 4D 结果或绑定影像不可用"}
+            </div>
+          )}
         </section>
       </div>
 
@@ -662,29 +784,26 @@ export default function PhaseFilterScreen() {
             <span className="font-bold">{t("scanFlow.phaseFilter.phaseFilterStep")}</span>
           </div>
         </div>
-        <button
-          onClick={() =>
-            navigate("/image-viewer", {
-              state: {
-                ...fourDViewerState,
-                phaseSelections: {
-                  ...fourDViewerState.phaseSelections,
-                  ...buildPhaseSelections(),
-                },
-              },
-            })
-          }
-          disabled={!allDuplicatesResolved}
+        <div className="flex items-center gap-3">
+          {workflowError && (
+            <div className="max-w-[360px] text-right text-[11px] font-semibold text-red-600" role="alert">
+              {workflowError}
+            </div>
+          )}
+          <button
+          onClick={openBoundViewer}
+          disabled={!allDuplicatesResolved || isFinalizing || stateLoadStatus !== "ready"}
           title={allDuplicatesResolved ? undefined : t("scanFlow.phaseFilter.disabledTitle")}
           className={`flex items-center gap-1.5 rounded-md px-6 py-2 text-[12px] font-bold shadow-sm transition-colors ${
-            allDuplicatesResolved
+            allDuplicatesResolved && !isFinalizing && stateLoadStatus === "ready"
               ? "bg-[#4D94FF] text-white hover:bg-blue-600"
               : "bg-slate-200 text-slate-400 cursor-not-allowed"
           }`}
         >
-          {t("scanFlow.imageBrowser")}
+          {isFinalizing ? "正在保存并完成检查…" : t("scanFlow.imageBrowser")}
           <ChevronRight size={14} />
         </button>
+        </div>
       </footer>
     </div>
   );
