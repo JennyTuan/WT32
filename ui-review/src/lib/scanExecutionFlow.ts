@@ -45,10 +45,19 @@ export const canStartScoutExecution = (
     && (!hasBoundSession || targetSeriesCount === expectedTargetSeriesCount);
 
 export type SeriesRecoveryAction = "return_to_edit" | "retry_series" | null;
+export type SeriesRecoveryIntent = "parameter_confirmation" | "physical_trigger";
 
 export const resolveSeriesRecoveryAction = (
     status: ApiScanSessionSeries["execution_status"],
+    intent: SeriesRecoveryIntent = "physical_trigger",
 ): SeriesRecoveryAction => {
+    // 返回参数确认必须留下 return_to_edit 审计语义；重新尝试则按当前状态选择合法恢复动作。
+    if (intent === "parameter_confirmation") {
+        if (status === "pending" || status === "running" || status === "failed" || status === "interrupted") {
+            return "return_to_edit";
+        }
+        throw new Error("Series with an image-ready result cannot return to parameter confirmation");
+    }
     if (status === "running") return "return_to_edit";
     if (status === "failed" || status === "interrupted") return "retry_series";
     if (status === "pending") return null;

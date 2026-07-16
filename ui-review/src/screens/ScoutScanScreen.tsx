@@ -14,7 +14,7 @@ import {
     CheckCircle,
     Info,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { loadSelectedPatient } from "../lib/patientSession";
 import { saveScoutPositioningRange } from "../lib/scoutPositioningSession";
 import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
@@ -724,13 +724,20 @@ const ScoutScanScreen = ({
     const { t } = useI18n();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
+    const location = useLocation();
     const navigate = useNavigate();
     const resolvedFirstStepLabel = firstStepLabel ?? t("scanFlow.step.laserPosition");
     const [workflowGuardStatus, setWorkflowGuardStatus] = useState<"checking" | "ready">("checking");
 
     // 4D workflow detection - driven by scan session acquisition_type
     const [is4DWorkflow, setIs4DWorkflow] = useState(false);
-    const [activeStepIdx, setActiveStepIdx] = useState(0);
+    const returnState = location.state as { activeStepIdx?: number } | null;
+    const [activeStepIdx, setActiveStepIdx] = useState(() => {
+        const requestedStep = returnState?.activeStepIdx;
+        return typeof requestedStep === "number" && requestedStep >= 0 && requestedStep <= 3
+            ? requestedStep
+            : 0;
+    });
     const isBreathingAcquisitionStep = is4DWorkflow && activeStepIdx === 0;
     const is4DParamConfirmStep = is4DWorkflow && activeStepIdx === 2;
     const is4DScoutExecuteStep = is4DWorkflow && activeStepIdx === 3;
@@ -2078,7 +2085,13 @@ const ScoutScanScreen = ({
                             }
                             if (is4DWorkflow && activeStepIdx === 2) {
                                 try { await persistPositioningToSession(); } catch (error) { console.error(error); }
-                                navigate('/scout-execute', { state: { showCombinedPatientConfirm: true, returnRoute: "/scout-scan" } });
+                                navigate('/scout-execute', {
+                                    state: {
+                                        showCombinedPatientConfirm: true,
+                                        returnRoute: "/scout-scan",
+                                        returnStep: activeStepIdx,
+                                    },
+                                });
                                 return;
                             }
                             // 4D scout 共4步(0-3)，步骤0-2推进，步骤3才导航

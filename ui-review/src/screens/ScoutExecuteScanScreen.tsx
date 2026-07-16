@@ -38,6 +38,7 @@ import {
     resolveSeriesRecoveryAction,
     selectScoutExecutionSeries,
     type PostScoutScanType,
+    type SeriesRecoveryIntent,
 } from "../lib/scanExecutionFlow";
 
 const HOLD_DURATION_MS = 3000;
@@ -91,7 +92,8 @@ type ScoutImageLoadState = "loading" | "ready" | "error";
 type PhysicalTriggerAction = "position" | "exposure";
 type ScoutExecuteLocationState = {
     showCombinedPatientConfirm?: boolean;
-    returnRoute?: string;
+    returnRoute?: "/scan-confirm" | "/scout-scan";
+    returnStep?: number;
 };
 
 type ProjectionMeta = {
@@ -565,7 +567,6 @@ export default function ScoutExecuteScanScreen() {
     const { t } = useI18n();
     const routeState = location.state as ScoutExecuteLocationState | null;
     const initialCombinedPatientConfirm = routeState?.showCombinedPatientConfirm === true;
-    const combinedPatientReturnRoute = routeState?.returnRoute ?? "/scan-confirm";
     const [stage, setStage] = useState<ScanStage>("idle");
     const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
     const [showCombinedPatientConfirm, setShowCombinedPatientConfirm] = useState(initialCombinedPatientConfirm);
@@ -603,6 +604,18 @@ export default function ScoutExecuteScanScreen() {
     const autoNextTimerRef = useRef<number | null>(null);
     const recoveryActionIdsRef = useRef<Map<string, string>>(new Map());
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
+
+    const navigateToSeriesConfirmation = () => {
+        const usesEmbeddedScoutConfirmation = scanSession?.acquisition_type === "four_d"
+            || scanSession?.acquisition_type === "gating";
+        const returnRoute = routeState?.returnRoute
+            ?? (usesEmbeddedScoutConfirmation ? "/scout-scan" : "/scan-confirm");
+        const returnStep = routeState?.returnStep
+            ?? (returnRoute === "/scout-scan" ? 2 : undefined);
+        navigate(returnRoute, {
+            state: returnStep === undefined ? undefined : { activeStepIdx: returnStep },
+        });
+    };
 
     const clearHoldRaf = () => {
         if (rafRef.current !== null) {
@@ -1106,7 +1119,7 @@ export default function ScoutExecuteScanScreen() {
         thresholdGuard.guard(buildThresholdInput(), performTriggerScan);
     };
 
-    const resetScoutExecutionUi = () => {
+    const resetScoutExecutionUi = (intent: SeriesRecoveryIntent) => {
         resetLimbsDicomDemoManifestCache();
         resetHeadDualScoutManifestCache();
         setLimbsDicomManifest(null);
@@ -1125,10 +1138,12 @@ export default function ScoutExecuteScanScreen() {
         setPhysicalTriggerAction("position");
         setImageLoadAttempt((attempt) => attempt + 1);
         setStage("idle");
-        setGuideVisible(true);
+        // 重新尝试必须重新经过患者信息确认，再由“开始扫描”进入模拟物理按键引导。
+        setShowCombinedPatientConfirm(intent === "physical_trigger");
+        setGuideVisible(false);
     };
 
-    const recoverScoutSeries = async (returnToConfirmAfterRecovery: boolean) => {
+    const recoverScoutSeries = async (intent: SeriesRecoveryIntent) => {
         if (isRecoveryActionRunning) return;
         setIsRecoveryActionRunning(true);
         try {
@@ -1142,7 +1157,7 @@ export default function ScoutExecuteScanScreen() {
                 let latest = latestSession;
                 for (const target of targets) {
                     if (target.execution_status === "image_ready" && dualScout) continue;
-                    const action = resolveSeriesRecoveryAction(target.execution_status);
+                    const action = resolveSeriesRecoveryAction(target.execution_status, intent);
                     if (!action) continue;
                     const actionKey = `${action}:${target.id}`;
                     const actionId = recoveryActionIdsRef.current.get(actionKey) ?? createActionId();
@@ -1151,19 +1166,28 @@ export default function ScoutExecuteScanScreen() {
                         action_id: actionId,
                         action,
                         target_series_id: target.id,
-                        reason: action === "retry_series"
-                            ? "User requested another simulated scout attempt"
-                            : "Recover an uncertain simulated scout trigger before retry",
+                        reason: intent === "parameter_confirmation"
+                            ? "User returned the simulated scout series to parameter confirmation"
+                            : action === "retry_series"
+                                ? "User requested another simulated scout attempt"
+                                : "Recover an uncertain simulated scout trigger before retry",
                     });
                     recoveryActionIdsRef.current.delete(actionKey);
                     latest = result.scan_session;
                 }
                 setScanSession(latest);
             }
-            resetScoutExecutionUi();
-            if (returnToConfirmAfterRecovery) navigate(combinedPatientReturnRoute);
+            resetScoutExecutionUi(intent);
+            if (intent === "parameter_confirmation") {
+                navigateToSeriesConfirmation();
+            }
         } catch (error) {
-            setExecutionError(error instanceof Error ? error.message : "定位像序列状态恢复失败，请重试");
+            const message = error instanceof Error ? error.message : "定位像序列状态恢复失败，请重试";
+            setExecutionError(message);
+            setTriggerFailure({
+                title: intent === "parameter_confirmation" ? "返回参数确认失败" : "重新尝试失败",
+                message,
+            });
         } finally {
             setIsRecoveryActionRunning(false);
         }
@@ -1171,7 +1195,7 @@ export default function ScoutExecuteScanScreen() {
 
     const handleExecuteScanClick = () => {
         if (stage === "failed") {
-            void recoverScoutSeries(false);
+            void recoverScoutSeries("physical_trigger");
             return;
         }
         if (stage === "completed") {
@@ -1262,7 +1286,7 @@ export default function ScoutExecuteScanScreen() {
     const handleCombinedPatientClose = () => {
         clearHoldRaf();
         holdStartRef.current = null;
-        navigate(combinedPatientReturnRoute);
+        navigateToSeriesConfirmation();
     };
 
     return (
@@ -1404,8 +1428,9 @@ export default function ScoutExecuteScanScreen() {
             />
             <ScanTriggerFailureDialog
                 failure={triggerFailure}
-                onRetry={() => { void recoverScoutSeries(false); }}
-                onReturnToConfirm={() => { void recoverScoutSeries(true); }}
+                busy={isRecoveryActionRunning}
+                onRetry={() => { void recoverScoutSeries("physical_trigger"); }}
+                onReturnToConfirm={() => { void recoverScoutSeries("parameter_confirmation"); }}
             />
         </div>
     );

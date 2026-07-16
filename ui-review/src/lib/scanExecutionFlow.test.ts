@@ -73,6 +73,14 @@ describe("scan execution flow decisions", () => {
         expect(() => resolveSeriesRecoveryAction("image_ready")).toThrow();
     });
 
+    it("returns every recoverable scout state to parameter confirmation through return_to_edit", () => {
+        expect(resolveSeriesRecoveryAction("pending", "parameter_confirmation")).toBe("return_to_edit");
+        expect(resolveSeriesRecoveryAction("running", "parameter_confirmation")).toBe("return_to_edit");
+        expect(resolveSeriesRecoveryAction("failed", "parameter_confirmation")).toBe("return_to_edit");
+        expect(resolveSeriesRecoveryAction("interrupted", "parameter_confirmation")).toBe("return_to_edit");
+        expect(() => resolveSeriesRecoveryAction("image_ready", "parameter_confirmation")).toThrow();
+    });
+
     it("keeps multi-target completion on the next confirmation route instead of the viewer", () => {
         const current = series(2, 2, "helical", "image_ready");
         const next = series(3, 3, "axial", "pending");
