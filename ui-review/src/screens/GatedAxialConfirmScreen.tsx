@@ -184,6 +184,7 @@ export default function GatedAxialConfirmScreen() {
                 `${nextRoute}&scanSessionId=${latestContext.scanSessionId}`
                 + `&targetSeriesId=${latestContext.targetSeriesId}`
                 + `&topogramId=${latestContext.requiredTopogramId ?? "none"}`,
+                { state: { showCombinedPatientConfirm: true } },
             );
         } catch (error) {
             setExecutionError(error instanceof Error ? error.message : "门控断层扫描前置条件校验失败");

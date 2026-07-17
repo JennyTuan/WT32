@@ -47,11 +47,10 @@ const EXPOSURE_REQUEST_TIMEOUT_MS = 8000;
 const EXPOSURE_DURATION_MS = 1200;
 const RENDER_DURATION_MS = 2200;
 const GANTRY_ROTATION_DURATION_MS = 1500;
-const FOUR_D_AUTO_NEXT_STEP_DELAY_MS = 700;
 type DualScoutPhase = "ap_exposing" | "ap_rendering" | "rotating" | "lat_exposing" | "lat_rendering" | "done" | null;
 const SCOUT_SERIES = {
-    basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
-    count: 118,
+    basePath: "/dicom/cap/soft",
+    count: 120,
     firstImageNumber: 1,
     fileNamePrefix: "1-",
     fileNamePadding: 3,
@@ -70,12 +69,12 @@ const FOUR_D_SCOUT_SERIES = {
     fallbackWindowLevel: 50,
 };
 const BRAIN_HELICAL_SCOUT_EXECUTE_SERIES = {
-    basePath: "/dicom-head-stroke-plain/Series%20001%20%5BTopogram%5D",
+    basePath: "/dicom-head-stroke-plain/scout",
     count: 1,
     firstImageNumber: 1,
     fileNamePrefix: "",
     fileNamePadding: 0,
-    fileNames: ["1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.6.0.dcm"],
+    fileNames: ["scout.dcm"],
     directImage: true,
     useCornerstoneViewer: true,
     fallbackWindowWidth: 130,
@@ -601,7 +600,6 @@ export default function ScoutExecuteScanScreen() {
     const positioningTimerRef = useRef<number | null>(null);
     const positioningTimeoutRef = useRef<number | null>(null);
     const triggerRequestIdRef = useRef(0);
-    const autoNextTimerRef = useRef<number | null>(null);
     const recoveryActionIdsRef = useRef<Map<string, string>>(new Map());
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
 
@@ -832,16 +830,8 @@ export default function ScoutExecuteScanScreen() {
     useEffect(() => {
         if (stage !== "completed") return;
 
-        autoNextTimerRef.current = window.setTimeout(() => {
-            navigate(postScoutRoute);
-        }, FOUR_D_AUTO_NEXT_STEP_DELAY_MS);
-
-        return () => {
-            if (autoNextTimerRef.current !== null) {
-                window.clearTimeout(autoNextTimerRef.current);
-                autoNextTimerRef.current = null;
-            }
-        };
+        // 定位像状态及影像来源已持久化后，立即进入下一序列的参数确认与范围框选。
+        navigate(postScoutRoute, { replace: true });
     }, [navigate, postScoutRoute, stage]);
 
     const renderFinished = isHeadDualScoutFlow
@@ -940,9 +930,6 @@ export default function ScoutExecuteScanScreen() {
                 window.clearTimeout(positioningTimerRef.current);
             }
             clearPositioningTimeout();
-            if (autoNextTimerRef.current !== null) {
-                window.clearTimeout(autoNextTimerRef.current);
-            }
         };
     }, []);
 
@@ -1177,18 +1164,14 @@ export default function ScoutExecuteScanScreen() {
                 }
                 setScanSession(latest);
             }
+        } catch (error) {
+            // 页面出口不依赖网络恢复结果；实际再次触发时仍由后端状态机校验并要求确认。
+            console.error("Failed to synchronize scout recovery state before leaving the failure dialog", error);
+        } finally {
             resetScoutExecutionUi(intent);
             if (intent === "parameter_confirmation") {
                 navigateToSeriesConfirmation();
             }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : "定位像序列状态恢复失败，请重试";
-            setExecutionError(message);
-            setTriggerFailure({
-                title: intent === "parameter_confirmation" ? "返回参数确认失败" : "重新尝试失败",
-                message,
-            });
-        } finally {
             setIsRecoveryActionRunning(false);
         }
     };

@@ -210,6 +210,7 @@ export default function GatedHelicalConfirmScreen() {
                 `${nextRoute}&scanSessionId=${latestContext.scanSessionId}`
                 + `&targetSeriesId=${latestContext.targetSeriesId}`
                 + `&topogramId=${latestContext.requiredTopogramId ?? "none"}`,
+                { state: { showCombinedPatientConfirm: true } },
             );
         } catch (error) {
             setExecutionError(error instanceof Error ? error.message : "门控螺旋扫描前置条件校验失败");

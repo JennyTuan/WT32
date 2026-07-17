@@ -16,13 +16,16 @@ from .websocket.scan_ws import router as scan_ws_router
 
 app = FastAPI(title="CT Prototype Backend", version="1.0.0")
 DATA_DIR = Path(__file__).resolve().parent / "data"
-DICOM_PUBLIC_DIR = Path(__file__).resolve().parent.parent / "ui-review" / "public" / "dicom"
-LIHVR_LOWER_EXTREMITY_DEMO_DIR = DATA_DIR / "lihVr" / "1.2.194.0.108707908.20260528141323.1236.10000.4191216"
+DEMO_DICOM_DIR = DATA_DIR / "demo-dicom"
+# Curated local reference images. This directory stays outside the front-end
+# bundle so replacing a demo set does not inflate the UI build.
+DICOM_PUBLIC_DIR = DEMO_DICOM_DIR
+LIHVR_LOWER_EXTREMITY_DEMO_DIR = DEMO_DICOM_DIR / "limbs"
 LIHVR_LOWER_EXTREMITY_SERIES = {
-    "topogram": "1.2.156.112605.189250948009764.260528061813.3.4424.38678",
-    "thin-soft": "1.2.156.112605.189250948009764.260528061813.3.4424.106136",
-    "thin-bone": "1.2.156.112605.189250948009764.260528061813.3.4424.96136",
-    "vr-reference": "1.2.156.112605.66988332599980.260528062340.3.3292.13135.2",
+    "topogram": "topogram",
+    "thin-soft": "thin-soft",
+    "thin-bone": "thin-bone",
+    "vr-reference": "thin-bone",
 }
 
 # Cookies must be permitted by CORS for the SPA → API session flow. With
@@ -296,6 +299,16 @@ def _demo_dicom_text(value, fallback: str = "N/A") -> str:
     return str(value) or fallback
 
 
+def _demo_dicom_scalar(value):
+    """Return the first value for DICOM multi-value attributes."""
+    if value is None or isinstance(value, (str, bytes, int, float)):
+        return value
+    try:
+        return value[0] if len(value) else None
+    except TypeError:
+        return value
+
+
 def _build_lihvr_demo_series(key: str, uid: str):
     series_dir = LIHVR_LOWER_EXTREMITY_DEMO_DIR / uid
     if not series_dir.is_dir():
@@ -312,12 +325,8 @@ def _build_lihvr_demo_series(key: str, uid: str):
         for path in files
     ]
 
-    window_center = getattr(first, "WindowCenter", None)
-    window_width = getattr(first, "WindowWidth", None)
-    if isinstance(window_center, (list, tuple)):
-        window_center = window_center[0] if window_center else None
-    if isinstance(window_width, (list, tuple)):
-        window_width = window_width[0] if window_width else None
+    window_center = _demo_dicom_scalar(getattr(first, "WindowCenter", None))
+    window_width = _demo_dicom_scalar(getattr(first, "WindowWidth", None))
 
     return {
         "key": key,
@@ -397,10 +406,14 @@ def serve_head_stroke_plain(file_path: str, request: Request):
     return _serve_validated_dicom(HEAD_STROKE_DEMO_PLAIN_DIR, file_path, request)
 
 
-HEAD_DUAL_SCOUT_DEMO_DIR = DICOM_PUBLIC_DIR / "head-dual-scout"
+# The current imported head study contains one real localizer. The legacy
+# dual-scout prototype may still request two orientations, so both simulated
+# entries intentionally reference that same single-view source until a matching
+# AP+LAT study is added to the curated demo set.
+HEAD_DUAL_SCOUT_DEMO_DIR = DEMO_DICOM_DIR / "head"
 HEAD_DUAL_SCOUT_SERIES = {
-    "scout-ap": "scout-ap.dcm",
-    "scout-lat": "scout-lat.dcm",
+    "scout-ap": "scout/scout.dcm",
+    "scout-lat": "scout/scout.dcm",
 }
 
 
@@ -424,12 +437,8 @@ def _build_head_dual_scout_series(key: str, filename: str):
         view = key.upper().replace("SCOUT-", "")
         tube_angle = 0.0 if view == "AP" else 90.0
 
-    window_center = getattr(ds, "WindowCenter", None)
-    window_width = getattr(ds, "WindowWidth", None)
-    if isinstance(window_center, (list, tuple)):
-        window_center = window_center[0] if window_center else None
-    if isinstance(window_width, (list, tuple)):
-        window_width = window_width[0] if window_width else None
+    window_center = _demo_dicom_scalar(getattr(ds, "WindowCenter", None))
+    window_width = _demo_dicom_scalar(getattr(ds, "WindowWidth", None))
 
     return {
         "key": key,
@@ -482,6 +491,7 @@ def get_head_dual_scout_manifest():
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+# The P113 directory below is the retained 4D engineering source; it must not
+# be redirected to the curated static-demo directory.
 DICOM_OUT_DIR = DATA_DIR / "dicom_out"
-DICOM_OUT_DIR.mkdir(parents=True, exist_ok=True)
-HEAD_STROKE_DEMO_PLAIN_DIR = DATA_DIR / "Head Stroke Demo [Plain]"
+HEAD_STROKE_DEMO_PLAIN_DIR = DEMO_DICOM_DIR / "head"

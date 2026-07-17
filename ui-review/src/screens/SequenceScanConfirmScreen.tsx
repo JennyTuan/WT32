@@ -37,8 +37,8 @@ export type TomographicScoutSeriesOverride =
       };
 
 const SCOUT_SERIES = {
-    basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
-    count: 118,
+    basePath: "/dicom/cap/soft",
+    count: 120,
     fallbackWindowWidth: 350,
     fallbackWindowLevel: 45,
 };
@@ -48,7 +48,7 @@ const SCOUT_SERIES = {
 // protocols so the demo shows a single consistent dataset.
 const HEAD_STROKE_DEMO_SCOUT_OVERRIDE: TomographicScoutSeriesOverride = {
     kind: "topogram",
-    url: "/dicom-head-stroke-plain/Series%20001%20%5BTopogram%5D/1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.6.0.dcm",
+    url: "/dicom-head-stroke-plain/scout/scout.dcm",
     fallbackWindowWidth: 130,
     fallbackWindowLevel: 130,
 };
@@ -1232,7 +1232,9 @@ const SequenceScanConfirmScreen = () => {
                     ? "none"
                     : String(executionContext.requiredTopogramId),
             });
-            navigate(`/helical-execute?${query.toString()}`);
+            navigate(`/helical-execute?${query.toString()}`, {
+                state: { showCombinedPatientConfirm: true },
+            });
         } catch (error) {
             setExecutionError(error instanceof Error ? error.message : "断层扫描前置条件校验失败");
         }

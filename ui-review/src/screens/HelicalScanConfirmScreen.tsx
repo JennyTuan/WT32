@@ -63,7 +63,7 @@ type ProtocolSeedHelicalParam = {
 // legacy loader unchanged.
 const BRAIN_HELICAL_SCOUT_OVERRIDE: TomographicScoutSeriesOverride = {
     kind: "topogram",
-    url: "/dicom-head-stroke-plain/Series%20001%20%5BTopogram%5D/1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.6.0.dcm",
+    url: "/dicom-head-stroke-plain/scout/scout.dcm",
     fallbackWindowWidth: 130,
     fallbackWindowLevel: 130,
 };
@@ -2416,7 +2416,8 @@ const HelicalScanConfirmScreen = () => {
                 ctdi_vol: estimated?.ctdi_vol ?? helicalParam?.ctdi_vol ?? null,
                 dlp: estimated?.dlp ?? helicalParam?.dlp ?? null,
             },
-            () => navigate(executeRoute),
+            // 范围确认完成后直接进入模拟物理按键，不再显示空的执行页中间态。
+            () => navigate(executeRoute, { state: { showCombinedPatientConfirm: true } }),
         );
     }, [thresholdGuard, scanSession, helicalParam, protocolHelicalSeed, measurements.scanLength, navigate, paramWrites, scoutDisplayReady, selectedPatient, topogramDependencyReady, topogramImageSource]);
 

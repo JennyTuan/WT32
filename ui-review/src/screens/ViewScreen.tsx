@@ -300,20 +300,20 @@ const LAYOUT_SPECS: Record<LayoutKey, LayoutSpec> = {
 };
 
 const REAL_LUNG_SERIES = {
-    studyName: "QIN LUNG CT",
-    studyId: "study-qin-lung",
-    seriesId: "series-qin-lung-soft",
-    seriesName: "THORAX W 3.0 B41 Soft Tissue",
-    count: 118,
+    studyName: "C/A/P CT Reference Demo",
+    studyId: "study-cap-demo",
+    seriesId: "series-cap-soft",
+    seriesName: "Body 5.0 CE",
+    count: 120,
     rows: 512,
     cols: 512,
-    thickness: "3.0 mm",
+    thickness: "5.0 mm",
     kV: "120",
     mAs: "Auto",
-    fov: "402.0 mm",
+    fov: "500.0 mm",
     matrix: "512",
-    kernel: "B41 Soft Tissue",
-    basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
+    kernel: "FC17",
+    basePath: "/dicom/cap/soft",
 };
 
 const REALISTIC_SCOUT_SERIES = {
@@ -335,11 +335,11 @@ const REALISTIC_SCOUT_SERIES = {
 // shape but points at the JPEG Lossless head data under /dicom-out/HeadStrokeDemo/.
 // Selected only when the active protocol ID matches the brain-helical demo.
 const BRAIN_HELICAL_VIEW_SERIES = {
-    studyName: "Head Stroke Demo",
-    studyId: "study-head-stroke-demo",
-    seriesId: "series-head-stroke-thick",
-    seriesName: "Thick Brain 5.0 Head Brain FC21",
-    count: 36,
+    studyName: "CT HEAD WO CONTRAST",
+    studyId: "study-head-demo",
+    seriesId: "series-head-soft",
+    seriesName: "Head WO 5mm",
+    count: 27,
     rows: 512,
     cols: 512,
     thickness: "5.0 mm",
@@ -348,7 +348,7 @@ const BRAIN_HELICAL_VIEW_SERIES = {
     fov: "240.0 mm",
     matrix: "512",
     kernel: "FC21",
-    basePath: "/dicom-out/HeadStrokeDemo/ThickBrain",
+    basePath: "/dicom-head-stroke-plain/soft",
 };
 const BRAIN_HELICAL_RECON_SERIES = [
     {
@@ -357,11 +357,11 @@ const BRAIN_HELICAL_RECON_SERIES = [
         defaultWl: HEAD_BRAIN_DEFAULT_WINDOW.wl,
     },
     {
-        studyName: "Head Stroke Demo",
-        studyId: "study-head-stroke-demo",
-        seriesId: "series-head-stroke-thin",
-        seriesName: "Thin Brain 1.0 Head Brain FC21",
-        count: 219,
+        studyName: "CT HEAD WO CONTRAST",
+        studyId: "study-head-demo",
+        seriesId: "series-head-bone",
+        seriesName: "Head WO Bone 5mm",
+        count: 27,
         rows: 512,
         cols: 512,
         thickness: "1.0 mm",
@@ -370,12 +370,12 @@ const BRAIN_HELICAL_RECON_SERIES = [
         fov: "240.0 mm",
         matrix: "512",
         kernel: "FC21",
-        basePath: "/dicom-out/HeadStrokeDemo/ThinBrain",
+        basePath: "/dicom-head-stroke-plain/bone",
         defaultWw: HEAD_BRAIN_DEFAULT_WINDOW.ww,
         defaultWl: HEAD_BRAIN_DEFAULT_WINDOW.wl,
     },
 ] as const;
-const HEAD_STROKE_TOPOGRAM_URL = "/dicom-head-stroke-plain/Series%20001%20%5BTopogram%5D/1.3.6.1.4.1.5962.99.1.4162874669.1997118507.1498811526445.6.0.dcm";
+const HEAD_STROKE_TOPOGRAM_URL = "/dicom-head-stroke-plain/scout/scout.dcm";
 const FOUR_D_SCOUT_URL = "/daae3df7f522b56724aed7e3e544c0fe/series-000002/image-000002.dcm";
 
 const getSeriesDicomUrl = (

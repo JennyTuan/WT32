@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import DicomViewer from "../components/DicomViewer";
 import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
 import ScanTriggerFailureDialog from "../components/ScanTriggerFailureDialog";
@@ -36,8 +36,8 @@ type HelicalResultSeriesConfig = {
 // AND the active protocol ID matches; gated_helical / gated_axial paths are
 // untouched and keep using HELICAL_RESULT_SERIES.
 const BRAIN_HELICAL_RESULT_SERIES: HelicalResultSeriesConfig = {
-    basePath: "/dicom-out/HeadStrokeDemo/ThinBrain",
-    count: 219,
+    basePath: "/dicom-head-stroke-plain/soft",
+    count: 27,
     fallbackWindowWidth: 100,
     fallbackWindowLevel: 35,
 };
@@ -48,6 +48,9 @@ type ScanStage = "idle" | "positioning" | "positioned" | "enabled" | "exposing" 
 type ExecuteMode = "helical" | "axial" | "gated_helical" | "gated_axial";
 type PhysicalTriggerAction = "position" | "exposure";
 type FinalizationState = "idle" | "saving" | "succeeded" | "failed" | "blocked";
+type HelicalExecuteLocationState = {
+    showCombinedPatientConfirm?: boolean;
+};
 
 const validateBoundExecutionSession = (
     scanSession: ApiScanSessionDetail | null,
@@ -145,8 +148,8 @@ const DIBH_SUCCESS_TIMEOUT_S = 25;
 const DIBH_EXPOSURE_DURATION_MS = 4500;
 const DIBH_MID_SCAN_PAUSE_PROGRESS = 0.52;
 const HELICAL_RESULT_SERIES: HelicalResultSeriesConfig = {
-    basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
-    count: 118,
+    basePath: "/dicom/cap/soft",
+    count: 120,
     fallbackWindowWidth: 350,
     fallbackWindowLevel: 45,
 };
@@ -387,7 +390,9 @@ function AxialRealtimeViewport({
 
 export default function HelicalExecuteScanScreen() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { t } = useI18n();
+    const initialCombinedPatientConfirm = (location.state as HelicalExecuteLocationState | null)?.showCombinedPatientConfirm === true;
     const [currentParams] = useSearchParams();
     const initialParamsRef = useRef<URLSearchParams | null>(null);
     if (initialParamsRef.current === null) {
@@ -457,7 +462,7 @@ export default function HelicalExecuteScanScreen() {
     const [stage, setStage] = useState<ScanStage>("idle");
     const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
     const [guideVisible, setGuideVisible] = useState(false);
-    const [showCombinedPatientConfirm, setShowCombinedPatientConfirm] = useState(false);
+    const [showCombinedPatientConfirm, setShowCombinedPatientConfirm] = useState(initialCombinedPatientConfirm);
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const helicalResultImageSourceId = useMemo<ApiScanSeriesImageSourceId | null>(() => {

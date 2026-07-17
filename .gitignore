@@ -55,6 +55,7 @@ ui-review/all_corrupted_lines.txt
 *.img
 *.mha
 backend/data/images/
+backend/data/demo-dicom/
 backend/data/dicom_out/
 backend/data/CatPhan604/
 backend/data/lihVr/

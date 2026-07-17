@@ -40,8 +40,8 @@ interface ProtocolGroup {
 }
 
 const BREATHING_SCOUT_SERIES = {
-    basePath: "/dicom/QIN LUNG CT/QIN-LUNG-01-0007/01-12-2000-1-CT Thorax wContrast-47252/2.000000-THORAX W  3.0 B41 Soft Tissue-52055",
-    count: 118,
+    basePath: "/dicom/cap/soft",
+    count: 120,
     fallbackWindowWidth: 350,
     fallbackWindowLevel: 45,
 };
@@ -632,7 +632,7 @@ function BreathingScoutViewport() {
                         <div>{meta.width} x {meta.height}</div>
                     </div>
                     <div className="pointer-events-none absolute right-3 top-3 text-right text-[10px] font-mono leading-[1.35] text-[#CFD8DC]">
-                        <div className="font-bold">QIN LUNG CT</div>
+                        <div className="font-bold">C/A/P CT Demo</div>
                         <div>KV {meta.kvp} | mAs {meta.mas}</div>
                     </div>
                     <div className="pointer-events-none absolute bottom-3 left-3 text-[10px] font-mono leading-[1.35] text-[#CFD8DC]">
