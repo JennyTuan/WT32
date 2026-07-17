@@ -21,6 +21,7 @@ import { getLimbsDicomSeries, loadLimbsDicomDemoManifest } from "../lib/limbsDic
 import { useI18n } from "../lib/i18nContext";
 import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceErrorEvents";
 import { hasVerifiedSeriesImageSource, resolveHelicalResultImageSource } from "../lib/scanSeriesImageSource";
+import { isBrainHelicalScanSession } from "../lib/brainHelicalDemo";
 import { resolvePostExecutionDestination } from "../lib/scanExecutionFlow";
 
 type HelicalResultSeriesConfig = {
@@ -467,6 +468,7 @@ export default function HelicalExecuteScanScreen() {
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const helicalResultImageSourceId = useMemo<ApiScanSeriesImageSourceId | null>(() => {
         if (executeMode !== "helical") return null;
+        if (isBrainHelicalScanSession(scanSession)) return "brain-helical-demo";
         const persistedTarget = scanSession?.series.find((series) => series.id === expectedTargetSeriesId);
         if (
             persistedTarget?.image_source_version === 1
@@ -961,7 +963,16 @@ export default function HelicalExecuteScanScreen() {
                 setPostExecutionRoute(destination.route);
                 setFinalizationState("succeeded");
                 autoNavigateTimerRef.current = window.setTimeout(() => {
-                    navigate(destination.route);
+                    // Keep an explicit viewer binding so the completed result
+                    // remains available even if browser storage was cleared
+                    // between acquisition and the viewer route.
+                    navigate(destination.route, {
+                        state: {
+                            viewerKind: "standard",
+                            scanSessionId: completedSession.id,
+                            patientId: completedSession.patient_id,
+                        },
+                    });
                 }, AUTO_NAVIGATE_DELAY_MS);
             } catch (error) {
                 if (!cancelled) {

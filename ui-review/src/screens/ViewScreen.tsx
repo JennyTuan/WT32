@@ -24,6 +24,7 @@ import {
     EyeOff,
     LayoutGrid,
     Focus,
+    Contrast,
     X,
     Check,
 } from "lucide-react";
@@ -62,6 +63,7 @@ import {
 import { loadSelectedPatient } from "../lib/patientSession";
 import {
     clearSelectedScanSessionId,
+    fetchScanSessionById,
     fetchSelectedScanSession,
     loadSelectedScanSessionId,
     type ApiScanSeriesImageSourceId,
@@ -81,6 +83,11 @@ import {
 
 type ImageItem = { id: string; name: string };
 type SeriesType = "topogram" | "helical" | "axial" | "4d" | "static";
+type StandardViewerHandoffState = {
+    viewerKind?: "standard";
+    scanSessionId?: number;
+    patientId?: number;
+};
 /** A single selectable image series in the viewer sidebar */
 type Series = {
     id: string;
@@ -193,26 +200,48 @@ const VOLUME_PRESETS = [
 type VolumePreset = typeof VOLUME_PRESETS[number];
 
 /**
- * Smart 3D volume preset defaults by body part. Control-end use case is
- * "quick coverage / sanity check", so we pick the preset whose opacity
- * transfer function makes the *primary tissue of that body part* visible
- * in volume rendering without manual tweaking.
- *
- * Falls back to "CT-Lung" (the initial default) for unknown body parts.
+ * Smart 3D volume preset defaults. Reconstruction content has priority over
+ * the exam body part: a bone reconstruction should look like bone even when
+ * it belongs to a head or C/A/P study. The body part remains the fallback for
+ * generic series names.
  */
 const PRESET_BY_BODY_PART: Record<string, VolumePreset> = {
+    BRAIN: "CT-Soft-Tissue",
     HEAD: "CT-Bone",            // skull bone surface; brain itself isn't VR-friendly
     NECK: "CT-Soft-Tissue",     // soft-tissue dominant; carotids only show with contrast
     CHEST: "CT-Lung",           // lung parenchyma + airways
+    THORAX: "CT-Lung",
     SPINE: "CT-Bone",           // vertebral cortex
     ABDOMEN: "CT-Soft-Tissue",  // organ silhouette; CT-Liver-Vasculature only on enhanced
     PELVIS: "CT-Bone",          // pelvic bone + sacrum
     EXTREMITY: "CT-Bone",       // bones
+    "C/A/P": "CT-Soft-Tissue",
 };
-const resolveDefaultVolumePreset = (bodyPart?: string | null): VolumePreset => {
-    if (!bodyPart) return "CT-Lung";
+const resolveDefaultVolumePreset = (
+    bodyPart?: string | null,
+    series?: Pick<Series, "name" | "kernel"> | null,
+): VolumePreset => {
+    const reconstruction = `${series?.name ?? ""} ${series?.kernel ?? ""}`.toLowerCase();
+
+    if (/(bone|osseous|骨窗|骨性|\bfc[4-9]\d\b|\bj[5-9]\d\w*\b|\bb[5-9]\d\w*\b)/i.test(reconstruction)) {
+        return "CT-Bone";
+    }
+    if (/(lung|pulmonary|肺窗|肺部|\bb3[01]\w*\b|\bb4[01]\w*\b)/i.test(reconstruction)) {
+        return "CT-Lung";
+    }
+    if (/(angi|arter|vessel|cta|血管|增强|contrast)/i.test(reconstruction)) {
+        const key = bodyPart?.trim().toUpperCase();
+        return key === "CHEST" || key === "THORAX"
+            ? "CT-Chest-Vessels"
+            : "CT-Liver-Vasculature";
+    }
+    if (/(brain|head|颅脑|软组织|soft|\bj[23]\d\w*\b|\bfc[12]\d\b)/i.test(reconstruction)) {
+        return "CT-Soft-Tissue";
+    }
+
+    if (!bodyPart) return "CT-Soft-Tissue";
     const key = bodyPart.trim().toUpperCase();
-    return PRESET_BY_BODY_PART[key] ?? "CT-Lung";
+    return PRESET_BY_BODY_PART[key] ?? "CT-Soft-Tissue";
 };
 
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
@@ -393,7 +422,7 @@ const getSeriesDicomUrl = (
 };
 
 type ViewerToolMode = "browse" | "pan" | "wl" | "measure" | "annotate" | "eraser" | "crosshairs" | "imageRotate" | "planeRotate" | "rotate3d";
-type ThreeDDisplayMode = "MPR" | "MIP" | "MinIP" | "Avg" | "VR";
+type FourthPanelRenderMode = "MIP" | "MinIP" | "Avg" | "VR";
 type SeriesBrowserState = {
     sliceIndex: number;
     imageMode: "2D" | "3D";
@@ -409,7 +438,7 @@ type SeriesBrowserState = {
     smoothing: number;
     sharpening: number;
     layout: LayoutKey;
-    displayMode3D: ThreeDDisplayMode;
+    fourthPanelRenderMode: FourthPanelRenderMode;
     activeMprPanel: MprActivePanelId;
 };
 const mapCornerstoneTool = (toolMode: ViewerToolMode) => {
@@ -491,8 +520,9 @@ const ViewScreen = () => {
 
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
     const routeFourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode; offlineRecon?: boolean }) | null;
-    const selectedPatientId = loadSelectedPatient()?.id ?? null;
-    const selectedScanSessionId = loadSelectedScanSessionId();
+    const routeStandardState = location.state as StandardViewerHandoffState | null;
+    const selectedPatientId = loadSelectedPatient()?.id ?? routeStandardState?.patientId ?? null;
+    const selectedScanSessionId = loadSelectedScanSessionId() ?? routeStandardState?.scanSessionId ?? null;
     const isFourDEntry = !!routeFourDState?.scanResult;
     const viewerBindingKey = buildViewerBindingKey({
         kind: isFourDEntry ? "4d" : "standard",
@@ -634,25 +664,14 @@ const ViewScreen = () => {
 
     const [selectedLayout, setSelectedLayout] = useState<LayoutKey>("four-up");
     const [selectedVolumePreset, setSelectedVolumePreset] = useState<VolumePreset>("CT-Lung");
-    // Apply the body-part-derived default volume preset exactly once per scan
-    // session load. After this, the user is free to switch presets; we don't
-    // fight them on later series changes within the same session.
-    const appliedDefaultPresetRef = useRef(false);
-    useEffect(() => {
-        if (appliedDefaultPresetRef.current) return;
-        if (!scanSession) return;
-        const preset = resolveDefaultVolumePreset(scanSession.body_part);
-        setSelectedVolumePreset(preset);
-        appliedDefaultPresetRef.current = true;
-    }, [scanSession]);
-    const [selectedRenderMode, setSelectedRenderMode] = useState<"MIP" | "MinIP">("MIP");
+    const appliedDefaultPresetForSeriesRef = useRef<string | null>(null);
+    const [fourthPanelRenderMode, setFourthPanelRenderMode] = useState<FourthPanelRenderMode>("MIP");
     const [selectedVoiLutMode, setSelectedVoiLutMode] = useState<"LINEAR" | "LINEAR_EXACT" | "SIGMOID">("LINEAR");
     const [selectedInterpolationMode, setSelectedInterpolationMode] = useState<"LINEAR" | "NEAREST" | "FAST_LINEAR">("LINEAR");
     const [isImageInverted, setIsImageInverted] = useState(false);
     const [imageSmoothing, setImageSmoothing] = useState(0);
     const [imageSharpening, setImageSharpening] = useState(0);
     const [readerMode, setReaderMode] = useState(false);
-    const [threeDDisplayMode, setThreeDDisplayMode] = useState<ThreeDDisplayMode>("VR");
     const [focusedMprPanel, setFocusedMprPanel] = useState<MprActivePanelId | null>(null);
     const [showAnnotations, setShowAnnotations] = useState(true);
     const seriesBrowserStateRef = useRef<Map<string, SeriesBrowserState>>(new Map());
@@ -663,7 +682,6 @@ const ViewScreen = () => {
     const [isBrowseModeOpen, setIsBrowseModeOpen] = useState(false);
     const [isLayoutOpen, setIsLayoutOpen] = useState(false);
     const [isVolumePresetOpen, setIsVolumePresetOpen] = useState(false);
-    const [isRenderModeOpen, setIsRenderModeOpen] = useState(false);
     const [isWindowPresetOpen, setIsWindowPresetOpen] = useState(false);
     const [isVolumeQualityOpen, setIsVolumeQualityOpen] = useState(false);
     // ─── 离线重建参数状态 (仅 isOfflineRecon 模式使用) ──────────────────────────
@@ -943,7 +961,12 @@ const ViewScreen = () => {
                     images: makeImages(1, `${prefix}-topo`),
                     defaultWw: 500,
                     defaultWl: 50,
-                    ...(sourceVerified && s.image_source_id === "head-stroke-topogram"
+                    ...(sourceVerified && (
+                        s.image_source_id === "head-stroke-topogram"
+                        // 这类历史 Brain 会话在修复前把定位像来源登记成了通用
+                        // C/A/P 来源；其已完成的脑部诊断序列才是权威判定依据。
+                        || (isBrainHelicalDemo && s.image_source_id === "qin-lung-topogram")
+                    )
                         ? { dicomUrls: [HEAD_STROKE_TOPOGRAM_URL], defaultWw: 130, defaultWl: 130 }
                         : {}),
                     ...(sourceVerified && s.image_source_id === "fourd-scout-demo"
@@ -1166,6 +1189,18 @@ const ViewScreen = () => {
               safeSeriesList.find((series) => series.seriesType !== "topogram")
             : undefined) ??
         safeSeriesList[0];
+    useEffect(() => {
+        const presetKey = [
+            scanSession?.id ?? "demo",
+            selectedSeries.id,
+            selectedSeries.name,
+            selectedSeries.kernel,
+        ].join(":");
+        if (appliedDefaultPresetForSeriesRef.current === presetKey) return;
+
+        setSelectedVolumePreset(resolveDefaultVolumePreset(scanSession?.body_part, selectedSeries));
+        appliedDefaultPresetForSeriesRef.current = presetKey;
+    }, [scanSession?.body_part, scanSession?.id, selectedSeries]);
     const isTopogramSeries = selectedSeries.seriesType === "topogram";
     const isFourDLungReconSeries = selectedSeries.seriesType === "4d";
     const selectedApiSeries = selectedSeries.sourceSeriesId == null
@@ -1273,8 +1308,8 @@ const ViewScreen = () => {
     const fourDPhaseBadgeLabel = `Phase ${FOUR_D_PHASE_LABELS[selectedPhaseIndex] ?? `${selectedPhaseIndex * 10}%`}`;
     const hasMultipleSlices = totalSlices > 1;
     const canUse3D = !isTopogramSeries && hasMultipleSlices;
-    const isProjectionViewportActive = isMprViewActive && activeMprOrientation === "volume" && threeDDisplayMode !== "VR";
-    const isVolumeViewportActive = isMprViewActive && activeMprOrientation === "volume" && threeDDisplayMode === "VR";
+    const isProjectionViewportActive = isMprViewActive && activeMprOrientation === "volume" && fourthPanelRenderMode !== "VR";
+    const isVolumeViewportActive = isMprViewActive && activeMprOrientation === "volume" && fourthPanelRenderMode === "VR";
     const canBrowseSlicesInActiveViewport = imageMode === "2D" || activeMprOrientation !== "volume";
     const isPlaybackEnabled = !isFourDPlaybackBlockedByReview && hasMultipleSlices && canBrowseSlicesInActiveViewport;
     const isToolSupportedInCurrentView = useCallback((mode: ViewerToolMode) => {
@@ -1309,25 +1344,10 @@ const ViewScreen = () => {
         setFocusedMprPanel(null);
         setImageMode(nextMode);
         setToolMode(lastToolByModeRef.current[nextMode]);
-        if (nextMode === "3D" && activeMprOrientation === "volume" && threeDDisplayMode === "MPR") {
+        if (nextMode === "3D" && activeMprOrientation === "volume" && selectedLayout !== "four-up") {
             setActiveMprOrientation("axial");
         }
-    }, [activeMprOrientation, canUse3D, imageMode, isFourDLungReconSeries, isTopogramSeries, showViewerNotice, threeDDisplayMode, toolMode]);
-
-    const handleThreeDDisplayModeChange = useCallback((nextMode: ThreeDDisplayMode) => {
-        setThreeDDisplayMode(nextMode);
-        setFocusedMprPanel(null);
-        if (nextMode === "MPR") {
-            setSelectedLayout("mpr");
-            setActiveMprOrientation((current) => current === "volume" ? "axial" : current);
-            return;
-        }
-        setSelectedLayout("four-up");
-        setActiveMprOrientation("volume");
-        if (nextMode === "MIP" || nextMode === "MinIP") {
-            setSelectedRenderMode(nextMode);
-        }
-    }, []);
+    }, [activeMprOrientation, canUse3D, imageMode, isFourDLungReconSeries, isTopogramSeries, selectedLayout, showViewerNotice, toolMode]);
 
     const handleViewerStatusChange = useCallback((status: "loading" | "ready" | "error") => {
         setViewerLoadStatus(status);
@@ -1362,9 +1382,9 @@ const ViewScreen = () => {
         setImageSharpening(0);
         setSlabThickness(5);
         setVolumeQuality("standard");
-        setSelectedVolumePreset(resolveDefaultVolumePreset(scanSession?.body_part));
+        setSelectedVolumePreset(resolveDefaultVolumePreset(scanSession?.body_part, selectedSeries));
         if (imageMode === "3D") mprRef.current?.forceWindowLevel(defaults.wl, defaults.ww);
-    }, [imageMode, scanSession?.body_part]);
+    }, [imageMode, scanSession?.body_part, selectedSeries]);
 
     const handleResetCurrentView = useCallback(() => {
         if (imageMode === "2D") dicomViewerRef.current?.resetView();
@@ -1389,8 +1409,8 @@ const ViewScreen = () => {
             else {
                 mprRef.current?.resetPlanes();
                 mprRef.current?.resetAllViews();
-                setSelectedLayout(threeDDisplayMode === "MPR" ? "mpr" : "four-up");
-                setActiveMprOrientation(threeDDisplayMode === "MPR" ? "axial" : "volume");
+                setSelectedLayout("four-up");
+                setActiveMprOrientation("axial");
             }
             restoreDisplayParameters();
             setFocusedMprPanel(null);
@@ -1398,7 +1418,7 @@ const ViewScreen = () => {
         }
         setPendingReset(null);
         setIsResetSheetOpen(false);
-    }, [imageMode, restoreDisplayParameters, showViewerNotice, threeDDisplayMode]);
+    }, [imageMode, restoreDisplayParameters, showViewerNotice]);
 
     const clampSliceIndex = useCallback((value: number) => Math.max(0, Math.min(totalSlices - 1, value)), [totalSlices]);
     const currentSliceIndex = clampSliceIndex(sliceIndex);
@@ -1614,7 +1634,14 @@ const ViewScreen = () => {
     // Auto-select first series when session data loads (or series list changes)
     useEffect(() => {
         const first = safeSeriesList[0];
-        const preferred = isFourDEntry ? preferredSeriesForFourDEntry : null;
+        const preferred = isFourDEntry
+            ? preferredSeriesForFourDEntry
+            : isBrainHelicalDemo
+                ? safeSeriesList.find(
+                    (series) => series.seriesType !== "topogram"
+                        && Boolean(series.dicomBasePath || series.dicomUrls?.length),
+                ) ?? first
+                : null;
         const target = preferred ?? first;
         if (!first) return;
         setSelectedSeriesId((prev) => {
@@ -1622,10 +1649,10 @@ const ViewScreen = () => {
             if (isFourDEntry && preferred && prev !== preferred.id) {
                 return preferred.id;
             }
-            if (isBrainHelicalDemo && !safeSeriesList.find((s) => s.id === prev && s.dicomBasePath)) {
-                setSliceIndex(getSeriesMidSliceIndex(first.count));
+            if (isBrainHelicalDemo && preferred && prev !== preferred.id) {
+                setSliceIndex(getSeriesMidSliceIndex(preferred.count));
                 dicomWindowAppliedSeriesRef.current = null;
-                return first.id;
+                return preferred.id;
             }
             // If current ID is still the static placeholder and we now have session data, switch to first session series
             if (prev === REAL_LUNG_SERIES.seriesId && scanSession) return first.id;
@@ -1773,7 +1800,7 @@ const ViewScreen = () => {
             smoothing: imageSmoothing,
             sharpening: imageSharpening,
             layout: selectedLayout,
-            displayMode3D: threeDDisplayMode,
+            fourthPanelRenderMode,
             activeMprPanel: activeMprOrientation,
         });
         setSelectedSeriesId(seriesId);
@@ -1797,7 +1824,7 @@ const ViewScreen = () => {
             setImageSmoothing(savedState.smoothing);
             setImageSharpening(savedState.sharpening);
             setSelectedLayout(savedState.layout);
-            setThreeDDisplayMode(savedState.displayMode3D);
+            setFourthPanelRenderMode(savedState.fourthPanelRenderMode ?? "MIP");
             setActiveMprOrientation(savedState.activeMprPanel);
         } else {
             setSliceIndex(getSeriesMidSliceIndex(nextSeries?.count ?? effectiveLungSeries.count));
@@ -1812,7 +1839,7 @@ const ViewScreen = () => {
         if (nextSeries?.defaultWw != null && nextSeries?.defaultWl != null) {
             defaultWindowRef.current = { ww: nextSeries.defaultWw, wl: nextSeries.defaultWl };
         }
-    }, [activeMprOrientation, displayWl, displayWw, effectiveLungSeries.count, imageMode, imageSharpening, imageSmoothing, isImageInverted, safeSeriesList, selectedInterpolationMode, selectedLayout, selectedSeriesId, selectedVoiLutMode, sliceIndex, threeDDisplayMode, toolMode, wl, ww]);
+    }, [activeMprOrientation, displayWl, displayWw, effectiveLungSeries.count, fourthPanelRenderMode, imageMode, imageSharpening, imageSmoothing, isImageInverted, safeSeriesList, selectedInterpolationMode, selectedLayout, selectedSeriesId, selectedVoiLutMode, sliceIndex, toolMode, wl, ww]);
     const screenPointInViewport = (clientX: number, clientY: number) => {
         const viewport = viewportRef.current;
         if (!viewport) return null;
@@ -1883,7 +1910,11 @@ const ViewScreen = () => {
                     }
                 });
         } else {
-            fetchSelectedScanSession({ preferCache: false })
+            (loadSelectedScanSessionId() === selectedScanSessionId
+                ? fetchSelectedScanSession({ preferCache: false })
+                : selectedScanSessionId !== null
+                    ? fetchScanSessionById(selectedScanSessionId)
+                    : Promise.resolve(null))
                 .then((session) => {
                     if (cancelled) return;
                     if (!session) throw new Error("No selected scan session is available.");
@@ -2231,7 +2262,6 @@ const ViewScreen = () => {
                                                     onClick={() => {
                                                         setIsWindowPresetOpen(!isWindowPresetOpen);
                                                         setIsVolumePresetOpen(false);
-                                                        setIsRenderModeOpen(false);
                                                         setIsVolumeQualityOpen(false);
                                                     }}
                                                     className={`flex h-full min-h-[44px] w-full cursor-pointer items-center justify-between rounded-md border bg-white/90 px-1.5 transition-all ${isWindowPresetOpen ? 'border-[#2563EB] ring-2 ring-[#60A5FA]/20' : 'border-[#BFDBFE] hover:border-[#60A5FA]'}`}
@@ -2295,27 +2325,16 @@ const ViewScreen = () => {
                             ) : (
                                 <div className="col-span-2 flex flex-col gap-2">
                                     {!isFourDLungReconSeries && (
-                                        <PanelSection title="三维显示">
-                                            <div className="grid grid-cols-5 gap-1.5">
-                                                {(["MPR", "MIP", "MinIP", "Avg", "VR"] as const).map((mode) => (
-                                                    <button
-                                                        key={mode}
-                                                        type="button"
-                                                        onClick={() => handleThreeDDisplayModeChange(mode)}
-                                                        aria-pressed={threeDDisplayMode === mode}
-                                                        className={`h-[44px] rounded-lg border text-[10px] font-black transition-colors ${threeDDisplayMode === mode
-                                                            ? "border-[#2563EB] bg-[#2563EB] text-white"
-                                                            : "border-[#DCE6F2] bg-white text-[#475569] active:bg-[#DBEAFE]"
-                                                            }`}
-                                                    >
-                                                        {mode}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                            <div className="grid grid-cols-4 gap-1.5">
+                                            <PanelSection title="布局模板">
+                                            <div className="grid grid-cols-3 gap-1.5">
                                                 <button
                                                     type="button"
-                                                    onClick={() => { setSelectedLayout("four-up"); setFocusedMprPanel(null); }}
+                                                    onClick={() => {
+                                                        setSelectedLayout("four-up");
+                                                        setFocusedMprPanel(null);
+                                                        setActiveMprOrientation("axial");
+                                                        setToolMode((current) => current === "rotate3d" ? "crosshairs" : current);
+                                                    }}
                                                     className={`flex h-[44px] flex-col items-center justify-center rounded-lg border text-[9px] font-bold ${selectedLayout === "four-up" && !focusedMprPanel ? "border-[#2563EB] bg-[#EBF3FF] text-[#2563EB]" : "border-[#DCE6F2] bg-white text-[#546E7A]"}`}
                                                 >
                                                     <LayoutGrid size={16} />
@@ -2323,30 +2342,31 @@ const ViewScreen = () => {
                                                 </button>
                                                 <button
                                                     type="button"
-                                                    onClick={() => { setSelectedLayout("mpr"); setFocusedMprPanel(null); setActiveMprOrientation((current) => current === "volume" ? "axial" : current); }}
+                                                    onClick={() => {
+                                                        setSelectedLayout("mpr");
+                                                        setFocusedMprPanel(null);
+                                                        setActiveMprOrientation("axial");
+                                                        setToolMode((current) => current === "rotate3d" ? "crosshairs" : current);
+                                                    }}
                                                     className={`flex h-[44px] flex-col items-center justify-center rounded-lg border text-[9px] font-bold ${selectedLayout === "mpr" && !focusedMprPanel ? "border-[#2563EB] bg-[#EBF3FF] text-[#2563EB]" : "border-[#DCE6F2] bg-white text-[#546E7A]"}`}
                                                 >
                                                     <Layers3 size={16} />
-                                                    <span className="mt-0.5">MPR</span>
+                                                    <span className="mt-0.5">三平面</span>
                                                 </button>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setFocusedMprPanel((current) => current ? null : activeMprOrientation)}
+                                                    onClick={() => {
+                                                        setSelectedLayout("four-up");
+                                                        setFocusedMprPanel((current) => current ? null : activeMprOrientation === "volume" ? "axial" : activeMprOrientation);
+                                                        setToolMode((current) => current === "rotate3d" ? "crosshairs" : current);
+                                                    }}
                                                     className={`flex h-[44px] flex-col items-center justify-center rounded-lg border text-[9px] font-bold ${focusedMprPanel ? "border-[#2563EB] bg-[#EBF3FF] text-[#2563EB]" : "border-[#DCE6F2] bg-white text-[#546E7A]"}`}
                                                 >
                                                     <Focus size={16} />
-                                                    <span className="mt-0.5">{focusedMprPanel ? "恢复布局" : "当前视口"}</span>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => { handleThreeDDisplayModeChange("VR"); setFocusedMprPanel("volume"); }}
-                                                    className={`flex h-[44px] flex-col items-center justify-center rounded-lg border text-[9px] font-bold ${focusedMprPanel === "volume" ? "border-[#2563EB] bg-[#EBF3FF] text-[#2563EB]" : "border-[#DCE6F2] bg-white text-[#546E7A]"}`}
-                                                >
-                                                    <Orbit size={16} />
-                                                    <span className="mt-0.5">三维主视图</span>
+                                                    <span className="mt-0.5">{focusedMprPanel ? "恢复多窗" : "单窗"}</span>
                                                 </button>
                                             </div>
-                                        </PanelSection>
+                                            </PanelSection>
                                     )}
                                     {/* Layout Dropdown */}
                                     <div className="hidden items-center gap-2 relative">
@@ -2406,70 +2426,96 @@ const ViewScreen = () => {
                                     {!isFourDLungReconSeries && (
                                         <>
                                              <PanelSection title={t("view.display")}>
-                                                 <div className="grid grid-cols-2 gap-2">
-                                                     <Param label="WW" value={String(Math.round(displayWw))} />
-                                                     <Param label="WL" value={String(Math.round(displayWl))} />
-                                                 </div>
-                                                 <div className="flex items-center gap-2 relative">
-                                                     <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.windowPreset")}</span>
-                                                     <div
-                                                         onClick={() => {
-                                                             setIsWindowPresetOpen(!isWindowPresetOpen);
-                                                             setIsVolumePresetOpen(false);
-                                                             setIsRenderModeOpen(false);
-                                                             setIsVolumeQualityOpen(false);
-                                                         }}
-                                                         className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isWindowPresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
-                                                     >
-                                                         <span className="text-[12px] font-medium text-[#37474F] truncate">
-                                                             {activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}
-                                                         </span>
-                                                         <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
-                                                     </div>
-                                                     {isWindowPresetOpen && (
-                                                         <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                                                             {windowPresetsForSelectedSeries.map((preset) => {
-                                                                 const active = activeWindowPreset?.key === preset.key;
-                                                                 return (
-                                                                     <div
-                                                                         key={preset.key}
-                                                                         onClick={() => {
-                                                                             applyWindowPreset(preset);
-                                                                             setIsWindowPresetOpen(false);
-                                                                         }}
-                                                                         className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${active ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
-                                                                     >
-                                                                         <div className="flex items-center justify-between gap-2">
-                                                                             <span>{preset.label}</span>
-                                                                             <span className="text-[10px] font-black tabular-nums opacity-60">
-                                                                                 {preset.ww}/{preset.wl}
-                                                                             </span>
-                                                                         </div>
-                                                                     </div>
-                                                                 );
-                                                             })}
+                                                 <div className="overflow-visible rounded-xl border border-[#DCE6F2] bg-white shadow-[0_6px_16px_-18px_rgba(15,23,42,0.65)]">
+                                                     <div className="grid grid-cols-2 divide-x divide-[#E7EDF5]">
+                                                         <div className="px-3 py-2.5">
+                                                             <div className="text-[9px] font-semibold text-[#64748B]">WW</div>
+                                                             <div className="mt-0.5 text-[16px] font-bold tabular-nums text-[#1E3A8A]">{Math.round(displayWw)}</div>
                                                          </div>
-                                                     )}
+                                                         <div className="px-3 py-2.5">
+                                                             <div className="text-[9px] font-semibold text-[#64748B]">WL</div>
+                                                             <div className="mt-0.5 text-[16px] font-bold tabular-nums text-[#047857]">{Math.round(displayWl)}</div>
+                                                         </div>
+                                                     </div>
+                                                     <div className="relative flex min-h-[42px] items-center gap-2 border-t border-[#E7EDF5] px-3">
+                                                         <span className="text-[11px] font-medium text-[#475569]">{t("view.controls.windowPreset")}</span>
+                                                         <button
+                                                             type="button"
+                                                             onClick={() => {
+                                                                  setIsWindowPresetOpen(!isWindowPresetOpen);
+                                                                  setIsVolumePresetOpen(false);
+                                                                  setIsVolumeQualityOpen(false);
+                                                             }}
+                                                             className="ml-auto inline-flex max-w-[118px] items-center gap-1 text-[11px] font-semibold text-[#2563EB]"
+                                                         >
+                                                             <span className="truncate">{activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}</span>
+                                                             <ChevronDown size={13} className={`shrink-0 transition-transform ${isWindowPresetOpen ? 'rotate-180' : ''}`} />
+                                                         </button>
+                                                         {isWindowPresetOpen && (
+                                                             <div className="absolute top-[calc(100%+4px)] left-0 right-0 rounded-xl border border-[#DCE6F2] bg-white py-1 shadow-xl z-50 overflow-hidden">
+                                                                 {windowPresetsForSelectedSeries.map((preset) => {
+                                                                     const active = activeWindowPreset?.key === preset.key;
+                                                                     return (
+                                                                         <button
+                                                                             key={preset.key}
+                                                                             type="button"
+                                                                             onClick={() => {
+                                                                                 applyWindowPreset(preset);
+                                                                                 setIsWindowPresetOpen(false);
+                                                                             }}
+                                                                             className={`flex w-full items-center justify-between px-3 py-2 text-left text-[12px] font-medium transition-colors ${active ? 'bg-[#EFF6FF] text-[#2563EB]' : 'text-[#37474F] hover:bg-[#F8FAFC]'}`}
+                                                                         >
+                                                                             <span>{preset.label}</span>
+                                                                             <span className="text-[10px] font-bold tabular-nums opacity-60">{preset.ww}/{preset.wl}</span>
+                                                                         </button>
+                                                                     );
+                                                                 })}
+                                                             </div>
+                                                         )}
+                                                     </div>
                                                  </div>
-                                                <div className="flex items-center justify-between rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
-                                                    <span className="text-[11px] font-semibold text-[#546E7A]">{t("view.controls.invert")}</span>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={isImageInverted}
-                                                        onChange={(event) => setIsImageInverted(event.target.checked)}
-                                                        className="h-4 w-4 accent-[#4D94FF]"
-                                                    />
-                                                </div>
                                             </PanelSection>
 
-                                            <PanelSection title={t("view.controls.volumeRendering")}>
+                                             {selectedLayout === "four-up" && !focusedMprPanel && (
+                                             <PanelSection title="第四宫格">
+                                                 <div className="grid grid-cols-4 gap-1.5">
+                                                     {(["VR", "MIP", "MinIP", "Avg"] as const).map((mode) => (
+                                                         <button
+                                                             key={mode}
+                                                             type="button"
+                                                             aria-pressed={fourthPanelRenderMode === mode}
+                                                             onClick={() => {
+                                                                 setFourthPanelRenderMode(mode);
+                                                                 if (mode !== "VR") {
+                                                                     setSlabThickness((current) => current < 5 ? 20 : current);
+                                                                 }
+                                                                 setActiveMprOrientation("volume");
+                                                                 setFocusedMprPanel(null);
+                                                                 setToolMode((current) => {
+                                                                     if (mode === "VR") return current === "pan" || current === "rotate3d" ? current : "rotate3d";
+                                                                     return current === "browse" || current === "crosshairs" || current === "planeRotate" ? "pan" : current;
+                                                                 });
+                                                             }}
+                                                             className={`h-[38px] rounded-lg border text-[10px] font-black transition-colors ${fourthPanelRenderMode === mode
+                                                                 ? "border-[#2563EB] bg-[#2563EB] text-white"
+                                                                 : "border-[#DCE6F2] bg-white text-[#475569] active:bg-[#DBEAFE]"
+                                                                 }`}
+                                                         >
+                                                             {mode}
+                                                         </button>
+                                                     ))}
+                                                 </div>
+                                             </PanelSection>
+                                             )}
+
+                                             {selectedLayout === "four-up" && !focusedMprPanel && fourthPanelRenderMode === "VR" && (
+                                             <PanelSection title={t("view.controls.volumeRendering")}>
                                             <div className="flex items-center gap-2 relative">
                                                 <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.volumePreset")}</span>
                                                 <div
                                                     onClick={() => {
                                                         setIsVolumePresetOpen(!isVolumePresetOpen);
                                                         setIsWindowPresetOpen(false);
-                                                        setIsRenderModeOpen(false);
                                                         setIsVolumeQualityOpen(false);
                                                     }}
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVolumePresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
@@ -2501,7 +2547,6 @@ const ViewScreen = () => {
                                                         setIsVolumeQualityOpen(!isVolumeQualityOpen);
                                                         setIsWindowPresetOpen(false);
                                                         setIsVolumePresetOpen(false);
-                                                        setIsRenderModeOpen(false);
                                                     }}
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVolumeQualityOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
                                                 >
@@ -2529,40 +2574,10 @@ const ViewScreen = () => {
                                                 )}
                                             </div>
                                             </PanelSection>
+                                            )}
 
-                                            <PanelSection title={t("view.controls.projection")}>
-
-                                            <div className="flex items-center gap-2 relative">
-                                                <span className={VIEW_CONTROL_LABEL_CLASS}>{t("view.controls.projectionMode")}</span>
-                                                <div
-                                                    onClick={() => {
-                                                        setIsRenderModeOpen(!isRenderModeOpen);
-                                                        setIsWindowPresetOpen(false);
-                                                        setIsVolumePresetOpen(false);
-                                                        setIsVolumeQualityOpen(false);
-                                                    }}
-                                                    className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isRenderModeOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
-                                                >
-                                                    <span className="text-[12px] font-medium text-[#37474F]">
-                                                        {selectedRenderMode}
-                                                    </span>
-                                                    <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isRenderModeOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
-                                                </div>
-                                                {isRenderModeOpen && (
-                                                    <div className="absolute top-[calc(100%+3px)] left-[80px] right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-                                                        {(["MIP", "MinIP"] as const).map((opt) => (
-                                                            <div
-                                                                key={opt}
-                                                                onClick={() => { setSelectedRenderMode(opt); handleThreeDDisplayModeChange(opt); setIsRenderModeOpen(false); }}
-                                                                className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedRenderMode === opt ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
-                                                            >
-                                                                {opt}
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-
+                                             {selectedLayout === "four-up" && !focusedMprPanel && fourthPanelRenderMode !== "VR" && (
+                                             <PanelSection title={t("view.controls.projection")}>
                                             <div className="flex items-start gap-2">
                                                 <span className={`${VIEW_CONTROL_LABEL_CLASS} pt-1`}>{t("view.controls.thickness")}</span>
                                                 <div className="flex-1 rounded-md border border-[#DCE6F2] bg-white px-2 py-1.5">
@@ -2583,6 +2598,7 @@ const ViewScreen = () => {
                                                 </div>
                                             </div>
                                             </PanelSection>
+                                            )}
 
                                         </>
                                     )}
@@ -2731,12 +2747,16 @@ const ViewScreen = () => {
                                     windowCenter={wl}
                                     windowWidth={ww}
                                     activeTool={mapCornerstoneTool(toolMode)}
-                                    renderMode={threeDDisplayMode}
+                                    renderMode={fourthPanelRenderMode}
                                     layoutMode={selectedLayout === "mpr" ? "three-up" : "four-up"}
                                     volumePanelMode="volume3d"
                                     activeOrientation={activeMprOrientation}
                                     onActiveOrientationChange={setActiveMprOrientation}
                                     focusedPanel={focusedMprPanel}
+                                    onFocusedPanelChange={(panel) => {
+                                        setFocusedMprPanel(panel);
+                                        setActiveMprOrientation(panel);
+                                    }}
                                     volumePreset={selectedVolumePreset}
                                     volumeSampleDistanceMultiplier={volumeSampleDistanceMultiplier}
                                     slabThickness={slabThickness}
@@ -2894,7 +2914,11 @@ const ViewScreen = () => {
                 <aside className="flex w-[96px] shrink-0 flex-col overflow-hidden border-l border-white/10 bg-[#0F172A]">
                     <div className="border-b border-white/10 px-2 py-2 text-center">
                         <div className="text-[9px] font-black uppercase tracking-[0.12em] text-[#60A5FA]">
-                            {imageMode === "2D" ? "2D" : activeMprOrientation === "volume" ? threeDDisplayMode : activeMprOrientation}
+                            {imageMode === "2D"
+                                ? "2D"
+                                : activeMprOrientation === "volume"
+                                    ? fourthPanelRenderMode
+                                    : activeMprOrientation}
                         </div>
                         <div className="mt-0.5 truncate text-[9px] font-bold text-white">
                             {([
@@ -2947,6 +2971,18 @@ const ViewScreen = () => {
                                     </button>
                                 );
                             })}
+                            <button
+                                type="button"
+                                aria-pressed={isImageInverted}
+                                onClick={() => setIsImageInverted((current) => !current)}
+                                className={`flex h-[50px] w-[72px] flex-col items-center justify-center rounded-[10px] border text-[9px] font-bold transition-colors ${isImageInverted
+                                    ? "border-[#60A5FA] bg-[#2563EB] text-white shadow-[0_0_12px_rgba(59,130,246,0.45)]"
+                                    : "border-white/10 bg-white/5 text-[#CBD5E1] active:bg-white/15"
+                                    }`}
+                            >
+                                <Contrast size={18} />
+                                <span className="mt-1 leading-none">{t("view.controls.invert")}</span>
+                            </button>
                         </div>
 
                         <div className="my-2 h-px bg-white/10" />
@@ -3303,14 +3339,6 @@ const ViewScreen = () => {
         </div>
     );
 };
-
-
-const Param = ({ label, value }: { label: string; value: string }) => (
-    <div className="p-2 bg-white border border-[#B0C4DE]/30 rounded-md flex flex-col items-center justify-center shadow-sm min-h-[56px]">
-        <span className="text-[8px] font-black uppercase text-[#90A4AE] tracking-tighter">{label}</span>
-        <span className="text-[13px] font-black text-[#37474F] mt-1">{value}</span>
-    </div>
-);
 
 const WindowValueStrip = ({ ww, wl, inline = false }: { ww: number | string; wl: number | string; inline?: boolean }) => (
     <div className={inline ? "contents" : "grid grid-cols-2 gap-2"}>

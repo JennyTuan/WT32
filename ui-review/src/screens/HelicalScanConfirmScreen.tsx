@@ -46,6 +46,7 @@ import {
 } from "../lib/headDualScoutDemo";
 import { buildScanSessionExecutionContext, isTerminalScanSessionStatus, resolveTopogramImageSource } from "../lib/scanSeriesPrerequisites";
 import { ScanParamWriteCoordinator } from "../lib/scanParamWriteCoordinator";
+import { isBrainHelicalScanSession } from "../lib/brainHelicalDemo";
 
 type ProtocolSeedHelicalParam = {
     ma?: number | null;
@@ -2119,6 +2120,7 @@ const HelicalScanConfirmScreen = () => {
         .filter((series) => series.series_type === "topogram" && (!helicalSeries || series.series_order < helicalSeries.series_order))
         .sort((a, b) => b.series_order - a.series_order)[0] ?? null;
     const topogramImageSource = resolveTopogramImageSource(requiredTopogram);
+    const isBrainHelicalFlow = isBrainHelicalScanSession(scanSession);
     const isLimbsHelicalSession = topogramImageSource === "limbs-helical-demo";
     const isHeadDualScoutFlow = topogramImageSource === "head-dual-scout-demo";
     const helicalParamId = helicalParam?.id ?? null;
@@ -2129,6 +2131,7 @@ const HelicalScanConfirmScreen = () => {
 
     const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(
         () => {
+            if (isBrainHelicalFlow) return BRAIN_HELICAL_SCOUT_OVERRIDE;
             if (isLimbsHelicalSession && limbsDicomManifest) {
                 const topogram = getLimbsDicomSeries(limbsDicomManifest, "topogram");
                 const url = topogram?.urls[0];
@@ -2148,7 +2151,7 @@ const HelicalScanConfirmScreen = () => {
             // qin-lung-topogram intentionally uses the built-in QIN projection.
             return undefined;
         },
-        [isLimbsHelicalSession, limbsDicomManifest, topogramImageSource],
+        [isBrainHelicalFlow, isLimbsHelicalSession, limbsDicomManifest, topogramImageSource],
     );
 
     useEffect(() => () => paramWrites.dispose(), [paramWrites]);

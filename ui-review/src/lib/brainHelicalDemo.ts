@@ -22,5 +22,11 @@ export const isBrainHelicalWorkflow = (plans: WorkflowPlan[]) =>
 export const isBrainHelicalScanSession = (session: ApiScanSessionDetail | null) => {
     if (!session) return false;
     if (session.acquisition_type !== "regular") return false;
-    return session.description?.includes("image-source:brain-helical-demo-v1") === true;
+    // 旧会话只记录了协议名称（例如 Brain），没有 image-source 标记。来源
+    // 必须由实际协议/序列决定，不能让旧的通用定位像回退覆盖脑部演示数据。
+    return session.description?.includes("image-source:brain-helical-demo-v1") === true
+        || isBrainHelicalName(session.name)
+        || session.series.some(
+            (series) => series.series_type === "helical" && isBrainHelicalName(series.series_label),
+        );
 };
