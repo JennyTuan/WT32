@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import csv
 from datetime import date, datetime
 import json
@@ -15,6 +16,17 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATABASE_URL = "sqlite:///./backend/app.db"
 load_dotenv(PROJECT_ROOT / ".env")
+
+
+def _database_url_from_environment() -> str:
+    encoded_url = os.environ.get("DATABASE_URL_B64", "").strip()
+    if encoded_url:
+        try:
+            return base64.b64decode(encoded_url, validate=True).decode("utf-8")
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ValueError("DATABASE_URL_B64 is not valid Base64 text") from exc
+
+    return os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
 def _normalize_database_url(database_url: str) -> str:
@@ -33,7 +45,7 @@ def _normalize_database_url(database_url: str) -> str:
 
 
 SQLALCHEMY_DATABASE_URL = _normalize_database_url(
-    os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
+    _database_url_from_environment()
 )
 
 _engine_options: dict = {}
