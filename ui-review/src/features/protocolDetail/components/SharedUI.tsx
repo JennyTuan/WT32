@@ -90,7 +90,7 @@ export function FieldSpinner({ label, value, onChange, step = 1, min, max }: {
                         if (next !== event.target.value) onChange?.(next);
                     }}
                     readOnly={!onChange}
-                    inputMode={min !== undefined || max !== undefined ? "decimal" : undefined}
+                    inputMode="decimal"
                     className="w-full h-[40px] px-3 pr-10 bg-white border border-[#B0C4DE] rounded-md text-[13px] font-bold text-[#37474F] outline-none focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/10 shadow-sm select-text"
                 />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-0 border-l border-[#B0C4DE] pl-2 h-7 justify-center">

@@ -50,7 +50,7 @@ import FeedbackShowcaseScreen from "./screens/FeedbackShowcaseScreen";
 import RequireAuth from "./components/RequireAuth";
 import EmergencyModeBanner from "./components/EmergencyModeBanner";
 import DeviceErrorCenter from "./components/DeviceErrorCenter";
-import SoftKeyboard from "./components/SoftKeyboard";
+import KeyboardViewportAvoidance from "./components/KeyboardViewportAvoidance";
 import { AuthProvider, useAuth } from "./lib/authContext";
 
 const HomeRoute = HomeScreen ?? (() => <Navigate to="/patients" replace />);
@@ -193,7 +193,7 @@ export default function App() {
               <Route path="*" element={<Navigate to="/patients" replace />} />
               </Route>
             </Routes>
-            <SoftKeyboard />
+            <KeyboardViewportAvoidance />
           </div>
         </div>
       </div>

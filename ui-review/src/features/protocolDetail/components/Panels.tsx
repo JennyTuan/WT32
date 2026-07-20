@@ -199,7 +199,7 @@ export function ReconParamsPanel({ series, draft, onDelete, onDraftChange }: {
                     <span className="text-[11px] font-bold">{t("protocolDetail.deleteRecon")}</span>
                 </button>
             </div>
-            <div className="flex-1 p-8 overflow-y-auto bg-white">
+            <div data-keyboard-avoidance-scroll className="flex-1 p-8 overflow-y-auto bg-white">
                 <div className="grid grid-cols-2 gap-x-12 gap-y-5">
                     <FieldInput label={t("protocolDetail.fieldReconName")} value={draft.reconName} onChange={(value) => onDraftChange({ reconName: value })} />
                     <FieldInput label="KERNEL" value={draft.kernel} onChange={(value) => onDraftChange({ kernel: value })} />

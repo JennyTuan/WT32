@@ -1,19 +1,12 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { viteCommonjs } from '@originjs/vite-plugin-commonjs'
-import { fileURLToPath, URL } from 'node:url'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), viteCommonjs()],
   optimizeDeps: {
     exclude: ['@cornerstonejs/dicom-image-loader'],
-  },
-  resolve: {
-    alias: {
-      // simple-ime 1.2.4 的入口指向缺失文件；保留其类型声明并加载随包发布的 ESM 文件。
-      'simple-ime': fileURLToPath(new URL('./node_modules/simple-ime/dist/simple-ime.es.js', import.meta.url)),
-    },
   },
   server: {
     host: '0.0.0.0',
