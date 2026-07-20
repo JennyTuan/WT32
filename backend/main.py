@@ -99,7 +99,7 @@ def on_startup():
 
 @app.get("/health")
 def health_check():
-    return {"message": "CT Prototype backend is running"}
+    return {"message": "CT Prototype backend is running", "simulated": True}
 
 
 @app.get("/")

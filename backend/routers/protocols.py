@@ -350,12 +350,15 @@ def list_protocol_catalog(db: Session = Depends(get_db)):
     visible_protocols: list[models.Protocol] = []
     for protocol in protocols:
         description = str(protocol.description or "")
-        if protocol.is_factory:
-            if description.startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX):
-                if description not in CURRENT_CSV_PROTOCOL_DESCRIPTIONS:
-                    continue
-            else:
-                continue
+        # Only hide stale records imported from an older CSV catalog. Regular
+        # built-in factory protocols use their own seed descriptions and must
+        # remain available in the scan workflow library.
+        if (
+            protocol.is_factory
+            and description.startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)
+            and description not in CURRENT_CSV_PROTOCOL_DESCRIPTIONS
+        ):
+            continue
         # Hide a legacy bad seed that was incorrectly stored as plain mode while
         # sharing the same display name as the real 4D chest protocol.
         if protocol.body_part == "chest" and protocol.name == "胸腔4D" and protocol.scan_mode == "plain":
