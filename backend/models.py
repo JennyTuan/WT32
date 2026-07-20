@@ -881,3 +881,18 @@ class DrlEntry(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (UniqueConstraint("body_part", "age_group", name="uq_drl_part_age"),)
+
+
+class PersistentDocument(Base):
+    """Versioned application state that previously lived in local JSON files.
+
+    Each document is owned by the backend and stored in PostgreSQL/SQLite through
+    SQLAlchemy.  The JSON payload preserves the existing API contracts while the
+    individual feature schemas remain Pydantic-validated at the router boundary.
+    """
+
+    __tablename__ = "persistent_documents"
+
+    key = Column(String(80), primary_key=True)
+    payload = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

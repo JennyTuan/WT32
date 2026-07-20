@@ -140,7 +140,7 @@ This runs backend tests, frontend tests, lint, and the production build. Use `-S
 | Styling | Tailwind CSS 3.4.17 |
 | Routing | React Router DOM 7.13.2 |
 | Icons | Lucide React |
-| Local browser storage | Dexie / IndexedDB, localStorage |
+| Local browser storage | Dexie / IndexedDB, localStorage (transient UI cache only) |
 | DICOM | Cornerstone3D, dicom-parser |
 
 ## Architecture
@@ -175,7 +175,7 @@ backend/
   schemas.py              Pydantic schemas
   routers/                API route modules
   websocket/scan_ws.py    Simulated scan WebSocket
-  data/                   Demo data and local service JSON
+  data/                   Demo DICOM/assets and one-time legacy JSON import input
 
 ui-review/
   package.json            Frontend scripts and dependencies

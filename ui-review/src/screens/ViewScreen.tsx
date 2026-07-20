@@ -76,6 +76,12 @@ import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
 import { buildViewerBindingKey, isViewerBindingKeyVerified } from "../lib/viewerBinding";
 import {
+    CORNERSTONE_DEFAULT_CONFIG,
+    fetchCornerConfig,
+    normalizeCornerConfig,
+} from "../lib/cornerConfig";
+import type { CornerConfigData, CornerItem } from "../lib/cornerConfig";
+import {
     createReconstructionJob,
     listReconstructionJobs,
     waitForReconstructionJob,
@@ -620,6 +626,7 @@ const ViewScreen = () => {
     // Displayed WW/WL — updated both from DICOM tags and from Cornerstone WL tool feedback
     const [displayWw, setDisplayWw] = useState(350);
     const [displayWl, setDisplayWl] = useState(45);
+    const [displayZoom, setDisplayZoom] = useState(1);
     // Scan session loaded from localStorage — MUST be declared before studyTree useMemo
     // Ref for imperative control of the Cornerstone viewport (zoom/fit/reset in 2D mode)
     const dicomViewerRef = useRef<DicomViewerHandle>(null);
@@ -674,9 +681,12 @@ const ViewScreen = () => {
         patientId: "N/A",
         patientSex: "N/A",
         patientAge: "N/A",
+        patientDob: "N/A",
         modality: "CT",
         studyDate: "N/A",
         studyTime: "N/A",
+        studyDescription: "N/A",
+        accessionNumber: "N/A",
         institution: "N/A",
         manufacturer: "N/A",
         seriesDescription: "N/A",
@@ -693,6 +703,67 @@ const ViewScreen = () => {
         cols: 0,
         count: 320,
     });
+    // 四角显示项由服务设置统一控制；读取失败时保留全显默认值，避免遮挡关键信息。
+    const [cornerConfig, setCornerConfig] = useState<CornerConfigData>(CORNERSTONE_DEFAULT_CONFIG);
+
+    useEffect(() => {
+        let disposed = false;
+
+        void fetchCornerConfig()
+            .then((apiConfig) => {
+                if (!disposed) {
+                    setCornerConfig(normalizeCornerConfig(JSON.parse(apiConfig.config_json)));
+                }
+            })
+            .catch((error) => {
+                console.error("Failed to load corner overlay configuration", error);
+            });
+
+        return () => {
+            disposed = true;
+        };
+    }, []);
+
+    const cornerOverlayValues = useMemo<Record<string, string>>(() => {
+        const isUnavailable = (value: string) => value === "N/A";
+        const withUnit = (value: string, unit: string) => isUnavailable(value) ? value : `${value} ${unit}`;
+        const studyDateTime = [meta.studyDate, meta.studyTime]
+            .filter((value) => !isUnavailable(value))
+            .join(" ") || "N/A";
+
+        return {
+            patient_name: meta.patientName,
+            patient_id: `ID: ${meta.patientId}`,
+            patient_gender: `Sex: ${meta.patientSex}`,
+            patient_dob: `DOB: ${meta.patientDob}`,
+            institution_name: meta.institution,
+            study_description: meta.studyDescription,
+            study_datetime: studyDateTime,
+            accession_number: `Acc# ${meta.accessionNumber}`,
+            series_description: meta.seriesDescription,
+            slice_thickness: `Thk: ${meta.thickness}`,
+            slice_location: `Loc: ${meta.sliceLocation}`,
+            kvp: withUnit(meta.kvp, "kVp"),
+            mas: withUnit(meta.mas, "mAs"),
+            image_index: `Se: ${meta.seriesNumber}  Im: ${meta.instanceNumber}/${meta.count}`,
+            zoom: `Zoom: ${Math.round(displayZoom * 100)}%`,
+            window: `W: ${Math.round(displayWw)}  L: ${Math.round(displayWl)}`,
+        };
+    }, [displayWl, displayWw, displayZoom, meta]);
+
+    const renderCornerItems = (items: CornerItem[], alignment: "left" | "right") => (
+        <div className={`flex flex-col ${alignment === "right" ? "items-end text-right" : "items-start text-left"}`}>
+            {items.filter((item) => item.visible).map((item) => (
+                <div
+                    key={item.key}
+                    data-corner-field={item.key}
+                    className="whitespace-nowrap"
+                >
+                    {cornerOverlayValues[item.key] ?? "N/A"}
+                </div>
+            ))}
+        </div>
+    );
 
     const [selectedLayout, setSelectedLayout] = useState<LayoutKey>("four-up");
     const [selectedVolumePreset, setSelectedVolumePreset] = useState<VolumePreset>("CT-Lung");
@@ -2019,9 +2090,12 @@ const ViewScreen = () => {
                 const patientId = cleanOverlayText(dataSet.string("x00100020"));
                 const patientSex = cleanOverlayText(dataSet.string("x00100040"));
                 const patientAge = cleanOverlayText(dataSet.string("x00101010"));
+                const patientDob = formatDicomDate(dataSet.string("x00100030"));
                 const modality = cleanOverlayText(dataSet.string("x00080060") ?? "CT");
                 const studyDate = formatDicomDate(dataSet.string("x00080020"));
                 const studyTime = formatDicomTime(dataSet.string("x00080030"));
+                const studyDescription = cleanOverlayText(dataSet.string("x00081030") ?? selectedSeries.name);
+                const accessionNumber = cleanOverlayText(dataSet.string("x00080050"));
                 const institution = cleanOverlayText(dataSet.string("x00080080"));
                 const manufacturer = cleanOverlayText(dataSet.string("x00080070"));
                 const seriesDescription = cleanOverlayText(dataSet.string("x0008103e") ?? selectedSeries.name);
@@ -2051,9 +2125,12 @@ const ViewScreen = () => {
                     patientId,
                     patientSex,
                     patientAge,
+                    patientDob,
                     modality,
                     studyDate,
                     studyTime,
+                    studyDescription,
+                    accessionNumber,
                     institution,
                     manufacturer,
                     seriesDescription,
@@ -2835,6 +2912,7 @@ const ViewScreen = () => {
                                 sharpening={imageSharpening}
                                 showAnnotations={showAnnotations}
                                 stateKey={selectedSeriesId}
+                                onZoomChange={setDisplayZoom}
                                 onWindowLevelChange={(wc, wwidth) => {
                                     setDisplayWl(Math.round(wc));
                                     setDisplayWw(Math.round(wwidth));
@@ -2921,28 +2999,16 @@ const ViewScreen = () => {
                                 ))}
                             {/* ── Corner DICOM overlays ── */}
                             <div className="absolute top-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35] pointer-events-none">
-                                <div className="font-bold">{meta.patientName}</div>
-                                <div>ID {meta.patientId} | {meta.patientSex} {meta.patientAge}</div>
-                                <div>{meta.modality} | {meta.studyDate} {meta.studyTime}</div>
+                                {renderCornerItems(cornerConfig.corners.topLeft, "left")}
                             </div>
                             <div className="absolute top-2 right-2 text-[10px] text-[#CFD8DC] font-mono text-right leading-[1.35] pointer-events-none">
-                                <div className="font-bold">{meta.seriesDescription}</div>
-                                <div>
-                                    Image {sliceIndex + 1}/{selectedSeries.count}
-                                </div>
-                                <div>KV {meta.kvp} | mAs {meta.mas}</div>
+                                {renderCornerItems(cornerConfig.corners.topRight, "right")}
                             </div>
                             <div className="absolute bottom-2 left-2 text-[10px] text-[#CFD8DC] font-mono leading-[1.35] pointer-events-none">
-                                <div>WW/WL {Math.round(displayWw)} / {Math.round(displayWl)}</div>
-                                <div>Spacing {meta.pixelSpacing}</div>
-                                <div>{meta.rows > 0 ? `${meta.rows} × ${meta.cols}` : "—"}</div>
+                                {renderCornerItems(cornerConfig.corners.bottomLeft, "left")}
                             </div>
                             <div className="absolute bottom-2 right-2 text-[10px] text-[#CFD8DC] font-mono text-right leading-[1.35] pointer-events-none">
-                                <div>
-                                    Slice {sliceIndex + 1}/{selectedSeries.count} | Thick {meta.thickness}
-                                </div>
-                                <div>Location {meta.sliceLocation}</div>
-                                <div>{meta.institution} | {meta.manufacturer}</div>
+                                {renderCornerItems(cornerConfig.corners.bottomRight, "right")}
                             </div>
                         </section>
                 </div>

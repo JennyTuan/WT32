@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { TranslationKey } from "../../../lib/i18n";
 import { useI18n } from "../../../lib/i18nContext";
@@ -141,11 +141,15 @@ export function useDailyQa() {
   const [analysisStage, setAnalysisStage] = useState<AnalysisStage>("pending");
   const [roiState, setRoiState] = useState(createDefaultRoiState());
   const [phantomImage, setPhantomImage] = useState<PhantomImageData | null>(null);
-  const [records, setRecords] = useState<DailyQaRecord[]>(() => loadDailyQaRecords());
+  const [records, setRecords] = useState<DailyQaRecord[]>([]);
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
   const [recordPhantomFilter, setRecordPhantomFilter] = useState<PhantomType | typeof ALL_PHANTOMS>(ALL_PHANTOMS);
   const [recordDateFilter, setRecordDateFilter] = useState("");
   const [previewRecordId, setPreviewRecordId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadDailyQaRecords().then(setRecords);
+  }, []);
 
   const metrics = useMemo(() => {
     if (!phantomImage) {
@@ -244,7 +248,7 @@ export function useDailyQa() {
 
     const nextRecords = [record, ...records];
     setRecords(nextRecords);
-    saveDailyQaRecords(nextRecords);
+    void saveDailyQaRecords(nextRecords).catch(() => undefined);
     setIsRunningQa(false);
     setAnalysisStage("done");
   };

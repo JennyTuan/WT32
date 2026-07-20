@@ -45,6 +45,7 @@ interface CornerstoneStackViewportProps {
   windowCenter?: number;
   windowWidth?: number;
   onWindowLevelChange?: (windowCenter: number, windowWidth: number) => void;
+  onZoomChange?: (zoom: number) => void;
   className?: string;
   windowSyncKey?: number;
   invert?: boolean;
@@ -143,6 +144,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
       windowCenter = 40,
       windowWidth = 400,
       onWindowLevelChange,
+      onZoomChange,
       className,
       windowSyncKey,
       invert = false,
@@ -565,14 +567,15 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
     // ─── Report WW/WL changes back to parent (e.g. after user drags WL tool) ───
     useEffect(() => {
       const element = elementRef.current;
-      if (!element || status !== 'ready' || !onWindowLevelChange) return;
+      if (!element || status !== 'ready' || (!onWindowLevelChange && !onZoomChange)) return;
 
       const handleImageRendered = () => {
         const viewport = viewportRef.current;
         if (!viewport) return;
         try {
+          onZoomChange?.(viewport.getZoom());
           const props = viewport.getProperties();
-          if (props.voiRange) {
+          if (onWindowLevelChange && props.voiRange) {
             const { lower, upper } = props.voiRange;
             const { windowWidth: ww, windowCenter: wc } = fromVoiRange(lower, upper, voiLutMode);
             
@@ -594,7 +597,7 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
 
       element.addEventListener(Enums.Events.IMAGE_RENDERED, handleImageRendered);
       return () => element.removeEventListener(Enums.Events.IMAGE_RENDERED, handleImageRendered);
-    }, [status, onWindowLevelChange, voiLutMode]);
+    }, [status, onWindowLevelChange, onZoomChange, voiLutMode]);
 
     // ─── Stack-image change sync ─────────────────────────────────────────────
     // Authoritative slice-index mirror: whenever Cornerstone advances to a new

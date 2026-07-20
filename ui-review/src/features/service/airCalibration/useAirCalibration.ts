@@ -8,6 +8,7 @@ import {
   clearAirCalibrationState,
   createCalibrationComboKey,
   loadAirCalibrationState,
+  loadAirCalibrationStateFromApi,
   saveAirCalibrationState,
 } from "./storage";
 import type {
@@ -98,12 +99,25 @@ export function useAirCalibration() {
     persistedState?.runStatus === "running" ? "paused" : "idle",
   );
   const [showAbortConfirm, setShowAbortConfirm] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const completedCombosRef = useRef(completedCombos);
 
   useEffect(() => {
     completedCombosRef.current = completedCombos;
   }, [completedCombos]);
+
+  useEffect(() => {
+    void loadAirCalibrationStateFromApi().then((state) => {
+      if (state) {
+        setSelectionState(state.selections ?? INITIAL_SELECTIONS);
+        setCompletedCombos(state.completedCombos ?? {});
+        setCurrentComboKey(state.runStatus === "running" ? null : (state.currentComboKey ?? null));
+        setRunStatus(state.runStatus === "running" ? "paused" : (state.runStatus ?? "idle"));
+      }
+      setIsHydrated(true);
+    });
+  }, []);
 
   const combos = useMemo(() => buildCalibrationCombos(selectionState), [selectionState]);
   const totalCombinations = combos.length;
@@ -127,6 +141,7 @@ export function useAirCalibration() {
   const stageLabel = t(STAGE_LABEL_KEYS[executionStage]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     saveAirCalibrationState({
       selections: selectionState,
       completedCombos,
@@ -134,7 +149,7 @@ export function useAirCalibration() {
       runStatus,
       lastUpdatedAt: new Date().toISOString(),
     });
-  }, [completedCombos, currentComboKey, runStatus, selectionState]);
+  }, [completedCombos, currentComboKey, isHydrated, runStatus, selectionState]);
 
   useEffect(() => {
     return () => {

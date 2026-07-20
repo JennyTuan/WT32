@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
-from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import Session
 
-
-DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "system_settings.json"
+from ..database import get_db
+from ..file_backed_documents import SYSTEM_SETTINGS_KEY
+from ..persistent_documents import load_document, save_document
 
 LanguageCode = Literal["zh-CN", "en-US"]
 ThemeMode = Literal["light", "dark", "auto"]
@@ -119,46 +119,38 @@ def _default_settings() -> SystemSettingsSnapshot:
     return SystemSettingsSnapshot()
 
 
-def _read_settings() -> SystemSettingsSnapshot:
-    if not DATA_FILE.exists():
-        return _default_settings()
+def _read_settings(db: Session) -> SystemSettingsSnapshot:
     try:
-        raw = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+        raw = load_document(db, SYSTEM_SETTINGS_KEY, _default_settings().model_dump())
         return SystemSettingsSnapshot.model_validate(raw)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to load system settings: {exc}") from exc
 
 
-def _write_settings(settings: SystemSettingsSnapshot) -> SystemSettingsSnapshot:
+def _write_settings(db: Session, settings: SystemSettingsSnapshot) -> SystemSettingsSnapshot:
     updated = settings.model_copy(update={"updated_at": _now_iso()})
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = DATA_FILE.with_suffix(".json.tmp")
-    temp_file.write_text(
-        json.dumps(updated.model_dump(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temp_file.replace(DATA_FILE)
+    save_document(db, SYSTEM_SETTINGS_KEY, updated.model_dump())
     return updated
 
 
 @router.get("/", response_model=SystemSettingsSnapshot)
-def get_system_settings():
-    return _read_settings()
+def get_system_settings(db: Session = Depends(get_db)):
+    return _read_settings(db)
 
 
 @router.put("/", response_model=SystemSettingsSnapshot)
-def update_system_settings(payload: SystemSettingsSnapshot):
-    return _write_settings(payload)
+def update_system_settings(payload: SystemSettingsSnapshot, db: Session = Depends(get_db)):
+    return _write_settings(db, payload)
 
 
 @router.post("/reset", response_model=SystemSettingsSnapshot)
-def reset_system_settings():
-    return _write_settings(_default_settings())
+def reset_system_settings(db: Session = Depends(get_db)):
+    return _write_settings(db, _default_settings())
 
 
 @router.post("/time-sync", response_model=TimeSyncResult)
-def sync_time():
-    settings = _read_settings()
+def sync_time(db: Session = Depends(get_db)):
+    settings = _read_settings(db)
     now = datetime.now(timezone.utc)
     return TimeSyncResult(
         ok=True,

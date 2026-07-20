@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, FileBarChart2, Calendar, Printer, ChevronDown } from "lucide-react";
 
 import { useI18n } from "../../../lib/i18nContext";
@@ -372,7 +372,11 @@ function ReportPreviewModal({
 
 export default function QAReportPage() {
   const { t } = useI18n();
-  const allRecords = useMemo(() => loadDailyQaRecords(), []);
+  const [allRecords, setAllRecords] = useState<DailyQaRecord[]>([]);
+
+  useEffect(() => {
+    void loadDailyQaRecords().then(setAllRecords);
+  }, []);
 
   const [searchText, setSearchText] = useState("");
   const [dateFrom, setDateFrom] = useState(ONE_MONTH_AGO);

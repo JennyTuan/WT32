@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
-from pathlib import Path
 import socket
 import time
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy.orm import Session
 
-
-DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "dicom_settings.json"
+from ..database import get_db
+from ..file_backed_documents import DICOM_SETTINGS_KEY
+from ..persistent_documents import load_document, save_document
 
 DicomNodeRole = Literal["archive", "storage", "worklist", "printer"]
 DicomNodeStatus = Literal["unknown", "online", "offline"]
@@ -161,41 +161,33 @@ def _default_settings() -> DicomSettingsSnapshot:
     )
 
 
-def _read_settings() -> DicomSettingsSnapshot:
-    if not DATA_FILE.exists():
-        return _default_settings()
+def _read_settings(db: Session) -> DicomSettingsSnapshot:
     try:
-        raw = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+        raw = load_document(db, DICOM_SETTINGS_KEY, _default_settings().model_dump())
         return DicomSettingsSnapshot.model_validate(raw)
     except Exception as exc:  # pragma: no cover - defensive for hand-edited JSON
         raise HTTPException(status_code=500, detail=f"Failed to load DICOM settings: {exc}") from exc
 
 
-def _write_settings(settings: DicomSettingsSnapshot) -> DicomSettingsSnapshot:
+def _write_settings(db: Session, settings: DicomSettingsSnapshot) -> DicomSettingsSnapshot:
     updated = settings.model_copy(update={"updated_at": _now_iso()})
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = DATA_FILE.with_suffix(".json.tmp")
-    temp_file.write_text(
-        json.dumps(updated.model_dump(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temp_file.replace(DATA_FILE)
+    save_document(db, DICOM_SETTINGS_KEY, updated.model_dump())
     return updated
 
 
 @router.get("/", response_model=DicomSettingsSnapshot)
-def get_dicom_settings():
-    return _read_settings()
+def get_dicom_settings(db: Session = Depends(get_db)):
+    return _read_settings(db)
 
 
 @router.put("/", response_model=DicomSettingsSnapshot)
-def update_dicom_settings(payload: DicomSettingsSnapshot):
-    return _write_settings(payload)
+def update_dicom_settings(payload: DicomSettingsSnapshot, db: Session = Depends(get_db)):
+    return _write_settings(db, payload)
 
 
 @router.post("/reset", response_model=DicomSettingsSnapshot)
-def reset_dicom_settings():
-    return _write_settings(_default_settings())
+def reset_dicom_settings(db: Session = Depends(get_db)):
+    return _write_settings(db, _default_settings())
 
 
 @router.post("/test-node", response_model=DicomConnectionTestResult)

@@ -35,6 +35,12 @@ If `backend/app.db` contains data that must be retained, copy it only after upgr
 
 The command copies all relational tables in foreign-key order within one target transaction, preserves primary keys, and advances PostgreSQL sequences. It never deletes source rows and refuses to write when the target already contains business data, so it cannot be used as an incremental synchronization tool.
 
+At the first backend startup after migration, mutable prototype state previously
+stored in `backend/data` (system, organization, DICOM, and disk-manager
+settings/audit records) is imported once into the `persistent_documents` table.
+The source JSON/JSONL files are then retained only as migration input and demo
+assets; runtime reads and writes use the database.
+
 ## Start The Backend
 
 Start FastAPI in the same terminal. Startup verifies that PostgreSQL is at the current revision before inserting or synchronizing prototype seed data.

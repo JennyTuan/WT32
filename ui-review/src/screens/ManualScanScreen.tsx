@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   FlipHorizontal2,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import DicomViewer from "../components/DicomViewer";
+import PhysicalTriggerGuide, { type PhysicalTriggerStep } from "../components/PhysicalTriggerGuide";
 import ServiceModeShell from "../features/service/shared/ServiceModeShell";
 
 const scanModes = [
@@ -65,9 +66,84 @@ export default function ManualScanScreen() {
   const [activeTool, setActiveTool] = useState("pan");
   const [windowCenter] = useState(40);
   const [windowWidth] = useState(400);
+  const [physicalGuideVisible, setPhysicalGuideVisible] = useState(false);
+  const [manualScanStage, setManualScanStage] = useState<"idle" | "hold" | "press" | "completed">("idle");
+  const physicalPressStartedAtRef = useRef<number | null>(null);
+
+  const physicalTriggerSteps = useMemo<PhysicalTriggerStep[]>(
+    () => [
+      {
+        id: "manual-trigger",
+        label: "长按模拟物理曝光按键",
+        detail: "点击执行扫描后，长按绿色按键至少 0.8 秒。",
+        state: manualScanStage === "hold" ? "active" : manualScanStage === "press" || manualScanStage === "completed" ? "done" : "pending",
+      },
+      {
+        id: "manual-execute",
+        label: "执行扫描",
+        detail: manualScanStage === "completed" ? "模拟扫描完成，未生成患者或检查记录。" : "完成长按后，短按一次绿色按键。",
+        state: manualScanStage === "press" ? "active" : manualScanStage === "completed" ? "done" : "pending",
+      },
+    ],
+    [manualScanStage],
+  );
+
+  const openPhysicalGuide = () => {
+    setManualScanStage("idle");
+    physicalPressStartedAtRef.current = null;
+    setPhysicalGuideVisible(true);
+  };
+
+  const handlePhysicalPressStart = () => {
+    if (manualScanStage === "hold" || manualScanStage === "press") {
+      physicalPressStartedAtRef.current = Date.now();
+    }
+  };
+
+  const handlePhysicalPressEnd = () => {
+    const startedAt = physicalPressStartedAtRef.current;
+    physicalPressStartedAtRef.current = null;
+    if (!startedAt) return;
+    const heldForMs = Date.now() - startedAt;
+
+    if (manualScanStage === "hold" && heldForMs >= 800) {
+      setManualScanStage("press");
+    } else if (manualScanStage === "press") {
+      setManualScanStage("completed");
+      setPhysicalGuideVisible(false);
+    }
+  };
 
   return (
-    <ServiceModeShell currentRoute="/mobile/manual-scan">
+    <ServiceModeShell
+      currentRoute="/mobile/manual-scan"
+      overlays={
+        <div className={`absolute bottom-[56px] right-0 top-[68px] z-40 flex items-stretch transition-all duration-300 ${physicalGuideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
+          <PhysicalTriggerGuide
+            title="模拟物理按键"
+            description="手动扫描未选择患者，仅用于原型界面的模拟采集。"
+            guideTitle="按住绿色按键"
+            triggerLabel="模拟扫描触发"
+            emergencyLabel="紧急停止参考"
+            simulatedLabel="原型模拟"
+            steps={physicalTriggerSteps}
+            onHoldStart={handlePhysicalPressStart}
+            onHoldEnd={handlePhysicalPressEnd}
+            footer={
+              <button
+                type="button"
+                disabled={manualScanStage !== "idle"}
+                onClick={() => setManualScanStage("hold")}
+                className="h-10 w-full rounded-lg bg-[#1D8B5D] text-[12px] font-black text-white shadow-[0_8px_16px_rgba(5,150,105,0.24)] transition hover:bg-[#13734B] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+              >
+                {manualScanStage === "idle" ? "执行扫描" : manualScanStage === "completed" ? "模拟扫描完成" : "请完成按键步骤"}
+              </button>
+            }
+            buttonActive={manualScanStage === "hold" || manualScanStage === "press"}
+          />
+        </div>
+      }
+    >
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-md border border-[#BFD0E4] bg-[linear-gradient(180deg,#F8FBFF_0%,#EEF3F9_100%)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_22px_rgba(148,163,184,0.12)]">
           <div className="relative min-h-0 flex-1 overflow-hidden rounded-[10px] bg-[#050A19] shadow-[inset_0_0_0_1px_rgba(26,38,66,0.95)]">
@@ -194,11 +270,22 @@ export default function ManualScanScreen() {
             </div>
 
             <div className="mb-1 mt-3 flex shrink-0 justify-center gap-2 px-1">
-              <button className="flex h-[38px] min-w-[92px] items-center justify-center gap-2 rounded-[14px] bg-[#4D94FF] px-3.5 text-[12px] font-black uppercase tracking-[0.04em] text-white shadow-[0_10px_20px_rgba(77,148,255,0.24)] transition-all hover:bg-blue-600 active:scale-95">
+              <button
+                type="button"
+                onClick={openPhysicalGuide}
+                className="flex h-[38px] min-w-[92px] items-center justify-center gap-2 rounded-[14px] bg-[#4D94FF] px-3.5 text-[12px] font-black uppercase tracking-[0.04em] text-white shadow-[0_10px_20px_rgba(77,148,255,0.24)] transition-all hover:bg-blue-600 active:scale-95"
+              >
                 <Play size={14} fill="currentColor" />
                 扫描
               </button>
-              <button className="flex h-[38px] min-w-[92px] items-center justify-center gap-2 rounded-[14px] border border-[#C9D8E8] bg-white/88 px-3.5 text-[11px] font-bold text-[#546E7A] transition-all hover:bg-white active:scale-95">
+              <button
+                type="button"
+                onClick={() => {
+                  setManualScanStage("idle");
+                  setPhysicalGuideVisible(false);
+                }}
+                className="flex h-[38px] min-w-[92px] items-center justify-center gap-2 rounded-[14px] border border-[#C9D8E8] bg-white/88 px-3.5 text-[11px] font-bold text-[#546E7A] transition-all hover:bg-white active:scale-95"
+              >
                 <RotateCcw size={16} />
                 重置
               </button>

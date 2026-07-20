@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
-from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.orm import Session
 
-
-DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "organization_info.json"
+from ..database import get_db
+from ..file_backed_documents import ORGANIZATION_INFO_KEY
+from ..persistent_documents import load_document, save_document
 
 InstitutionType = Literal["hospital", "clinic", "imaging_center", "research", "other"]
 
@@ -80,38 +80,30 @@ def _default_settings() -> OrganizationInfoSnapshot:
     return OrganizationInfoSnapshot()
 
 
-def _read_settings() -> OrganizationInfoSnapshot:
-    if not DATA_FILE.exists():
-        return _default_settings()
+def _read_settings(db: Session) -> OrganizationInfoSnapshot:
     try:
-        raw = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+        raw = load_document(db, ORGANIZATION_INFO_KEY, _default_settings().model_dump())
         return OrganizationInfoSnapshot.model_validate(raw)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to load organization info: {exc}") from exc
 
 
-def _write_settings(settings: OrganizationInfoSnapshot) -> OrganizationInfoSnapshot:
+def _write_settings(db: Session, settings: OrganizationInfoSnapshot) -> OrganizationInfoSnapshot:
     updated = settings.model_copy(update={"updated_at": _now_iso()})
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = DATA_FILE.with_suffix(".json.tmp")
-    temp_file.write_text(
-        json.dumps(updated.model_dump(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temp_file.replace(DATA_FILE)
+    save_document(db, ORGANIZATION_INFO_KEY, updated.model_dump())
     return updated
 
 
 @router.get("/", response_model=OrganizationInfoSnapshot)
-def get_organization_info():
-    return _read_settings()
+def get_organization_info(db: Session = Depends(get_db)):
+    return _read_settings(db)
 
 
 @router.put("/", response_model=OrganizationInfoSnapshot)
-def update_organization_info(payload: OrganizationInfoSnapshot):
-    return _write_settings(payload)
+def update_organization_info(payload: OrganizationInfoSnapshot, db: Session = Depends(get_db)):
+    return _write_settings(db, payload)
 
 
 @router.post("/reset", response_model=OrganizationInfoSnapshot)
-def reset_organization_info():
-    return _write_settings(_default_settings())
+def reset_organization_info(db: Session = Depends(get_db)):
+    return _write_settings(db, _default_settings())

@@ -64,11 +64,12 @@ def migrate_legacy_sqlite(
         source_metadata.reflect(bind=source_engine)
 
         target_table_names = [table.name for table in Base.metadata.sorted_tables]
-        missing_tables = [name for name in target_table_names if name not in source_metadata.tables]
-        if missing_tables:
-            raise RuntimeError(
-                "SQLite 源数据库缺少业务表：" + ", ".join(sorted(missing_tables))
-            )
+        # The legacy SQLite database can legitimately predate newer tables.
+        # Copy every shared relational table; the normal backend startup imports
+        # file-backed documents and initializes new empty tables afterwards.
+        copy_table_names = [
+            name for name in target_table_names if name in source_metadata.tables
+        ]
 
         with target_engine.begin() as target_connection:
             existing_target_tables = set(inspect(target_connection).get_table_names())
@@ -84,6 +85,8 @@ def migrate_legacy_sqlite(
             copied_counts: dict[str, int] = {}
             with source_engine.connect() as source_connection:
                 for target_table in Base.metadata.sorted_tables:
+                    if target_table.name not in copy_table_names:
+                        continue
                     source_table = source_metadata.tables[target_table.name]
                     shared_columns = [
                         column.name

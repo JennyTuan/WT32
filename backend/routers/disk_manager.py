@@ -1,28 +1,18 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-import json
-import threading
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from ..database import get_db
+from ..file_backed_documents import DEFAULT_DISK_MANAGER_STATE, DISK_MANAGER_KEY
+from ..persistent_documents import load_document, save_document
+
 
 router = APIRouter(prefix="/disk-manager", tags=["disk-manager"])
-
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-DISKS_FILE = DATA_DIR / "disks.json"
-SCANFILES_FILE = DATA_DIR / "scanfiles.json"
-AUDIT_FILE = DATA_DIR / "audit.jsonl"
-
-lock = threading.Lock()
-
-config: dict[str, Any] = {
-    "retention_days": 7,
-    "retention_time": "00:00",
-    "auto_cleanup": False,
-}
 
 
 class FileActionRequest(BaseModel):
@@ -49,46 +39,27 @@ class AuditLogEntry(BaseModel):
     detail: dict[str, Any] = Field(default_factory=dict)
 
 
-def read_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8-sig") as file:
-        return json.load(file)
+def _state(db: Session) -> dict[str, Any]:
+    # Round-trip through the document store so callers can mutate an isolated payload.
+    state = load_document(db, DISK_MANAGER_KEY, DEFAULT_DISK_MANAGER_STATE)
+    if not isinstance(state, dict):
+        raise HTTPException(status_code=500, detail="Invalid disk-manager data")
+    state.setdefault("config", dict(DEFAULT_DISK_MANAGER_STATE["config"]))
+    state.setdefault("partitions", [])
+    state.setdefault("files", [])
+    state.setdefault("audit", [])
+    return state
 
 
-def write_json(path: Path, payload: Any) -> None:
-    with path.open("w", encoding="utf-8-sig") as file:
-        json.dump(payload, file, ensure_ascii=False, indent=2)
+def _save_state(db: Session, state: dict[str, Any]) -> None:
+    save_document(db, DISK_MANAGER_KEY, state)
 
 
-def append_audit(action: str, detail: dict[str, Any]) -> None:
-    entry = {
-        "timestamp": datetime.now().isoformat(),
-        "action": action,
-        **detail,
-    }
-    with AUDIT_FILE.open("a", encoding="utf-8-sig") as file:
-        file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+def _append_audit(state: dict[str, Any], action: str, detail: dict[str, Any]) -> None:
+    state["audit"].append({"timestamp": datetime.now().isoformat(), "action": action, **detail})
 
 
-def read_audit_entries() -> list[dict[str, Any]]:
-    if not AUDIT_FILE.exists():
-        return []
-
-    entries: list[dict[str, Any]] = []
-    with AUDIT_FILE.open("r", encoding="utf-8-sig") as file:
-        for line in file:
-            raw = line.strip()
-            if not raw:
-                continue
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(parsed, dict):
-                entries.append(parsed)
-    return entries
-
-
-def normalize_audit_entry(entry: dict[str, Any]) -> AuditLogEntry:
+def _normalize_audit(entry: dict[str, Any]) -> AuditLogEntry:
     detail = {key: value for key, value in entry.items() if key not in {"timestamp", "action", "partition", "file_ids", "result"}}
     file_ids = entry.get("file_ids")
     return AuditLogEntry(
@@ -101,58 +72,37 @@ def normalize_audit_entry(entry: dict[str, Any]) -> AuditLogEntry:
     )
 
 
-def build_retain_until() -> str:
-    now = datetime.now()
-    hours, minutes = map(int, config["retention_time"].split(":"))
-    target = (now + timedelta(days=config["retention_days"])).replace(
-        hour=hours,
-        minute=minutes,
-        second=0,
-        microsecond=0,
-    )
-    return target.isoformat()
-
-
-def build_partitions_response() -> list[dict[str, Any]]:
-    partitions = read_json(DISKS_FILE)
-    files = read_json(SCANFILES_FILE)
-
-    result: list[dict[str, Any]] = []
-    for partition in partitions:
-        partition_files = [item for item in files if item["partition"] == partition["id"]]
-        used_mb = sum(item["file_size_mb"] for item in partition_files)
-        result.append(
-            {
-                **partition,
-                "used_mb": used_mb,
-                "files": partition_files,
-            }
-        )
-    return result
-
-
-def validate_partition_exists(partition_id: str) -> None:
-    partitions = read_json(DISKS_FILE)
-    if not any(item["id"] == partition_id for item in partitions):
+def _partition_or_404(state: dict[str, Any], partition_id: str) -> dict[str, Any]:
+    partition = next((item for item in state["partitions"] if item.get("id") == partition_id), None)
+    if partition is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partition not found")
+    return partition
 
 
-def get_target_files(files: list[dict[str, Any]], partition: str, file_ids: list[str]) -> list[dict[str, Any]]:
-    return [item for item in files if item["partition"] == partition and item["id"] in file_ids]
+def _target_files(state: dict[str, Any], partition: str, file_ids: list[str]) -> list[dict[str, Any]]:
+    return [item for item in state["files"] if item.get("partition") == partition and item.get("id") in file_ids]
 
 
-def ensure_request_has_files(req: FileActionRequest) -> None:
+def _require_files(req: FileActionRequest) -> None:
     if not req.file_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files selected")
 
 
+def _retain_until(config: dict[str, Any]) -> str:
+    hours, minutes = map(int, str(config["retention_time"]).split(":"))
+    return (datetime.now() + timedelta(days=int(config["retention_days"]))).replace(
+        hour=hours, minute=minutes, second=0, microsecond=0
+    ).isoformat()
+
+
 @router.get("/partitions")
-def get_partitions() -> dict[str, Any]:
-    with lock:
-        return {
-            "partitions": build_partitions_response(),
-            "config": config,
-        }
+def get_partitions(db: Session = Depends(get_db)) -> dict[str, Any]:
+    state = _state(db)
+    partitions = []
+    for partition in state["partitions"]:
+        files = [item for item in state["files"] if item.get("partition") == partition.get("id")]
+        partitions.append({**partition, "used_mb": sum(item.get("file_size_mb", 0) for item in files), "files": files})
+    return {"partitions": partitions, "config": state["config"]}
 
 
 @router.get("/audit", response_model=list[AuditLogEntry])
@@ -162,206 +112,109 @@ def list_audit_logs(
     result: str | None = None,
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
 ) -> list[AuditLogEntry]:
-    with lock:
-        rows = read_audit_entries()
-
+    rows = _state(db)["audit"]
     if action:
         rows = [row for row in rows if row.get("action") == action]
     if partition:
         rows = [row for row in rows if row.get("partition") == partition]
     if result:
         rows = [row for row in rows if row.get("result") == result]
-
     rows.sort(key=lambda row: str(row.get("timestamp", "")), reverse=True)
-    return [normalize_audit_entry(row) for row in rows[offset : offset + limit]]
+    return [_normalize_audit(row) for row in rows[offset : offset + limit]]
 
 
 @router.post("/files/reserve")
-def reserve_files(req: FileActionRequest) -> dict[str, Any]:
-    ensure_request_has_files(req)
-
-    with lock:
-        validate_partition_exists(req.partition)
-        files = read_json(SCANFILES_FILE)
-        targets = get_target_files(files, req.partition, req.file_ids)
-
-        if not targets:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching files found")
-
-        retain_until = build_retain_until()
-        updated: list[str] = []
-
-        for item in files:
-            if item in targets:
-                item["status"] = "RESERVED"
-                item["is_locked"] = True
-                item["retain_until"] = retain_until
-                updated.append(item["id"])
-
-        write_json(SCANFILES_FILE, files)
-        append_audit(
-            "RESERVE",
-            {
-                "partition": req.partition,
-                "file_ids": updated,
-                "result": "success",
-            },
-        )
-
+def reserve_files(req: FileActionRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_files(req)
+    state = _state(db)
+    _partition_or_404(state, req.partition)
+    targets = _target_files(state, req.partition, req.file_ids)
+    if not targets:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching files found")
+    retain_until = _retain_until(state["config"])
+    for item in targets:
+        item.update(status="RESERVED", is_locked=True, retain_until=retain_until)
+    updated = [str(item["id"]) for item in targets]
+    _append_audit(state, "RESERVE", {"partition": req.partition, "file_ids": updated, "result": "success"})
+    _save_state(db, state)
     return {"updated": updated, "count": len(updated)}
 
 
 @router.post("/files/release")
-def release_files(req: FileActionRequest) -> dict[str, Any]:
-    ensure_request_has_files(req)
-
-    with lock:
-        validate_partition_exists(req.partition)
-        files = read_json(SCANFILES_FILE)
-        targets = get_target_files(files, req.partition, req.file_ids)
-
-        if not targets:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching files found")
-
-        blocked: list[dict[str, str]] = []
-        updated: list[str] = []
-
-        for item in files:
-            if item in targets:
-                if item["active_recon_jobs"] > 0:
-                    blocked.append(
-                        {
-                            "id": item["id"],
-                            "reason": f"存在 {item['active_recon_jobs']} 个重建任务",
-                        }
-                    )
-                    continue
-
-                item["status"] = "ACQUIRED"
-                item["is_locked"] = False
-                item["retain_until"] = None
-                updated.append(item["id"])
-
-        if not updated and blocked:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"message": "选中文件无法释放", "blocked": blocked},
-            )
-
-        write_json(SCANFILES_FILE, files)
-        append_audit(
-            "RELEASE",
-            {
-                "partition": req.partition,
-                "file_ids": updated,
-                "blocked": blocked,
-                "result": "success" if updated else "blocked",
-            },
-        )
-
+def release_files(req: FileActionRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_files(req)
+    state = _state(db)
+    _partition_or_404(state, req.partition)
+    targets = _target_files(state, req.partition, req.file_ids)
+    if not targets:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching files found")
+    updated: list[str] = []
+    blocked: list[dict[str, str]] = []
+    for item in targets:
+        if item.get("active_recon_jobs", 0) > 0:
+            blocked.append({"id": str(item["id"]), "reason": f"存在 {item['active_recon_jobs']} 个重建任务"})
+            continue
+        item.update(status="ACQUIRED", is_locked=False, retain_until=None)
+        updated.append(str(item["id"]))
+    if not updated and blocked:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"message": "选中文件无法释放", "blocked": blocked})
+    _append_audit(state, "RELEASE", {"partition": req.partition, "file_ids": updated, "blocked": blocked, "result": "success" if updated else "blocked"})
+    _save_state(db, state)
     return {"updated": updated, "blocked": blocked, "count": len(updated)}
 
 
 @router.delete("/files/purge")
-def purge_files(req: FileActionRequest) -> dict[str, Any]:
-    ensure_request_has_files(req)
-
-    with lock:
-        validate_partition_exists(req.partition)
-        files = read_json(SCANFILES_FILE)
-        targets = get_target_files(files, req.partition, req.file_ids)
-
-        if not targets:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching files found")
-
-        blocked: list[dict[str, str]] = []
-        purged: list[str] = []
-        remaining: list[dict[str, Any]] = []
-
-        for item in files:
-            if item not in targets:
-                remaining.append(item)
-                continue
-
-            if item["active_recon_jobs"] > 0:
-                blocked.append(
-                    {
-                        "id": item["id"],
-                        "reason": f"存在 {item['active_recon_jobs']} 个重建任务",
-                    }
-                )
-                remaining.append(item)
-                continue
-
-            if item["status"] == "RESERVED":
-                blocked.append({"id": item["id"], "reason": "文件已保留，请先释放"})
-                remaining.append(item)
-                continue
-
-            purged.append(item["id"])
-
-        if not purged and blocked:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"message": "选中文件无法删除", "blocked": blocked},
-            )
-
-        write_json(SCANFILES_FILE, remaining)
-        append_audit(
-            "PURGE",
-            {
-                "partition": req.partition,
-                "file_ids": purged,
-                "blocked": blocked,
-                "result": "success" if purged else "blocked",
-            },
-        )
-
+def purge_files(req: FileActionRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_files(req)
+    state = _state(db)
+    _partition_or_404(state, req.partition)
+    targets = _target_files(state, req.partition, req.file_ids)
+    if not targets:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching files found")
+    purged: list[str] = []
+    blocked: list[dict[str, str]] = []
+    remaining: list[dict[str, Any]] = []
+    for item in state["files"]:
+        if item not in targets:
+            remaining.append(item)
+        elif item.get("active_recon_jobs", 0) > 0:
+            blocked.append({"id": str(item["id"]), "reason": f"存在 {item['active_recon_jobs']} 个重建任务"})
+            remaining.append(item)
+        elif item.get("status") == "RESERVED":
+            blocked.append({"id": str(item["id"]), "reason": "文件已保留，请先释放"})
+            remaining.append(item)
+        else:
+            purged.append(str(item["id"]))
+    if not purged and blocked:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"message": "选中文件无法删除", "blocked": blocked})
+    state["files"] = remaining
+    _append_audit(state, "PURGE", {"partition": req.partition, "file_ids": purged, "blocked": blocked, "result": "success" if purged else "blocked"})
+    _save_state(db, state)
     return {"purged": purged, "blocked": blocked, "count": len(purged)}
 
 
 @router.patch("/partitions/{partition_id}/threshold")
-def update_partition_threshold(partition_id: str, body: ThresholdUpdate) -> dict[str, Any]:
-    with lock:
-        partitions = read_json(DISKS_FILE)
-        target = next((item for item in partitions if item["id"] == partition_id), None)
-
-        if target is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partition not found")
-
-        target["threshold"] = body.threshold
-        write_json(DISKS_FILE, partitions)
-        append_audit(
-            "UPDATE_THRESHOLD",
-            {
-                "partition": partition_id,
-                "threshold": body.threshold,
-                "result": "success",
-            },
-        )
-
+def update_partition_threshold(partition_id: str, body: ThresholdUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
+    state = _state(db)
+    partition = _partition_or_404(state, partition_id)
+    partition["threshold"] = body.threshold
+    _append_audit(state, "UPDATE_THRESHOLD", {"partition": partition_id, "threshold": body.threshold, "result": "success"})
+    _save_state(db, state)
     return {"partition_id": partition_id, "threshold": body.threshold}
 
 
 @router.patch("/config")
-def update_disk_config(body: ConfigUpdate) -> dict[str, Any]:
-    with lock:
-        if body.retention_days is not None:
-            config["retention_days"] = body.retention_days
-        if body.retention_time is not None:
-            config["retention_time"] = body.retention_time
-        if body.auto_cleanup is not None:
-            config["auto_cleanup"] = body.auto_cleanup
-
-        append_audit(
-            "UPDATE_CONFIG",
-            {
-                "config": config,
-                "result": "success",
-            },
-        )
-
-        return config
-
-
+def update_disk_config(body: ConfigUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
+    state = _state(db)
+    config = state["config"]
+    if body.retention_days is not None:
+        config["retention_days"] = body.retention_days
+    if body.retention_time is not None:
+        config["retention_time"] = body.retention_time
+    if body.auto_cleanup is not None:
+        config["auto_cleanup"] = body.auto_cleanup
+    _append_audit(state, "UPDATE_CONFIG", {"config": config, "result": "success"})
+    _save_state(db, state)
+    return config

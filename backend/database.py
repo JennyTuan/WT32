@@ -2222,6 +2222,12 @@ def init_db(sync_protocol_defaults: bool | None = None) -> None:
 
     db = SessionLocal()
     try:
+        from .file_backed_documents import seed_legacy_documents
+
+        migrated_document_count = seed_legacy_documents(db, models)
+        if migrated_document_count:
+            db.commit()
+            print(f"Migrated file-backed documents: {migrated_document_count}")
         _seed_dose_defaults(db)
         _seed_user_management_defaults(db)
         _seed_corner_defaults(db)

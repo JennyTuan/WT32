@@ -13,6 +13,7 @@ interface DicomViewerProps {
     windowCenter?: number;
     windowWidth?: number;
     onWindowLevelChange?: (windowCenter: number, windowWidth: number) => void;
+    onZoomChange?: (zoom: number) => void;
     windowSyncKey?: number;
     invert?: boolean;
     interpolationMode?: "LINEAR" | "NEAREST" | "FAST_LINEAR";
@@ -34,6 +35,7 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
         windowCenter = 40,
         windowWidth = 400,
         onWindowLevelChange,
+        onZoomChange,
         windowSyncKey,
         invert,
         interpolationMode,
@@ -68,6 +70,7 @@ const DicomViewer = forwardRef<DicomViewerHandle, DicomViewerProps>(function Dic
             windowCenter={windowCenter}
             windowWidth={windowWidth}
             onWindowLevelChange={onWindowLevelChange}
+            onZoomChange={onZoomChange}
             windowSyncKey={windowSyncKey}
             invert={invert}
             interpolationMode={interpolationMode}

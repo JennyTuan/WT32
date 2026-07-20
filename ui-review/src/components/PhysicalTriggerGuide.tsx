@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CheckCircle } from "lucide-react";
 
 import PhysicalControlPanelSvg from "./PhysicalControlPanelSvg";
@@ -24,6 +25,7 @@ type PhysicalTriggerGuideProps = {
     onHoldEnd: () => void;
     buttonActive?: boolean;
     disabled?: boolean;
+    footer?: ReactNode;
 };
 
 const stepClasses: Record<PhysicalTriggerStepState, string> = {
@@ -44,6 +46,7 @@ export default function PhysicalTriggerGuide({
     onHoldEnd,
     buttonActive = false,
     disabled = false,
+    footer,
 }: PhysicalTriggerGuideProps) {
     const lampOn = !disabled && steps.some((step) => step.state === "active");
 
@@ -97,6 +100,7 @@ export default function PhysicalTriggerGuide({
                     ))}
                 </div>
             </div>
+            {footer && <div className="border-t border-slate-200 bg-white/80 p-3">{footer}</div>}
         </div>
     );
 }
