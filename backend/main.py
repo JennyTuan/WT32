@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
@@ -110,6 +110,12 @@ def root():
     if FRONTEND_INDEX_FILE.is_file():
         return FileResponse(FRONTEND_INDEX_FILE)
     return health_check()
+
+
+@app.head("/", include_in_schema=False)
+def root_head():
+    """Allow hosting-platform reachability probes without returning the SPA."""
+    return Response(status_code=200)
 
 
 app.include_router(auth.router, prefix="/api")
