@@ -1478,6 +1478,30 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(refreshed.json()["status"], "cancelled")
         self.assertEqual(len(refreshed.json()["series"]), 4)
 
+    def test_protocol_dose_reference_returns_only_estimation_fields(self) -> None:
+        response = self.client.get("/api/protocols/dose-reference")
+        self.assertEqual(response.status_code, 200, response.text)
+
+        protocol = response.json()[0]
+        self.assertEqual(protocol["name"], "API Snapshot Protocol")
+        self.assertEqual(len(protocol["series"]), 1)
+
+        series = protocol["series"][0]
+        self.assertEqual(series["series_type"], "helical")
+        self.assertNotIn("recon_series", series)
+        self.assertEqual(
+            series["helical_param"],
+            {
+                "ma": 180.0,
+                "kv": 120.0,
+                "rotation_time": 0.75,
+                "pitch": 0.8,
+                "scan_length": 220.0,
+                "ctdi_vol": 12.5,
+                "dlp": 275.0,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

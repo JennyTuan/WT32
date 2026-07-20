@@ -2184,8 +2184,21 @@ def assert_database_current(target_engine: Engine = engine) -> None:
         )
 
 
-def init_db() -> None:
+def init_db(sync_protocol_defaults: bool | None = None) -> None:
+    """Validate storage and initialize an empty prototype database.
+
+    Existing databases retain their protocol templates during normal application
+    startup. Set ``WT32_SYNC_PROTOCOL_DEFAULTS_ON_STARTUP=1`` when an explicit
+    refresh of the built-in prototype templates is required.
+    """
     from . import models
+
+    if sync_protocol_defaults is None:
+        sync_protocol_defaults = os.environ.get("WT32_SYNC_PROTOCOL_DEFAULTS_ON_STARTUP", "").strip() in {
+            "1",
+            "true",
+            "TRUE",
+        }
 
     if engine.dialect.name == "sqlite":
         # SQLite 仅作为无 DATABASE_URL 时的本地兼容回退，保留旧库升级逻辑。
@@ -2201,6 +2214,9 @@ def init_db() -> None:
         _seed_user_management_defaults(db)
         _seed_corner_defaults(db)
         if db.query(models.Protocol).first():
+            if not sync_protocol_defaults:
+                return
+
             seed_uses_company_csv = any(
                 str(protocol_seed.get("description", "")).startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)
                 for protocol_seed in PROTOCOL_SEEDS

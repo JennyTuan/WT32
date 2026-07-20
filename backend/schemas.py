@@ -471,6 +471,30 @@ class ProtocolSummary(ProtocolBase, ORMModel):
     supported_modes: List[str] = Field(default_factory=list)
 
 
+class DoseReferenceParam(ORMModel):
+    """Parameters required to estimate a reference dose for historical logs."""
+
+    ma: Optional[float] = None
+    kv: Optional[float] = None
+    rotation_time: Optional[float] = None
+    pitch: Optional[float] = None
+    scan_length: Optional[float] = None
+    ctdi_vol: Optional[float] = None
+    dlp: Optional[float] = None
+
+
+class ProtocolDoseReferenceSeries(ORMModel):
+    series_type: str
+    helical_param: Optional[DoseReferenceParam] = None
+    axial_param: Optional[DoseReferenceParam] = None
+    topogram_param: Optional[DoseReferenceParam] = None
+
+
+class ProtocolDoseReference(ORMModel):
+    name: str
+    series: List[ProtocolDoseReferenceSeries] = Field(default_factory=list)
+
+
 class ScanSessionStatusUpdate(BaseModel):
     status: Literal["draft", "in_progress", "completed", "cancelled"]
 

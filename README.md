@@ -48,7 +48,13 @@ To preserve the existing `backend/app.db` records, run the legacy data migration
 .\.venv\Scripts\python.exe -m backend.migrate_legacy_sqlite --source backend\app.db
 ```
 
-The FastAPI startup seeds the prototype defaults after confirming that the schema is at the current Alembic revision. It does not create or upgrade PostgreSQL tables implicitly. See [docs/database-migrations.md](docs/database-migrations.md) for rollback and troubleshooting.
+On an empty database, FastAPI startup seeds the prototype defaults after confirming that the schema is at the current Alembic revision. It does not create or upgrade PostgreSQL tables implicitly. See [docs/database-migrations.md](docs/database-migrations.md) for rollback and troubleshooting.
+
+For an existing database, normal startup preserves protocol templates instead of synchronizing the built-in protocol set on every reload. To explicitly refresh built-in prototype protocol defaults, set this only for that startup:
+
+```powershell
+$env:WT32_SYNC_PROTOCOL_DEFAULTS_ON_STARTUP = "1"
+```
 
 If Python 3.14 cannot build `pydantic-core`, use:
 

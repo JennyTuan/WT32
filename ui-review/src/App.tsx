@@ -1,59 +1,59 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
-import HomeScreen from "./screens/HomeScreen";
-import PatientListScreen from "./screens/PatientListScreen";
-import ProtocolSetupScreen from "./screens/ProtocolSetupScreen";
-import WT32ProtocolDetailScreen from "./screens/WT32ProtocolDetailScreen";
-import WT32NewProtocolScoutDetailScreen from "./screens/WT32NewProtocolScoutDetailScreen";
-import WT32NewProtocolHelicalDetailScreen from "./screens/WT32NewProtocolHelicalDetailScreen";
-import WT32NewProtocolReconDetailScreen from "./screens/WT32NewProtocolReconDetailScreen";
-import WT32NewProtocolDoseDetailScreen from "./screens/WT32NewProtocolDoseDetailScreen";
-import ScoutScanScreen from "./screens/ScoutScanScreen";
-import ScanConfirmScreen from "./screens/ScanConfirmScreen";
-import ScoutExecuteScanScreen from "./screens/ScoutExecuteScanScreen";
-import SequenceScanConfirmScreen from "./screens/SequenceScanConfirmScreen";
-import HelicalScanConfirmScreen from "./screens/HelicalScanConfirmScreen";
-import HelicalExecuteScanScreen from "./screens/HelicalExecuteScanScreen";
-import GatedHelicalConfirmScreen from "./screens/GatedHelicalConfirmScreen";
-import GatedAxialConfirmScreen from "./screens/GatedAxialConfirmScreen";
-import FourDDiagnosticConfirmScreen from "./screens/FourDDiagnosticConfirmScreen";
-import FourDRescanSelectScreen from "./screens/FourDRescanSelectScreen";
-import ViewScreen from "./screens/ViewScreen";
-import ImageLoadScreen from "./screens/ImageLoadScreen";
-import PhaseFilterScreen from "./screens/PhaseFilterScreen";
-import ManualScanScreen from "./screens/ManualScanScreen";
-import MobileModePlaceholderScreen from "./screens/MobileModePlaceholderScreen";
-import MockScanScreen from "./screens/MockScanScreen";
-import TubeWarmupScreen from "./screens/TubeWarmupScreen";
-import AirCalibrationScreen from "./screens/AirCalibrationScreen";
-import DailyQAScreen from "./screens/DailyQAScreen";
-import HardwareTestScreen from "./screens/HardwareTestScreen";
-import BatteryManagementScreen from "./screens/BatteryManagementScreen";
-import DiskManagementScreen from "./screens/DiskManagementScreen";
-import PerformanceEvaluationScreen from "./screens/PerformanceEvaluationScreen";
-import RuntimeStatsPage from "./features/service/runtimeStats/RuntimeStatsPage";
-import QAReportPage from "./features/service/qaReport/QAReportPage";
-import ServiceSystemLogPage from "./features/service/reports/ServiceSystemLogPage";
-import ServiceAuditLogPage from "./features/service/reports/ServiceAuditLogPage";
-import ServiceDoseLogsPage from "./features/service/dose/ServiceDoseLogsPage";
-import ServiceDoseSettingsPage from "./features/service/dose/ServiceDoseSettingsPage";
-import ProtocolManagementScreen from "./screens/ProtocolManagementScreen";
-import CornerInfoPage from "./features/service/cornerInfo/CornerInfoPage";
-import DicomSettingsPage from "./features/service/dicom/DicomSettingsPage";
-import UserManagementPage from "./features/service/userManagement/UserManagementPage";
-import SystemSettingsPage from "./features/service/systemSettings/SystemSettingsPage";
-import OrganizationInfoPage from "./features/service/organizationInfo/OrganizationInfoPage";
-import LoginScreen from "./screens/LoginScreen";
-import ChangePasswordScreen from "./screens/ChangePasswordScreen";
-import FeedbackShowcaseScreen from "./screens/FeedbackShowcaseScreen";
-import RequireAuth from "./components/RequireAuth";
-import EmergencyModeBanner from "./components/EmergencyModeBanner";
-import DeviceErrorCenter from "./components/DeviceErrorCenter";
-import KeyboardViewportAvoidance from "./components/KeyboardViewportAvoidance";
 import { AuthProvider, useAuth } from "./lib/authContext";
 
-const HomeRoute = HomeScreen ?? (() => <Navigate to="/patients" replace />);
+const HomeScreen = lazy(() => import("./screens/HomeScreen"));
+const PatientListScreen = lazy(() => import("./screens/PatientListScreen"));
+const ProtocolSetupScreen = lazy(() => import("./screens/ProtocolSetupScreen"));
+const WT32ProtocolDetailScreen = lazy(() => import("./screens/WT32ProtocolDetailScreen"));
+const WT32NewProtocolScoutDetailScreen = lazy(() => import("./screens/WT32NewProtocolScoutDetailScreen"));
+const WT32NewProtocolHelicalDetailScreen = lazy(() => import("./screens/WT32NewProtocolHelicalDetailScreen"));
+const WT32NewProtocolReconDetailScreen = lazy(() => import("./screens/WT32NewProtocolReconDetailScreen"));
+const WT32NewProtocolDoseDetailScreen = lazy(() => import("./screens/WT32NewProtocolDoseDetailScreen"));
+const ScoutScanScreen = lazy(() => import("./screens/ScoutScanScreen"));
+const ScanConfirmScreen = lazy(() => import("./screens/ScanConfirmScreen"));
+const ScoutExecuteScanScreen = lazy(() => import("./screens/ScoutExecuteScanScreen"));
+const SequenceScanConfirmScreen = lazy(() => import("./screens/SequenceScanConfirmScreen"));
+const HelicalScanConfirmScreen = lazy(() => import("./screens/HelicalScanConfirmScreen"));
+const HelicalExecuteScanScreen = lazy(() => import("./screens/HelicalExecuteScanScreen"));
+const GatedHelicalConfirmScreen = lazy(() => import("./screens/GatedHelicalConfirmScreen"));
+const GatedAxialConfirmScreen = lazy(() => import("./screens/GatedAxialConfirmScreen"));
+const FourDDiagnosticConfirmScreen = lazy(() => import("./screens/FourDDiagnosticConfirmScreen"));
+const FourDRescanSelectScreen = lazy(() => import("./screens/FourDRescanSelectScreen"));
+const ViewScreen = lazy(() => import("./screens/ViewScreen"));
+const ImageLoadScreen = lazy(() => import("./screens/ImageLoadScreen"));
+const PhaseFilterScreen = lazy(() => import("./screens/PhaseFilterScreen"));
+const ManualScanScreen = lazy(() => import("./screens/ManualScanScreen"));
+const MobileModePlaceholderScreen = lazy(() => import("./screens/MobileModePlaceholderScreen"));
+const MockScanScreen = lazy(() => import("./screens/MockScanScreen"));
+const TubeWarmupScreen = lazy(() => import("./screens/TubeWarmupScreen"));
+const AirCalibrationScreen = lazy(() => import("./screens/AirCalibrationScreen"));
+const DailyQAScreen = lazy(() => import("./screens/DailyQAScreen"));
+const HardwareTestScreen = lazy(() => import("./screens/HardwareTestScreen"));
+const BatteryManagementScreen = lazy(() => import("./screens/BatteryManagementScreen"));
+const DiskManagementScreen = lazy(() => import("./screens/DiskManagementScreen"));
+const PerformanceEvaluationScreen = lazy(() => import("./screens/PerformanceEvaluationScreen"));
+const RuntimeStatsPage = lazy(() => import("./features/service/runtimeStats/RuntimeStatsPage"));
+const QAReportPage = lazy(() => import("./features/service/qaReport/QAReportPage"));
+const ServiceSystemLogPage = lazy(() => import("./features/service/reports/ServiceSystemLogPage"));
+const ServiceAuditLogPage = lazy(() => import("./features/service/reports/ServiceAuditLogPage"));
+const ServiceDoseLogsPage = lazy(() => import("./features/service/dose/ServiceDoseLogsPage"));
+const ServiceDoseSettingsPage = lazy(() => import("./features/service/dose/ServiceDoseSettingsPage"));
+const ProtocolManagementScreen = lazy(() => import("./screens/ProtocolManagementScreen"));
+const CornerInfoPage = lazy(() => import("./features/service/cornerInfo/CornerInfoPage"));
+const DicomSettingsPage = lazy(() => import("./features/service/dicom/DicomSettingsPage"));
+const UserManagementPage = lazy(() => import("./features/service/userManagement/UserManagementPage"));
+const SystemSettingsPage = lazy(() => import("./features/service/systemSettings/SystemSettingsPage"));
+const OrganizationInfoPage = lazy(() => import("./features/service/organizationInfo/OrganizationInfoPage"));
+const LoginScreen = lazy(() => import("./screens/LoginScreen"));
+const ChangePasswordScreen = lazy(() => import("./screens/ChangePasswordScreen"));
+const FeedbackShowcaseScreen = lazy(() => import("./screens/FeedbackShowcaseScreen"));
+const RequireAuth = lazy(() => import("./components/RequireAuth"));
+const EmergencyModeBanner = lazy(() => import("./components/EmergencyModeBanner"));
+const DeviceErrorCenter = lazy(() => import("./components/DeviceErrorCenter"));
+const KeyboardViewportAvoidance = lazy(() => import("./components/KeyboardViewportAvoidance"));
+
 const TABLET_WIDTH = 1024;
 const TABLET_HEIGHT = 768;
 const TABLET_PADDING = 96;
@@ -97,6 +97,17 @@ function AuthenticatedSystemOverlays() {
   );
 }
 
+function AppLoadingFallback() {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-[#0B1220] text-slate-100">
+      <div className="flex flex-col items-center gap-4">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-600 border-t-sky-400" />
+        <p className="text-sm font-medium tracking-wide">正在加载控制台…</p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const scale = useTabletScale();
   const shellWidth = TABLET_WIDTH * scale + 40;
@@ -133,8 +144,9 @@ export default function App() {
               transform: `translate(-50%, -50%) scale(${scale})`,
             }}
           >
-            <AuthenticatedSystemOverlays />
-            <Routes>
+            <Suspense fallback={<AppLoadingFallback />}>
+              <AuthenticatedSystemOverlays />
+              <Routes>
               <Route
                 path="/dev/feedback-showcase"
                 element={import.meta.env.DEV ? <FeedbackShowcaseScreen /> : <Navigate to="/login" replace />}
@@ -142,7 +154,7 @@ export default function App() {
               <Route path="/login" element={<LoginScreen />} />
               <Route element={<RequireAuth />}>
               <Route path="/change-password" element={<ChangePasswordScreen />} />
-              <Route path="/" element={<HomeRoute />} />
+              <Route path="/" element={<HomeScreen />} />
 
               <Route path="/patients" element={<PatientListScreen />} />
               <Route path="/protocol-select" element={<ProtocolSetupScreen />} />
@@ -192,8 +204,9 @@ export default function App() {
 
               <Route path="*" element={<Navigate to="/patients" replace />} />
               </Route>
-            </Routes>
-            <KeyboardViewportAvoidance />
+              </Routes>
+              <KeyboardViewportAvoidance />
+            </Suspense>
           </div>
         </div>
       </div>

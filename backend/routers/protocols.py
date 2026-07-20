@@ -78,6 +78,14 @@ def _protocol_catalog_query(db: Session):
     return db.query(models.Protocol).options(selectinload(models.Protocol.series))
 
 
+def _protocol_dose_reference_query(db: Session):
+    return db.query(models.Protocol).options(
+        selectinload(models.Protocol.series).selectinload(models.Series.topogram_param),
+        selectinload(models.Protocol.series).selectinload(models.Series.helical_param),
+        selectinload(models.Protocol.series).selectinload(models.Series.axial_param),
+    )
+
+
 def _series_query(db: Session):
     return db.query(models.Series).options(
         selectinload(models.Series.topogram_param),
@@ -354,6 +362,12 @@ def list_protocol_catalog(db: Session = Depends(get_db)):
             continue
         visible_protocols.append(protocol)
     return [_build_protocol_summary(protocol) for protocol in visible_protocols]
+
+
+@router.get("/dose-reference", response_model=list[schemas.ProtocolDoseReference])
+def list_protocol_dose_references(db: Session = Depends(get_db)):
+    """Return only the template fields needed to estimate historical log doses."""
+    return _protocol_dose_reference_query(db).order_by(models.Protocol.id.asc()).all()
 
 
 @router.get("/{protocol_id}", response_model=schemas.ProtocolDetail)

@@ -212,7 +212,7 @@ export default function ServiceDoseLogsPage() {
       const [data, drl, protos] = await Promise.all([
         listDoseLogs({ limit: 2000 }),
         listDrlEntries().catch(() => [] as ApiDrlEntry[]),
-        fetch(buildApiUrl("/api/protocols/"))
+        fetch(buildApiUrl("/api/protocols/dose-reference"))
           .then((r) => (r.ok ? r.json() : []) as Promise<ProtocolListItem[]>)
           .catch(() => [] as ProtocolListItem[]),
       ]);
