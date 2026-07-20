@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Search, FileBarChart2, Calendar, Printer, ChevronDown } from "lucide-react";
 
 import { useI18n } from "../../../lib/i18nContext";
+import { listQaReportRecords } from "../../../lib/reportsApi";
 import ServiceModeShell from "../shared/ServiceModeShell";
 import { PHANTOM_LABEL_KEYS, QA_STATUS_LABEL_KEYS } from "../dailyQa/dailyQaI18n";
-import { loadDailyQaRecords } from "../dailyQa/storage";
 import type { DailyQaRecord, PhantomType } from "../dailyQa/types";
 
 const DEVICE_NAME = "CT-Scanner-Alpha";
@@ -375,7 +375,7 @@ export default function QAReportPage() {
   const [allRecords, setAllRecords] = useState<DailyQaRecord[]>([]);
 
   useEffect(() => {
-    void loadDailyQaRecords().then(setAllRecords);
+    void listQaReportRecords().then((response) => setAllRecords(response.items));
   }, []);
 
   const [searchText, setSearchText] = useState("");

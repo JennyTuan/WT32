@@ -1,25 +1,18 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, Clock4, Download, RefreshCcw, Scan, Zap } from "lucide-react";
 
 import ServiceModeShell from "../shared/ServiceModeShell";
 import { useI18n } from "../../../lib/i18nContext";
+import { getRuntimeStats, type RuntimeStats } from "../../../lib/reportsApi";
+import { buildCsv, downloadCsv, timestampSuffix } from "../../../lib/csvExport";
 
-// ─── Mock runtime data ──────────────────────────────────────────────────────
-const POWER_ON_HOURS = 4126.5;
-const TUBE_EXPOSURE_HOURS = 612.8;
-const TOTAL_SCANS = 18342;
-const FAULT_COUNT_30D = 7;
-const WARNING_COUNT_30D = 23;
-
-const SCAN_MIX = [
-    { key: "helical", color: "#2F67D8", value: 9821 },
-    { key: "axial", color: "#10B981", value: 3450 },
-    { key: "scout", color: "#F59E0B", value: 4220 },
-    { key: "fourD", color: "#A855F7", value: 851 },
+// 扫描类型与显示颜色保持固定，数值由后端已完成会话汇总。
+const SCAN_MIX_META = [
+    { key: "helical", apiKey: "helical", color: "#2F67D8" },
+    { key: "axial", apiKey: "axial", color: "#10B981" },
+    { key: "scout", apiKey: "topogram", color: "#F59E0B" },
+    { key: "fourD", apiKey: "4d", color: "#A855F7" },
 ];
-
-// last 14 days scan counts
-const DAILY_SCANS = [42, 58, 51, 63, 47, 71, 88, 39, 55, 67, 74, 81, 62, 73];
 
 type ComponentUsageRow = {
     key: string;
@@ -29,14 +22,6 @@ type ComponentUsageRow = {
     percentRaw: number;
 };
 
-const COMPONENT_USAGE: ComponentUsageRow[] = [
-    { key: "tube", cumulative: 612.8, rated: 1500, unitKey: "service.runtimeStats.unit.hours", percentRaw: 0.408 },
-    { key: "detector", cumulative: 4126.5, rated: 12000, unitKey: "service.runtimeStats.unit.hours", percentRaw: 0.344 },
-    { key: "gantry", cumulative: 186420, rated: 500000, unitKey: "service.runtimeStats.unit.rotations", percentRaw: 0.373 },
-    { key: "table", cumulative: 9874, rated: 60000, unitKey: "service.runtimeStats.unit.cycles", percentRaw: 0.165 },
-    { key: "hv", cumulative: 612.8, rated: 2000, unitKey: "service.runtimeStats.unit.hours", percentRaw: 0.306 },
-    { key: "ups", cumulative: 4126.5, rated: 20000, unitKey: "service.runtimeStats.unit.hours", percentRaw: 0.206 },
-];
 
 type KPI = {
     icon: typeof Clock4;
@@ -56,52 +41,92 @@ export default function RuntimeStatsPage() {
     const defaultStart = new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10);
     const [dateFrom, setDateFrom] = useState(defaultStart);
     const [dateTo, setDateTo] = useState(defaultEnd);
+    const [stats, setStats] = useState<RuntimeStats | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    const totalScanMix = SCAN_MIX.reduce((sum, item) => sum + item.value, 0);
-    const maxDaily = Math.max(...DAILY_SCANS);
+    const loadStats = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            setStats(await getRuntimeStats(dateFrom, dateTo));
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "无法加载运行统计");
+        } finally {
+            setLoading(false);
+        }
+    }, [dateFrom, dateTo]);
+
+    useEffect(() => {
+        void loadStats();
+    }, [loadStats]);
+
+    const scanMix = useMemo(
+        () => SCAN_MIX_META.map((item) => ({ ...item, value: stats?.scan_mix[item.apiKey] ?? 0 })),
+        [stats],
+    );
+    const totalScanMix = scanMix.reduce((sum, item) => sum + item.value, 0);
+    const dailyScans = stats?.daily_scans ?? [];
+    const maxDaily = Math.max(1, ...dailyScans.map((item) => item.count));
+    const componentUsage: ComponentUsageRow[] = (stats?.telemetry.component_usage ?? []).map((item) => ({
+        key: item.key,
+        cumulative: item.cumulative,
+        rated: item.rated,
+        unitKey: item.unit,
+        percentRaw: item.rated > 0 ? item.cumulative / item.rated : 0,
+    }));
+
+    const exportStats = () => {
+        if (!stats) return;
+        const csv = buildCsv(stats.daily_scans, [
+            { header: "日期", value: (item) => item.date },
+            { header: "已完成扫描次数（参考）", value: (item) => item.count },
+        ]);
+        downloadCsv(`runtime-stats-${timestampSuffix()}.csv`, csv);
+    };
 
     const kpis: KPI[] = useMemo(
         () => [
             {
                 icon: Clock4,
                 labelKey: "service.runtimeStats.kpi.powerOn",
-                value: `${formatNumber(POWER_ON_HOURS)} h`,
+                value: stats?.telemetry.power_on_hours == null ? "—" : `${formatNumber(stats.telemetry.power_on_hours)} h`,
                 sublabelKey: "service.runtimeStats.kpi.powerOn.sub",
                 accent: "bg-[#E8F0FE] text-[#2F67D8]",
             },
             {
                 icon: Scan,
                 labelKey: "service.runtimeStats.kpi.scans",
-                value: formatNumber(TOTAL_SCANS),
+                value: formatNumber(stats?.completed_scans_all_time ?? 0),
                 sublabelKey: "service.runtimeStats.kpi.scans.sub",
                 accent: "bg-[#E6F8EE] text-[#15803D]",
             },
             {
                 icon: Zap,
                 labelKey: "service.runtimeStats.kpi.exposure",
-                value: `${formatNumber(TUBE_EXPOSURE_HOURS)} h`,
+                value: stats?.telemetry.tube_exposure_hours == null ? "—" : `${formatNumber(stats.telemetry.tube_exposure_hours)} h`,
                 sublabelKey: "service.runtimeStats.kpi.exposure.sub",
                 accent: "bg-[#FFF5E2] text-[#B45309]",
             },
             {
                 icon: AlertTriangle,
                 labelKey: "service.runtimeStats.kpi.alerts",
-                value: `${FAULT_COUNT_30D} / ${WARNING_COUNT_30D}`,
+                value: `${stats?.alerts.errors ?? 0} / ${stats?.alerts.warnings ?? 0}`,
                 sublabelKey: "service.runtimeStats.kpi.alerts.sub",
                 accent: "bg-[#FEE7E7] text-[#B91C1C]",
             },
         ],
-        [],
+        [stats],
     );
 
     // SVG ring chart geometry
     const ringRadius = 56;
     const ringCircumference = 2 * Math.PI * ringRadius;
-    const { segments: ringSegments } = SCAN_MIX.reduce<{
+    const { segments: ringSegments } = scanMix.reduce<{
         offset: number;
-        segments: Array<(typeof SCAN_MIX)[number] & { fraction: number; length: number; offset: number }>;
+        segments: Array<(typeof scanMix)[number] & { fraction: number; length: number; offset: number }>;
     }>((acc, item) => {
-        const fraction = item.value / totalScanMix;
+        const fraction = totalScanMix > 0 ? item.value / totalScanMix : 0;
         const length = fraction * ringCircumference;
         return {
             offset: acc.offset + length,
@@ -133,18 +158,29 @@ export default function RuntimeStatsPage() {
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
-                            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#D7E3F0] bg-white px-3 text-[12px] font-black text-[#31485E] hover:bg-[#F8FAFC]"
+                            onClick={() => void loadStats()}
+                            disabled={loading}
+                            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#D7E3F0] bg-white px-3 text-[12px] font-black text-[#31485E] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                            <RefreshCcw size={14} className="text-[#2F67D8]" /> {t("service.runtimeStats.refresh")}
+                            <RefreshCcw size={14} className={loading ? "animate-spin text-[#2F67D8]" : "text-[#2F67D8]"} /> {t("service.runtimeStats.refresh")}
                         </button>
                         <button
                             type="button"
-                            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#2F67D8] px-3 text-[12px] font-black text-white hover:bg-[#2654B0]"
+                            onClick={exportStats}
+                            disabled={!stats}
+                            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#2F67D8] px-3 text-[12px] font-black text-white hover:bg-[#2654B0] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <Download size={14} /> {t("service.runtimeStats.export")}
                         </button>
                     </div>
                 </div>
+
+                {error && <div className="rounded-md border border-[#FFCDD2] bg-[#FFEBEE] px-4 py-2 text-[12px] font-bold text-[#C62828]">{error}</div>}
+                {stats?.telemetry.availability_note && (
+                    <div className="rounded-md border border-[#FFE0B2] bg-[#FFF8E1] px-4 py-2 text-[12px] font-bold text-[#795548]">
+                        参考统计：{stats.telemetry.availability_note}
+                    </div>
+                )}
 
                 {/* KPI cards */}
                 <div className="grid grid-cols-4 gap-3">
@@ -223,14 +259,12 @@ export default function RuntimeStatsPage() {
                             <div className="text-[11px] font-bold text-[#90A4AE]">{t("service.runtimeStats.trend.subtitle")}</div>
                         </div>
                         <div className="mt-4 flex h-[160px] items-end gap-1.5">
-                            {DAILY_SCANS.map((count, idx) => {
-                                const heightPct = (count / maxDaily) * 100;
-                                const dayLabel = new Date(today.getTime() - (DAILY_SCANS.length - 1 - idx) * 86400000)
-                                    .toISOString()
-                                    .slice(5, 10);
+                            {dailyScans.map((entry) => {
+                                const heightPct = (entry.count / maxDaily) * 100;
+                                const dayLabel = entry.date.slice(5, 10);
                                 return (
-                                    <div key={idx} className="flex flex-1 flex-col items-center gap-1">
-                                        <div className="text-[10px] font-bold text-[#90A4AE]">{count}</div>
+                                    <div key={entry.date} className="flex flex-1 flex-col items-center gap-1">
+                                        <div className="text-[10px] font-bold text-[#90A4AE]">{entry.count}</div>
                                         <div
                                             className="w-full rounded-t-md bg-gradient-to-t from-[#2F67D8] to-[#74A3FF]"
                                             style={{ height: `${heightPct}%`, minHeight: 6 }}
@@ -260,7 +294,7 @@ export default function RuntimeStatsPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {COMPONENT_USAGE.map((row) => {
+                            {componentUsage.map((row) => {
                                 const pct = Math.round(row.percentRaw * 100);
                                 const status =
                                     row.percentRaw >= 0.8 ? "alert" : row.percentRaw >= 0.5 ? "warn" : "ok";
@@ -293,6 +327,11 @@ export default function RuntimeStatsPage() {
                                     </tr>
                                 );
                             })}
+                            {componentUsage.length === 0 && (
+                                <tr>
+                                    <td colSpan={5} className="px-4 py-8 text-center text-[#90A4AE]">设备部件遥测尚未接入</td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>

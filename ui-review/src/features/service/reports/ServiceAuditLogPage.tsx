@@ -4,12 +4,11 @@ import { ChevronDown, ChevronLeft, ChevronRight, Download, RefreshCw, Search } f
 
 import ServiceModeShell from "../shared/ServiceModeShell";
 import {
-  listAuditLogs,
-  listSystemLogs,
   type ApiAuditLog,
   type ApiSystemLog,
   type LogLevel,
 } from "../../../lib/logsApi";
+import { listReportAuditLogs } from "../../../lib/reportsApi";
 import type { TranslationKey } from "../../../lib/i18n";
 import { useI18n } from "../../../lib/i18nContext";
 import { buildCsv, downloadCsv, timestampSuffix } from "../../../lib/csvExport";
@@ -224,11 +223,7 @@ export default function ServiceAuditLogPage() {
     setLoading(true);
     setError(null);
     try {
-      const [systemRows, diskRows] = await Promise.all([
-        listSystemLogs({ limit: 2000 }),
-        listAuditLogs({ limit: 2000 }),
-      ]);
-      const auditedSystemRows = systemRows.filter((log) => log.source === "scan_sessions");
+      const { system_logs: auditedSystemRows, disk_logs: diskRows } = await listReportAuditLogs();
       const normalized = [
         ...auditedSystemRows.map((row) => normalizeSystemLog(row, t)),
         ...diskRows.map((row, index) => normalizeDiskAudit(row, index, t)),
