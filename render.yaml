@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: wt32
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: CT_PROTOTYPE_SESSION_SECRET
+        generateValue: true
+      - key: CT_PROTOTYPE_SESSION_HTTPS_ONLY
+        value: "1"

@@ -7,8 +7,9 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.staticfiles import StaticFiles
 
 from .database import SessionLocal, init_db
 from .routers import ai_inference, auth, contrast_configs, corners, dicom_settings, disk_manager, dose_settings, logs, organization_info, patients, performance, protocols, recon_params, reconstruction, respira_simulator, scan_params, scan_results, scan_sessions, scan_workflow_actions, system_settings, user_management
@@ -20,6 +21,10 @@ DEMO_DICOM_DIR = DATA_DIR / "demo-dicom"
 # Curated local reference images. This directory stays outside the front-end
 # bundle so replacing a demo set does not inflate the UI build.
 DICOM_PUBLIC_DIR = DEMO_DICOM_DIR
+FRONTEND_DIST_DIR = Path(
+    os.environ.get("WT32_FRONTEND_DIST_DIR", str(Path(__file__).resolve().parent.parent / "ui-review" / "dist"))
+).resolve()
+FRONTEND_INDEX_FILE = FRONTEND_DIST_DIR / "index.html"
 LIHVR_LOWER_EXTREMITY_DEMO_DIR = DEMO_DICOM_DIR / "limbs"
 LIHVR_LOWER_EXTREMITY_SERIES = {
     "topogram": "topogram",
@@ -58,12 +63,17 @@ app.add_middleware(
 # Session cookie: signed with itsdangerous. SECRET_KEY should come from env in
 # production; a dev fallback keeps local startup zero-config.
 _session_secret = os.environ.get("CT_PROTOTYPE_SESSION_SECRET") or "dev-only-secret-change-me"
+_session_https_only = os.environ.get("CT_PROTOTYPE_SESSION_HTTPS_ONLY", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 app.add_middleware(
     SessionMiddleware,
     secret_key=_session_secret,
     session_cookie="ct_session",
     same_site="lax",
-    https_only=False,
+    https_only=_session_https_only,
     max_age=60 * 60 * 12,  # 12h
 )
 
@@ -87,9 +97,19 @@ def on_startup():
         db.close()
 
 
-@app.get("/")
+@app.get("/health")
 def health_check():
     return {"message": "CT Prototype backend is running"}
+
+
+@app.get("/")
+def root():
+    # Render production image bundles the SPA with the API, keeping session
+    # cookies and WebSocket traffic on one origin. Local API-only startup keeps
+    # the original JSON response for lightweight checks.
+    if FRONTEND_INDEX_FILE.is_file():
+        return FileResponse(FRONTEND_INDEX_FILE)
+    return health_check()
 
 
 app.include_router(auth.router, prefix="/api")
@@ -495,3 +515,22 @@ def get_head_dual_scout_manifest():
 # be redirected to the curated static-demo directory.
 DICOM_OUT_DIR = DATA_DIR / "dicom_out"
 HEAD_STROKE_DEMO_PLAIN_DIR = DEMO_DICOM_DIR / "head"
+
+
+if FRONTEND_DIST_DIR.is_dir():
+    frontend_assets_dir = FRONTEND_DIST_DIR / "assets"
+    if frontend_assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=frontend_assets_dir), name="frontend-assets")
+
+    @app.get("/{frontend_path:path}", include_in_schema=False)
+    def serve_frontend_route(frontend_path: str):
+        # Let unknown API and demo-image requests remain 404s instead of
+        # returning the SPA shell, which would obscure deployment problems.
+        blocked_prefixes = ("api/", "ws/", "dicom/", "dicom-out/", "dicom-head-stroke-plain/", "dicom-lihvr/")
+        if frontend_path.startswith(blocked_prefixes):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        candidate = (FRONTEND_DIST_DIR / frontend_path).resolve()
+        if FRONTEND_DIST_DIR in candidate.parents and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(FRONTEND_INDEX_FILE)
