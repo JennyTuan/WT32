@@ -71,6 +71,7 @@ import {
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
 import { hasVerifiedSeriesImageSource } from "../lib/scanSeriesImageSource";
+import { getScanSeriesImageAsset } from "../lib/scanSeriesImageAssets";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
 import { buildViewerBindingKey, isViewerBindingKeyVerified } from "../lib/viewerBinding";
@@ -174,6 +175,8 @@ const HEAD_WINDOW_PRESETS = [
 ] as const satisfies readonly WindowPreset[];
 
 const VOLUME_PRESETS = [
+    "WT-Head-Soft-Tissue",
+    "WT-Head-Bone",
     "CT-AAA",
     "CT-AAA2",
     "CT-Bone",
@@ -199,6 +202,12 @@ const VOLUME_PRESETS = [
 
 type VolumePreset = typeof VOLUME_PRESETS[number];
 
+const VOLUME_PRESET_LABELS: Partial<Record<VolumePreset, string>> = {
+    "WT-Head-Soft-Tissue": "头部软组织",
+    "WT-Head-Bone": "头部骨性",
+};
+const getVolumePresetLabel = (preset: VolumePreset) => VOLUME_PRESET_LABELS[preset] ?? preset;
+
 /**
  * Smart 3D volume preset defaults. Reconstruction content has priority over
  * the exam body part: a bone reconstruction should look like bone even when
@@ -206,8 +215,8 @@ type VolumePreset = typeof VOLUME_PRESETS[number];
  * generic series names.
  */
 const PRESET_BY_BODY_PART: Record<string, VolumePreset> = {
-    BRAIN: "CT-Soft-Tissue",
-    HEAD: "CT-Bone",            // skull bone surface; brain itself isn't VR-friendly
+    BRAIN: "WT-Head-Soft-Tissue",
+    HEAD: "WT-Head-Bone",
     NECK: "CT-Soft-Tissue",     // soft-tissue dominant; carotids only show with contrast
     CHEST: "CT-Lung",           // lung parenchyma + airways
     THORAX: "CT-Lung",
@@ -222,9 +231,11 @@ const resolveDefaultVolumePreset = (
     series?: Pick<Series, "name" | "kernel"> | null,
 ): VolumePreset => {
     const reconstruction = `${series?.name ?? ""} ${series?.kernel ?? ""}`.toLowerCase();
+    const bodyPartKey = bodyPart?.trim().toUpperCase();
+    const isHeadStudy = bodyPartKey === "BRAIN" || bodyPartKey === "HEAD" || /(brain|head|颅脑)/i.test(reconstruction);
 
     if (/(bone|osseous|骨窗|骨性|\bfc[4-9]\d\b|\bj[5-9]\d\w*\b|\bb[5-9]\d\w*\b)/i.test(reconstruction)) {
-        return "CT-Bone";
+        return isHeadStudy ? "WT-Head-Bone" : "CT-Bone";
     }
     if (/(lung|pulmonary|肺窗|肺部|\bb3[01]\w*\b|\bb4[01]\w*\b)/i.test(reconstruction)) {
         return "CT-Lung";
@@ -236,12 +247,11 @@ const resolveDefaultVolumePreset = (
             : "CT-Liver-Vasculature";
     }
     if (/(brain|head|颅脑|软组织|soft|\bj[23]\d\w*\b|\bfc[12]\d\b)/i.test(reconstruction)) {
-        return "CT-Soft-Tissue";
+        return isHeadStudy ? "WT-Head-Soft-Tissue" : "CT-Soft-Tissue";
     }
 
     if (!bodyPart) return "CT-Soft-Tissue";
-    const key = bodyPart.trim().toUpperCase();
-    return PRESET_BY_BODY_PART[key] ?? "CT-Soft-Tissue";
+    return PRESET_BY_BODY_PART[bodyPartKey ?? ""] ?? "CT-Soft-Tissue";
 };
 
 const formatPersonName = (value?: string) => (value ? value.replace(/\^/g, " ").trim() : "N/A");
@@ -328,12 +338,15 @@ const LAYOUT_SPECS: Record<LayoutKey, LayoutSpec> = {
     },
 };
 
+const QIN_LUNG_TOPOGRAM_ASSET = getScanSeriesImageAsset("qin-lung-topogram");
+const QIN_LUNG_HELICAL_ASSET = getScanSeriesImageAsset("qin-lung-helical-demo");
+
 const REAL_LUNG_SERIES = {
     studyName: "C/A/P CT Reference Demo",
     studyId: "study-cap-demo",
     seriesId: "series-cap-soft",
     seriesName: "Body 5.0 CE",
-    count: 120,
+    count: QIN_LUNG_HELICAL_ASSET?.imageUrls.length ?? 0,
     rows: 512,
     cols: 512,
     thickness: "5.0 mm",
@@ -342,7 +355,6 @@ const REAL_LUNG_SERIES = {
     fov: "500.0 mm",
     matrix: "512",
     kernel: "FC17",
-    basePath: "/dicom/cap/soft",
 };
 
 const REALISTIC_SCOUT_SERIES = {
@@ -381,6 +393,24 @@ const BRAIN_HELICAL_VIEW_SERIES = {
 };
 const BRAIN_HELICAL_RECON_SERIES = [
     {
+        studyName: "CT HEAD WO CONTRAST",
+        studyId: "study-head-demo",
+        seriesId: "series-head-thin-cor",
+        seriesName: "Head WO Coronal 2mm",
+        count: 112,
+        rows: 512,
+        cols: 574,
+        thickness: "2.0 mm",
+        kV: "120",
+        mAs: "Auto",
+        fov: "185.0 mm",
+        matrix: "512",
+        kernel: "J30s",
+        basePath: "/dicom-head-stroke-plain/cor",
+        defaultWw: HEAD_BRAIN_DEFAULT_WINDOW.ww,
+        defaultWl: HEAD_BRAIN_DEFAULT_WINDOW.wl,
+    },
+    {
         ...BRAIN_HELICAL_VIEW_SERIES,
         defaultWw: HEAD_BRAIN_DEFAULT_WINDOW.ww,
         defaultWl: HEAD_BRAIN_DEFAULT_WINDOW.wl,
@@ -405,7 +435,8 @@ const BRAIN_HELICAL_RECON_SERIES = [
     },
 ] as const;
 const HEAD_STROKE_TOPOGRAM_URL = "/dicom-head-stroke-plain/scout/scout.dcm";
-const FOUR_D_SCOUT_URL = "/daae3df7f522b56724aed7e3e544c0fe/series-000002/image-000002.dcm";
+const QIN_LUNG_TOPOGRAM_URL = QIN_LUNG_TOPOGRAM_ASSET?.imageUrls[0] ?? "";
+const FOUR_D_SCOUT_URL = QIN_LUNG_TOPOGRAM_URL;
 
 const getSeriesDicomUrl = (
     sliceIndex: number,
@@ -521,7 +552,8 @@ const ViewScreen = () => {
     // ─── 4D 后处理状态 ────────────────────────────────────────────────────────
     const routeFourDState = location.state as (FourDPostScanState & { initialBrowseMode?: FourDBrowseMode; offlineRecon?: boolean }) | null;
     const routeStandardState = location.state as StandardViewerHandoffState | null;
-    const selectedPatientId = loadSelectedPatient()?.id ?? routeStandardState?.patientId ?? null;
+    const selectedPatient = loadSelectedPatient();
+    const selectedPatientId = selectedPatient?.id ?? routeStandardState?.patientId ?? null;
     const selectedScanSessionId = loadSelectedScanSessionId() ?? routeStandardState?.scanSessionId ?? null;
     const isFourDEntry = !!routeFourDState?.scanResult;
     const viewerBindingKey = buildViewerBindingKey({
@@ -969,6 +1001,9 @@ const ViewScreen = () => {
                     )
                         ? { dicomUrls: [HEAD_STROKE_TOPOGRAM_URL], defaultWw: 130, defaultWl: 130 }
                         : {}),
+                    ...(sourceVerified && !isBrainHelicalDemo && s.image_source_id === "qin-lung-topogram" && QIN_LUNG_TOPOGRAM_ASSET
+                        ? { dicomUrls: [...QIN_LUNG_TOPOGRAM_ASSET.imageUrls] }
+                        : {}),
                     ...(sourceVerified && s.image_source_id === "fourd-scout-demo"
                         ? { dicomUrls: [FOUR_D_SCOUT_URL] }
                         : {}),
@@ -1023,8 +1058,8 @@ const ViewScreen = () => {
                     images: makeImages(seriesCount, `${prefix}-recon${r.id}`),
                     defaultWw: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.ww : r.window_width,
                     defaultWl: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : r.window_level,
-                    ...(sourceVerified && s.image_source_id === "qin-lung-helical-demo"
-                        ? { dicomBasePath: REAL_LUNG_SERIES.basePath, dicomFilePrefix: "lung" as const }
+                    ...(sourceVerified && s.image_source_id === "qin-lung-helical-demo" && QIN_LUNG_HELICAL_ASSET
+                        ? { dicomUrls: [...QIN_LUNG_HELICAL_ASSET.imageUrls] }
                         : {}),
                     }));
 
@@ -1047,8 +1082,8 @@ const ViewScreen = () => {
                         images: makeImages(seriesCount, `${prefix}-scan`),
                         defaultWw: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.ww : undefined,
                         defaultWl: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : undefined,
-                        ...(sourceVerified && s.image_source_id === "qin-lung-helical-demo"
-                            ? { dicomBasePath: REAL_LUNG_SERIES.basePath, dicomFilePrefix: "lung" as const }
+                        ...(sourceVerified && s.image_source_id === "qin-lung-helical-demo" && QIN_LUNG_HELICAL_ASSET
+                            ? { dicomUrls: [...QIN_LUNG_HELICAL_ASSET.imageUrls] }
                             : {}),
                     });
                 }
@@ -2119,8 +2154,8 @@ const ViewScreen = () => {
     return (
         <div className="relative flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden">
             <AppHeader
-                patientName={meta.patientName !== "N/A" ? meta.patientName : null}
-                patientId={meta.patientId !== "N/A" ? meta.patientId : null}
+                patientName={selectedPatient?.name ?? (meta.patientName !== "N/A" ? meta.patientName : null)}
+                patientId={selectedPatient?.patientId ?? (meta.patientId !== "N/A" ? meta.patientId : null)}
                 clockOverride={{ time: clockStr, date: dateStr }}
             />
 
@@ -2521,7 +2556,7 @@ const ViewScreen = () => {
                                                     className={`h-[30px] flex-1 bg-white border rounded-md px-2.5 flex items-center justify-between transition-all cursor-pointer ${isVolumePresetOpen ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#DCE6F2] hover:border-[#4D94FF]/50'}`}
                                                 >
                                                     <span className="text-[12px] font-medium text-[#37474F] truncate">
-                                                        {selectedVolumePreset}
+                                                        {getVolumePresetLabel(selectedVolumePreset)}
                                                     </span>
                                                     <ChevronDown size={13} className={`text-[#94A3B8] transition-transform shrink-0 ml-1 ${isVolumePresetOpen ? 'rotate-180 text-[#4D94FF]' : ''}`} />
                                                 </div>
@@ -2533,7 +2568,7 @@ const ViewScreen = () => {
                                                                 onClick={() => { setSelectedVolumePreset(preset); setIsVolumePresetOpen(false); }}
                                                                 className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${selectedVolumePreset === preset ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
                                                             >
-                                                                {preset}
+                                                                {getVolumePresetLabel(preset)}
                                                             </div>
                                                         ))}
                                                     </div>

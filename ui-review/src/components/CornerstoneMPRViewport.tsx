@@ -6,6 +6,7 @@ import {
   RenderingEngine,
   setVolumesForViewports,
   type Types,
+  utilities,
   volumeLoader,
 } from '@cornerstonejs/core';
 import { annotation } from '@cornerstonejs/tools';
@@ -184,6 +185,72 @@ function getInterpolationType(mode: InterpolationMode) {
   return Enums.InterpolationType.LINEAR;
 }
 
+const CUSTOM_VOLUME_PRESETS: Record<string, Types.ViewportPreset> = {
+  'WT-Head-Soft-Tissue': {
+    name: 'WT-Head-Soft-Tissue',
+    gradientOpacity: '4 0 0.28 180 1',
+    specularPower: '18',
+    scalarOpacity: '20 -3024 0 -1000 0 -250 0 -120 0.025 20 0.08 80 0.16 200 0.24 400 0.36 800 0.58 3071 0.88',
+    specular: '0.22',
+    shade: '1',
+    ambient: '0.18',
+    colorTransfer: '40 -3024 0 0 0 -1000 0 0 0 -250 0.08 0.025 0.018 -120 0.22 0.07 0.045 20 0.56 0.22 0.16 80 0.86 0.46 0.34 200 0.94 0.66 0.5 400 0.98 0.8 0.61 800 1 0.91 0.74 3071 1 1 0.96',
+    diffuse: '0.82',
+    interpolation: '1',
+  },
+  'WT-Head-Bone': {
+    name: 'WT-Head-Bone',
+    gradientOpacity: '4 0 0.18 260 1',
+    specularPower: '24',
+    scalarOpacity: '18 -3024 0 -1000 0 120 0 220 0.04 350 0.22 500 0.48 800 0.72 1400 0.88 3071 0.95',
+    specular: '0.28',
+    shade: '1',
+    ambient: '0.14',
+    colorTransfer: '36 -3024 0 0 0 -1000 0 0 0 120 0.18 0.07 0.04 220 0.58 0.28 0.16 350 0.84 0.61 0.38 500 0.94 0.8 0.58 800 1 0.92 0.72 1400 1 0.98 0.88 3071 1 1 1',
+    diffuse: '0.86',
+    interpolation: '1',
+  },
+};
+
+function applyVolumeRenderingProperties(
+  viewport: Types.IVolumeViewport,
+  presetName: VolumePreset,
+  sampleDistanceMultiplier: number,
+  smoothing: number,
+  sharpening: number,
+) {
+  const customPreset = CUSTOM_VOLUME_PRESETS[presetName];
+  if (customPreset) {
+    // 头部专用曲线只改变模拟显示效果，不修改原始体数据或序列窗宽窗位。
+    const actor = viewport.getDefaultActor()?.actor as Types.VolumeActor | undefined;
+    if (actor) utilities.applyPreset(actor, customPreset);
+    viewport.setProperties({
+      sampleDistanceMultiplier,
+      smoothing,
+      sharpening,
+    } as Types.VolumeViewportProperties);
+    return;
+  }
+
+  viewport.setProperties({
+    preset: presetName,
+    sampleDistanceMultiplier,
+    smoothing,
+    sharpening,
+  } as Types.VolumeViewportProperties);
+}
+
+function resetVolumeRenderingCamera(viewport: Types.IVolumeViewport) {
+  viewport.resetCamera();
+  const renderer = viewport.getRenderer();
+  const camera = renderer.getActiveCamera();
+  camera.azimuth(30);
+  camera.elevation(58);
+  renderer.resetCamera();
+  renderer.resetCameraClippingRange();
+  viewport.setZoom(viewport.getZoom() * 1.28);
+}
+
 const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRViewportProps>(
   function CornerstoneMPRViewport(
     {
@@ -257,6 +324,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
 
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [errorMsg, setErrorMsg] = useState('');
+    const [isResultInteracting, setIsResultInteracting] = useState(false);
     const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([]);
     const [phasePickerPanel, setPhasePickerPanel] = useState<PanelId | null>(null);
     const phasePickerRef = useRef<HTMLDivElement | null>(null);
@@ -271,6 +339,11 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     // Latest imageUrls reference, read by the long-lived prewarm walker so it
     // can skip the active phase without being restarted on every cine tick.
     const currentImageUrlsRef = useRef(imageUrls);
+    // Keep rotation responsive, then restore the selected sampling quality
+    // immediately when the interaction ends.
+    const effectiveVolumeSampleDistanceMultiplier = isResultInteracting
+      ? Math.max(1.75, volumeSampleDistanceMultiplier * 2.25)
+      : volumeSampleDistanceMultiplier;
     useEffect(() => {
       currentImageUrlsRef.current = imageUrls;
     }, [imageUrls]);
@@ -550,7 +623,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     // Reconfigure that panel only; rebuilding the complete engine would blank
     // the three MPR views and reload the same cached volume on every click.
     useEffect(() => {
-      if (!engineReady || slabViewportIs3dRef.current === isFourthVolume3d) return;
+      if (!engineReady || status !== 'ready' || slabViewportIs3dRef.current === isFourthVolume3d) return;
       const engine = engineRef.current;
       const volumeId = volumeIdRef.current;
       if (!engine || !slabRef.current || !cache.getVolume(volumeId)) return;
@@ -566,6 +639,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
             ? { background: [0, 0, 0] as [number, number, number] }
             : { orientation: Enums.OrientationAxis.CORONAL, background: [0, 0, 0] as [number, number, number] },
         });
+        // disableElement 会让 Cornerstone Tools 自动移除旧视口；重建后必须重新挂回第四窗工具组。
+        getOrCreateToolGroup(volumeToolGroupId.current).addViewport(vpSlab, engineId.current);
         slabViewportIs3dRef.current = isFourthVolume3d;
 
         void setVolumesForViewports(engine, [{ volumeId }], [vpSlab]).then(() => {
@@ -576,12 +651,13 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
           if (isFourthVolume3d) {
             // setVolumesForViewports creates a new actor and resets its
             // properties, so the VR transfer preset must be applied after it.
-            fourthViewport.setProperties({
-              preset: volumePreset,
-              sampleDistanceMultiplier: volumeSampleDistanceMultiplier,
+            applyVolumeRenderingProperties(
+              fourthViewport,
+              volumePreset,
+              effectiveVolumeSampleDistanceMultiplier,
               smoothing,
               sharpening,
-            } as Types.VolumeViewportProperties);
+            );
             fourthViewport.setBlendMode(Enums.BlendModes.COMPOSITE);
           } else {
             fourthViewport.setProperties({
@@ -594,7 +670,8 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
             fourthViewport.setBlendMode(getBlendMode(renderMode));
             fourthViewport.setSlabThickness(isProjectionMode(renderMode) ? slabThickness : 1);
           }
-          fourthViewport.resetCamera();
+          if (isFourthVolume3d) resetVolumeRenderingCamera(fourthViewport);
+          else fourthViewport.resetCamera();
           fourthViewport.render();
         }).catch((error) => {
           if (!cancelled) console.error('Fourth result viewport switch failed:', error);
@@ -606,7 +683,7 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       return () => {
         cancelled = true;
       };
-    }, [engineReady, interpolationMode, invert, isFourthVolume3d, renderMode, sharpening, slabThickness, smoothing, volumePreset, volumeSampleDistanceMultiplier, voiLutMode, vpSlab]);
+    }, [effectiveVolumeSampleDistanceMultiplier, engineReady, interpolationMode, invert, isFourthVolume3d, renderMode, sharpening, slabThickness, smoothing, status, volumePreset, voiLutMode, vpSlab]);
 
     // ── Volume swap ──────────────────────────────────────────────────────────
     // When imageUrls change (e.g. 4D phase-cine advances phase N → N+1),
@@ -1134,10 +1211,14 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       panelViewportIds.forEach((id) => {
         const vp = engine.getViewport(id) as Types.IVolumeViewport | undefined;
         if (!vp) return;
-        vp.setProperties(commonProperties);
-        vp.setBlendMode(useProjectionForMprPanels ? blendMode : Enums.BlendModes.COMPOSITE);
-        vp.setSlabThickness(useProjectionForMprPanels ? slabThickness : 1);
-        vp.render();
+        try {
+          vp.setProperties(commonProperties);
+          vp.setBlendMode(useProjectionForMprPanels ? blendMode : Enums.BlendModes.COMPOSITE);
+          vp.setSlabThickness(useProjectionForMprPanels ? slabThickness : 1);
+          vp.render();
+        } catch {
+          // 渲染器切换瞬间 Actor 可能尚未挂载，体数据就绪后的下一次同步会自动补齐。
+        }
       });
 
       if (layoutMode === 'three-up') return;
@@ -1145,21 +1226,26 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       const fourthVp = engine.getViewport(vpSlab) as Types.IVolumeViewport | undefined;
       if (!fourthVp) return;
 
-      if (isFourthVolume3d) {
-        fourthVp.setProperties({
-          preset: volumePreset,
-          sampleDistanceMultiplier: volumeSampleDistanceMultiplier,
-          smoothing,
-          sharpening,
-        } as Types.VolumeViewportProperties);
-        fourthVp.setBlendMode(Enums.BlendModes.COMPOSITE);
-      } else {
-        fourthVp.setProperties(commonProperties);
-        fourthVp.setBlendMode(blendMode);
-        fourthVp.setSlabThickness(isProjectionMode(renderMode) ? slabThickness : 1);
+      try {
+        if (isFourthVolume3d) {
+          applyVolumeRenderingProperties(
+            fourthVp,
+            volumePreset,
+            effectiveVolumeSampleDistanceMultiplier,
+            smoothing,
+            sharpening,
+          );
+          fourthVp.setBlendMode(Enums.BlendModes.COMPOSITE);
+        } else {
+          fourthVp.setProperties(commonProperties);
+          fourthVp.setBlendMode(blendMode);
+          fourthVp.setSlabThickness(isProjectionMode(renderMode) ? slabThickness : 1);
+        }
+        fourthVp.render();
+      } catch {
+        // 第四窗重建期间忽略一次中间态参数同步，避免快速切换导致页面白屏。
       }
-      fourthVp.render();
-    }, [interpolationMode, invert, isFourthVolume3d, layoutMode, renderMode, sharpening, slabThickness, smoothing, status, voiLutMode, volumePanelMode, volumePreset, volumeSampleDistanceMultiplier, vpAxial, vpCoronal, vpSagittal, vpSlab]);
+    }, [effectiveVolumeSampleDistanceMultiplier, interpolationMode, invert, isFourthVolume3d, layoutMode, renderMode, sharpening, slabThickness, smoothing, status, voiLutMode, volumePanelMode, volumePreset, vpAxial, vpCoronal, vpSagittal, vpSlab]);
 
     useEffect(() => {
       const engine = engineRef.current;
@@ -1182,6 +1268,11 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
       [showAnnotations, stateKey, textAnnotations],
     );
     const panelBase = 'relative overflow-hidden bg-black touch-none';
+    const volumeCursorClass = isFourthVolume3d && activeTool === 'trackballRotate'
+      ? isResultInteracting
+        ? 'cursor-grabbing [&_canvas]:!cursor-grabbing'
+        : 'cursor-grab [&_canvas]:!cursor-grab'
+      : '';
     const slabLabel = volumePanelMode === 'volume3d'
       ? renderMode === 'VR' ? 'VR' : renderMode
       : renderMode === 'MIP' ? 'MIP' : renderMode === 'MinIP' ? 'MinIP' : renderMode === 'Avg' ? 'Avg' : 'Coronal';
@@ -1396,8 +1487,16 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
         </div>
         <div
           ref={slabRef}
-          onPointerDown={() => onActiveOrientationChange?.('volume')}
-          className={`${panelBase} ${getPanelLayoutClass('volume')} ${activeOrientation === 'volume' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
+          onPointerDown={() => {
+            onActiveOrientationChange?.('volume');
+            if (isFourthVolume3d) setIsResultInteracting(true);
+          }}
+          onPointerUp={() => setIsResultInteracting(false)}
+          onPointerCancel={() => setIsResultInteracting(false)}
+          onPointerLeave={(event) => {
+            if (event.buttons === 0) setIsResultInteracting(false);
+          }}
+          className={`${panelBase} ${volumeCursorClass} ${getPanelLayoutClass('volume')} ${activeOrientation === 'volume' ? 'ring-2 ring-inset ring-[#4D94FF]' : ''}`}
           style={{ minHeight: 0 }}
         >
           <div className={PANEL_LABEL_CLASS} style={{ color: '#86EFAC' }}>{slabLabel}</div>

@@ -86,7 +86,13 @@ const DICOM_ERROR_I18N_KEYS: Record<DicomErrorCode, string> = {
 async function probeDicomUrl(url: string): Promise<{ ok: true } | { ok: false; code: DicomErrorCode; detail?: string }> {
   try {
     const resp = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-131' } });
-    if (resp.ok) return { ok: true };
+    if (resp.ok) {
+      // Vite dev server may return the SPA HTML shell for a missing static asset.
+      // Treat that fallback as a missing DICOM instead of a network failure.
+      const contentType = resp.headers.get('content-type') ?? '';
+      if (contentType.includes('text/html')) return { ok: false, code: 'DICOM_NOT_FOUND' };
+      return { ok: true };
+    }
     if (resp.status === 404) return { ok: false, code: 'DICOM_NOT_FOUND' };
     const contentType = resp.headers.get('content-type') ?? '';
     if (contentType.includes('application/json')) {
