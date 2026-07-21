@@ -1,3 +1,4 @@
+import { FileText } from "lucide-react";
 import type { HardwareTestLog } from "../types";
 import { useI18n } from "../../../../lib/i18nContext";
 
@@ -19,12 +20,20 @@ export function HardwareTestStatusPanel({ logs, onClearLogs, runningCount }: Har
 
   return (
     <section className="mt-3 shrink-0 overflow-hidden rounded-xl border border-[#E2E8F0] bg-white shadow-sm">
+      {/* Panel Header */}
       <div className="flex items-center justify-between border-b border-[#EEF2F9] bg-[#F8FAFC] px-5 py-2.5">
         <div className="flex items-center gap-2.5">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-[#E3F2FD]">
+            <FileText size={12} style={{ color: "#1E88E5" }} />
+          </div>
+          <span className="text-[12px] font-bold text-[#475569]">
+            {t("service.hardwareTest.logTitle")}
+          </span>
           <span
-            className={`h-1.5 w-1.5 rounded-full ${runningCount > 0 ? "bg-[#2F7BFF]" : "bg-[#4ADE80]"}`}
+            className={`h-1.5 w-1.5 rounded-full ${
+              runningCount > 0 ? "animate-pulse bg-[#4D94FF]" : "bg-[#4ADE80]"
+            }`}
           />
-          <span className="text-[12px] font-semibold text-[#475569]">{t("service.hardwareTest.logTitle")}</span>
           <span className="text-[11px] text-[#94A3B8]">
             {t("service.hardwareTest.recentLogs", { count: logs.length })}
             {runningCount > 0
@@ -35,13 +44,14 @@ export function HardwareTestStatusPanel({ logs, onClearLogs, runningCount }: Har
         <button
           type="button"
           onClick={onClearLogs}
-          className="rounded px-2 py-0.5 text-[11px] font-medium text-[#94A3B8] transition-colors hover:bg-[#F1F5F9] hover:text-[#475569]"
+          className="rounded-md px-2.5 py-1 text-[11px] font-medium text-[#94A3B8] transition-colors hover:bg-[#F1F5F9] hover:text-[#475569]"
         >
           {t("service.hardwareTest.clearLogs")}
         </button>
       </div>
 
-      <div className="grid grid-cols-[96px_72px_1fr_1.2fr_120px] border-b border-[#F1F5F9] px-5 py-1.5">
+      {/* Column Headers */}
+      <div className="grid grid-cols-[96px_72px_1fr_1.2fr_120px] border-b border-[#F1F5F9] px-5 py-1.5 bg-[#FAFCFF]">
         {columns.map((col) => (
           <div key={col} className="text-[10px] font-semibold uppercase tracking-widest text-[#CBD5E1]">
             {col}
@@ -49,16 +59,19 @@ export function HardwareTestStatusPanel({ logs, onClearLogs, runningCount }: Har
         ))}
       </div>
 
+      {/* Log Rows */}
       <div className="max-h-[130px] overflow-y-auto custom-scrollbar">
         {logs.length === 0 ? (
-          <div className="px-5 py-4 text-[12px] italic text-[#CBD5E1]">{t("service.hardwareTest.emptyLogs")}</div>
+          <div className="px-5 py-4 text-[12px] italic text-[#CBD5E1]">
+            {t("service.hardwareTest.emptyLogs")}
+          </div>
         ) : (
           logs.map((log, index) => (
             <div
               key={log.id}
-              className={`grid grid-cols-[96px_72px_1fr_1.2fr_120px] items-center px-5 py-2 transition-colors hover:bg-[#FAFCFF] ${
-                index < logs.length - 1 ? "border-b border-[#F8FAFC]" : ""
-              }`}
+              className={`grid grid-cols-[96px_72px_1fr_1.2fr_120px] items-center px-5 py-2 transition-colors hover:bg-[#F8FBFF] ${
+                index % 2 === 0 ? "bg-white" : "bg-[#FAFCFF]"
+              } ${index < logs.length - 1 ? "border-b border-[#F8FAFC]" : ""}`}
             >
               <div className="font-mono text-[11px] text-[#94A3B8]">{log.time}</div>
               <div className="text-[12px] font-semibold text-[#475569]">{log.module}</div>
@@ -66,7 +79,9 @@ export function HardwareTestStatusPanel({ logs, onClearLogs, runningCount }: Har
               <div className="truncate text-[12px] text-[#94A3B8]" title={log.paramsSnapshot}>
                 {log.paramsSnapshot}
               </div>
-              <div className="text-[12px] font-semibold text-[#2F7BFF]">{log.result}</div>
+              <div className="text-[12px] font-semibold" style={{ color: "#4D94FF" }}>
+                {log.result}
+              </div>
             </div>
           ))
         )}

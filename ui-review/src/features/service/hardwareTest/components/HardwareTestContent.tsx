@@ -1,3 +1,4 @@
+import { TestTube, Activity } from "lucide-react";
 import type { EditingField, HardwareTestAction, HardwareTestTab, HardwareTestTabOption } from "../types";
 import { useI18n } from "../../../../lib/i18nContext";
 
@@ -28,38 +29,80 @@ export function HardwareTestContent({
 }: HardwareTestContentProps) {
   const { t } = useI18n();
   const activeRunningKey = Object.entries(runningActions).find(([, running]) => running)?.[0] ?? null;
+  const runningCount = Object.values(runningActions).filter(Boolean).length;
 
   return (
     <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#E2E8F0] bg-white shadow-sm">
-      <div className="flex items-end border-b border-[#EEF2F9] px-4 pt-3">
+      {/* Card Header */}
+      <div className="flex items-center justify-between border-b border-[#EEF2F9] bg-[#F8FAFC] px-5 py-3">
+        <div className="flex items-center gap-3">
+          <div
+            className="flex h-8 w-8 items-center justify-center rounded-lg"
+            style={{ background: "linear-gradient(135deg, #4D94FF 0%, #1E88E5 100%)" }}
+          >
+            <TestTube size={15} className="text-white" />
+          </div>
+          <div>
+            <div className="text-[13px] font-bold text-[#1E293B]">
+              {t("service.hardwareTest.title") || "硬件测试"}
+            </div>
+            <div className="text-[10px] text-[#94A3B8]">
+              {t("service.hardwareTest.subtitle") || "设备功能验证与参数调试"}
+            </div>
+          </div>
+        </div>
+
+        {runningCount > 0 && (
+          <div
+            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold"
+            style={{ background: "#E3F2FD", color: "#1E88E5" }}
+          >
+            <Activity size={12} className="animate-pulse" />
+            {runningCount} 项运行中
+          </div>
+        )}
+      </div>
+
+      {/* Tab Bar */}
+      <div className="flex items-end border-b border-[#EEF2F9] px-5 pt-2">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
             className={`relative px-5 py-2 text-[13px] font-semibold transition-colors ${
-              activeTab === tab.id ? "text-[#2F7BFF]" : "text-[#94A3B8] hover:text-[#64748B]"
+              activeTab === tab.id ? "text-[#4D94FF]" : "text-[#94A3B8] hover:text-[#64748B]"
             }`}
           >
             {tab.label}
             {activeTab === tab.id ? (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] rounded-t-full bg-[#2F7BFF]" />
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] rounded-t-full bg-[#4D94FF]" />
             ) : null}
           </button>
         ))}
       </div>
 
+      {/* Column Header */}
       <div className="grid grid-cols-[2fr_2fr_140px] border-b border-[#F1F5F9] bg-[#F8FAFC] px-5 py-2">
-        <div className="text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">{t("service.hardwareTest.column.testItem")}</div>
-        <div className="text-center text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">{t("service.hardwareTest.column.params")}</div>
-        <div className="text-center text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">{t("service.hardwareTest.column.control")}</div>
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">
+          {t("service.hardwareTest.column.testItem")}
+        </div>
+        <div className="text-center text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">
+          {t("service.hardwareTest.column.params")}
+        </div>
+        <div className="text-center text-[10px] font-semibold uppercase tracking-widest text-[#94A3B8]">
+          {t("service.hardwareTest.column.control")}
+        </div>
       </div>
 
+      {/* Rows */}
       <div key={activeTab} className="flex-1 overflow-y-auto custom-scrollbar">
         {rows.map((row, index) => {
           const actionKey = buildActionKey(activeTab, row.id);
           const isRunning = Boolean(runningActions[actionKey]);
           const isDisabled = activeRunningKey !== null && activeRunningKey !== actionKey;
-          const actionLabel = isRunning ? row.runningLabel ?? t("service.hardwareTest.button.stop") : row.idleLabel;
+          const actionLabel = isRunning
+            ? (row.runningLabel ?? t("service.hardwareTest.button.stop"))
+            : row.idleLabel;
           const isPrimary = (row.buttonTone ?? "primary") === "primary";
 
           return (
@@ -67,13 +110,18 @@ export function HardwareTestContent({
               key={row.id}
               className={`grid grid-cols-[2fr_2fr_140px] items-center px-5 py-3 transition-colors ${
                 isDisabled
-                  ? "bg-[#FAFBFD] opacity-45"
+                  ? "bg-[#FAFBFD] opacity-40"
                   : isRunning
-                    ? "bg-[#F8FBFF]"
-                    : "hover:bg-[#FAFCFF]"
+                  ? "bg-[#F0F7FF]"
+                  : "hover:bg-[#FAFCFF]"
               } ${index < rows.length - 1 ? "border-b border-[#F1F5F9]" : ""}`}
+              style={isRunning ? { borderLeft: "3px solid #4D94FF" } : { borderLeft: "3px solid transparent" }}
             >
+              {/* Test Name */}
               <div className="flex items-center gap-2 pr-4">
+                {isRunning && (
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#4D94FF]" />
+                )}
                 <span className="text-[13px] font-semibold text-[#1E293B]">{row.name}</span>
                 {row.code ? (
                   <span className="rounded bg-[#F1F5F9] px-1.5 py-0.5 text-[10px] font-medium text-[#94A3B8]">
@@ -82,6 +130,7 @@ export function HardwareTestContent({
                 ) : null}
               </div>
 
+              {/* Params */}
               <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 px-2">
                 {row.params?.length ? (
                   row.params.map((param) => {
@@ -95,14 +144,16 @@ export function HardwareTestContent({
                           <input
                             autoFocus
                             value={param.value}
-                            onChange={(event) => onParamChange(activeTab, row.id, param.key, event.target.value)}
+                            onChange={(event) =>
+                              onParamChange(activeTab, row.id, param.key, event.target.value)
+                            }
                             onBlur={() => onStartEditing(null)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === "Escape") {
                                 onStartEditing(null);
                               }
                             }}
-                            className={`${param.widthClass ?? "w-14"} h-7 rounded-md border border-[#93C5FD] bg-white px-2 text-center text-[13px] font-semibold text-[#2F7BFF] outline-none ring-2 ring-[#BFDBFE]`}
+                            className={`${param.widthClass ?? "w-14"} h-7 rounded-md border border-[#93C5FD] bg-white px-2 text-center text-[13px] font-semibold text-[#4D94FF] outline-none ring-2 ring-[#BFDBFE]`}
                           />
                         ) : (
                           <button
@@ -115,8 +166,8 @@ export function HardwareTestContent({
                                 paramKey: param.key,
                               })
                             }
-                            className={`${param.widthClass ?? "w-14"} h-7 rounded-md border border-[#CBD5E1] bg-white px-2 text-center text-[13px] font-semibold text-[#2F7BFF] transition-colors ${
-                              isDisabled ? "cursor-not-allowed" : "hover:border-[#93C5FD]"
+                            className={`${param.widthClass ?? "w-14"} h-7 rounded-md border border-[#CBD5E1] bg-white px-2 text-center text-[13px] font-semibold text-[#4D94FF] transition-colors ${
+                              isDisabled ? "cursor-not-allowed" : "hover:border-[#93C5FD] hover:bg-[#F0F7FF]"
                             }`}
                           >
                             {param.value}
@@ -126,10 +177,13 @@ export function HardwareTestContent({
                     );
                   })
                 ) : (
-                  <span className="text-[12px] italic text-[#CBD5E1]">{t("service.hardwareTest.noParams")}</span>
+                  <span className="text-[12px] italic text-[#CBD5E1]">
+                    {t("service.hardwareTest.noParams")}
+                  </span>
                 )}
               </div>
 
+              {/* Action Button */}
               <div className="flex justify-center">
                 <button
                   type="button"
@@ -141,9 +195,14 @@ export function HardwareTestContent({
                       : isRunning
                       ? "bg-[#EF4444] text-white shadow-sm hover:bg-[#DC2626] active:scale-95"
                       : isPrimary
-                        ? "bg-[#2F7BFF] text-white shadow-sm shadow-blue-100 hover:bg-[#1D6AF5] active:scale-95"
-                        : "border border-[#CBD5E1] bg-white text-[#475569] hover:bg-[#F8FAFC] active:scale-95"
+                      ? "text-white shadow-sm active:scale-95"
+                      : "border border-[#CBD5E1] bg-white text-[#475569] hover:bg-[#F8FAFC] active:scale-95"
                   }`}
+                  style={
+                    !isDisabled && !isRunning && isPrimary
+                      ? { background: "linear-gradient(135deg, #4D94FF 0%, #1E88E5 100%)", boxShadow: "0 2px 8px rgba(77,148,255,0.3)" }
+                      : {}
+                  }
                 >
                   {actionLabel}
                 </button>
