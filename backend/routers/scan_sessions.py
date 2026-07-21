@@ -98,24 +98,52 @@ def _copy_fields(source, fields: tuple[str, ...]) -> dict:
     return {field: getattr(source, field) for field in fields}
 
 
-def _clone_topogram_param(source, *, template_param_id: int | None) -> models.ScanSessionTopogramParam:
+def _clone_topogram_param(
+    source,
+    *,
+    template_param_id: int | None,
+    dom_enabled_by_default: bool | None = None,
+) -> models.ScanSessionTopogramParam:
+    values = _copy_fields(source, TOPOGRAM_PARAM_FIELDS)
+    if values["dom"] is None and dom_enabled_by_default is not None:
+        values["dom"] = "1" if dom_enabled_by_default else "0"
     return models.ScanSessionTopogramParam(
         template_param_id=template_param_id,
-        **_copy_fields(source, TOPOGRAM_PARAM_FIELDS),
+        **values,
     )
 
 
-def _clone_helical_param(source, *, template_param_id: int | None) -> models.ScanSessionHelicalParam:
+def _clone_helical_param(
+    source,
+    *,
+    template_param_id: int | None,
+    dom_enabled_by_default: bool | None = None,
+) -> models.ScanSessionHelicalParam:
+    values = _copy_fields(source, HELICAL_PARAM_FIELDS)
+    if values["dom"] is None and dom_enabled_by_default is not None:
+        values["dom"] = "1" if dom_enabled_by_default else "0"
+    if dom_enabled_by_default is not None:
+        values["auto_ma"] = values["dom"] == "1"
     return models.ScanSessionHelicalParam(
         template_param_id=template_param_id,
-        **_copy_fields(source, HELICAL_PARAM_FIELDS),
+        **values,
     )
 
 
-def _clone_axial_param(source, *, template_param_id: int | None) -> models.ScanSessionAxialParam:
+def _clone_axial_param(
+    source,
+    *,
+    template_param_id: int | None,
+    dom_enabled_by_default: bool | None = None,
+) -> models.ScanSessionAxialParam:
+    values = _copy_fields(source, AXIAL_PARAM_FIELDS)
+    if values["dom"] is None and dom_enabled_by_default is not None:
+        values["dom"] = "1" if dom_enabled_by_default else "0"
+    if dom_enabled_by_default is not None:
+        values["auto_ma"] = values["dom"] == "1"
     return models.ScanSessionAxialParam(
         template_param_id=template_param_id,
-        **_copy_fields(source, AXIAL_PARAM_FIELDS),
+        **values,
     )
 
 
@@ -176,7 +204,13 @@ def _get_patient_or_404(patient_id: int, db: Session) -> models.Patient:
     return patient
 
 
-def _clone_session_from_protocol(patient: models.Patient, protocol: models.Protocol, payload: schemas.ScanSessionCreate) -> models.ScanSession:
+def _clone_session_from_protocol(
+    patient: models.Patient,
+    protocol: models.Protocol,
+    payload: schemas.ScanSessionCreate,
+    *,
+    dom_enabled_by_default: bool = True,
+) -> models.ScanSession:
     scan_session = models.ScanSession(
         patient_id=patient.id,
         protocol_id=protocol.id,
@@ -219,18 +253,21 @@ def _clone_session_from_protocol(patient: models.Patient, protocol: models.Proto
             session_series.topogram_param = _clone_topogram_param(
                 series.topogram_param,
                 template_param_id=series.topogram_param.id,
+                dom_enabled_by_default=dom_enabled_by_default,
             )
 
         if series.helical_param:
             session_series.helical_param = _clone_helical_param(
                 series.helical_param,
                 template_param_id=series.helical_param.id,
+                dom_enabled_by_default=dom_enabled_by_default,
             )
 
         if series.axial_param:
             session_series.axial_param = _clone_axial_param(
                 series.axial_param,
                 template_param_id=series.axial_param.id,
+                dom_enabled_by_default=dom_enabled_by_default,
             )
 
         for recon in series.recon_series:
@@ -857,7 +894,14 @@ def get_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
 def create_scan_session(payload: schemas.ScanSessionCreate, db: Session = Depends(get_db)):
     patient = _get_patient_or_404(payload.patient_id, db)
     protocol = _get_protocol_or_404(payload.protocol_id, db)
-    scan_session = _clone_session_from_protocol(patient, protocol, payload)
+    dose_settings = db.query(models.DoseSettings).filter(models.DoseSettings.id == 1).first()
+    dom_enabled_by_default = dose_settings.aec_enabled if dose_settings else True
+    scan_session = _clone_session_from_protocol(
+        patient,
+        protocol,
+        payload,
+        dom_enabled_by_default=dom_enabled_by_default,
+    )
     db.add(scan_session)
     db.commit()
     db.refresh(scan_session)

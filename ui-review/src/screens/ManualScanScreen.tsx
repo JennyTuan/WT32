@@ -248,16 +248,6 @@ export default function ManualScanScreen() {
                       <FieldControl key={field.label} {...field} type={field.select ? "select" : "input"} options={field.select} />
                     ))}
 
-                    <div className="col-span-2 flex flex-col gap-1">
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                        扫描名称
-                      </label>
-                      <input
-                        type="text"
-                        defaultValue="待定"
-                        className="h-[32px] w-full rounded-lg border border-slate-200 bg-white px-2 text-[12px] font-bold outline-none transition-all focus:border-[#4D94FF]"
-                      />
-                    </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-x-3 gap-y-3 pt-3">

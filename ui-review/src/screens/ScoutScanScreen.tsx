@@ -773,6 +773,13 @@ const ScoutScanScreen = ({
                 // Gating shares the 4-step flow with 4D: 呼吸训练 -> 定位像 -> 参数确认 -> 执行扫描。
                 // 扫描后的去向由 ScoutExecuteScanScreen 根据协议类型处理。
                 setIs4DWorkflow(session.acquisition_type === "four_d" || session.acquisition_type === "gating");
+                const activePlan = workflowPlans.find((plan) => plan.sourceSessionId === session.id);
+                const activeScout = activePlan
+                    ? mergeDualScoutPlanSequences(activePlan).sequences.find((sequence) => sequence.type === "scout")
+                    : null;
+                if (activePlan && activeScout) {
+                    setExpandedSeqId(`group-${activePlan.id}-seq-${activeScout.id}`);
+                }
                 setWorkflowGuardStatus("ready");
             } catch {
                 if (!cancelled) {
@@ -786,7 +793,7 @@ const ScoutScanScreen = ({
         return () => {
             cancelled = true;
         };
-    }, [navigate, selectedPatient, workflowPlans.length]);
+    }, [navigate, selectedPatient, workflowPlans]);
 
     const isBreathingTraining = bottomPanelMode === "breathing" && breathingWorkflowVariant === "training";
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
@@ -1399,7 +1406,7 @@ const ScoutScanScreen = ({
             />
 
             {/* 2. Main Content Area - Card Partitioning */}
-            <main className="flex-1 flex overflow-hidden p-2 gap-1">
+            <main className="flex-1 flex overflow-hidden p-[2px] gap-1">
 
                 {/* Left Sidebar Card */}
                 <aside className="w-[240px] bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden shrink-0">
@@ -1426,12 +1433,12 @@ const ScoutScanScreen = ({
                     {/* Protocol Tree Area - Match ScanConfirm implementation */}
                     <div className={`overflow-y-auto p-2 flex flex-col gap-0 transition-all duration-300 ${isTreeCollapsed ? 'h-[48px] opacity-40 grayscale overflow-hidden' : 'flex-1 min-h-0'}`}>
                         {groups.map(group => (
-                            <div key={group.id} className="flex flex-col">
+                            <div key={group.id} className="flex flex-col mb-1 last:mb-0">
                                 <div
                                     onClick={() => toggleSelection(group.id)}
-                                    className="flex items-center gap-2 px-2 py-1.5 text-[#37474F] cursor-pointer hover:bg-[#EEF2F9] rounded-md transition-all"
+                                    className="flex items-center gap-2 px-2 py-1 text-[#64748B] cursor-pointer hover:bg-[#F8FAFC] rounded-md transition-all"
                                 >
-                                    <ChevronDown size={14} className="opacity-40" />
+                                    <ChevronDown size={14} className="text-[#94A3B8]" />
                                     <div
                                         onClick={(e) => {
                                             e.stopPropagation();
@@ -1444,7 +1451,7 @@ const ScoutScanScreen = ({
                                     >
                                         {group.sequences.every(s => selectedIds.includes(s.id)) && <Check size={9} className="text-white stroke-[3]" />}
                                     </div>
-                                    <span className={`text-[13px] font-bold truncate transition-all ${group.sequences.every(s => selectedIds.includes(s.id)) ? 'text-[#4D94FF]' : 'text-[#37474F]'}`}>{group.name}</span>
+                                    <span className={`text-[11px] font-semibold truncate transition-all ${group.sequences.every(s => selectedIds.includes(s.id)) ? 'text-[#4D94FF]' : 'text-[#64748B]'}`}>{group.name}</span>
                                 </div>
 
                                 <div className="flex flex-col">
@@ -1462,7 +1469,8 @@ const ScoutScanScreen = ({
                                                 const isCompletedSequence = bottomPanelMode === 'breathing'
                                                     && breathingWorkflowVariant === 'training'
                                                     && isScoutType;
-                                                const isUnifiedActiveSequence = bottomPanelMode === 'breathing' ? resolvedActiveSequence : isScoutType;
+                                                // 仅当前展开的序列代表本次操作焦点；同类定位像不应同时高亮。
+                                                const isUnifiedActiveSequence = isExpanded && (bottomPanelMode === 'breathing' ? resolvedActiveSequence : isScoutType);
                                                 const shouldShowSteps = !!seq.steps?.length && isExpanded;
 
                                                 return (

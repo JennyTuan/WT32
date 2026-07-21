@@ -18,6 +18,8 @@ import {
     PanelLeftClose,
     PanelLeftOpen,
     RotateCw,
+    FlipHorizontal,
+    FlipVertical,
     Orbit,
     ScanLine,
     Eye,
@@ -1361,6 +1363,14 @@ const ViewScreen = () => {
     const isMprViewActive = !isTopogramSeries && imageMode === "3D";
     const isReaderModeSupported = imageMode === "2D" || isTopogramSeries;
     const isReaderModeActive = readerMode && isReaderModeSupported;
+    const toggleReaderMode = useCallback(() => {
+        if (!isReaderModeActive) {
+            // 阅片入口统一从窗宽/窗位开始，避免沿用上一操作的旋转等临时工具状态。
+            setToolMode("wl");
+            lastToolByModeRef.current["2D"] = "wl";
+        }
+        setReaderMode((current) => !current);
+    }, [isReaderModeActive]);
     const isFourDPlaybackBlockedByReview = isFourDLungReconSeries && isFourDEntry && fourDStage !== "done";
     const getFourDEngineerMhaUrlsForPhase = useCallback(
         (phaseIndex: number) => {
@@ -2236,7 +2246,7 @@ const ViewScreen = () => {
                 clockOverride={{ time: clockStr, date: dateStr }}
             />
 
-            <main className={`flex-1 flex overflow-hidden p-2 ${isReaderModeActive ? "gap-0" : "gap-2"}`}>
+            <main className={`flex-1 flex overflow-hidden ${isReaderModeActive ? "gap-0 p-[2px]" : "gap-1 p-1"}`}>
                 <aside
                     aria-hidden={isReaderModeActive}
                     className={`bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden shrink-0 transition-all duration-200 ${
@@ -2370,39 +2380,42 @@ const ViewScreen = () => {
                                         <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1.4fr)] gap-1.5 rounded-md border border-[#B7D5FF] bg-[linear-gradient(135deg,#F0F7FF_0%,#F4FFFB_100%)] px-2 py-2 shadow-[0_8px_18px_-16px_rgba(37,99,235,0.75)]">
                                             <WindowValueStrip ww={Math.round(displayWw)} wl={Math.round(displayWl)} inline />
                                             <div className="relative">
-                                                <div
+                                                <button
+                                                    type="button"
                                                     onClick={() => {
                                                         setIsWindowPresetOpen(!isWindowPresetOpen);
                                                         setIsVolumePresetOpen(false);
                                                         setIsVolumeQualityOpen(false);
                                                     }}
-                                                    className={`flex h-full min-h-[44px] w-full cursor-pointer items-center justify-between rounded-md border bg-white/90 px-1.5 transition-all ${isWindowPresetOpen ? 'border-[#2563EB] ring-2 ring-[#60A5FA]/20' : 'border-[#BFDBFE] hover:border-[#60A5FA]'}`}
+                                                    aria-expanded={isWindowPresetOpen}
+                                                    aria-haspopup="listbox"
+                                                    aria-label={t("view.controls.windowPreset")}
+                                                    title={activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}
+                                                    className={`flex h-full min-h-[44px] w-full items-center gap-1 rounded-md border bg-white/90 px-2 text-left transition-all ${isWindowPresetOpen ? 'border-[#2563EB] ring-2 ring-[#60A5FA]/20' : 'border-[#BFDBFE] hover:border-[#60A5FA]'}`}
                                                 >
-                                                    <span className="truncate text-[10px] font-semibold text-[#1E3A8A]">
+                                                    <span className="truncate text-[10px] font-bold text-[#1E3A8A]">
                                                         {activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}
                                                     </span>
-                                                    <ChevronDown size={13} className={`text-[#60A5FA] transition-transform shrink-0 ml-1 ${isWindowPresetOpen ? 'rotate-180 text-[#2563EB]' : ''}`} />
-                                                </div>
+                                                    <ChevronDown size={13} className={`ml-auto shrink-0 text-[#60A5FA] transition-transform ${isWindowPresetOpen ? 'rotate-180 text-[#2563EB]' : ''}`} />
+                                                </button>
                                                 {isWindowPresetOpen && (
-                                                    <div className="absolute top-[calc(100%+3px)] left-0 right-0 bg-white border border-[#DCE6F2] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                                                    <div role="listbox" aria-label={t("view.controls.windowPreset")} className="absolute top-[calc(100%+4px)] left-0 right-0 z-50 max-h-[184px] overflow-y-auto rounded-lg border border-[#BFDBFE] bg-white py-1 shadow-xl">
                                                         {windowPresetsForSelectedSeries.map((preset) => {
                                                             const active = activeWindowPreset?.key === preset.key;
                                                             return (
-                                                                <div
+                                                                <button
                                                                     key={preset.key}
+                                                                    type="button"
+                                                                    role="option"
+                                                                    aria-selected={active}
                                                                     onClick={() => {
                                                                         applyWindowPreset(preset);
                                                                         setIsWindowPresetOpen(false);
                                                                     }}
-                                                                    className={`px-3 py-2 text-[12px] font-medium cursor-pointer transition-colors ${active ? 'bg-[#EBF3FF] text-[#4D94FF]' : 'text-[#37474F] hover:bg-[#F5F5F5]'}`}
+                                                                    className={`flex min-h-[40px] w-full items-center px-3 text-left transition-colors ${active ? 'bg-[#EFF6FF] text-[#1D4ED8]' : 'text-[#37474F] hover:bg-[#F8FAFC]'}`}
                                                                 >
-                                                                    <div className="flex items-center justify-between gap-2">
-                                                                        <span>{preset.label}</span>
-                                                                        <span className="text-[10px] font-black tabular-nums opacity-60">
-                                                                            {preset.ww}/{preset.wl}
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
+                                                                    <span className="truncate text-[12px] font-bold">{preset.label}</span>
+                                                                </button>
                                                             );
                                                         })}
                                                     </div>
@@ -2538,47 +2551,44 @@ const ViewScreen = () => {
                                     {!isFourDLungReconSeries && (
                                         <>
                                              <PanelSection title={t("view.display")}>
-                                                 <div className="overflow-visible rounded-xl border border-[#DCE6F2] bg-white shadow-[0_6px_16px_-18px_rgba(15,23,42,0.65)]">
-                                                     <div className="grid grid-cols-2 divide-x divide-[#E7EDF5]">
-                                                         <div className="px-3 py-2.5">
-                                                             <div className="text-[9px] font-semibold text-[#64748B]">WW</div>
-                                                             <div className="mt-0.5 text-[16px] font-bold tabular-nums text-[#1E3A8A]">{Math.round(displayWw)}</div>
-                                                         </div>
-                                                         <div className="px-3 py-2.5">
-                                                             <div className="text-[9px] font-semibold text-[#64748B]">WL</div>
-                                                             <div className="mt-0.5 text-[16px] font-bold tabular-nums text-[#047857]">{Math.round(displayWl)}</div>
-                                                         </div>
-                                                     </div>
-                                                     <div className="relative flex min-h-[42px] items-center gap-2 border-t border-[#E7EDF5] px-3">
-                                                         <span className="text-[11px] font-medium text-[#475569]">{t("view.controls.windowPreset")}</span>
+                                                 <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1.4fr)] gap-1.5 rounded-md border border-[#B7D5FF] bg-[linear-gradient(135deg,#F0F7FF_0%,#F4FFFB_100%)] px-2 py-2 shadow-[0_8px_18px_-16px_rgba(37,99,235,0.75)]">
+                                                     <WindowValueStrip ww={Math.round(displayWw)} wl={Math.round(displayWl)} inline />
+                                                     <div className="relative">
                                                          <button
                                                              type="button"
                                                              onClick={() => {
-                                                                  setIsWindowPresetOpen(!isWindowPresetOpen);
-                                                                  setIsVolumePresetOpen(false);
-                                                                  setIsVolumeQualityOpen(false);
+                                                                 setIsWindowPresetOpen(!isWindowPresetOpen);
+                                                                 setIsVolumePresetOpen(false);
+                                                                 setIsVolumeQualityOpen(false);
                                                              }}
-                                                             className="ml-auto inline-flex max-w-[118px] items-center gap-1 text-[11px] font-semibold text-[#2563EB]"
+                                                             aria-expanded={isWindowPresetOpen}
+                                                             aria-haspopup="listbox"
+                                                             aria-label={t("view.controls.windowPreset")}
+                                                             title={activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}
+                                                             className={`flex h-full min-h-[44px] w-full items-center gap-1 rounded-md border bg-white/90 px-2 text-left transition-all ${isWindowPresetOpen ? 'border-[#2563EB] ring-2 ring-[#60A5FA]/20' : 'border-[#BFDBFE] hover:border-[#60A5FA]'}`}
                                                          >
-                                                             <span className="truncate">{activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}</span>
-                                                             <ChevronDown size={13} className={`shrink-0 transition-transform ${isWindowPresetOpen ? 'rotate-180' : ''}`} />
+                                                             <span className="truncate text-[10px] font-bold text-[#1E3A8A]">
+                                                                 {activeWindowPreset ? activeWindowPreset.label : t("view.controls.windowPreset")}
+                                                             </span>
+                                                             <ChevronDown size={13} className={`ml-auto shrink-0 text-[#60A5FA] transition-transform ${isWindowPresetOpen ? 'rotate-180 text-[#2563EB]' : ''}`} />
                                                          </button>
                                                          {isWindowPresetOpen && (
-                                                             <div className="absolute top-[calc(100%+4px)] left-0 right-0 rounded-xl border border-[#DCE6F2] bg-white py-1 shadow-xl z-50 overflow-hidden">
+                                                             <div role="listbox" aria-label={t("view.controls.windowPreset")} className="absolute top-[calc(100%+4px)] left-0 right-0 z-50 max-h-[184px] overflow-y-auto rounded-lg border border-[#BFDBFE] bg-white py-1 shadow-xl">
                                                                  {windowPresetsForSelectedSeries.map((preset) => {
                                                                      const active = activeWindowPreset?.key === preset.key;
                                                                      return (
                                                                          <button
                                                                              key={preset.key}
                                                                              type="button"
+                                                                             role="option"
+                                                                             aria-selected={active}
                                                                              onClick={() => {
                                                                                  applyWindowPreset(preset);
                                                                                  setIsWindowPresetOpen(false);
                                                                              }}
-                                                                             className={`flex w-full items-center justify-between px-3 py-2 text-left text-[12px] font-medium transition-colors ${active ? 'bg-[#EFF6FF] text-[#2563EB]' : 'text-[#37474F] hover:bg-[#F8FAFC]'}`}
+                                                                             className={`flex min-h-[40px] w-full items-center px-3 text-left transition-colors ${active ? 'bg-[#EFF6FF] text-[#1D4ED8]' : 'text-[#37474F] hover:bg-[#F8FAFC]'}`}
                                                                          >
-                                                                             <span>{preset.label}</span>
-                                                                             <span className="text-[10px] font-bold tabular-nums opacity-60">{preset.ww}/{preset.wl}</span>
+                                                                             <span className="truncate text-[12px] font-bold">{preset.label}</span>
                                                                          </button>
                                                                      );
                                                                  })}
@@ -3084,6 +3094,34 @@ const ViewScreen = () => {
                                 <Contrast size={18} />
                                 <span className="mt-1 leading-none">{t("view.controls.invert")}</span>
                             </button>
+                            {imageMode === "2D" && (
+                                <>
+                                    <button
+                                        type="button"
+                                        aria-label="左右翻转"
+                                        onClick={() => {
+                                            dicomViewerRef.current?.flipHorizontal();
+                                            showViewerNotice("已左右翻转当前图像");
+                                        }}
+                                        className="flex h-[50px] w-[72px] flex-col items-center justify-center rounded-[10px] border border-white/10 bg-white/5 text-[9px] font-bold text-[#CBD5E1] transition-colors active:bg-white/15"
+                                    >
+                                        <FlipHorizontal size={18} />
+                                        <span className="mt-1 leading-none">左右翻转</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        aria-label="上下翻转"
+                                        onClick={() => {
+                                            dicomViewerRef.current?.flipVertical();
+                                            showViewerNotice("已上下翻转当前图像");
+                                        }}
+                                        className="flex h-[50px] w-[72px] flex-col items-center justify-center rounded-[10px] border border-white/10 bg-white/5 text-[9px] font-bold text-[#CBD5E1] transition-colors active:bg-white/15"
+                                    >
+                                        <FlipVertical size={18} />
+                                        <span className="mt-1 leading-none">上下翻转</span>
+                                    </button>
+                                </>
+                            )}
                         </div>
 
                         <div className="my-2 h-px bg-white/10" />
@@ -3131,7 +3169,7 @@ const ViewScreen = () => {
                             {isReaderModeSupported && (
                                 <button
                                     type="button"
-                                    onClick={() => setReaderMode((current) => !current)}
+                                    onClick={toggleReaderMode}
                                     className={`flex h-[44px] items-center justify-center gap-1.5 rounded-lg px-1 text-[9px] font-bold ring-1 ${isReaderModeActive ? "bg-[#2563EB] text-white ring-[#60A5FA]" : "bg-white/5 text-[#CBD5E1] ring-white/10"}`}
                                 >{isReaderModeActive ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}<span>{isReaderModeActive ? "退出阅片" : "阅片模式"}</span></button>
                             )}
@@ -3214,7 +3252,7 @@ const ViewScreen = () => {
                                     key: "reader",
                                     title: isReaderModeActive ? t("view.tool.exitReaderMode") : t("view.tool.readerMode"),
                                     icon: isReaderModeActive ? <PanelLeftOpen size={20} strokeWidth={1.5} /> : <PanelLeftClose size={20} strokeWidth={1.5} />,
-                                    action: () => setReaderMode((prev) => !prev),
+                                    action: toggleReaderMode,
                                     active: isReaderModeActive,
                                     disabled: !isReaderModeSupported,
                                 },

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
     clearSelectedScanWorkflowPlans,
+    findNextWorkflowPlan,
     loadSelectedScanWorkflowPlans,
     saveSelectedScanWorkflowPlans,
     type WorkflowPlan,
@@ -42,6 +43,16 @@ describe("selected scan workflow plans", () => {
         saveSelectedScanWorkflowPlans(plans);
 
         expect(loadSelectedScanWorkflowPlans()).toEqual(plans);
+    });
+
+    it("continues multi-plan examinations with the next bound scan session", () => {
+        const firstPlan = createWorkflowPlan();
+        const secondPlan = { ...createWorkflowPlan(), id: "plan-2", sourceSessionId: 702 };
+        const thirdPlan = { ...createWorkflowPlan(), id: "plan-3", sourceSessionId: 703 };
+
+        expect(findNextWorkflowPlan([firstPlan, secondPlan, thirdPlan], 701)).toEqual(secondPlan);
+        expect(findNextWorkflowPlan([firstPlan, secondPlan, thirdPlan], 702)).toEqual(thirdPlan);
+        expect(findNextWorkflowPlan([firstPlan, secondPlan, thirdPlan], 703)).toBeNull();
     });
 
     it("stores a snapshot instead of retaining mutable protocol-plan references", () => {

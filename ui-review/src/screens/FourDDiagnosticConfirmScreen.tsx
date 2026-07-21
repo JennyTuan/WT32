@@ -906,7 +906,7 @@ export default function FourDDiagnosticConfirmScreen() {
                 onLaserToggle={() => setLaserActive((prev) => !prev)}
             />
 
-            <main className="flex-1 flex overflow-hidden p-2 gap-1">
+            <main className="flex-1 flex overflow-hidden p-[2px] gap-1">
                 <aside className="w-[240px] bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden shrink-0">
                     <div className="h-[48px] bg-[#F8FAFC] border-b border-[#EEF2F9] flex items-center justify-between px-3 shrink-0">
                         <div className="flex items-center gap-2">

@@ -1288,7 +1288,7 @@ export default function ScoutExecuteScanScreen() {
                 onCancel={thresholdGuard.cancel}
             />
 
-            <div className="pointer-events-none absolute bottom-[80px] left-[246px] right-0 top-[82px] z-20 overflow-hidden rounded-lg">
+            <div className="pointer-events-none absolute bottom-[82px] left-[246px] right-[2px] top-[82px] z-20 overflow-hidden rounded-lg">
                 <div className="flex h-full flex-col border border-white/5 bg-[#1A222B]">
                     <div className="relative flex-1 overflow-hidden bg-[#05080C]">
                         <div className={`absolute inset-0 transition-opacity duration-500 ${stage === "idle" || stage === "positioning" || stage === "positioned" || stage === "enabled" ? "opacity-100" : "opacity-0"}`}>

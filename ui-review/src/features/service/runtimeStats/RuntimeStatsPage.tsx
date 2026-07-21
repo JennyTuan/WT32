@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, Clock4, Download, RefreshCcw, Scan, Zap } from "lucide-react";
+import { Activity, AlertTriangle, Clock4, Download, RefreshCcw, Scan, Wrench, Zap } from "lucide-react";
 
 import ServiceModeShell from "../shared/ServiceModeShell";
 import { useI18n } from "../../../lib/i18nContext";
@@ -67,7 +67,8 @@ export default function RuntimeStatsPage() {
     );
     const totalScanMix = scanMix.reduce((sum, item) => sum + item.value, 0);
     const dailyScans = stats?.daily_scans ?? [];
-    const maxDaily = Math.max(1, ...dailyScans.map((item) => item.count));
+    const recentDailyScans = dailyScans.slice(-14);
+    const maxDaily = Math.max(1, ...recentDailyScans.map((item) => item.count));
     const componentUsage: ComponentUsageRow[] = (stats?.telemetry.component_usage ?? []).map((item) => ({
         key: item.key,
         cumulative: item.cumulative,
@@ -136,23 +137,22 @@ export default function RuntimeStatsPage() {
 
     return (
         <ServiceModeShell currentRoute="/service/reports/runtime-stats">
-            <section className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar">
-                {/* Toolbar */}
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#B0C4DE] bg-white px-4 py-3 shadow-sm">
+            <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-[#F7FAFE] p-3 custom-scrollbar">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#D6E4F5] bg-white px-3 py-2.5 shadow-[0_4px_14px_rgba(48,84,120,0.06)]">
                     <div className="flex items-center gap-2 text-[12px] font-bold text-[#4F6479]">
-                        <span>{t("service.runtimeStats.dateRange")}</span>
+                        <span className="whitespace-nowrap text-[#223547]">{t("service.runtimeStats.dateRange")}</span>
                         <input
                             type="date"
                             value={dateFrom}
                             onChange={(e) => setDateFrom(e.target.value)}
-                            className="h-9 rounded-lg border border-[#D7E3F0] px-2 text-[13px] font-bold text-[#223547] outline-none focus:border-[#93C5FD]"
+                            className="h-8 rounded-lg border border-[#D7E3F0] bg-[#FBFDFF] px-2 text-[12px] font-bold text-[#223547] outline-none focus:border-[#5794E8] focus:ring-2 focus:ring-[#5794E8]/10"
                         />
-                        <span className="text-[#90A4AE]">→</span>
+                        <span className="text-[#9FB2C7]">→</span>
                         <input
                             type="date"
                             value={dateTo}
                             onChange={(e) => setDateTo(e.target.value)}
-                            className="h-9 rounded-lg border border-[#D7E3F0] px-2 text-[13px] font-bold text-[#223547] outline-none focus:border-[#93C5FD]"
+                            className="h-8 rounded-lg border border-[#D7E3F0] bg-[#FBFDFF] px-2 text-[12px] font-bold text-[#223547] outline-none focus:border-[#5794E8] focus:ring-2 focus:ring-[#5794E8]/10"
                         />
                     </div>
                     <div className="flex items-center gap-2">
@@ -160,7 +160,7 @@ export default function RuntimeStatsPage() {
                             type="button"
                             onClick={() => void loadStats()}
                             disabled={loading}
-                            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#D7E3F0] bg-white px-3 text-[12px] font-black text-[#31485E] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#D7E3F0] bg-white px-3 text-[12px] font-bold text-[#31485E] hover:border-[#A9C9EE] hover:bg-[#F7FBFF] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <RefreshCcw size={14} className={loading ? "animate-spin text-[#2F67D8]" : "text-[#2F67D8]"} /> {t("service.runtimeStats.refresh")}
                         </button>
@@ -168,48 +168,39 @@ export default function RuntimeStatsPage() {
                             type="button"
                             onClick={exportStats}
                             disabled={!stats}
-                            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#2F67D8] px-3 text-[12px] font-black text-white hover:bg-[#2654B0] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#2F67D8] px-3 text-[12px] font-bold text-white shadow-sm shadow-[#2F67D8]/20 hover:bg-[#2654B0] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <Download size={14} /> {t("service.runtimeStats.export")}
                         </button>
                     </div>
                 </div>
 
-                {error && <div className="rounded-md border border-[#FFCDD2] bg-[#FFEBEE] px-4 py-2 text-[12px] font-bold text-[#C62828]">{error}</div>}
-                {stats?.telemetry.availability_note && (
-                    <div className="rounded-md border border-[#FFE0B2] bg-[#FFF8E1] px-4 py-2 text-[12px] font-bold text-[#795548]">
-                        参考统计：{stats.telemetry.availability_note}
-                    </div>
-                )}
-
-                {/* KPI cards */}
-                <div className="grid grid-cols-4 gap-3">
+                {error && <div className="rounded-lg border border-[#FFCDD2] bg-[#FFF5F5] px-3 py-2 text-[12px] font-bold text-[#C62828]">{error}</div>}
+                <div className="grid grid-cols-4 gap-2.5">
                     {kpis.map(({ icon: Icon, labelKey, value, sublabelKey, accent }) => (
-                        <div key={labelKey} className="rounded-md border border-[#B0C4DE] bg-white p-4 shadow-sm">
+                        <div key={labelKey} className="min-w-0 rounded-xl border border-[#D9E6F4] bg-white p-3 shadow-[0_3px_10px_rgba(48,84,120,0.045)]">
                             <div className="flex items-center gap-2">
-                                <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${accent}`}>
-                                    <Icon size={16} />
+                                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${accent}`}>
+                                    <Icon size={15} />
                                 </span>
-                                <span className="text-[12px] font-bold text-[#6B85A0]">{t(labelKey as never)}</span>
+                                <span className="truncate text-[11px] font-bold text-[#6B85A0]">{t(labelKey as never)}</span>
                             </div>
-                            <div className="mt-3 text-[26px] font-black tracking-tight text-[#223547]">{value}</div>
-                            <div className="mt-1 text-[11px] font-bold text-[#90A4AE]">{t(sublabelKey as never)}</div>
+                            <div className="mt-2 text-[24px] font-black tracking-tight text-[#223547]">{value}</div>
+                            <div className="mt-1 truncate text-[10px] font-medium text-[#91A4B9]">{t(sublabelKey as never)}</div>
                         </div>
                     ))}
                 </div>
 
-                {/* Middle row: ring + bar trend */}
-                <div className="grid grid-cols-12 gap-3">
-                    {/* Scan mix ring */}
-                    <div className="col-span-5 rounded-md border border-[#B0C4DE] bg-white p-4 shadow-sm">
+                <div className="grid grid-cols-[minmax(250px,0.9fr)_minmax(0,1.1fr)] gap-2.5">
+                    <div className="min-w-0 rounded-xl border border-[#D9E6F4] bg-white p-3 shadow-[0_3px_10px_rgba(48,84,120,0.045)]">
                         <div className="flex items-center justify-between">
                             <div className="text-[14px] font-black text-[#223547]">{t("service.runtimeStats.scanMix.title")}</div>
-                            <div className="text-[11px] font-bold text-[#90A4AE]">{t("service.runtimeStats.scanMix.subtitle")}</div>
+                            <div className="text-[10px] font-medium text-[#91A4B9]">{t("service.runtimeStats.scanMix.subtitle")}</div>
                         </div>
-                        <div className="mt-3 flex items-center gap-5">
-                            <svg width="150" height="150" viewBox="0 0 150 150" className="shrink-0">
+                        <div className="mt-2.5 flex items-center gap-3">
+                            <svg width="120" height="120" viewBox="0 0 150 150" className="shrink-0">
                                 <g transform="translate(75 75) rotate(-90)">
-                                    <circle r={ringRadius} fill="none" stroke="#EEF2F9" strokeWidth="16" />
+                                    <circle r={ringRadius} fill="none" stroke="#EDF2F8" strokeWidth="16" />
                                     {ringSegments.map((seg) => (
                                         <circle
                                             key={seg.key}
@@ -223,23 +214,23 @@ export default function RuntimeStatsPage() {
                                         />
                                     ))}
                                 </g>
-                                <text x="75" y="72" textAnchor="middle" className="fill-[#223547]" style={{ fontSize: 18, fontWeight: 900 }}>
+                                <text x="75" y="72" textAnchor="middle" className="fill-[#223547]" style={{ fontSize: 20, fontWeight: 900 }}>
                                     {formatNumber(totalScanMix)}
                                 </text>
-                                <text x="75" y="92" textAnchor="middle" className="fill-[#90A4AE]" style={{ fontSize: 10, fontWeight: 700 }}>
+                                <text x="75" y="92" textAnchor="middle" className="fill-[#90A4AE]" style={{ fontSize: 10, fontWeight: 600 }}>
                                     {t("service.runtimeStats.scanMix.center")}
                                 </text>
                             </svg>
-                            <ul className="flex-1 space-y-2">
+                            <ul className="min-w-0 flex-1 space-y-1.5">
                                 {ringSegments.map((seg) => (
-                                    <li key={seg.key} className="flex items-center justify-between text-[12px]">
-                                        <span className="flex items-center gap-2 text-[#4F6479] font-bold">
-                                            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: seg.color }} />
+                                    <li key={seg.key} className="flex items-center justify-between gap-1 text-[11px]">
+                                        <span className="flex min-w-0 items-center gap-1.5 truncate font-medium text-[#526B83]">
+                                            <span className="inline-block h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: seg.color }} />
                                             {t(`service.runtimeStats.scanMix.${seg.key}` as never)}
                                         </span>
-                                        <span className="font-black text-[#223547]">
+                                        <span className="shrink-0 font-black text-[#223547]">
                                             {formatNumber(seg.value)}
-                                            <span className="ml-1 text-[10px] font-bold text-[#90A4AE]">
+                                            <span className="ml-1 text-[9px] font-medium text-[#90A4AE]">
                                                 {(seg.fraction * 100).toFixed(1)}%
                                             </span>
                                         </span>
@@ -249,40 +240,52 @@ export default function RuntimeStatsPage() {
                         </div>
                     </div>
 
-                    {/* 14d trend */}
-                    <div className="col-span-7 rounded-md border border-[#B0C4DE] bg-white p-4 shadow-sm">
+                    <div className="min-w-0 rounded-xl border border-[#D9E6F4] bg-white p-3 shadow-[0_3px_10px_rgba(48,84,120,0.045)]">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 text-[14px] font-black text-[#223547]">
                                 <Activity size={16} className="text-[#2F67D8]" />
                                 {t("service.runtimeStats.trend.title")}
                             </div>
-                            <div className="text-[11px] font-bold text-[#90A4AE]">{t("service.runtimeStats.trend.subtitle")}</div>
+                            <div className="text-[10px] font-medium text-[#91A4B9]">{t("service.runtimeStats.trend.subtitle")}</div>
                         </div>
-                        <div className="mt-4 flex h-[160px] items-end gap-1.5">
-                            {dailyScans.map((entry) => {
+                        <div className="mt-3 flex h-[134px] items-end gap-1.5 rounded-lg bg-[#F8FBFF] px-2 pb-1 pt-2">
+                            {recentDailyScans.map((entry) => {
                                 const heightPct = (entry.count / maxDaily) * 100;
-                                const dayLabel = entry.date.slice(5, 10);
+                                const dayLabel = entry.date.slice(8);
                                 return (
-                                    <div key={entry.date} className="flex flex-1 flex-col items-center gap-1">
-                                        <div className="text-[10px] font-bold text-[#90A4AE]">{entry.count}</div>
+                                    <div key={entry.date} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+                                        <div className="h-3 text-[9px] font-bold text-[#6F8AA7]">{entry.count || ""}</div>
                                         <div
-                                            className="w-full rounded-t-md bg-gradient-to-t from-[#2F67D8] to-[#74A3FF]"
-                                            style={{ height: `${heightPct}%`, minHeight: 6 }}
+                                            className="w-full rounded-t-sm bg-gradient-to-t from-[#2F67D8] to-[#80ADFF]"
+                                            style={{ height: `${heightPct}%`, minHeight: entry.count > 0 ? 8 : 3 }}
                                         />
-                                        <div className="text-[10px] font-bold text-[#B0BEC5]">{dayLabel}</div>
+                                        <div className="text-[9px] font-medium text-[#9DB0C5]">{dayLabel}</div>
                                     </div>
                                 );
                             })}
+                            {recentDailyScans.length === 0 && (
+                                <div className="flex h-full w-full items-center justify-center text-[12px] text-[#9DB0C5]">所选周期暂无已完成扫描</div>
+                            )}
                         </div>
                     </div>
                 </div>
 
-                {/* Component usage table */}
-                <div className="rounded-md border border-[#B0C4DE] bg-white shadow-sm">
+                <div className="rounded-xl border border-[#D9E6F4] bg-white shadow-[0_3px_10px_rgba(48,84,120,0.045)]">
                     <div className="flex items-center justify-between border-b border-[#E2EBF5] px-4 py-3">
                         <div className="text-[14px] font-black text-[#223547]">{t("service.runtimeStats.components.title")}</div>
-                        <div className="text-[11px] font-bold text-[#90A4AE]">{t("service.runtimeStats.components.subtitle")}</div>
+                        <div className="text-[10px] font-medium text-[#91A4B9]">{t("service.runtimeStats.components.subtitle")}</div>
                     </div>
+                    {componentUsage.length === 0 ? (
+                        <div className="flex items-center gap-3 px-4 py-4">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#EEF4FB] text-[#6E8CAB]">
+                                <Wrench size={17} />
+                            </div>
+                            <div>
+                                <div className="text-[12px] font-bold text-[#405A73]">设备遥测未接入</div>
+                                <div className="mt-0.5 text-[11px] text-[#90A4AE]">接入模拟遥测后，将在这里展示部件累计使用与维护参考。</div>
+                            </div>
+                        </div>
+                    ) : (
                     <table className="w-full text-[12px]">
                         <thead>
                             <tr className="bg-[#F4F7FB] text-[11px] font-black uppercase tracking-wide text-[#6B85A0]">
@@ -327,13 +330,9 @@ export default function RuntimeStatsPage() {
                                     </tr>
                                 );
                             })}
-                            {componentUsage.length === 0 && (
-                                <tr>
-                                    <td colSpan={5} className="px-4 py-8 text-center text-[#90A4AE]">设备部件遥测尚未接入</td>
-                                </tr>
-                            )}
                         </tbody>
                     </table>
+                    )}
                 </div>
             </section>
         </ServiceModeShell>

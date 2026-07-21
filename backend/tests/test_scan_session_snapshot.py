@@ -63,10 +63,10 @@ class ScanSessionSnapshotTests(unittest.TestCase):
             fov=260.0,
             collimator="128x0.6",
             scan_direction="OUT",
-            dom="1",
+            dom=None,
             ctdi_vol=12.5,
             dlp=275.0,
-            auto_ma=True,
+            auto_ma=False,
             ma_min=80.0,
             ma_max=360.0,
         )
@@ -153,6 +153,7 @@ class ScanSessionSnapshotTests(unittest.TestCase):
         self.assertEqual(cloned_axial.collimator, "32x1.2")
         self.assertEqual(cloned_axial.scan_direction, "IN")
         self.assertEqual(cloned_axial.dom, "1")
+        self.assertTrue(cloned_axial.auto_ma)
         self.assertEqual(cloned_axial.step_count, 5)
 
     def test_duplicate_session_series_keeps_session_snapshot_fields(self) -> None:

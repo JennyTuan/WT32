@@ -370,27 +370,33 @@ export default function ServiceAuditLogPage() {
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex-1 overflow-auto">
-            <table className="w-full text-[13px]">
+            <table className="w-full table-fixed text-[13px]">
+              <colgroup>
+                <col className="w-[104px]" />
+                <col className="w-[168px]" />
+                <col className="w-[76px]" />
+                <col className="w-[142px]" />
+                <col />
+                <col className="w-[38px]" />
+              </colgroup>
               <thead className="sticky top-0 z-10">
-                <tr className="border-b border-[#E2EBF5] bg-[#F5F8FC] font-black text-[#37474F]">
-                  <th className="w-[120px] px-3 py-3 text-left">{t("service.logs.time")}</th>
-                  <th className="w-[86px] px-3 py-3 text-left">{t("service.audit.module")}</th>
-                  <th className="w-[120px] px-3 py-3 text-left">{t("service.logs.event")}</th>
-                  <th className="w-[78px] px-3 py-3 text-left">{t("service.audit.status")}</th>
-                  <th className="w-[90px] px-3 py-3 text-left">{t("service.audit.actor")}</th>
-                  <th className="w-[105px] px-3 py-3 text-left">{t("service.audit.targetType")}</th>
+                <tr className="border-b border-[#DDE8F4] bg-[#F5F8FC] text-[11px] font-black uppercase tracking-wide text-[#5F7790]">
+                  <th className="px-3 py-3 text-left">{t("service.logs.time")}</th>
+                  <th className="px-3 py-3 text-left">{t("service.logs.event")}</th>
+                  <th className="px-3 py-3 text-left">{t("service.audit.status")}</th>
                   <th className="px-3 py-3 text-left">{t("service.audit.target")}</th>
-                  <th className="w-[230px] px-3 py-3 text-left">{t("service.logs.details")}</th>
+                  <th className="px-3 py-3 text-left">{t("service.logs.details")}</th>
+                  <th className="px-1 py-3"><span className="sr-only">{t("service.logs.details")}</span></th>
                 </tr>
               </thead>
               <tbody>
                 {error ? (
                   <tr>
-                    <td colSpan={8} className="py-16 text-center text-[14px] text-[#D32F2F]">{error}</td>
+                    <td colSpan={6} className="py-16 text-center text-[14px] text-[#D32F2F]">{error}</td>
                   </tr>
                 ) : pageRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-16 text-center text-[14px] text-[#90A4AE]">
+                    <td colSpan={6} className="py-16 text-center text-[14px] text-[#90A4AE]">
                       {loading ? t("service.logs.loading") : t("service.audit.noRecords")}
                     </td>
                   </tr>
@@ -401,30 +407,35 @@ export default function ServiceAuditLogPage() {
                       <tr
                         key={log.id}
                         onClick={() => setSelectedLog(log)}
-                        className="cursor-pointer border-t border-[#E2EBF5] hover:bg-[#F9FBFC]"
+                        className="group cursor-pointer border-t border-[#E7EEF6] transition-colors hover:bg-[#F7FBFF]"
                       >
-                        <td className="whitespace-nowrap px-3 py-3">
-                          <div className="font-mono text-[13px] leading-tight text-[#37474F]">{timestamp.date}</div>
-                          <div className="mt-0.5 font-mono text-[11px] leading-tight text-[#90A4AE]">{timestamp.time}</div>
+                        <td className="whitespace-nowrap px-3 py-3 align-middle">
+                          <div className="font-mono text-[11px] font-bold leading-tight text-[#405A73]">{timestamp.date}</div>
+                          <div className="mt-1 font-mono text-[10px] leading-tight text-[#91A4B9]">{timestamp.time}</div>
                         </td>
-                        <td className="px-3 py-3">
-                          <span className={`inline-flex h-[22px] min-w-[64px] items-center justify-center rounded-md px-2 text-[11px] font-bold ${log.moduleStyle}`}>
-                            {log.module}
-                          </span>
+                        <td className="px-3 py-3 align-middle">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className={`inline-flex h-5 shrink-0 items-center justify-center rounded-md px-1.5 text-[10px] font-bold ${log.moduleStyle}`}>
+                              {log.module}
+                            </span>
+                            <span className="truncate text-[12px] font-bold text-[#344F68]" title={log.event}>{log.event}</span>
+                          </div>
+                          <div className="mt-1 truncate text-[10px] text-[#91A4B9]">{log.actor}</div>
                         </td>
-                        <td className="px-3 py-3 text-[#37474F]">{log.event}</td>
-                        <td className="px-3 py-3">
-                          <span className={`inline-flex h-[22px] min-w-[54px] items-center justify-center rounded-full px-2 text-[11px] font-bold ${STATUS_STYLES[log.status]}`}>
+                        <td className="px-3 py-3 align-middle">
+                          <span className={`inline-flex h-6 min-w-[54px] items-center justify-center rounded-full px-2 text-[10px] font-bold ${STATUS_STYLES[log.status]}`}>
                             {t(STATUS_LABELS[log.status])}
                           </span>
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-[#546E7A]">{log.actor}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-[#546E7A]">{log.targetType}</td>
-                        <td className="px-3 py-3 text-[#37474F]">
-                          <div className="max-w-[200px] truncate" title={log.targetName}>{log.targetName}</div>
+                        <td className="px-3 py-3 align-middle">
+                          <div className="truncate text-[12px] font-bold text-[#405A73]" title={log.targetName}>{log.targetName}</div>
+                          <div className="mt-1 truncate text-[10px] text-[#91A4B9]">{log.targetType}</div>
                         </td>
-                        <td className="px-3 py-3 text-[#37474F]">
-                          <div className="max-w-[230px] truncate" title={log.detail}>{log.detail}</div>
+                        <td className="px-3 py-3 align-middle text-[#546E7A]">
+                          <div className="truncate text-[12px]" title={log.detail}>{log.detail}</div>
+                        </td>
+                        <td className="px-1 py-3 align-middle text-[#A3B6C9]">
+                          <ChevronRight size={16} className="transition-transform group-hover:translate-x-0.5 group-hover:text-[#2F67D8]" />
                         </td>
                       </tr>
                     );

@@ -49,7 +49,15 @@ const draftSeriesName = (seriesType: ApiSeriesDetail["series_type"], index: numb
     return `螺旋扫描 ${index}`;
 };
 
-export const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["series_type"], index: number, language?: LanguageCode): ApiSeriesDetail => {
+export const createDraftSeries = (
+    id: number,
+    seriesType: ApiSeriesDetail["series_type"],
+    index: number,
+    language?: LanguageCode,
+    domEnabledByDefault = true,
+): ApiSeriesDetail => {
+    const dom = domEnabledByDefault ? "1" : "0";
+
     if (seriesType === "topogram") {
         return {
             id,
@@ -63,7 +71,7 @@ export const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["serie
                 fov: 500,
                 collimator: "32x0.6",
                 scan_direction: "OUT",
-                dom: "0",
+                dom,
             },
             helical_param: null,
             axial_param: null,
@@ -89,7 +97,8 @@ export const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["serie
                 step_count: 24,
                 collimator: "32x0.6",
                 scan_direction: "OUT",
-                dom: "0",
+                dom,
+                auto_ma: domEnabledByDefault,
             },
             recon_series: [],
         };
@@ -108,10 +117,10 @@ export const createDraftSeries = (id: number, seriesType: ApiSeriesDetail["serie
             rotation_time: 1,
             scan_length: 120,
             fov: 350,
-            auto_ma: false,
+            auto_ma: domEnabledByDefault,
             collimator: "32x0.6",
             scan_direction: "OUT",
-            dom: "0",
+            dom,
         },
         axial_param: null,
         recon_series: [],

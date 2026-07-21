@@ -7,7 +7,7 @@ import GatingMonitorPanel from "../components/GatingMonitorPanel";
 import GatingWaveformPanel from "../components/GatingWaveformPanel";
 import DibhStatusRow from "../components/DibhStatusRow";
 import { useBreathHoldStateMachine, type BreathHoldStage } from "../components/useBreathHoldStateMachine";
-import { clearSelectedScanSessionId, fetchSelectedScanSession, loadSelectedScanSessionId, startScanSession, completeScanSession, updateScanSessionSeriesExecution, type ApiScanSeriesImageSourceId, type ApiScanSessionDetail, type ApiScanSessionSeries } from "../lib/scanSession";
+import { clearSelectedScanSessionId, fetchSelectedScanSession, loadSelectedScanSessionId, saveSelectedScanSessionId, startScanSession, completeScanSession, updateScanSessionSeriesExecution, type ApiScanSeriesImageSourceId, type ApiScanSessionDetail, type ApiScanSessionSeries } from "../lib/scanSession";
 import { applyScanWorkflowAction, createActionId } from "../lib/scanWorkflowActions";
 import { loadSelectedPatient } from "../lib/patientSession";
 import {
@@ -23,6 +23,7 @@ import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceE
 import { hasVerifiedSeriesImageSource, resolveHelicalResultImageSource } from "../lib/scanSeriesImageSource";
 import { isBrainHelicalScanSession } from "../lib/brainHelicalDemo";
 import { resolvePostExecutionDestination } from "../lib/scanExecutionFlow";
+import { findNextWorkflowPlan, loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
 
 type HelicalResultSeriesConfig = {
     basePath?: string;
@@ -498,8 +499,8 @@ export default function HelicalExecuteScanScreen() {
     const [completedBeds, setCompletedBeds] = useState(0);
     const [executionError, setExecutionError] = useState<string | null>(null);
     const [finalizationState, setFinalizationState] = useState<FinalizationState>("idle");
-    const [postExecutionDestination, setPostExecutionDestination] = useState<"viewer" | "next_series" | null>(null);
-    const [postExecutionRoute, setPostExecutionRoute] = useState<"/image-viewer" | "/helical-confirm" | "/sequence-confirm" | "/fourd-confirm" | null>(null);
+    const [postExecutionDestination, setPostExecutionDestination] = useState<"viewer" | "next_series" | "next_plan" | null>(null);
+    const [postExecutionRoute, setPostExecutionRoute] = useState<"/image-viewer" | "/helical-confirm" | "/sequence-confirm" | "/fourd-confirm" | "/scout-scan" | null>(null);
     const [finalizationAttempt, setFinalizationAttempt] = useState(0);
     const [sessionValidationState, setSessionValidationState] = useState<"loading" | "ready" | "error">("loading");
     const [isCancelling, setIsCancelling] = useState(false);
@@ -956,6 +957,20 @@ export default function HelicalExecuteScanScreen() {
                 }
                 if (loadSelectedScanSessionId() !== sessionId) {
                     throw new Error("当前选择已切换；原扫描会话已完成，请从患者列表重新打开结果");
+                }
+                const nextPlan = findNextWorkflowPlan(loadSelectedScanWorkflowPlans(), sessionId);
+                if (nextPlan?.sourceSessionId) {
+                    // 当前计划已闭环后，切换到下一计划的独立会话，继续从定位像流程开始。
+                    saveSelectedScanSessionId(nextPlan.sourceSessionId);
+                    if (cancelled) return;
+                    setScanSession(completedSession);
+                    setPostExecutionDestination("next_plan");
+                    setPostExecutionRoute("/scout-scan");
+                    setFinalizationState("succeeded");
+                    autoNavigateTimerRef.current = window.setTimeout(() => {
+                        navigate("/scout-scan");
+                    }, AUTO_NAVIGATE_DELAY_MS);
+                    return;
                 }
                 if (cancelled) return;
                 setScanSession(completedSession);
@@ -1544,7 +1559,7 @@ export default function HelicalExecuteScanScreen() {
         if (stage === "completed") {
             if (finalizationState === "failed") return t("scanFlow.finalization.retry");
             if (finalizationState !== "succeeded") return t("scanFlow.finalization.saving");
-            if (postExecutionDestination === "next_series") return t("common.nextStep");
+            if (postExecutionDestination === "next_series" || postExecutionDestination === "next_plan") return t("common.nextStep");
             return t("scanFlow.imageBrowser");
         }
         if (bedWaitTimedOut) return t("scanFlow.live.waitingTechnician");

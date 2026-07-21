@@ -32,7 +32,7 @@ export type ApiSeriesDetail = {
     axial_param?: {
         id?: number;
         kv: number; ma: number; slice_thickness: number; slice_interval: number;
-        rotation_time: number; scan_length: number; fov: number; step_count?: number | null;
+        rotation_time: number; scan_length: number; fov: number; step_count?: number | null; auto_ma?: boolean;
         collimator?: string | null; scan_direction?: string | null; dom?: string | null;
         ctdi_vol?: number | null; dlp?: number | null;
     } | null;

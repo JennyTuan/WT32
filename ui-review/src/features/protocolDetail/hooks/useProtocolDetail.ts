@@ -39,6 +39,7 @@ import {
     updateSelectedScanSessionAxialParam,
     updateSelectedScanSessionReconSeries
 } from "../../../lib/scanSession";
+import { getDoseSettings } from "../../../lib/doseSettingsApi";
 import { clampFov } from "../../../lib/fov";
 
 const parseDraftFov = (value: string, fallback: number) => clampFov(parseNumber(value) ?? fallback);
@@ -63,6 +64,7 @@ export function useProtocolDetail() {
     const [selection, setSelection] = useState<Selection>({ type: "basic" });
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState<string | null>(null);
+    const [domEnabledByDefault, setDomEnabledByDefault] = useState(true);
     const tempSeriesIdRef = useRef(-1);
     // Snapshot of IDs from the last backend load (scan-flow mode). Used at save-time to compute
     // which series / recons were locally deleted so we can DELETE them on the backend.
@@ -126,6 +128,19 @@ export function useProtocolDetail() {
             }
         };
         loadCatalog();
+        return () => { cancelled = true; };
+    }, []);
+
+    // 仅用于新建序列；已有协议和扫描会话继续保留各自已保存的 DOM 值。
+    useEffect(() => {
+        let cancelled = false;
+        void getDoseSettings()
+            .then((settings) => {
+                if (!cancelled) setDomEnabledByDefault(settings.dom_enabled);
+            })
+            .catch((error) => {
+                console.error("Failed to load DOM default setting.", error);
+            });
         return () => { cancelled = true; };
     }, []);
 
@@ -263,7 +278,13 @@ export function useProtocolDetail() {
         setProtocol((current) => {
             if (!current) return current;
             const existingCount = current.series.filter((item) => item.series_type === seriesType).length;
-            const createdSeries = createDraftSeries(nextId, seriesType, existingCount + 1, language);
+            const createdSeries = createDraftSeries(
+                nextId,
+                seriesType,
+                existingCount + 1,
+                language,
+                domEnabledByDefault,
+            );
             return { ...current, series: [...current.series, createdSeries] };
         });
         setSelection({ type: "series", seriesId: nextId });

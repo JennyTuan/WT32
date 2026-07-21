@@ -23,6 +23,7 @@ import { loadSelectedPatient } from "../lib/patientSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { useDoseThresholdGuard } from "../lib/useDoseThresholdGuard";
 import { estimateDose } from "../lib/doseEstimate";
+import { getDoseSettings } from "../lib/doseSettingsApi";
 import { buildApiUrl } from "../lib/apiClient";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import AppHeader from "../components/AppHeader";
@@ -1766,7 +1767,7 @@ const GatingHelicalConfirmScreen = () => {
             />
 
             {/* 2. Main Content Area */}
-            <main className="flex-1 flex overflow-hidden p-2 gap-1">
+            <main className="flex-1 flex overflow-hidden p-[2px] gap-1">
                 {/* Left Sidebar */}
                 <aside className="w-[240px] bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden shrink-0">
                     {/* Toolbar */}
@@ -2229,7 +2230,20 @@ const HelicalScanConfirmScreen = () => {
                 const loaded = scanSession?.series.find((series) => series.series_type === "helical")?.helical_param as ApiScanSessionHelicalParam | null | undefined;
                 if (!loaded) return;
 
-                setHelicalParam(loaded);
+                let resolvedParam = loaded;
+                if (loaded.dom == null) {
+                    try {
+                        const domEnabled = (await getDoseSettings()).dom_enabled;
+                        const domPatch = { dom: domEnabled ? "1" : "0", auto_ma: domEnabled };
+                        resolvedParam = { ...loaded, ...domPatch };
+                        await updateSelectedScanSessionHelicalParam(loaded.id, domPatch);
+                    } catch (error) {
+                        console.error("Failed to apply the DOM default to the scan session.", error);
+                    }
+                }
+
+                if (cancelled) return;
+                setHelicalParam(resolvedParam);
                 setMeasurements({
                     scanLength: String(loaded.scan_length),
                     scoutFov: String(loaded.fov),
@@ -2292,15 +2306,18 @@ const HelicalScanConfirmScreen = () => {
         const { noise_level, ...rest } = patch;
         if (noise_level !== undefined) setNoiseLevel(noise_level);
         if (!helicalParam || Object.keys(rest).length === 0) return;
-        setHelicalParam((prev) => (prev ? { ...prev, ...rest } : prev));
-        void paramWrites.write(() => updateSelectedScanSessionHelicalParam(helicalParam.id, rest)).catch((error) => {
+        const synchronizedPatch = rest.auto_ma === undefined
+            ? rest
+            : { ...rest, dom: rest.auto_ma ? "1" : "0" };
+        setHelicalParam((prev) => (prev ? { ...prev, ...synchronizedPatch } : prev));
+        void paramWrites.write(() => updateSelectedScanSessionHelicalParam(helicalParam.id, synchronizedPatch)).catch((error) => {
             console.error("Failed to persist Auto mA settings.", error);
         });
     };
 
     const scanLengthNum = Number(measurements.scanLength);
     const scanLengthForCurve = Number.isFinite(scanLengthNum) ? scanLengthNum : (helicalParam?.scan_length ?? 0);
-    const showAutoMaPanel = helicalParam?.auto_ma ?? false;
+    const showAutoMaPanel = helicalParam?.dom === "1" || (helicalParam?.dom == null && helicalParam?.auto_ma === true);
 
     const realMaCurve = useMemo(() => {
         if (!showAutoMaPanel || !scoutHu || !scoutCropBox || !helicalParam) return null;
@@ -2489,7 +2506,7 @@ const HelicalScanConfirmScreen = () => {
                     {helicalParam && showAutoMaPanel && (
                         <AutoMaPanel
                             mode="helical"
-                            autoMa={helicalParam.auto_ma ?? false}
+                            autoMa={showAutoMaPanel}
                             maMin={helicalParam.ma_min ?? Math.max(40, Math.round((helicalParam.ma ?? 200) * 0.5))}
                             maMax={helicalParam.ma_max ?? Math.round((helicalParam.ma ?? 200) * 1.2)}
                             fallbackMa={helicalParam.ma}

@@ -470,7 +470,7 @@ export default function AutoMaPanel({
                         )}
                     </div>
 
-                    <div className={`relative ${isHelical ? "h-[150px]" : "h-[120px]"} overflow-hidden`}>
+                    <div className="relative h-[120px] overflow-hidden">
                         <svg
                             viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
                             preserveAspectRatio="none"

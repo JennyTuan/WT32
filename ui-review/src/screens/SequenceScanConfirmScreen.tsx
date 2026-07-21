@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import { imageLoader, metaData } from "@cornerstonejs/core";
-import { Crosshair, Hand, Move, RotateCcw, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { Hand, Move, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { fetchSelectedScanSession, updateScanSessionSeriesExecution, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
 import type { ApiScanSessionAxialParam, ApiScanSessionSeries } from "../lib/scanSession";
 import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
@@ -10,6 +10,7 @@ import AutoMaPanel, { NOISE_SLIDER_DEFAULT, type NoiseLevel } from "../component
 import ScanConfirmScreen from "./ScanConfirmScreen";
 import { buildWadoImageId, initCornerstone } from "../lib/cornerstone/initCornerstone";
 import { computeDoseModulation, type ScoutHuData } from "../lib/doseModulation";
+import { getDoseSettings } from "../lib/doseSettingsApi";
 import { useI18n } from "../lib/i18nContext";
 import { loadSelectedPatient } from "../lib/patientSession";
 import { buildScanSessionExecutionContext, isTerminalScanSessionStatus, resolveTopogramImageSource } from "../lib/scanSeriesPrerequisites";
@@ -157,6 +158,8 @@ export function TomographicScoutViewport({
     onReconCenterChange?: (delta: ReconCenterDelta) => void;
     onLoadStateChange?: (state: "loading" | "ready" | "error") => void;
 }) {
+    // 保留角度输入用于与确认页的定位参数同步；不再在视图区显示中心标记。
+    void tubeAngle;
     const { t } = useI18n();
     const viewportRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -717,8 +720,6 @@ export function TomographicScoutViewport({
         }),
         [cropBox],
     );
-    const isReconCenterAtIso = Math.abs(reconCenterRatio.x - 0.5) < 1e-4 && Math.abs(reconCenterRatio.y - 0.5) < 1e-4;
-
     const reconCenterDelta = useMemo<ReconCenterDelta | null>(() => {
         if (!projectionMeta) return null;
         const physW = projectionMeta.width * projectionMeta.pixelSpacingX;
@@ -728,14 +729,6 @@ export function TomographicScoutViewport({
     useEffect(() => {
         if (reconCenterDelta) onReconCenterChangeRef.current?.(reconCenterDelta);
     }, [reconCenterDelta]);
-
-    const resetReconCenter = () => {
-        setCropBox((current) => ({
-            ...current,
-            x: clamp(0.5 - current.width / 2, 0, 1 - current.width),
-            y: clamp(0.5 - current.height / 2, 0, 1 - current.height),
-        }));
-    };
 
     const measurementLabels = useMemo(() => {
         const meta = metaRef.current;
@@ -891,41 +884,6 @@ export function TomographicScoutViewport({
                             <div>Zoom {zoom.toFixed(2)}x</div>
                         </div>
 
-                        {/* Reconstruction center marker follows the crop box center; AP scout updates LPS X. */}
-                        <div
-                            className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-1/2"
-                            style={{
-                                left: `${reconCenterRatio.x * 100}%`,
-                                top: `${reconCenterRatio.y * 100}%`,
-                            }}
-                            title="重建中心 - 跟随扫描框中心"
-                        >
-                            <div className="relative w-12 h-12 flex items-center justify-center">
-                                <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-[#FF6B6B] shadow-[0_0_6px_rgba(255,107,107,0.7)]" />
-                                <div className="absolute top-1/2 left-0 w-full h-px -translate-y-1/2 bg-[#FF6B6B] shadow-[0_0_6px_rgba(255,107,107,0.7)]" />
-                                <div className="w-3 h-3 rounded-full border-2 border-[#FF6B6B] bg-[#0F172A]/60" />
-                            </div>
-                        </div>
-
-                        {/* 重建中心读数 + 复位 */}
-                        <div className="absolute top-2 right-2 z-40 flex items-center gap-1 rounded-md bg-[#0F172A]/85 px-2 py-1 ring-1 ring-[#FF6B6B]/40 backdrop-blur-sm">
-                            <Crosshair size={12} className="text-[#FF6B6B]" />
-                            <span className="text-[10px] font-mono font-bold text-white tabular-nums">
-                                {reconCenterDelta
-                                    ? `Δ${reconCenterDelta.axis.toUpperCase()} ${reconCenterDelta.valueMm >= 0 ? "+" : ""}${reconCenterDelta.valueMm.toFixed(1)} mm`
-                                    : "Δ-- mm"}
-                            </span>
-                            <span className="text-[9px] font-mono text-[#94A3B8]">@{Math.round(((Math.round(tubeAngle) % 360) + 360) % 360)}°</span>
-                            <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); resetReconCenter(); }}
-                                disabled={isReconCenterAtIso}
-                                className="ml-1 flex h-[18px] w-[18px] items-center justify-center rounded text-[#CBD5E1] hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
-                                title="复位到等中心 (ISO)"
-                            >
-                                <Undo2 size={11} />
-                            </button>
-                        </div>
                     </>
                 )}
             </section>
@@ -1086,7 +1044,20 @@ const SequenceScanConfirmScreen = () => {
                 }
                 if (!loaded || cancelled) return;
 
-                setAxialParam(loaded);
+                let resolvedParam = loaded;
+                if (loaded.dom == null) {
+                    try {
+                        const domEnabled = (await getDoseSettings()).dom_enabled;
+                        const domPatch = { dom: domEnabled ? "1" : "0", auto_ma: domEnabled };
+                        resolvedParam = { ...loaded, ...domPatch };
+                        await updateSelectedScanSessionAxialParam(loaded.id, domPatch);
+                    } catch (error) {
+                        console.error("Failed to apply the DOM default to the scan session.", error);
+                    }
+                }
+
+                if (cancelled) return;
+                setAxialParam(resolvedParam);
                 setMeasurements({
                     scanLength: String(loaded.scan_length),
                     scoutFov: String(loaded.fov),
@@ -1108,8 +1079,11 @@ const SequenceScanConfirmScreen = () => {
         const { noise_level, ...rest } = patch;
         if (noise_level !== undefined) setNoiseLevel(noise_level);
         if (!axialParam || Object.keys(rest).length === 0) return;
-        setAxialParam((prev) => (prev ? { ...prev, ...rest } : prev));
-        void paramWrites.write(() => updateSelectedScanSessionAxialParam(axialParam.id, rest)).catch((error) => {
+        const synchronizedPatch = rest.auto_ma === undefined
+            ? rest
+            : { ...rest, dom: rest.auto_ma ? "1" : "0" };
+        setAxialParam((prev) => (prev ? { ...prev, ...synchronizedPatch } : prev));
+        void paramWrites.write(() => updateSelectedScanSessionAxialParam(axialParam.id, synchronizedPatch)).catch((error) => {
             console.error("Failed to persist Auto mA settings.", error);
         });
     };
@@ -1144,7 +1118,7 @@ const SequenceScanConfirmScreen = () => {
         setScanPositionRatio(bedIndex / (axialBedCount - 1));
     };
 
-    const showAutoMaPanel = axialParam?.auto_ma ?? false;
+    const showAutoMaPanel = axialParam?.dom === "1" || (axialParam?.dom == null && axialParam?.auto_ma === true);
 
     const realMaCurve = useMemo(() => {
         if (!showAutoMaPanel || !scoutHu || !scoutCropBox || !axialParam) return null;
@@ -1286,7 +1260,7 @@ const SequenceScanConfirmScreen = () => {
                     )}
                     {axialParam && showAutoMaPanel && (
                         <AutoMaPanel
-                            autoMa={axialParam.auto_ma ?? false}
+                            autoMa={showAutoMaPanel}
                             maMin={axialParam.ma_min ?? Math.max(40, Math.round((axialParam.ma ?? 200) * 0.5))}
                             maMax={axialParam.ma_max ?? Math.round((axialParam.ma ?? 200) * 1.2)}
                             fallbackMa={axialParam.ma}

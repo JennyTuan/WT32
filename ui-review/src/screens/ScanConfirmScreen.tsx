@@ -871,7 +871,7 @@ const ScanConfirmScreen = ({
             />
 
             {/* 2. Main Content Area */}
-            <main className="flex-1 flex overflow-hidden p-2 gap-1">
+            <main className="flex-1 flex overflow-hidden p-[2px] gap-1">
                 {/* Left Sidebar Card */}
                 <aside className="w-[240px] bg-white rounded-lg border border-[#B0C4DE] shadow-sm flex flex-col overflow-hidden shrink-0">
                     {/* Sidebar Toolbar - Precise match to screenshot */}

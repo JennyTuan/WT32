@@ -34,6 +34,22 @@ export const loadSelectedScanWorkflowPlans = (): WorkflowPlan[] => {
     }
 };
 
+/**
+ * 返回当前扫描计划之后、已绑定扫描会话的下一个计划。
+ * 多计划检查必须先完成所有计划，不能在第一个计划完成后直接进入阅片。
+ */
+export const findNextWorkflowPlan = (
+    plans: WorkflowPlan[],
+    currentSessionId: number,
+): WorkflowPlan | null => {
+    const currentPlanIndex = plans.findIndex((plan) => plan.sourceSessionId === currentSessionId);
+    if (currentPlanIndex < 0) return null;
+
+    return plans.slice(currentPlanIndex + 1).find(
+        (plan) => typeof plan.sourceSessionId === "number" && Number.isFinite(plan.sourceSessionId),
+    ) ?? null;
+};
+
 export const clearSelectedScanWorkflowPlans = () => {
     localStorage.removeItem(STORAGE_KEY);
 };

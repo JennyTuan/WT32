@@ -29,6 +29,8 @@ type AppliedDisplayProperties = {
 export type CornerstoneViewportHandle = {
   zoomIn: () => void;
   zoomOut: () => void;
+  flipHorizontal: () => void;
+  flipVertical: () => void;
   fit: () => void;
   resetView: () => void;
   reset: () => void;
@@ -192,6 +194,22 @@ const CornerstoneStackViewport = forwardRef<CornerstoneViewportHandle, Cornersto
         const viewport = viewportRef.current;
         if (!viewport) return;
         viewport.setZoom(clamp(viewport.getZoom() * 0.87, 0.2, 20));
+        viewport.render();
+      },
+      flipHorizontal: () => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+        // 翻转仅修改当前序列的视图相机；切换序列时由 stateKey 保存与恢复。
+        const camera = viewport.getCamera();
+        viewport.setCamera({ flipHorizontal: !camera.flipHorizontal });
+        viewport.render();
+      },
+      flipVertical: () => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+        // 翻转仅修改当前序列的视图相机；切换序列时由 stateKey 保存与恢复。
+        const camera = viewport.getCamera();
+        viewport.setCamera({ flipVertical: !camera.flipVertical });
         viewport.render();
       },
       fit: () => {

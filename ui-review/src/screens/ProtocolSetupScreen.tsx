@@ -1904,12 +1904,12 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
     const handleStartScanFlow = async () => {
         if (!activePlan) return;
-        saveSelectedScanWorkflowPlans(
-            scanPlans.map((plan) => ({
+        const toWorkflowPlan = (plan: UiPlan, sourceSessionId = plan.sourceSessionId) =>
+            ({
                 id: plan.id,
                 protocolId: plan.sourceProtocolId,
                 title: plan.title,
-                sourceSessionId: plan.sourceSessionId,
+                sourceSessionId,
                 sequences: plan.sequences.map((sequence) => ({
                     id: sequence.id,
                     sourceSeriesId: sequence.sourceSeriesId,
@@ -1928,9 +1928,10 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                         .map((recon) => recon.sourceReconId)
                         .filter((id): id is number => typeof id === "number" && Number.isFinite(id)),
                 })),
-            }))
-        );
+            });
+
         if (isDraftActivePlan) {
+            saveSelectedScanWorkflowPlans(scanPlans.map((plan) => toWorkflowPlan(plan)));
             if (typeof window !== "undefined") {
                 persistProtocolSelectState({
                     selectedProtocolIds,
@@ -1942,13 +1943,42 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             navigate("/protocol-detail?mode=new");
             return;
         }
-        if (activeScanSession && activePlan?.sourceSessionId) {
-            const startRoute = getScanFlowStartRoute();
-            if (!startRoute) {
-                setSessionActionError(getScanFlowUnavailableMessage());
-                return;
+
+        const startRoute = getScanFlowStartRoute();
+        if (!startRoute) {
+            setSessionActionError(getScanFlowUnavailableMessage());
+            return;
+        }
+
+        setSessionActionError("");
+        setIsCreatingSession(true);
+        try {
+            // 用户当前选中的计划作为起点；其余计划按列表顺序衔接。
+            const orderedPlans = [activePlan, ...scanPlans.filter((plan) => plan.id !== activePlan.id)];
+            const workflowPlans = [];
+            for (const plan of orderedPlans) {
+                let sourceSessionId = plan.sourceSessionId;
+                if (!sourceSessionId && plan.id === activePlan.id && activeScanSession) {
+                    sourceSessionId = activeScanSession.id;
+                }
+                if (!sourceSessionId) {
+                    if (!plan.sourceProtocolId) {
+                        throw new Error("扫描计划缺少可创建会话的协议来源");
+                    }
+                    const scanSession = await createScanSessionForSelectedPatient(plan.sourceProtocolId, plan.title);
+                    sourceSessionId = scanSession.id;
+                }
+                workflowPlans.push(toWorkflowPlan(plan, sourceSessionId));
             }
-            saveSelectedScanSessionId(activeScanSession.id);
+
+            const initialSessionId = workflowPlans[0]?.sourceSessionId;
+            if (!initialSessionId) throw new Error("未能建立首个扫描计划会话");
+
+            saveSelectedScanWorkflowPlans(workflowPlans);
+            saveSelectedScanSessionId(initialSessionId);
+            // 批量创建会话会更新临时缓存；重新读取首个会话以避免进入错误计划。
+            const initialSession = await fetchScanSessionById(initialSessionId);
+            applySessionToScreen(initialSession);
             localStorage.removeItem("selectedProtocol");
             if (typeof window !== "undefined") {
                 persistProtocolSelectState({
@@ -1959,18 +1989,12 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 sessionStorage.setItem(PROTOCOL_SELECT_RESUME_KEY, "1");
             }
             navigate(startRoute);
-            return;
+        } catch (error) {
+            console.error(error);
+            setSessionActionError(t("protocolSetup.createSessionError"));
+        } finally {
+            setIsCreatingSession(false);
         }
-
-        if (!activeProtocolId) return;
-        if (!activeProtocolSummary) return;
-
-        const startRoute = getScanFlowStartRoute();
-        if (!startRoute) {
-            setSessionActionError(getScanFlowUnavailableMessage());
-            return;
-        }
-        await openScanSession(activeProtocolId, startRoute);
     };
 
     useEffect(() => {
