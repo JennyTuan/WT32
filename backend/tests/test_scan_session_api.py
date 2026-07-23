@@ -101,7 +101,7 @@ class ScanSessionApiTests(unittest.TestCase):
                 scan_length=220.0,
                 fov=260.0,
                 collimator="128x0.6",
-                scan_direction="OUT",
+                scan_direction="HEAD_TO_FOOT",
                 dom="1",
                 ctdi_vol=12.5,
                 dlp=275.0,
@@ -331,6 +331,9 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertFalse(session_series["range_confirmed"])
         self.assertIsNone(session_series["image_source_id"])
         self.assertIsNone(session_series["image_source_version"])
+        self.assertEqual(session_series["scan_planning"]["scan_direction"], "HEAD_TO_FOOT")
+        self.assertIsNone(session_series["scan_planning"]["range_min_position_mm"])
+        self.assertIsNone(session_series["scan_planning"]["range_max_position_mm"])
 
         helical = session_series["helical_param"]
         self.assertIsNotNone(helical)
@@ -338,7 +341,7 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(helical["kv"], 120)
         self.assertEqual(helical["ma"], 180)
         self.assertEqual(helical["collimator"], "128x0.6")
-        self.assertEqual(helical["scan_direction"], "OUT")
+        self.assertEqual(helical["scan_direction"], "HEAD_TO_FOOT")
         self.assertEqual(helical["dom"], "1")
         self.assertTrue(helical["auto_ma"])
         self.assertEqual(helical["ma_min"], 80.0)
@@ -349,6 +352,75 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(recon["recon_fov"], 220.0)
         self.assertEqual(recon["center_x"], 3.5)
         self.assertEqual(recon["center_y"], -4.5)
+
+    def test_scan_planning_binds_a_diagnostic_series_to_its_preceding_topogram(self) -> None:
+        scan_session = self._create_scan_session()
+        target_series = scan_session["series"][0]
+
+        db = self.SessionTesting()
+        try:
+            topogram = models.ScanSessionSeries(
+                scan_session_id=scan_session["id"],
+                series_order=0,
+                series_type="topogram",
+                series_label="Scout",
+            )
+            topogram.scan_planning = models.ScanSessionScanPlanning(
+                range_min_position_mm=320.0,
+                range_max_position_mm=780.0,
+                scan_direction="HEAD_TO_FOOT",
+            )
+            db.add(topogram)
+            db.commit()
+            topogram_id = topogram.id
+        finally:
+            db.close()
+
+        response = self.client.put(
+            f"/api/scan-sessions/series/{target_series['id']}/planning",
+            json={
+                "source_topogram_series_id": topogram_id,
+                "range_min_position_mm": 410.0,
+                "range_max_position_mm": 520.0,
+                "scan_direction": "FOOT_TO_HEAD",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        planning = response.json()
+        self.assertEqual(planning["source_topogram_series_id"], topogram_id)
+        self.assertEqual(planning["range_min_position_mm"], 410.0)
+        self.assertEqual(planning["range_max_position_mm"], 520.0)
+        self.assertEqual(planning["scan_direction"], "FOOT_TO_HEAD")
+
+        refreshed = self.client.get(f"/api/scan-sessions/{scan_session['id']}")
+        self.assertEqual(refreshed.status_code, 200, refreshed.text)
+        target = next(item for item in refreshed.json()["series"] if item["id"] == target_series["id"])
+        self.assertEqual(target["helical_param"]["scan_length"], 110.0)
+        self.assertEqual(target["helical_param"]["scan_direction"], "FOOT_TO_HEAD")
+
+    def test_scan_planning_rejects_reversed_range_and_missing_topogram_reference(self) -> None:
+        scan_session = self._create_scan_session()
+        target_series = scan_session["series"][0]
+
+        reversed_range = self.client.put(
+            f"/api/scan-sessions/series/{target_series['id']}/planning",
+            json={
+                "range_min_position_mm": 520.0,
+                "range_max_position_mm": 410.0,
+                "scan_direction": "HEAD_TO_FOOT",
+            },
+        )
+        self.assertEqual(reversed_range.status_code, 422)
+
+        missing_source = self.client.put(
+            f"/api/scan-sessions/series/{target_series['id']}/planning",
+            json={
+                "range_min_position_mm": 410.0,
+                "range_max_position_mm": 520.0,
+                "scan_direction": "HEAD_TO_FOOT",
+            },
+        )
+        self.assertEqual(missing_source.status_code, 422)
 
     def test_update_scan_session_helical_param_does_not_mutate_protocol_template(self) -> None:
         scan_session = self._create_scan_session()

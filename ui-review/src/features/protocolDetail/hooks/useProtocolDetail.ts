@@ -75,7 +75,8 @@ export function useProtocolDetail() {
 
     // Derived
     const isFactory = protocol?.is_factory === true;
-    const isReadOnly = isViewMode || (isCatalogSource && isFactory);
+    // 出厂模板的查看页不可直接覆盖；“另存为”进入新建模式后可保存为独立协议。
+    const isReadOnly = isViewMode || (isCatalogSource && isFactory && !isNewMode);
     const series = useMemo(() => protocol?.series ?? [], [protocol?.series]);
     const ageLabel = protocol ? getLocalizedAgeLabel(protocol.age_group, language) : "-";
 
@@ -93,7 +94,7 @@ export function useProtocolDetail() {
     const [seriesDraft, setSeriesDraft] = useState<SeriesDraft>({
         seriesLabel: "", kv: "", ma: "", scanLength: "", fov: "", tubeAngle: "",
         rotationTime: "", pitch: "", sliceThickness: "", sliceInterval: "",
-        collimator: "", scanDirection: "OUT", dom: "0",
+        collimator: "", scanDirection: "HEAD_TO_FOOT", dom: "0",
     });
     const [reconDraft, setReconDraft] = useState<ReconDraft>({
         reconName: "", kernel: "", sliceThickness: "", increment: "",
@@ -248,7 +249,7 @@ export function useProtocolDetail() {
             sliceThickness: String(activeSeries.helical_param?.slice_thickness ?? activeSeries.axial_param?.slice_thickness ?? ""),
             sliceInterval: String(activeSeries.axial_param?.slice_interval ?? ""),
             collimator: String(activeSeries.topogram_param?.collimator ?? activeSeries.helical_param?.collimator ?? activeSeries.axial_param?.collimator ?? ""),
-            scanDirection: String(activeSeries.topogram_param?.scan_direction ?? activeSeries.helical_param?.scan_direction ?? activeSeries.axial_param?.scan_direction ?? "OUT"),
+            scanDirection: String(activeSeries.topogram_param?.scan_direction ?? activeSeries.helical_param?.scan_direction ?? activeSeries.axial_param?.scan_direction ?? "HEAD_TO_FOOT"),
             dom: String(activeSeries.topogram_param?.dom ?? activeSeries.helical_param?.dom ?? activeSeries.axial_param?.dom ?? "0"),
         });
     }, [activeSeries, selection.type]);

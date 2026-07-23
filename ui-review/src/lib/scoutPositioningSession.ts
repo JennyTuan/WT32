@@ -55,6 +55,18 @@ export const mapScoutRangeToCropBox = (range: ScoutPositioningRange) => {
     };
 };
 
+export const mapCropBoxToScoutRange = (cropBox: { y: number; height: number }): ScoutPositioningRange => {
+    const totalSpan = BED_POSITION_MAX - BED_POSITION_MIN;
+    const normalizedStart = Math.min(1, Math.max(0, cropBox.y));
+    const normalizedEnd = Math.min(1, Math.max(normalizedStart, cropBox.y + cropBox.height));
+
+    // 原型坐标仅用于推导模拟机架移动范围，不代表真实设备控制坐标。
+    return {
+        start: BED_POSITION_MIN + normalizedStart * totalSpan,
+        end: BED_POSITION_MIN + normalizedEnd * totalSpan,
+    };
+};
+
 export const applyMeasurementsToCropBox = (
     cropBox: { x: number; y: number; width: number; height: number },
     metrics: { scanLength?: number | null; scoutFov?: number | null },

@@ -38,7 +38,7 @@ class ScanSessionSnapshotTests(unittest.TestCase):
             tube_angle=90.0,
             fov=480.0,
             collimator="64x0.6",
-            scan_direction="IN",
+            scan_direction="FOOT_TO_HEAD",
             dom="0",
             ctdi_vol=1.2,
             dlp=9.6,
@@ -62,7 +62,7 @@ class ScanSessionSnapshotTests(unittest.TestCase):
             scan_length=220.0,
             fov=260.0,
             collimator="128x0.6",
-            scan_direction="OUT",
+            scan_direction="HEAD_TO_FOOT",
             dom=None,
             ctdi_vol=12.5,
             dlp=275.0,
@@ -106,7 +106,7 @@ class ScanSessionSnapshotTests(unittest.TestCase):
             scan_length=96.0,
             fov=240.0,
             collimator="32x1.2",
-            scan_direction="IN",
+            scan_direction="FOOT_TO_HEAD",
             dom="1",
             ctdi_vol=8.0,
             dlp=76.8,
@@ -128,14 +128,14 @@ class ScanSessionSnapshotTests(unittest.TestCase):
         self.assertIsNotNone(cloned_topogram)
         self.assertEqual(cloned_topogram.template_param_id, topogram_series.topogram_param.id)
         self.assertEqual(cloned_topogram.collimator, "64x0.6")
-        self.assertEqual(cloned_topogram.scan_direction, "IN")
+        self.assertEqual(cloned_topogram.scan_direction, "FOOT_TO_HEAD")
         self.assertEqual(cloned_topogram.dom, "0")
 
         cloned_helical = scan_session.series[1].helical_param
         self.assertIsNotNone(cloned_helical)
         self.assertEqual(cloned_helical.template_param_id, helical_series.helical_param.id)
         self.assertEqual(cloned_helical.collimator, "128x0.6")
-        self.assertEqual(cloned_helical.scan_direction, "OUT")
+        self.assertEqual(cloned_helical.scan_direction, "HEAD_TO_FOOT")
         self.assertEqual(cloned_helical.dom, "1")
         self.assertTrue(cloned_helical.auto_ma)
         self.assertEqual(cloned_helical.ma_min, 80.0)
@@ -151,7 +151,7 @@ class ScanSessionSnapshotTests(unittest.TestCase):
         self.assertIsNotNone(cloned_axial)
         self.assertEqual(cloned_axial.template_param_id, axial_series.axial_param.id)
         self.assertEqual(cloned_axial.collimator, "32x1.2")
-        self.assertEqual(cloned_axial.scan_direction, "IN")
+        self.assertEqual(cloned_axial.scan_direction, "FOOT_TO_HEAD")
         self.assertEqual(cloned_axial.dom, "1")
         self.assertTrue(cloned_axial.auto_ma)
         self.assertEqual(cloned_axial.step_count, 5)
@@ -177,7 +177,7 @@ class ScanSessionSnapshotTests(unittest.TestCase):
             scan_length=220.0,
             fov=260.0,
             collimator="128x0.6",
-            scan_direction="OUT",
+            scan_direction="HEAD_TO_FOOT",
             dom="1",
             ctdi_vol=12.5,
             dlp=275.0,
@@ -212,7 +212,7 @@ class ScanSessionSnapshotTests(unittest.TestCase):
         self.assertIsNotNone(cloned.helical_param)
         self.assertEqual(cloned.helical_param.template_param_id, source.helical_param.template_param_id)
         self.assertEqual(cloned.helical_param.collimator, "128x0.6")
-        self.assertEqual(cloned.helical_param.scan_direction, "OUT")
+        self.assertEqual(cloned.helical_param.scan_direction, "HEAD_TO_FOOT")
         self.assertEqual(cloned.helical_param.dom, "1")
         self.assertTrue(cloned.helical_param.auto_ma)
 

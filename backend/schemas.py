@@ -22,6 +22,7 @@ PrototypeImageSourceId = Literal[
     "qin-lung-helical-demo",
 ]
 PrototypeImageSourceVersion = Literal[1]
+ScanDirection = Literal["HEAD_TO_FOOT", "FOOT_TO_HEAD"]
 
 
 class PatientBase(BaseModel):
@@ -187,7 +188,7 @@ class TopogramParamBase(BaseModel):
     tube_angle: float = 270.0
     fov: float = 500.0
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = "OUT"
+    scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -205,7 +206,7 @@ class TopogramParamUpdate(BaseModel):
     tube_angle: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = None
+    scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -225,7 +226,7 @@ class HelicalParamBase(BaseModel):
     scan_length: float
     fov: float
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = "OUT"
+    scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -248,7 +249,7 @@ class HelicalParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = None
+    scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -271,7 +272,7 @@ class AxialParamBase(BaseModel):
     scan_length: float
     fov: float
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = "OUT"
+    scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -295,7 +296,7 @@ class AxialParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = None
+    scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -602,6 +603,28 @@ class ScanSessionSeriesExecutionUpdate(BaseModel):
         return self
 
 
+class ScanSessionScanPlanningUpdate(BaseModel):
+    source_topogram_series_id: Optional[int] = None
+    range_min_position_mm: float
+    range_max_position_mm: float
+    scan_direction: ScanDirection
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "ScanSessionScanPlanningUpdate":
+        if self.range_min_position_mm > self.range_max_position_mm:
+            raise ValueError("range_min_position_mm must not exceed range_max_position_mm")
+        return self
+
+
+class ScanSessionScanPlanning(ORMModel):
+    id: int
+    scan_session_series_id: int
+    source_topogram_series_id: Optional[int] = None
+    range_min_position_mm: Optional[float] = None
+    range_max_position_mm: Optional[float] = None
+    scan_direction: ScanDirection = "HEAD_TO_FOOT"
+
+
 class ScanSessionTopogramParamUpdate(BaseModel):
     kv: Optional[int] = None
     ma: Optional[int] = None
@@ -609,7 +632,7 @@ class ScanSessionTopogramParamUpdate(BaseModel):
     tube_angle: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = None
+    scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -625,7 +648,7 @@ class ScanSessionTopogramParam(ORMModel):
     tube_angle: float
     fov: float
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = "OUT"
+    scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -640,7 +663,7 @@ class ScanSessionHelicalParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = None
+    scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -661,7 +684,7 @@ class ScanSessionHelicalParam(ORMModel):
     scan_length: float
     fov: float
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = "OUT"
+    scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -679,7 +702,7 @@ class ScanSessionAxialParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = None
+    scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -701,7 +724,7 @@ class ScanSessionAxialParam(ORMModel):
     scan_length: float
     fov: float
     collimator: Optional[str] = None
-    scan_direction: Optional[str] = "OUT"
+    scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
     dlp: Optional[float] = None
@@ -835,6 +858,7 @@ class ScanSessionSeries(ORMModel):
     range_confirmed: bool = False
     image_source_id: Optional[PrototypeImageSourceId] = None
     image_source_version: Optional[PrototypeImageSourceVersion] = None
+    scan_planning: Optional[ScanSessionScanPlanning] = None
     topogram_param: Optional[ScanSessionTopogramParam] = None
     helical_param: Optional[ScanSessionHelicalParam] = None
     axial_param: Optional[ScanSessionAxialParam] = None

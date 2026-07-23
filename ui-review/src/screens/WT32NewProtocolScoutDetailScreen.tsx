@@ -10,7 +10,7 @@ const scoutFields: ScoutField[] = [
     { label: "旋转时间 (S)", type: "select", options: ["1", "0.5", "1.5"] },
     { label: "准直器 (COLLIMATION)", type: "input", placeholder: "例如: 320.6" },
     { label: "扫描长度 (MM)", type: "input", value: "450" },
-    { label: "扫描方向", type: "select", options: ["OUT", "IN"] },
+    { label: "扫描方向", type: "select", options: ["头向足", "足向头"] },
     { label: "定位像 FOV", type: "input", value: "500" },
     { label: "DOM (动态扫描)", type: "input", placeholder: "0 或 1" },
     { label: "床角度 (ANGLE)", type: "input", value: "0" },

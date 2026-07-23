@@ -160,12 +160,25 @@ def _scan_session_query(db: Session):
         selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.topogram_param),
         selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.helical_param),
         selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.axial_param),
+        selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.scan_planning),
         selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.recon_series),
         selectinload(models.ScanSession.series).selectinload(models.ScanSessionSeries.gating_config),
         selectinload(models.ScanSession.series)
         .selectinload(models.ScanSessionSeries.fourd_config)
         .selectinload(models.ScanSessionFourDConfig.breathing_training_param),
     )
+
+
+def _series_scan_direction(series: models.ScanSessionSeries) -> str:
+    for param in (series.topogram_param, series.helical_param, series.axial_param):
+        if param and param.scan_direction:
+            return param.scan_direction
+    return "HEAD_TO_FOOT"
+
+
+def _sync_scan_planning_direction(series: models.ScanSessionSeries, scan_direction: str) -> None:
+    if series.scan_planning:
+        series.scan_planning.scan_direction = scan_direction
 
 
 def _get_scan_session_or_404(scan_session_id: int, db: Session) -> models.ScanSession:
@@ -269,6 +282,10 @@ def _clone_session_from_protocol(
                 template_param_id=series.axial_param.id,
                 dom_enabled_by_default=dom_enabled_by_default,
             )
+
+        session_series.scan_planning = models.ScanSessionScanPlanning(
+            scan_direction=_series_scan_direction(session_series),
+        )
 
         for recon in series.recon_series:
             session_series.recon_series.append(
@@ -798,6 +815,10 @@ def _build_session_series_from_payload(payload: schemas.ScanSessionSeriesCreate)
         axial = payload.axial_param.model_dump(exclude_unset=True, exclude={"series_id"})
         session_series.axial_param = models.ScanSessionAxialParam(**axial)
 
+    session_series.scan_planning = models.ScanSessionScanPlanning(
+        scan_direction=_series_scan_direction(session_series),
+    )
+
     for recon_payload in payload.recon_series:
         recon = recon_payload.model_dump(exclude_unset=True, exclude={"series_id"})
         if "recon_type" not in recon or recon["recon_type"] is None:
@@ -835,6 +856,18 @@ def _clone_session_series(source: models.ScanSessionSeries) -> models.ScanSessio
         cloned.axial_param = _clone_axial_param(
             source.axial_param,
             template_param_id=source.axial_param.template_param_id,
+        )
+
+    if source.scan_planning:
+        cloned.scan_planning = models.ScanSessionScanPlanning(
+            source_topogram_series_id=source.scan_planning.source_topogram_series_id,
+            range_min_position_mm=source.scan_planning.range_min_position_mm,
+            range_max_position_mm=source.scan_planning.range_max_position_mm,
+            scan_direction=source.scan_planning.scan_direction,
+        )
+    else:
+        cloned.scan_planning = models.ScanSessionScanPlanning(
+            scan_direction=_series_scan_direction(cloned),
         )
 
     for recon in source.recon_series:
@@ -1123,6 +1156,71 @@ def update_scan_session_series(session_series_id: int, payload: schemas.ScanSess
     return entity
 
 
+@router.put("/series/{session_series_id}/planning", response_model=schemas.ScanSessionScanPlanning)
+def update_scan_session_series_planning(
+    session_series_id: int,
+    payload: schemas.ScanSessionScanPlanningUpdate,
+    db: Session = Depends(get_db),
+):
+    scan_session_id, locked_series_id = _get_series_ref_or_404(session_series_id, db)
+    _, series = _lock_series_for_mutation(
+        scan_session_id,
+        locked_series_id,
+        db,
+        "scan planning",
+        require_pending=True,
+        forbid_four_d_result=True,
+    )
+
+    source_topogram_id = payload.source_topogram_series_id
+    if source_topogram_id is not None:
+        source_topogram = (
+            db.query(models.ScanSessionSeries)
+            .filter(
+                models.ScanSessionSeries.id == source_topogram_id,
+                models.ScanSessionSeries.scan_session_id == scan_session_id,
+                models.ScanSessionSeries.series_type == "topogram",
+            )
+            .first()
+        )
+        if not source_topogram:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="source_topogram_series_id must reference a topogram in the same scan session",
+            )
+        if source_topogram.id == series.id or source_topogram.series_order >= series.series_order:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="source topogram must precede the planned scan series",
+            )
+    elif series.series_type != "topogram":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="non-topogram scan planning must reference its source topogram",
+        )
+
+    planning = series.scan_planning
+    if not planning:
+        planning = models.ScanSessionScanPlanning(scan_session_series_id=series.id)
+        db.add(planning)
+
+    planning.source_topogram_series_id = source_topogram_id
+    planning.range_min_position_mm = payload.range_min_position_mm
+    planning.range_max_position_mm = payload.range_max_position_mm
+    planning.scan_direction = payload.scan_direction
+
+    scan_length = payload.range_max_position_mm - payload.range_min_position_mm
+    parameter = series.topogram_param or series.helical_param or series.axial_param
+    if parameter:
+        parameter.scan_length = scan_length
+        parameter.scan_direction = payload.scan_direction
+    _invalidate_range_confirmation_for_parameter_change(series)
+
+    db.commit()
+    db.refresh(planning)
+    return planning
+
+
 @router.put("/series/{session_series_id}/execution", response_model=schemas.ScanSessionSeries)
 def update_scan_session_series_execution(
     session_series_id: int,
@@ -1295,6 +1393,8 @@ def update_scan_session_topogram_param(param_id: int, payload: schemas.ScanSessi
     if _parameter_values_changed(entity, updates):
         _invalidate_range_confirmation_for_parameter_change(series)
     _apply_updates(entity, updates)
+    if "scan_direction" in updates:
+        _sync_scan_planning_direction(series, updates["scan_direction"])
     db.commit()
     db.refresh(entity)
     return entity
@@ -1328,6 +1428,8 @@ def update_scan_session_helical_param(param_id: int, payload: schemas.ScanSessio
     if _parameter_values_changed(entity, updates):
         _invalidate_range_confirmation_for_parameter_change(series)
     _apply_updates(entity, updates)
+    if "scan_direction" in updates:
+        _sync_scan_planning_direction(series, updates["scan_direction"])
     db.commit()
     db.refresh(entity)
     return entity
@@ -1361,6 +1463,8 @@ def update_scan_session_axial_param(param_id: int, payload: schemas.ScanSessionA
     if _parameter_values_changed(entity, updates):
         _invalidate_range_confirmation_for_parameter_change(series)
     _apply_updates(entity, updates)
+    if "scan_direction" in updates:
+        _sync_scan_planning_direction(series, updates["scan_direction"])
     db.commit()
     db.refresh(entity)
     return entity

@@ -38,7 +38,7 @@ interface ProtocolGroup {
 
 const MockScanScreen = () => {
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
-    const [bedMode, setBedMode] = useState<"in" | "out">("in");
+    const [scanDirection, setScanDirection] = useState<"HEAD_TO_FOOT" | "FOOT_TO_HEAD">("HEAD_TO_FOOT");
     const [groups, setGroups] = useState<ProtocolGroup[]>([
         {
             id: "g1",
@@ -246,16 +246,16 @@ const MockScanScreen = () => {
                             <div className="p-3 flex justify-center">
                                 <div className="flex w-full h-[36px] bg-white border border-[#B0C4DE] rounded-sm overflow-hidden p-[2px]">
                                     <button
-                                        onClick={() => setBedMode("in")}
-                                        className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${bedMode === "in" ? "bg-[#4D94FF] text-white shadow-inner" : "text-[#90A4AE] hover:bg-gray-50"}`}
+                                        onClick={() => setScanDirection("HEAD_TO_FOOT")}
+                                        className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${scanDirection === "HEAD_TO_FOOT" ? "bg-[#4D94FF] text-white shadow-inner" : "text-[#90A4AE] hover:bg-gray-50"}`}
                                     >
-                                        进床
+                                        头向足
                                     </button>
                                     <button
-                                        onClick={() => setBedMode("out")}
-                                        className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${bedMode === "out" ? "bg-[#4D94FF] text-white shadow-inner" : "text-[#90A4AE] hover:bg-gray-50"}`}
+                                        onClick={() => setScanDirection("FOOT_TO_HEAD")}
+                                        className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${scanDirection === "FOOT_TO_HEAD" ? "bg-[#4D94FF] text-white shadow-inner" : "text-[#90A4AE] hover:bg-gray-50"}`}
                                     >
-                                        出床
+                                        足向头
                                     </button>
                                 </div>
                             </div>

@@ -1373,25 +1373,25 @@ def _migrate_protocol_columns() -> None:
         "ALTER TABLE protocols ADD COLUMN is_enhance BOOLEAN NOT NULL DEFAULT 0",
         # Topogram Param additions
         "ALTER TABLE topogram_params ADD COLUMN collimator VARCHAR(50)",
-        "ALTER TABLE topogram_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE topogram_params ADD COLUMN scan_direction VARCHAR(20) DEFAULT 'HEAD_TO_FOOT'",
         "ALTER TABLE topogram_params ADD COLUMN dom VARCHAR(20)",
         # Helical Param additions
         "ALTER TABLE helical_params ADD COLUMN collimator VARCHAR(50)",
-        "ALTER TABLE helical_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE helical_params ADD COLUMN scan_direction VARCHAR(20) DEFAULT 'HEAD_TO_FOOT'",
         "ALTER TABLE helical_params ADD COLUMN dom VARCHAR(20)",
         # Axial Param additions
         "ALTER TABLE axial_params ADD COLUMN collimator VARCHAR(50)",
-        "ALTER TABLE axial_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE axial_params ADD COLUMN scan_direction VARCHAR(20) DEFAULT 'HEAD_TO_FOOT'",
         "ALTER TABLE axial_params ADD COLUMN dom VARCHAR(20)",
         # Scan Session additions
         "ALTER TABLE scan_session_topogram_params ADD COLUMN collimator VARCHAR(50)",
-        "ALTER TABLE scan_session_topogram_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE scan_session_topogram_params ADD COLUMN scan_direction VARCHAR(20) DEFAULT 'HEAD_TO_FOOT'",
         "ALTER TABLE scan_session_topogram_params ADD COLUMN dom VARCHAR(20)",
         "ALTER TABLE scan_session_helical_params ADD COLUMN collimator VARCHAR(50)",
-        "ALTER TABLE scan_session_helical_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE scan_session_helical_params ADD COLUMN scan_direction VARCHAR(20) DEFAULT 'HEAD_TO_FOOT'",
         "ALTER TABLE scan_session_helical_params ADD COLUMN dom VARCHAR(20)",
         "ALTER TABLE scan_session_axial_params ADD COLUMN collimator VARCHAR(50)",
-        "ALTER TABLE scan_session_axial_params ADD COLUMN scan_direction VARCHAR(10) DEFAULT 'OUT'",
+        "ALTER TABLE scan_session_axial_params ADD COLUMN scan_direction VARCHAR(20) DEFAULT 'HEAD_TO_FOOT'",
         "ALTER TABLE scan_session_axial_params ADD COLUMN dom VARCHAR(20)",
         "ALTER TABLE scan_sessions ADD COLUMN acquisition_type VARCHAR(20) NOT NULL DEFAULT 'regular'",
         # Recon Series additions

@@ -281,7 +281,11 @@ const mapScanSessionToProtocolCases = (scanSession: ApiScanSessionDetail | null)
             const scanParams: Record<string, string | number | boolean> = {
                 angle: topogram?.tube_angle ?? 0,
                 collimation: "--",
-                scanningDirection: scanSession.table_direction.toUpperCase(),
+                // 滑轨 CT 由机架沿患者固定体位移动，方向来自该序列本身而非床位设置。
+                scanningDirection: topogram?.scan_direction
+                    ?? helical?.scan_direction
+                    ?? axial?.scan_direction
+                    ?? "HEAD_TO_FOOT",
             };
 
             if (topogram?.scan_length !== undefined) scanParams.scanLength = topogram.scan_length;
@@ -473,7 +477,7 @@ const ScanConfirmScreen = ({
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
     const [scanSessionLoadState, setScanSessionLoadState] = useState<"loading" | "ready" | "error">("loading");
     const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
-    const [bedMode, setBedMode] = useState<"in" | "out">("in");
+    const [scanDirection, setScanDirection] = useState<"HEAD_TO_FOOT" | "FOOT_TO_HEAD">("HEAD_TO_FOOT");
     const [patientPosition, setPatientPosition] = useState("HFS");
     const [activeParamTab, setActiveParamTab] = useState<"main" | "extra">("main");
     const [dualScoutApAngle, setDualScoutApAngle] = useState<number>(0);
@@ -791,8 +795,8 @@ const ScanConfirmScreen = ({
         const direction = parameterPanelMode === "helicalScan"
             ? resolvedHelicalScanDisplayParams.scanningDirection
             : resolvedTomographicScanDisplayParams.scanningDirection;
-        if (direction === "IN" || direction === "OUT") {
-            setBedMode(direction === "IN" ? "in" : "out");
+        if (direction === "HEAD_TO_FOOT" || direction === "FOOT_TO_HEAD") {
+            setScanDirection(direction);
         }
     }, [parameterPanelMode, resolvedTomographicScanDisplayParams.scanningDirection, resolvedHelicalScanDisplayParams.scanningDirection]);
 
@@ -993,16 +997,16 @@ const ScanConfirmScreen = ({
                         <div className="hidden">
                             <div className="grid grid-cols-2 gap-2">
                                 <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                    <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.inOutTable")}</span>
+                                    <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.positioning.scanDirection")}</span>
                                     <div className="relative w-full">
                                         <select
-                                            value={bedMode}
-                                            onChange={(event) => setBedMode(event.target.value as "in" | "out")}
+                                            value={scanDirection}
+                                            onChange={(event) => setScanDirection(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD")}
                                             disabled={readOnlyMode}
                                             className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                         >
-                                            <option value="in">{t("scanFlow.tableIn")}</option>
-                                            <option value="out">{t("scanFlow.tableOut")}</option>
+                                            <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
+                                            <option value="FOOT_TO_HEAD">{t("scanFlow.positioning.footToHead")}</option>
                                         </select>
                                         <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                                     </div>
@@ -1030,20 +1034,20 @@ const ScanConfirmScreen = ({
                                 </label>
                             </div>
                         </div>
-                        {/* In/Out Toggle */}
+                        {/* 机架扫描方向 */}
                         <div className="hidden">
                             <div className="flex w-full h-[36px] bg-white border border-[#B0C4DE] rounded-sm overflow-hidden p-[2px]">
                                 <button
-                                    onClick={() => setBedMode("in")}
-                                    className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${bedMode === "in" ? 'bg-[#4D94FF] text-white shadow-inner' : 'text-[#90A4AE] hover:bg-gray-50'}`}
+                                    onClick={() => setScanDirection("HEAD_TO_FOOT")}
+                                    className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${scanDirection === "HEAD_TO_FOOT" ? 'bg-[#4D94FF] text-white shadow-inner' : 'text-[#90A4AE] hover:bg-gray-50'}`}
                                 >
-                                    {t("scanFlow.tableIn")}
+                                    {t("scanFlow.positioning.headToFoot")}
                                 </button>
                                 <button
-                                    onClick={() => setBedMode("out")}
-                                    className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${bedMode === "out" ? 'bg-[#4D94FF] text-white shadow-inner' : 'text-[#90A4AE] hover:bg-gray-50'}`}
+                                    onClick={() => setScanDirection("FOOT_TO_HEAD")}
+                                    className={`flex-1 flex items-center justify-center text-[12px] font-bold rounded-sm transition-all ${scanDirection === "FOOT_TO_HEAD" ? 'bg-[#4D94FF] text-white shadow-inner' : 'text-[#90A4AE] hover:bg-gray-50'}`}
                                 >
-                                    {t("scanFlow.tableOut")}
+                                    {t("scanFlow.positioning.footToHead")}
                                 </button>
                             </div>
                         </div>
@@ -1104,15 +1108,15 @@ const ScanConfirmScreen = ({
                                         </div>
                                     )}
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.inOutTable")}</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.positioning.scanDirection")}</span>
                                         <div className="relative w-full">
                                             <select
-                                                value={bedMode}
-                                                onChange={(event) => setBedMode(event.target.value as "in" | "out")}
+                                                value={scanDirection}
+                                                onChange={(event) => setScanDirection(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD")}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
-                                                <option value="in">{t("scanFlow.tableIn")}</option>
-                                                <option value="out">{t("scanFlow.tableOut")}</option>
+                                                <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
+                                                <option value="FOOT_TO_HEAD">{t("scanFlow.positioning.footToHead")}</option>
                                             </select>
                                             <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                                         </div>
@@ -1235,15 +1239,15 @@ const ScanConfirmScreen = ({
                                         </div>
                                     )}
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.inOutTable")}</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.positioning.scanDirection")}</span>
                                         <div className="relative w-full">
                                             <select
-                                                value={bedMode}
-                                                onChange={(event) => setBedMode(event.target.value as "in" | "out")}
+                                                value={scanDirection}
+                                                onChange={(event) => setScanDirection(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD")}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
-                                                <option value="in">{t("scanFlow.tableIn")}</option>
-                                                <option value="out">{t("scanFlow.tableOut")}</option>
+                                                <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
+                                                <option value="FOOT_TO_HEAD">{t("scanFlow.positioning.footToHead")}</option>
                                             </select>
                                             <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                                         </div>
@@ -1341,15 +1345,15 @@ const ScanConfirmScreen = ({
                             ) : (
                                 <div className="grid grid-cols-2 gap-2">
                                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.inOutTable")}</span>
+                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.positioning.scanDirection")}</span>
                                         <div className="relative w-full">
                                             <select
-                                                value={bedMode}
-                                                onChange={(event) => setBedMode(event.target.value as "in" | "out")}
+                                                value={scanDirection}
+                                                onChange={(event) => setScanDirection(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD")}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
-                                                <option value="in">{t("scanFlow.tableIn")}</option>
-                                                <option value="out">{t("scanFlow.tableOut")}</option>
+                                                <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
+                                                <option value="FOOT_TO_HEAD">{t("scanFlow.positioning.footToHead")}</option>
                                             </select>
                                             <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                                         </div>

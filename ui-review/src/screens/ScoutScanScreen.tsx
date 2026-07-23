@@ -8,7 +8,6 @@ import {
     ChevronsUp,
     FilePlus,
     Trash2,
-    ArrowUpDown,
     AlertTriangle,
     Check,
     CheckCircle,
@@ -17,7 +16,7 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import { loadSelectedPatient } from "../lib/patientSession";
 import { saveScoutPositioningRange } from "../lib/scoutPositioningSession";
-import { fetchSelectedScanSession, updateSelectedScanSessionTopogramParam } from "../lib/scanSession";
+import { fetchSelectedScanSession, updateSelectedScanSessionSeriesPlanning } from "../lib/scanSession";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { clearSelectedExamWorkflowState } from "../lib/workflowNavigationState";
 import { mergeDualScoutPlanSequences } from "../lib/headDualScoutDemo";
@@ -47,7 +46,7 @@ const BREATHING_SCOUT_SERIES = {
 };
 
 const BREATHING_HELICAL_PARAM_PREVIEW = {
-    bedMode: "OUT",
+    scanDirection: "头向足",
     position: "HFS",
     scanLength: "165.0",
     mA: "215",
@@ -155,7 +154,7 @@ const BreathingHelicalParamCard = ({ label, value }: { label: string; value: str
 );
 
 type FourDScoutParams = {
-    bedMode: string;
+    scanDirection: string;
     position: string;
     scanLength: string;
     mA: string;
@@ -194,16 +193,16 @@ function FourDScoutParamPanel({
             <div className="flex-1 p-2 pt-2 flex flex-col gap-2 overflow-y-auto">
                 <div className="grid grid-cols-2 gap-2">
                     <label className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm cursor-pointer">
-                        <span className={labelCls}>{t("scanFlow.inOutTable")}</span>
+                        <span className={labelCls}>{t("scanFlow.positioning.scanDirection")}</span>
                         <div className="relative w-full">
                             <select
-                                value={params.bedMode}
-                                onChange={(e) => onChange("bedMode", e.target.value)}
+                                value={params.scanDirection}
+                                onChange={(e) => onChange("scanDirection", e.target.value)}
                                 disabled={readOnly}
                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                             >
-                                <option value="in">{t("scanFlow.tableIn")}</option>
-                                <option value="out">{t("scanFlow.tableOut")}</option>
+                                <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
+                                <option value="FOOT_TO_HEAD">{t("scanFlow.positioning.footToHead")}</option>
                             </select>
                             <ChevronDown size={9} className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[#90A4AE]" />
                         </div>
@@ -780,6 +779,18 @@ const ScoutScanScreen = ({
                 if (activePlan && activeScout) {
                     setExpandedSeqId(`group-${activePlan.id}-seq-${activeScout.id}`);
                 }
+                const topogram = session.series.find((series) => series.series_type === "topogram");
+                const planning = topogram?.scan_planning;
+                if (
+                    planning?.range_min_position_mm !== null && planning?.range_min_position_mm !== undefined
+                    && planning.range_max_position_mm !== null && planning.range_max_position_mm !== undefined
+                ) {
+                    setStartPos(planning.range_min_position_mm.toFixed(2));
+                    setEndPos(planning.range_max_position_mm.toFixed(2));
+                }
+                if (planning?.scan_direction === "HEAD_TO_FOOT" || planning?.scan_direction === "FOOT_TO_HEAD") {
+                    setScanDirection(planning.scan_direction);
+                }
                 setWorkflowGuardStatus("ready");
             } catch {
                 if (!cancelled) {
@@ -799,6 +810,7 @@ const ScoutScanScreen = ({
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
     const [startPos, setStartPos] = useState("472.95");
     const [endPos, setEndPos] = useState("595.17");
+    const [scanDirection, setScanDirection] = useState<"HEAD_TO_FOOT" | "FOOT_TO_HEAD">("HEAD_TO_FOOT");
     const isBreathingSignalEnabled = true;
     const isRespiraScopeActive = isBreathingSignalEnabled && (isBreathingAcquisitionStep || bottomPanelMode === "breathing");
     const [respiraScopeNowMs, setRespiraScopeNowMs] = useState(() => Date.now());
@@ -824,7 +836,7 @@ const ScoutScanScreen = ({
     });
     const [breathingParamsExpanded, setBreathingParamsExpanded] = useState(false);
     const [fourDScoutParams, setFourDScoutParams] = useState<FourDScoutParams>({
-        bedMode: "in",
+        scanDirection: "HEAD_TO_FOOT",
         position: "HFS",
         scanLength: "80.00",
         mA: "30",
@@ -857,11 +869,6 @@ const ScoutScanScreen = ({
         const iMean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
         const iCv = Math.sqrt(intervals.reduce((a, b) => a + (b - iMean) ** 2, 0) / intervals.length) / iMean;
         return vCv < 0.12 && iCv < 0.15;
-    };
-
-    const handleSwap = () => {
-        setStartPos(endPos);
-        setEndPos(startPos);
     };
 
     // Waveform simulation state (increased buffer for longer period)
@@ -1296,19 +1303,24 @@ const ScoutScanScreen = ({
 
     const persistPositioningToSession = useCallback(async () => {
         const scanSession = await fetchSelectedScanSession();
-        const topogramParamId = scanSession?.series.find((series) => series.series_type === "topogram")?.topogram_param?.id;
-        if (!topogramParamId) return;
+        const topogramSeries = scanSession?.series.find((series) => series.series_type === "topogram");
+        if (!topogramSeries) return;
 
         const start = Number(startPos);
         const end = Number(endPos);
         if (!Number.isFinite(start) || !Number.isFinite(end)) return;
 
-        saveScoutPositioningRange({ start, end });
+        const rangeMin = Math.min(start, end);
+        const rangeMax = Math.max(start, end);
+        saveScoutPositioningRange({ start: rangeMin, end: rangeMax });
 
-        await updateSelectedScanSessionTopogramParam(topogramParamId, {
-            scan_length: Number(Math.abs(end - start).toFixed(2)),
+        await updateSelectedScanSessionSeriesPlanning(topogramSeries.id, {
+            source_topogram_series_id: null,
+            range_min_position_mm: rangeMin,
+            range_max_position_mm: rangeMax,
+            scan_direction: scanDirection,
         });
-    }, [endPos, startPos]);
+    }, [endPos, scanDirection, startPos]);
 
     const handlePreviousStep = useCallback(() => {
         if (is4DWorkflow) {
@@ -1552,7 +1564,7 @@ const ScoutScanScreen = ({
                                 {t("scanFlow.breathingTraining")}
                             </button>
                             <div className="grid grid-cols-2 gap-1.5">
-                                <BreathingHelicalParamCard label="进出床" value={BREATHING_HELICAL_PARAM_PREVIEW.bedMode} />
+                                <BreathingHelicalParamCard label="扫描方向" value={BREATHING_HELICAL_PARAM_PREVIEW.scanDirection} />
                                 <BreathingHelicalParamCard label="体位" value={BREATHING_HELICAL_PARAM_PREVIEW.position} />
                                 <BreathingHelicalParamCard label="扫描长度" value={BREATHING_HELICAL_PARAM_PREVIEW.scanLength} />
                                 <BreathingHelicalParamCard label="mA" value={BREATHING_HELICAL_PARAM_PREVIEW.mA} />
@@ -1593,7 +1605,18 @@ const ScoutScanScreen = ({
                         />
                     ) : (
                         <div className={`mt-auto border-t border-[#EEF2F9] bg-[#F8FAFC] px-4 py-3 shrink-0 transition-all duration-300 ${isTreeCollapsed ? 'flex-1 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]' : 'h-[168px]'}`}>
-                            <div className="mb-3 text-[12px] font-bold text-[#546E7A]">{positioningHint}</div>
+                            <div className="mb-1 text-[12px] font-bold text-[#546E7A]">{positioningHint}</div>
+                            <label className="mb-2 flex items-center gap-2 text-[10px] font-bold text-[#546E7A]">
+                                {t("scanFlow.positioning.scanDirection")}
+                                <select
+                                    value={scanDirection}
+                                    onChange={(event) => setScanDirection(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD")}
+                                    className="h-[24px] min-w-[112px] rounded border border-[#B0C4DE] bg-white px-2 text-[11px] font-bold text-[#37474F] outline-none focus:border-[#4D94FF]"
+                                >
+                                    <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
+                                    <option value="FOOT_TO_HEAD">{t("scanFlow.positioning.footToHead")}</option>
+                                </select>
+                            </label>
                             <div className="flex items-stretch gap-3 h-[calc(100%-28px)]">
                                 <div className="flex flex-col items-center self-stretch justify-center py-2 shrink-0">
                                     <button
@@ -1601,14 +1624,6 @@ const ScoutScanScreen = ({
                                         className={`w-3 h-3 rounded-full border-2 flex items-center justify-center p-[2px] shrink-0 transition-all ${selectedPosition === 'start' ? 'bg-[#4D94FF] border-white shadow-sm' : 'bg-white border-[#B0C4DE]'}`}
                                     >
                                         {selectedPosition === 'start' && <div className="w-full h-full bg-white rounded-full" />}
-                                    </button>
-                                    <div className="w-px flex-1 bg-[#C5D5E8] my-1" />
-                                    <button
-                                        onClick={handleSwap}
-                                        title={t("scanFlow.positioning.swapRange")}
-                                        className="w-[20px] h-[20px] rounded-full bg-white border border-[#B0C4DE] flex items-center justify-center text-[#78A0BF] hover:text-[#4D94FF] hover:border-[#4D94FF] hover:bg-[#EEF6FF] transition-all active:scale-90 shadow-sm shrink-0"
-                                    >
-                                        <ArrowUpDown size={10} />
                                     </button>
                                     <div className="w-px flex-1 bg-[#C5D5E8] my-1" />
                                     <button
@@ -1624,7 +1639,7 @@ const ScoutScanScreen = ({
                                         onClick={() => setSelectedPosition('start')}
                                         className="flex items-center gap-2 h-[32px] min-w-0 cursor-pointer"
                                     >
-                                        <span className={`text-[11px] font-bold w-[72px] shrink-0 transition-colors ${selectedPosition === 'start' ? 'text-[#4D94FF]' : 'text-[#90A4AE]'}`}>{t("scanFlow.positioning.startPosition")}</span>
+                                        <span className={`text-[11px] font-bold w-[72px] shrink-0 transition-colors ${selectedPosition === 'start' ? 'text-[#4D94FF]' : 'text-[#90A4AE]'}`}>{t("scanFlow.positioning.rangeMin")}</span>
                                         <input
                                             type="text"
                                             value={startPos}
@@ -1643,7 +1658,7 @@ const ScoutScanScreen = ({
                                         onClick={() => setSelectedPosition('end')}
                                         className="flex items-center gap-2 h-[32px] min-w-0 cursor-pointer"
                                     >
-                                        <span className={`text-[11px] font-bold w-[72px] shrink-0 transition-colors ${selectedPosition === 'end' ? 'text-[#66BB6A]' : 'text-[#90A4AE]'}`}>{t("scanFlow.positioning.endPosition")}</span>
+                                        <span className={`text-[11px] font-bold w-[72px] shrink-0 transition-colors ${selectedPosition === 'end' ? 'text-[#66BB6A]' : 'text-[#90A4AE]'}`}>{t("scanFlow.positioning.rangeMax")}</span>
                                         <input
                                             type="text"
                                             value={endPos}

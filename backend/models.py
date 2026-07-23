@@ -138,7 +138,7 @@ class TopogramParam(Base):
     tube_angle = Column(Float, nullable=False, default=270.0)
     fov = Column(Float, nullable=False, default=500.0)
     collimator = Column(String(50), nullable=True)
-    scan_direction = Column(String(10), nullable=True, default="OUT")
+    scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
@@ -159,7 +159,7 @@ class HelicalParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     collimator = Column(String(50), nullable=True)
-    scan_direction = Column(String(10), nullable=True, default="OUT")
+    scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
@@ -183,7 +183,7 @@ class AxialParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     collimator = Column(String(50), nullable=True)
-    scan_direction = Column(String(10), nullable=True, default="OUT")
+    scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
@@ -445,6 +445,13 @@ class ScanSessionSeries(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    scan_planning = relationship(
+        "ScanSessionScanPlanning",
+        back_populates="session_series",
+        cascade="all, delete-orphan",
+        foreign_keys="ScanSessionScanPlanning.scan_session_series_id",
+        uselist=False,
+    )
     fourd_result = relationship(
         "ScanSessionFourDResult",
         back_populates="target_series",
@@ -456,6 +463,46 @@ class ScanSessionSeries(Base):
         back_populates="series",
         cascade="all, delete-orphan",
         order_by="ScanSessionSeriesAttempt.attempt_number",
+    )
+
+
+class ScanSessionScanPlanning(Base):
+    __tablename__ = "scan_session_scan_plannings"
+    __table_args__ = (
+        CheckConstraint(
+            "(range_min_position_mm IS NULL AND range_max_position_mm IS NULL) OR "
+            "(range_min_position_mm IS NOT NULL AND range_max_position_mm IS NOT NULL "
+            "AND range_min_position_mm <= range_max_position_mm)",
+            name="ck_scan_session_planning_range",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    scan_session_series_id = Column(
+        Integer,
+        ForeignKey("scan_session_series.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    source_topogram_series_id = Column(
+        Integer,
+        ForeignKey("scan_session_series.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    range_min_position_mm = Column(Float, nullable=True)
+    range_max_position_mm = Column(Float, nullable=True)
+    scan_direction = Column(String(20), nullable=False, default="HEAD_TO_FOOT")
+
+    session_series = relationship(
+        "ScanSessionSeries",
+        back_populates="scan_planning",
+        foreign_keys=[scan_session_series_id],
+    )
+    source_topogram_series = relationship(
+        "ScanSessionSeries",
+        foreign_keys=[source_topogram_series_id],
     )
 
 
@@ -608,7 +655,7 @@ class ScanSessionTopogramParam(Base):
     tube_angle = Column(Float, nullable=False, default=270.0)
     fov = Column(Float, nullable=False, default=500.0)
     collimator = Column(String(50), nullable=True)
-    scan_direction = Column(String(10), nullable=True, default="OUT")
+    scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
@@ -630,7 +677,7 @@ class ScanSessionHelicalParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     collimator = Column(String(50), nullable=True)
-    scan_direction = Column(String(10), nullable=True, default="OUT")
+    scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)
@@ -655,7 +702,7 @@ class ScanSessionAxialParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     collimator = Column(String(50), nullable=True)
-    scan_direction = Column(String(10), nullable=True, default="OUT")
+    scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
     dlp = Column(Float, nullable=True)

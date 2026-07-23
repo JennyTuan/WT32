@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ImageIcon, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Contrast, ImageIcon, Loader2, RefreshCw } from "lucide-react";
 
 import ServiceModeShell from "../shared/ServiceModeShell";
 import type { TranslationKey } from "../../../lib/i18n";
@@ -124,14 +124,21 @@ export default function PerformanceEvaluationScreen() {
   const [info, setInfo] = useState<DatasetInfo | null>(null);
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [sliceIndex, setSliceIndex] = useState(0);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [windowCenter, setWindowCenter] = useState<number | null>(null);
+  const [windowWidth, setWindowWidth] = useState<number | null>(null);
+  const [previewWindowCenter, setPreviewWindowCenter] = useState<number | null>(null);
+  const [previewWindowWidth, setPreviewWindowWidth] = useState<number | null>(null);
+  const [analysisDirty, setAnalysisDirty] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mtfRoi, setMtfRoi] = useState<{ slice: number; x: number; y: number; size: number } | null>(null);
   const [fwhmPeak, setFwhmPeak] = useState<{ slice: number; x: number; y: number } | null>(null);
-  const [dragMode, setDragMode] = useState<null | "move" | "resize">(null);
+  const [dragMode, setDragMode] = useState<null | "roi-move" | "roi-resize" | "peak-move" | "window">(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
-  const reanalyzeTimer = useRef<number | null>(null);
+  const windowDragStart = useRef<{ x: number; y: number; center: number; width: number } | null>(null);
+  const windowValuesRef = useRef<{ center: number; width: number } | null>(null);
 
   // When tab changes, jump to the slice where the relevant marker lives.
   useEffect(() => {
@@ -153,13 +160,14 @@ export default function PerformanceEvaluationScreen() {
   const previewUrl = useMemo(() => {
     if (!info || !activeDataset) return "";
     const base = API_BASE_URL;
-    const wc = info.default_window_center;
-    const ww = info.default_window_width;
+    const wc = previewWindowCenter ?? info.default_window_center;
+    const ww = previewWindowWidth ?? info.default_window_width;
     return `${base}/api/performance/dataset/${activeDataset.id}/slice/${sliceIndex}/preview.png?wc=${wc}&ww=${ww}`;
-  }, [info, activeDataset, sliceIndex]);
+  }, [info, activeDataset, sliceIndex, previewWindowCenter, previewWindowWidth]);
 
   const applyAnalysis = (aData: AnalyzeResponse) => {
     setAnalysis(aData);
+    setAnalysisDirty(false);
     setMtfRoi({
       slice: aData.edge_slice_index,
       x: aData.mtf.roi_x,
@@ -184,7 +192,13 @@ export default function PerformanceEvaluationScreen() {
       const infoRes = await apiFetch(`/api/performance/dataset/${activeDataset.id}/slices`);
       if (!infoRes.ok) throw new Error(t("service.performance.errorFetchSlices"));
       const infoData: DatasetInfo = await infoRes.json();
+      setImageLoaded(false);
       setInfo(infoData);
+      setWindowCenter(infoData.default_window_center);
+      setWindowWidth(infoData.default_window_width);
+      setPreviewWindowCenter(infoData.default_window_center);
+      setPreviewWindowWidth(infoData.default_window_width);
+      windowValuesRef.current = { center: infoData.default_window_center, width: infoData.default_window_width };
       const analyzeRes = await apiFetch(`/api/performance/dataset/${activeDataset.id}/analyze`, {
         method: "POST",
       });
@@ -220,13 +234,10 @@ export default function PerformanceEvaluationScreen() {
     }
     try {
       setLoading(true);
-      const res = await apiFetch(`/api/performance/dataset/${activeDataset.id}/analyze?${params}`, {
-        method: "POST",
-      });
+      const res = await apiFetch(`/api/performance/dataset/${activeDataset.id}/analyze?${params}`, { method: "POST" });
       if (!res.ok) throw new Error(t("service.performance.errorReanalyze"));
-      const aData: AnalyzeResponse = await res.json();
-      // Preserve user-edited overlay positions; just refresh curves.
-      setAnalysis(aData);
+      setAnalysis(await res.json() as AnalyzeResponse);
+      setAnalysisDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("service.performance.errorReanalyze"));
     } finally {
@@ -234,33 +245,19 @@ export default function PerformanceEvaluationScreen() {
     }
   };
 
-  const scheduleReanalyze = (
-    nextMtf: { slice: number; x: number; y: number; size: number } | null,
-    nextPeak: { slice: number; x: number; y: number } | null,
-  ) => {
-    if (reanalyzeTimer.current !== null) window.clearTimeout(reanalyzeTimer.current);
-    reanalyzeTimer.current = window.setTimeout(() => {
-      reanalyzeTimer.current = null;
-      void reanalyze(nextMtf, nextPeak);
-    }, 200);
-  };
-
-  // Convert a pointer event to image-pixel coords using the rendered <img> rect.
   const pointerToImagePx = (e: React.PointerEvent | PointerEvent): { x: number; y: number } | null => {
     if (!imgRef.current || !info) return null;
     const rect = imgRef.current.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
-    const fx = (e.clientX - rect.left) / rect.width;
-    const fy = (e.clientY - rect.top) / rect.height;
     return {
-      x: Math.max(0, Math.min(fx * info.columns, info.columns - 1)),
-      y: Math.max(0, Math.min(fy * info.rows, info.rows - 1)),
+      x: Math.max(0, Math.min(((e.clientX - rect.left) / rect.width) * info.columns, info.columns - 1)),
+      y: Math.max(0, Math.min(((e.clientY - rect.top) / rect.height) * info.rows, info.rows - 1)),
     };
   };
 
   // Image-pixel -> displayed percentage relative to the <img> element.
   const imageRectStyle = (cx: number, cy: number, sizePx: number) => {
-    if (!info || !imgRef.current || !overlayRef.current) return undefined;
+    if (!info || !imageLoaded || !imgRef.current || !overlayRef.current) return undefined;
     const imgRect = imgRef.current.getBoundingClientRect();
     const parentRect = overlayRef.current.getBoundingClientRect();
     const scaleX = imgRect.width / info.columns;
@@ -276,7 +273,7 @@ export default function PerformanceEvaluationScreen() {
   };
 
   const imagePointStyle = (cx: number, cy: number) => {
-    if (!info || !imgRef.current || !overlayRef.current) return undefined;
+    if (!info || !imageLoaded || !imgRef.current || !overlayRef.current) return undefined;
     const imgRect = imgRef.current.getBoundingClientRect();
     const parentRect = overlayRef.current.getBoundingClientRect();
     const scaleX = imgRect.width / info.columns;
@@ -287,53 +284,79 @@ export default function PerformanceEvaluationScreen() {
     };
   };
 
-  const handleOverlayPointerDown = (e: React.PointerEvent, mode: "move" | "resize") => {
-    e.stopPropagation();
-    (e.target as Element).setPointerCapture?.(e.pointerId);
+  const adjustWindowCenter = (delta: number) => {
+    if (!info) return;
+    const center = (windowValuesRef.current?.center ?? windowCenter ?? info.default_window_center) + delta;
+    const width = windowValuesRef.current?.width ?? windowWidth ?? info.default_window_width;
+    windowValuesRef.current = { center, width };
+    setWindowCenter(center);
+    setPreviewWindowCenter(center);
+  };
+
+  const adjustWindowWidth = (delta: number) => {
+    if (!info) return;
+    const center = windowValuesRef.current?.center ?? windowCenter ?? info.default_window_center;
+    const width = Math.max(1, (windowValuesRef.current?.width ?? windowWidth ?? info.default_window_width) + delta);
+    windowValuesRef.current = { center, width };
+    setWindowWidth(width);
+    setPreviewWindowWidth(width);
+  };
+
+  const handleOverlayPointerDown = (event: React.PointerEvent, mode: "roi-move" | "roi-resize" | "peak-move") => {
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     setDragMode(mode);
   };
 
-  const handleOverlayPointerMove = (e: React.PointerEvent) => {
+  const handleImagePointerDown = (event: React.PointerEvent) => {
+    if (!info) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    windowDragStart.current = {
+      x: event.clientX,
+      y: event.clientY,
+      center: windowCenter ?? info.default_window_center,
+      width: windowWidth ?? info.default_window_width,
+    };
+    setDragMode("window");
+  };
+
+  const handleOverlayPointerMove = (event: React.PointerEvent) => {
     if (!dragMode || !info) return;
-    const pt = pointerToImagePx(e);
-    if (!pt) return;
-    if (activeTab === "MTF") {
-      setMtfRoi((prev) => {
-        const base = prev ?? { slice: sliceIndex, x: pt.x, y: pt.y, size: 48 };
-        if (dragMode === "move") {
-          return { ...base, slice: sliceIndex, x: pt.x, y: pt.y };
-        }
-        // resize: distance from current center * 2 (clamped)
-        const dx = pt.x - base.x;
-        const dy = pt.y - base.y;
-        const newSize = Math.max(24, Math.min(192, Math.round(2 * Math.max(Math.abs(dx), Math.abs(dy)))));
-        return { ...base, size: newSize };
-      });
-    } else {
-      setFwhmPeak({ slice: sliceIndex, x: pt.x, y: pt.y });
+    if (dragMode === "window") {
+      const start = windowDragStart.current;
+      if (!start) return;
+      const width = Math.max(1, Math.round(start.width + (event.clientX - start.x) * 4));
+      const center = Math.round(start.center - (event.clientY - start.y) * 2);
+      windowValuesRef.current = { center, width };
+      setWindowWidth(width);
+      setWindowCenter(center);
+      return;
     }
+
+    const point = pointerToImagePx(event);
+    if (!point) return;
+    if (dragMode === "roi-move" || dragMode === "roi-resize") {
+      setMtfRoi((current) => {
+        const roi = current ?? { slice: sliceIndex, x: point.x, y: point.y, size: 48 };
+        if (dragMode === "roi-move") return { ...roi, x: point.x, y: point.y };
+        const size = Math.max(24, Math.min(192, Math.round(2 * Math.max(Math.abs(point.x - roi.x), Math.abs(point.y - roi.y)))));
+        return { ...roi, size };
+      });
+      return;
+    }
+    setFwhmPeak((current) => ({ slice: current?.slice ?? sliceIndex, x: point.x, y: point.y }));
   };
 
   const handleOverlayPointerUp = () => {
     if (!dragMode) return;
-    setDragMode(null);
-    scheduleReanalyze(mtfRoi, fwhmPeak);
-  };
-
-  // Click anywhere on the image (when not over the box) to place ROI/peak there.
-  const handleImagePointerDown = (e: React.PointerEvent) => {
-    if (dragMode || !info) return;
-    const pt = pointerToImagePx(e);
-    if (!pt) return;
-    if (activeTab === "MTF") {
-      const next = { slice: sliceIndex, x: pt.x, y: pt.y, size: mtfRoi?.size ?? 48 };
-      setMtfRoi(next);
-      scheduleReanalyze(next, fwhmPeak);
-    } else {
-      const next = { slice: sliceIndex, x: pt.x, y: pt.y };
-      setFwhmPeak(next);
-      scheduleReanalyze(mtfRoi, next);
+    if (dragMode === "window" && windowValuesRef.current) {
+      setPreviewWindowCenter(windowValuesRef.current.center);
+      setPreviewWindowWidth(windowValuesRef.current.width);
     }
+    const needsReanalysis = dragMode !== "window";
+    setDragMode(null);
+    windowDragStart.current = null;
+    if (needsReanalysis) setAnalysisDirty(true);
   };
 
   // Derive chart inputs from analysis or fall back to demo
@@ -487,6 +510,15 @@ export default function PerformanceEvaluationScreen() {
               </div>
             </div>
             <button
+              type="button"
+              onClick={() => void reanalyze(mtfRoi, fwhmPeak)}
+              disabled={loading || !analysisDirty}
+              className="flex h-10 items-center gap-2 rounded-full border border-[#B8D8FF] bg-white px-4 text-[12px] font-bold text-[#2563EB] transition-colors hover:bg-[#F0F7FF] disabled:cursor-not-allowed disabled:border-[#E2E8F0] disabled:text-[#A0AEC0]"
+            >
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+              {t("service.performance.recalculate")}
+            </button>
+            <button
               onClick={handleImport}
               disabled={loading || !activeDataset}
               className="px-6 h-10 bg-[#2F54EB] text-white font-bold rounded-full hover:bg-blue-600 transition-all active:scale-95 shadow-md text-[13px] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
@@ -515,58 +547,76 @@ export default function PerformanceEvaluationScreen() {
                     alt={`Slice ${sliceIndex + 1}`}
                     className="max-w-full max-h-full object-contain select-none"
                     draggable={false}
+                    onLoad={() => setImageLoaded(true)}
                   />
                   {/* MTF ROI box */}
-                  {activeTab === "MTF" && mtfRoi && mtfRoi.slice === sliceIndex && (
+                  {activeTab === "MTF" && mtfRoi && imageLoaded && (
                     <div
-                      className="absolute border-2 border-[#FBBF24] shadow-[0_0_18px_rgba(251,191,36,0.5)] cursor-move group"
+                      className="absolute cursor-move border-2 border-[#FBBF24] shadow-[0_0_18px_rgba(251,191,36,0.5)]"
                       style={imageRectStyle(mtfRoi.x, mtfRoi.y, mtfRoi.size)}
-                      onPointerDown={(e) => handleOverlayPointerDown(e, "move")}
+                      onPointerDown={(event) => handleOverlayPointerDown(event, "roi-move")}
                     >
                       <div className="absolute -top-5 left-0 text-[10px] font-black text-[#FBBF24] bg-black/60 px-1.5 py-0.5 rounded">
                         ROI {mtfRoi.size}px
                       </div>
-                      {/* corner resize handle */}
                       <div
-                        className="absolute -right-1 -bottom-1 w-3 h-3 bg-[#FBBF24] border border-black/40 rounded-sm cursor-nwse-resize"
-                        onPointerDown={(e) => handleOverlayPointerDown(e, "resize")}
+                        className="absolute -bottom-1 -right-1 h-3 w-3 cursor-nwse-resize rounded-sm border border-black/40 bg-[#FBBF24]"
+                        onPointerDown={(event) => handleOverlayPointerDown(event, "roi-resize")}
                       />
                       {/* center marker */}
                       <div className="absolute top-1/2 left-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#FBBF24]" />
                     </div>
                   )}
-                  {activeTab === "MTF" && mtfRoi && mtfRoi.slice !== sliceIndex && (
-                    <div className="absolute top-12 left-3 bg-black/60 text-[#FBBF24] text-[10px] font-bold px-2 py-1 rounded-md">
-                      {t("service.performance.roiOtherSlice", { slice: mtfRoi.slice + 1 })}
-                    </div>
-                  )}
                   {/* FWHM peak marker on its slice */}
-                  {activeTab !== "MTF" && fwhmPeak && fwhmPeak.slice === sliceIndex && (
+                  {activeTab !== "MTF" && fwhmPeak && imageLoaded && (
                     <div
                       className="absolute -translate-x-1/2 -translate-y-1/2 cursor-move"
                       style={imagePointStyle(fwhmPeak.x, fwhmPeak.y)}
-                      onPointerDown={(e) => handleOverlayPointerDown(e, "move")}
+                      onPointerDown={(event) => handleOverlayPointerDown(event, "peak-move")}
                     >
                       <div className="w-7 h-7 rounded-full border-2 border-[#22D3EE] shadow-[0_0_12px_rgba(34,211,238,0.8)]" />
                       {activeTab === "FWHM_H" && <div className="absolute left-1/2 top-1/2 -translate-y-1/2 -translate-x-1/2 w-24 h-[1px] bg-[#22D3EE]/70" />}
                       {activeTab === "FWHM_V" && <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1px] h-24 bg-[#22D3EE]/70" />}
                     </div>
                   )}
-                  {activeTab !== "MTF" && fwhmPeak && fwhmPeak.slice !== sliceIndex && (
-                    <div className="absolute top-12 left-3 bg-black/60 text-[#22D3EE] text-[10px] font-bold px-2 py-1 rounded-md">
-                      {t("service.performance.sampleOtherSlice", { slice: fwhmPeak.slice + 1 })}
-                    </div>
-                  )}
                 </div>
                 <div className="absolute top-3 left-3 bg-black/60 text-[#7DD3FC] text-[10px] font-bold px-2.5 py-1 rounded-md tracking-wider">
                   SLICE {sliceIndex + 1}/{info.slice_count}
                 </div>
-                <div className="absolute top-3 right-3 bg-black/60 text-[#94A3B8] text-[10px] font-bold px-2.5 py-1 rounded-md tracking-wider">
+                <div className="absolute right-3 top-3 bg-black/60 text-[#94A3B8] text-[10px] font-bold px-2.5 py-1 rounded-md tracking-wider">
                   {info.rows}×{info.columns} · {info.pixel_spacing_mm[0].toFixed(3)} mm/px
                 </div>
-                {/* Slice slider */}
-                <div className="absolute bottom-3 left-3 right-3 flex items-center gap-2 bg-black/50 backdrop-blur px-3 py-2 rounded-xl">
-                  <span className="text-[10px] font-bold text-[#7DD3FC] tracking-widest">1</span>
+                <div className="hidden">
+                  <span className="text-[9px] font-black tracking-wide text-[#7DD3FC]">图像工具</span>
+                  <div className="flex items-center gap-1 border-l border-white/15 pl-2 text-[9px] font-bold" title="ROI 固定显示">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#FBBF24]" />
+                    ROI
+                  </div>
+                  <div className="flex items-center gap-1 border-l border-white/15 pl-2 text-[9px] font-bold">
+                    <span>WW {windowWidth ?? info.default_window_width}</span>
+                    <button type="button" title={`${t("protocolDetail.fieldWindowWidth")} -100`} onClick={() => adjustWindowWidth(-100)} className="flex h-5 w-5 items-center justify-center rounded bg-white/10 hover:bg-white/20"><ChevronLeft size={13} /></button>
+                    <button type="button" title={`${t("protocolDetail.fieldWindowWidth")} +100`} onClick={() => adjustWindowWidth(100)} className="flex h-5 w-5 items-center justify-center rounded bg-white/10 hover:bg-white/20"><ChevronRight size={13} /></button>
+                  </div>
+                  <div className="flex items-center gap-1 border-l border-white/15 pl-2 text-[9px] font-bold">
+                    <span>WL {windowCenter ?? info.default_window_center}</span>
+                    <button type="button" title={`${t("protocolDetail.fieldWindowLevel")} -20`} onClick={() => adjustWindowCenter(-20)} className="flex h-5 w-5 items-center justify-center rounded bg-white/10 hover:bg-white/20"><ChevronDown size={13} /></button>
+                    <button type="button" title={`${t("protocolDetail.fieldWindowLevel")} +20`} onClick={() => adjustWindowCenter(20)} className="flex h-5 w-5 items-center justify-center rounded bg-white/10 hover:bg-white/20"><ChevronUp size={13} /></button>
+                  </div>
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 border-l border-white/15 pl-2">
+                    <span className="text-[9px] font-bold text-[#7DD3FC]">{sliceIndex + 1}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(info.slice_count - 1, 0)}
+                      value={sliceIndex}
+                      onChange={(e) => setSliceIndex(Number(e.target.value))}
+                      className="min-w-0 flex-1 accent-[#4D94FF]"
+                    />
+                    <span className="text-[9px] font-bold text-[#7DD3FC]">{info.slice_count}</span>
+                  </div>
+                </div>
+                <div className="absolute bottom-3 left-3 right-3 flex items-center gap-2 rounded-xl bg-black/50 px-3 py-2 backdrop-blur">
+                  <span className="text-[10px] font-bold tracking-widest text-[#7DD3FC]">1</span>
                   <input
                     type="range"
                     min={0}
@@ -575,8 +625,35 @@ export default function PerformanceEvaluationScreen() {
                     onChange={(e) => setSliceIndex(Number(e.target.value))}
                     className="flex-1 accent-[#4D94FF]"
                   />
-                  <span className="text-[10px] font-bold text-[#7DD3FC] tracking-widest">{info.slice_count}</span>
+                  <span className="text-[10px] font-bold tracking-widest text-[#7DD3FC]">{info.slice_count}</span>
                 </div>
+                <aside className="hidden">
+                  <div className="border-b border-white/10 px-1 py-2 text-center">
+                    <div className="text-[9px] font-black tracking-[0.12em] text-[#60A5FA]">TOOLS</div>
+                    <div className="mt-0.5 text-[8px] font-bold text-[#CBD5E1]">2D</div>
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5 px-1.5 py-2">
+                    <div className="flex h-[50px] w-[52px] flex-col items-center justify-center rounded-[10px] border border-[#FBBF24]/70 bg-[#854D0E]/35 text-[9px] font-bold text-[#FDE68A]" title="ROI">
+                      <span className="mb-1 h-4 w-4 border-2 border-[#FBBF24]" />
+                      <span>ROI</span>
+                    </div>
+                    <div className="flex h-[50px] w-[52px] flex-col items-center justify-center rounded-[10px] border border-[#60A5FA] bg-[#2563EB] text-[9px] font-bold text-white shadow-[0_0_12px_rgba(59,130,246,0.45)]" title={t("view.tool.windowLevel")}>
+                      <Contrast size={18} />
+                      <span className="mt-1 leading-none">WL</span>
+                    </div>
+                    <div className="my-1 h-px w-full bg-white/10" />
+                    <div className="grid w-[52px] grid-cols-2 gap-1">
+                      <button type="button" title={`${t("protocolDetail.fieldWindowWidth")} -100`} onClick={() => adjustWindowWidth(-100)} className="flex h-6 items-center justify-center rounded-lg bg-white/5 text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15"><ChevronLeft size={14} /></button>
+                      <button type="button" title={`${t("protocolDetail.fieldWindowWidth")} +100`} onClick={() => adjustWindowWidth(100)} className="flex h-6 items-center justify-center rounded-lg bg-white/5 text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15"><ChevronRight size={14} /></button>
+                      <button type="button" title={`${t("protocolDetail.fieldWindowLevel")} +20`} onClick={() => adjustWindowCenter(20)} className="flex h-6 items-center justify-center rounded-lg bg-white/5 text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15"><ChevronUp size={14} /></button>
+                      <button type="button" title={`${t("protocolDetail.fieldWindowLevel")} -20`} onClick={() => adjustWindowCenter(-20)} className="flex h-6 items-center justify-center rounded-lg bg-white/5 text-[#CBD5E1] ring-1 ring-white/10 active:bg-white/15"><ChevronDown size={14} /></button>
+                    </div>
+                    <div className="mt-1 text-center text-[8px] font-bold leading-4 text-[#93C5FD]">
+                      <div>WW {windowWidth ?? info.default_window_width}</div>
+                      <div>WL {windowCenter ?? info.default_window_center}</div>
+                    </div>
+                  </div>
+                </aside>
               </>
             ) : (
               <div className="flex flex-col items-center gap-4 opacity-40">

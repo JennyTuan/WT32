@@ -16,7 +16,7 @@ import {
     ZoomOut,
     RotateCcw,
 } from "lucide-react";
-import { fetchSelectedScanSession, updateScanSessionSeriesExecution, updateSelectedScanSessionHelicalParam } from "../lib/scanSession";
+import { fetchSelectedScanSession, updateScanSessionSeriesExecution, updateSelectedScanSessionHelicalParam, updateSelectedScanSessionSeriesPlanning } from "../lib/scanSession";
 import type { ApiScanSessionDetail, ApiScanSessionHelicalParam } from "../lib/scanSession";
 
 import { loadSelectedPatient } from "../lib/patientSession";
@@ -33,7 +33,7 @@ import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import DicomViewer from "../components/DicomViewer";
 import { TomographicScoutViewport, type TomographicScoutSeriesOverride } from "./SequenceScanConfirmScreen";
 import { useI18n } from "../lib/i18nContext";
-import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
+import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapCropBoxToScoutRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
 import {
     getLimbsDicomSeries,
     loadLimbsDicomDemoManifest,
@@ -1457,7 +1457,7 @@ export function HelicalScanPreviewViewport({ isScanning, active, revealY = 1 }: 
 // Gating Helical Param Defaults
 // ---------------------------------------------------------------------------
 const HELICAL_GATING_PARAMS = {
-    bedMode: "OUT",
+    scanDirection: "头向足",
     position: "HFS",
     scanLength: "220.0",
     mA: "180",
@@ -1859,7 +1859,7 @@ const GatingHelicalConfirmScreen = () => {
                         </button>
                         <div className="grid grid-cols-2 gap-1.5">
                             {[
-                                { label: "进出床", value: HELICAL_GATING_PARAMS.bedMode },
+                                { label: "扫描方向", value: HELICAL_GATING_PARAMS.scanDirection },
                                 { label: "体位", value: HELICAL_GATING_PARAMS.position },
                                 { label: "扫描长度", value: dynamicParams.scanLength.toFixed(1) },
                                 { label: "MA", value: HELICAL_GATING_PARAMS.mA },
@@ -2397,6 +2397,20 @@ const HelicalScanConfirmScreen = () => {
                 ) {
                     throw new Error("定位像未成功出图，无法执行后续螺旋扫描");
                 }
+                if (scoutCropBox) {
+                    const range = mapCropBoxToScoutRange(scoutCropBox);
+                    const target = latestScanSession.series.find((series) => series.id === executionContext.targetSeriesId);
+                    await updateSelectedScanSessionSeriesPlanning(executionContext.targetSeriesId, {
+                        source_topogram_series_id: latestTopogram.id,
+                        range_min_position_mm: range.start,
+                        range_max_position_mm: range.end,
+                        scan_direction: target?.helical_param?.scan_direction === "FOOT_TO_HEAD"
+                            ? "FOOT_TO_HEAD"
+                            : target?.scan_planning?.scan_direction === "FOOT_TO_HEAD"
+                                ? "FOOT_TO_HEAD"
+                                : "HEAD_TO_FOOT",
+                    });
+                }
                 await updateScanSessionSeriesExecution(latestTopogram.id, { range_confirmed: true });
             }
             const query = new URLSearchParams({
@@ -2439,7 +2453,7 @@ const HelicalScanConfirmScreen = () => {
             // 范围确认完成后直接进入模拟物理按键，不再显示空的执行页中间态。
             () => navigate(executeRoute, { state: { showCombinedPatientConfirm: true } }),
         );
-    }, [thresholdGuard, scanSession, helicalParam, protocolHelicalSeed, measurements.scanLength, navigate, paramWrites, scoutDisplayReady, selectedPatient, topogramDependencyReady, topogramImageSource]);
+    }, [thresholdGuard, scanSession, helicalParam, protocolHelicalSeed, measurements.scanLength, navigate, paramWrites, scoutCropBox, scoutDisplayReady, selectedPatient, topogramDependencyReady, topogramImageSource]);
 
     // 4D gets a completely different layout. Keep this after all hooks so
     // React sees the same hook order for gated and non-gated workflows.

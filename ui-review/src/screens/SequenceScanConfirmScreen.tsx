@@ -3,9 +3,9 @@ import { useNavigate } from "react-router-dom";
 import * as dicomParser from "dicom-parser";
 import { imageLoader, metaData } from "@cornerstonejs/core";
 import { Hand, Move, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
-import { fetchSelectedScanSession, updateScanSessionSeriesExecution, updateSelectedScanSessionAxialParam } from "../lib/scanSession";
+import { fetchSelectedScanSession, updateScanSessionSeriesExecution, updateSelectedScanSessionAxialParam, updateSelectedScanSessionSeriesPlanning } from "../lib/scanSession";
 import type { ApiScanSessionAxialParam, ApiScanSessionSeries } from "../lib/scanSession";
-import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
+import { DEFAULT_SCOUT_CROP_BOX, applyMeasurementsToCropBox, loadScoutPositioningRange, mapCropBoxToScoutRange, mapScoutRangeToCropBox } from "../lib/scoutPositioningSession";
 import AutoMaPanel, { NOISE_SLIDER_DEFAULT, type NoiseLevel } from "../components/AutoMaPanel";
 import ScanConfirmScreen from "./ScanConfirmScreen";
 import { buildWadoImageId, initCornerstone } from "../lib/cornerstone/initCornerstone";
@@ -1194,6 +1194,20 @@ const SequenceScanConfirmScreen = () => {
                     || !scoutDisplayReady
                 ) {
                     throw new Error("定位像未成功出图，无法执行后续断层扫描");
+                }
+                if (scoutCropBox) {
+                    const range = mapCropBoxToScoutRange(scoutCropBox);
+                    const target = latestScanSession.series.find((series) => series.id === executionContext.targetSeriesId);
+                    await updateSelectedScanSessionSeriesPlanning(executionContext.targetSeriesId, {
+                        source_topogram_series_id: requiredTopogram.id,
+                        range_min_position_mm: range.start,
+                        range_max_position_mm: range.end,
+                        scan_direction: target?.axial_param?.scan_direction === "FOOT_TO_HEAD"
+                            ? "FOOT_TO_HEAD"
+                            : target?.scan_planning?.scan_direction === "FOOT_TO_HEAD"
+                                ? "FOOT_TO_HEAD"
+                                : "HEAD_TO_FOOT",
+                    });
                 }
                 await updateScanSessionSeriesExecution(requiredTopogram.id, { range_confirmed: true });
             }

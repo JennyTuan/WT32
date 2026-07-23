@@ -42,7 +42,11 @@ export function FieldInput({ label, value, placeholder, required, onChange, min,
 }
 
 export function FieldSelect({ label, value, options, required, onChange }: {
-    label: string; value?: string | number; options: string[]; required?: boolean; onChange?: (value: string) => void;
+    label: string;
+    value?: string | number;
+    options: Array<string | { value: string; label: string }>;
+    required?: boolean;
+    onChange?: (value: string) => void;
 }) {
     return (
         <div className="flex flex-col gap-1.5">
@@ -52,11 +56,16 @@ export function FieldSelect({ label, value, options, required, onChange }: {
             </label>
             <div className="relative">
                 <select
-                    value={value !== undefined ? String(value) : options[0]}
+                    value={value !== undefined ? String(value) : (typeof options[0] === "string" ? options[0] : options[0]?.value)}
                     onChange={(event) => onChange?.(event.target.value)}
                     className="w-full h-[40px] px-3 bg-white border border-[#B0C4DE] rounded-md text-[13px] font-bold text-[#37474F] outline-none appearance-none cursor-pointer focus:border-[#4D94FF] shadow-sm"
                 >
-                    {options.map((o) => <option key={o}>{o}</option>)}
+                    {options.map((option) => {
+                        const normalized = typeof option === "string"
+                            ? { value: option, label: option }
+                            : option;
+                        return <option key={normalized.value} value={normalized.value}>{normalized.label}</option>;
+                    })}
                 </select>
                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#90A4AE] pointer-events-none" />
             </div>

@@ -228,7 +228,7 @@ export default function ProtocolManagementPage() {
   const [protocols, setProtocols] = useState<ApiProtocolSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("factory");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [bodyPartFilter, setBodyPartFilter] = useState("all");
   const [ageGroupFilter, setAgeGroupFilter] = useState<AgeGroup | "all">("all");
   const [acquisitionTypeFilter, setAcquisitionTypeFilter] = useState<AcquisitionType | "all">("all");
@@ -494,10 +494,10 @@ export default function ProtocolManagementPage() {
                   <colgroup>
                     <col style={{ width: "56px" }} />
                     <col />
-                    <col style={{ width: "72px" }} />
+                    <col style={{ width: "88px" }} />
                     <col style={{ width: "112px" }} />
                     <col style={{ width: "92px" }} />
-                    <col style={{ width: sourceFilter === "factory" ? "140px" : "120px" }} />
+                    <col style={{ width: "132px" }} />
                   </colgroup>
                   <thead className="border-b border-[#EEF2F9] bg-[#F8FBFF] sticky top-0 z-10 shadow-sm">
                     <tr>
@@ -519,15 +519,17 @@ export default function ProtocolManagementPage() {
                             {(curPage - 1) * pageSize + index + 1}
                           </td>
 
-                          <td className="px-4 py-3.5">
-                            <div className="flex flex-col gap-0.5">
-                              <span className="text-[13px] font-bold text-[#1A2332] truncate leading-tight" title={p.name}>
+                          <td className="px-4 py-3">
+                            <div className="min-w-0 rounded-lg px-2 py-1.5 transition-colors group-hover:bg-white">
+                              <span className="block truncate text-[13px] font-bold leading-5 text-[#1A2332]" title={p.name}>
                                 {p.name}
                               </span>
-                              <AcquisitionTypeBadge type={p.acquisition_type} />
-                              <span className="text-[11px] text-[#90A4AE]">
-                                {t(AGE_GROUP_LABEL_KEYS[p.age_group])} · {p.body_part}
-                              </span>
+                              <div className="mt-1 flex items-center gap-2.5">
+                                <AcquisitionTypeBadge type={p.acquisition_type} />
+                                <span className="min-w-0 truncate text-[11px] font-medium text-[#78909C]">
+                                  {t(AGE_GROUP_LABEL_KEYS[p.age_group])} · {p.body_part}
+                                </span>
+                              </div>
                             </div>
                           </td>
 

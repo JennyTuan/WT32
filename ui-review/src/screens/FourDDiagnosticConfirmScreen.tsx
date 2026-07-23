@@ -53,7 +53,7 @@ const FOUR_D_AUTO_NEXT_STEP_DELAY_MS = 700;
 const BED_TRAVEL_MM = 19.2;
 
 const FOURD_PARAMS = {
-    bedMode: "OUT",
+    scanDirection: "头向足",
     position: "HFS",
     scanLength: "165.0",
     mA: "215",
@@ -787,7 +787,7 @@ export default function FourDDiagnosticConfirmScreen() {
     ];
 
     const sidebarParams = [
-        { label: t("scanFlow.inOutTable"), value: FOURD_PARAMS.bedMode, accent: false },
+        { label: t("scanFlow.positioning.scanDirection"), value: FOURD_PARAMS.scanDirection, accent: false },
         { label: t("scanFlow.patientPosition"), value: FOURD_PARAMS.position, accent: false },
         { label: t("scanFlow.scanLength"), value: dynamicParams.scanLength.toFixed(1), accent: false },
         { label: "mA", value: FOURD_PARAMS.mA, accent: true },

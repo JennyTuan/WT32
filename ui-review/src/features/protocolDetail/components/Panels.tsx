@@ -18,6 +18,8 @@ import { FOV_MAX_MM, FOV_MIN_MM } from "../../../lib/fov";
 
 const TUBE_ANGLE_OPTIONS = ["0", "90", "180", "270"];
 const ROTATION_TIME_OPTIONS = ["0.75", "1", "2"];
+// 与协议模板 CSV 的 Filter 值域一致；STANDARD 用于新建重建序列的默认值。
+const RECON_KERNEL_OPTIONS = ["STANDARD", "Brain", "Bone2", "Lung2", "S2", "S3"];
 
 export function BasicInfoPanel({ protocol, draft, selectedPos, bodyPartOptions, ageGroupOptions, onPosChange, onDraftChange }: {
     protocol: ApiProtocolDetail | null;
@@ -92,6 +94,10 @@ export function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, o
 }) {
     const { language, t } = useI18n();
     const modeOptions = getEditableSeriesTypeOptions(language);
+    const scanDirectionOptions = [
+        { value: "HEAD_TO_FOOT", label: t("scanFlow.positioning.headToFoot") },
+        { value: "FOOT_TO_HEAD", label: t("scanFlow.positioning.footToHead") },
+    ];
     return (
         <>
             <div className="h-[52px] bg-[#F8FAFC] border-b border-[#EEF2F9] flex items-center justify-between px-6 shrink-0">
@@ -119,10 +125,10 @@ export function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, o
                     <FieldSelect label={t("protocolDetail.fieldRotationTime")} value="1" options={ROTATION_TIME_OPTIONS} required />
                     <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator} placeholder="e.g. 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
                     <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
-                    <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
+                    <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={scanDirectionOptions} required onChange={(value) => onDraftChange({ scanDirection: value })} />
                     <FieldInput label="FOV" value={draft.fov} required min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ fov: value })} />
                     <FieldInput label="DOM" value={draft.dom} placeholder={language === "en-US" ? "0 or 1" : "0 或 1"} onChange={(value) => onDraftChange({ dom: value })} />
-                    <FieldSelect label={t("protocolDetail.fieldTableAngle")} value={draft.tubeAngle} options={TUBE_ANGLE_OPTIONS} required onChange={(value) => onDraftChange({ tubeAngle: value })} />
+                    <FieldSelect label={t("protocolDetail.fieldTubeAngle")} value={draft.tubeAngle} options={TUBE_ANGLE_OPTIONS} required onChange={(value) => onDraftChange({ tubeAngle: value })} />
                 </div>
             </div>
         </>
@@ -140,6 +146,10 @@ export function HelicalParamsPanel({ series, draft, canEditMode, onModeChange, o
     const { language, t } = useI18n();
     const typeLabel = getLocalizedSeriesTypeLabel(series.series_type, language);
     const modeOptions = getEditableSeriesTypeOptions(language);
+    const scanDirectionOptions = [
+        { value: "HEAD_TO_FOOT", label: t("scanFlow.positioning.headToFoot") },
+        { value: "FOOT_TO_HEAD", label: t("scanFlow.positioning.footToHead") },
+    ];
     const typeKey = series.series_type === "helical" ? "HELICAL PARAMS" : "AXIAL PARAMS";
     return (
         <>
@@ -162,7 +172,7 @@ export function HelicalParamsPanel({ series, draft, canEditMode, onModeChange, o
                     <FieldSelect label={t("protocolDetail.fieldRotationTime")} value={draft.rotationTime || "1"} options={ROTATION_TIME_OPTIONS} required onChange={(value) => onDraftChange({ rotationTime: value })} />
                     <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator} placeholder="e.g. 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
                     <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
-                    <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={["OUT", "IN"]} required onChange={(value) => onDraftChange({ scanDirection: value })} />
+                    <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={scanDirectionOptions} required onChange={(value) => onDraftChange({ scanDirection: value })} />
                     <FieldInput label="FOV" value={draft.fov} required min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ fov: value })} />
                     <FieldInput label="DOM" value={draft.dom} placeholder={language === "en-US" ? "0 or 1" : "0 或 1"} onChange={(value) => onDraftChange({ dom: value })} />
                     {series.series_type === "helical" && (
@@ -185,6 +195,7 @@ export function ReconParamsPanel({ series, draft, onDelete, onDraftChange }: {
     onDraftChange: (patch: Partial<ReconDraft>) => void;
 }) {
     const { t } = useI18n();
+    const kernelOptions = Array.from(new Set([...RECON_KERNEL_OPTIONS, draft.kernel].filter(Boolean)));
     return (
         <>
             <div className="h-[52px] bg-[#F8FAFC] border-b border-[#EEF2F9] flex items-center justify-between px-6 shrink-0">
@@ -202,7 +213,7 @@ export function ReconParamsPanel({ series, draft, onDelete, onDraftChange }: {
             <div data-keyboard-avoidance-scroll className="flex-1 p-8 overflow-y-auto bg-white">
                 <div className="grid grid-cols-2 gap-x-12 gap-y-5">
                     <FieldInput label={t("protocolDetail.fieldReconName")} value={draft.reconName} onChange={(value) => onDraftChange({ reconName: value })} />
-                    <FieldInput label="KERNEL" value={draft.kernel} onChange={(value) => onDraftChange({ kernel: value })} />
+                    <FieldSelect label={t("protocolDetail.fieldKernel")} value={draft.kernel} options={kernelOptions} onChange={(value) => onDraftChange({ kernel: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldSliceThickness")} value={draft.sliceThickness} onChange={(value) => onDraftChange({ sliceThickness: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldSliceIncrement")} value={draft.increment} onChange={(value) => onDraftChange({ increment: value })} />
                     <FieldSpinner label={t("protocolDetail.reconFov")} value={draft.reconFov} min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ reconFov: value })} />

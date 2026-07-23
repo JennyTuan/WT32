@@ -10,7 +10,7 @@ export default function HardwareTestPage() {
     <ServiceModeShell
       currentRoute="/service/hardware-test"
     >
-      <div className="flex-1 flex flex-col h-full min-h-0">
+      <div className="flex h-full min-h-0 flex-1 flex-col bg-white px-5 py-4">
         <HardwareTestContent
           activeTab={hardwareTest.activeTab}
           editingFieldKey={hardwareTest.editingFieldKey}

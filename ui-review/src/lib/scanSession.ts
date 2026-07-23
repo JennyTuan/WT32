@@ -28,6 +28,15 @@ export type ApiScanSessionTopogramParam = {
     dlp?: number | null;
 };
 
+export type ApiScanSessionScanPlanning = {
+    id: number;
+    scan_session_series_id: number;
+    source_topogram_series_id?: number | null;
+    range_min_position_mm?: number | null;
+    range_max_position_mm?: number | null;
+    scan_direction: "HEAD_TO_FOOT" | "FOOT_TO_HEAD";
+};
+
 export type ApiScanSessionHelicalParam = {
     id: number;
     kv: number;
@@ -136,6 +145,7 @@ export type ApiScanSessionSeries = {
     range_confirmed: boolean;
     image_source_id?: ApiScanSeriesImageSourceId | null;
     image_source_version?: ApiScanSeriesImageSourceVersion | null;
+    scan_planning?: ApiScanSessionScanPlanning | null;
     topogram_param?: ApiScanSessionTopogramParam | null;
     helical_param?: ApiScanSessionHelicalParam | null;
     axial_param?: ApiScanSessionAxialParam | null;
@@ -541,6 +551,19 @@ export const deleteSelectedScanSessionReconSeries = async (reconId: number) => {
 
 export const updateSelectedScanSessionTopogramParam = async (paramId: number, payload: UpdatePayload) =>
     updateSelectedScanSessionEntity<ApiScanSessionTopogramParam>(`/api/scan-sessions/topogram/${paramId}`, payload);
+
+export const updateSelectedScanSessionSeriesPlanning = async (
+    sessionSeriesId: number,
+    payload: {
+        source_topogram_series_id?: number | null;
+        range_min_position_mm: number;
+        range_max_position_mm: number;
+        scan_direction: "HEAD_TO_FOOT" | "FOOT_TO_HEAD";
+    },
+) => updateSelectedScanSessionEntity<ApiScanSessionScanPlanning>(
+    `/api/scan-sessions/series/${sessionSeriesId}/planning`,
+    payload,
+);
 
 export const updateSelectedScanSessionHelicalParam = async (paramId: number, payload: UpdatePayload) =>
     updateSelectedScanSessionEntity<ApiScanSessionHelicalParam>(`/api/scan-sessions/helical/${paramId}`, payload);
