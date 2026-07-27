@@ -731,6 +731,7 @@ class ScanSessionReconSeries(Base):
     recon_fov = Column(Float, nullable=True)
     center_x = Column(Float, nullable=True)
     center_y = Column(Float, nullable=True)
+    metal_artifact_suppression = Column(Boolean, nullable=False, default=False)
 
     session_series = relationship("ScanSessionSeries", back_populates="recon_series")
 

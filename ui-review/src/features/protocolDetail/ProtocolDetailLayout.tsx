@@ -85,7 +85,7 @@ export function ProtocolDetailLayout({
                 <span className="text-[16px] font-bold text-[#37474F]">{t("protocolDetail.header")}</span>
             </header>
 
-            <main className="flex-1 overflow-hidden p-2 flex gap-3">
+            <main className="flex-1 overflow-hidden p-2 flex gap-1">
                 <ProtocolSidebar
                     protocol={protocol}
                     isNewMode={isNewMode}

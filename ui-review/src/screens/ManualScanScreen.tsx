@@ -45,7 +45,7 @@ const extraAcquisitionFields = [
   { label: "体位", value: "HFS", select: ["HFS", "FFS", "HFP", "FFP"] },
   { label: "起始位置 (START)", value: "--.-" },
   { label: "结束位置 (END)", value: "--.-" },
-  { label: "扫描方向", value: "IN", select: ["IN", "OUT"] },
+  { label: "扫描方向", value: "头向足", select: ["头向足", "足向头"] },
   { label: "部位", value: "Body", select: ["Body", "Head", "Chest", "Abdomen"] },
 ];
 

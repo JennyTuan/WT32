@@ -18,6 +18,7 @@ import { FOV_MAX_MM, FOV_MIN_MM } from "../../../lib/fov";
 
 const TUBE_ANGLE_OPTIONS = ["0", "90", "180", "270"];
 const ROTATION_TIME_OPTIONS = ["0.75", "1", "2"];
+const FIXED_COLLIMATOR = "32*0.6";
 // 与协议模板 CSV 的 Filter 值域一致；STANDARD 用于新建重建序列的默认值。
 const RECON_KERNEL_OPTIONS = ["STANDARD", "Brain", "Bone2", "Lung2", "S2", "S3"];
 
@@ -123,7 +124,7 @@ export function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, o
                     <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
                     <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
                     <FieldSelect label={t("protocolDetail.fieldRotationTime")} value="1" options={ROTATION_TIME_OPTIONS} required />
-                    <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator} placeholder="e.g. 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
+                    <FieldInput label={t("protocolDetail.collimator")} value={FIXED_COLLIMATOR} disabled />
                     <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
                     <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={scanDirectionOptions} required onChange={(value) => onDraftChange({ scanDirection: value })} />
                     <FieldInput label="FOV" value={draft.fov} required min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ fov: value })} />
@@ -170,7 +171,7 @@ export function HelicalParamsPanel({ series, draft, canEditMode, onModeChange, o
                     <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
                     <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
                     <FieldSelect label={t("protocolDetail.fieldRotationTime")} value={draft.rotationTime || "1"} options={ROTATION_TIME_OPTIONS} required onChange={(value) => onDraftChange({ rotationTime: value })} />
-                    <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator} placeholder="e.g. 32x0.6" onChange={(value) => onDraftChange({ collimator: value })} />
+                    <FieldInput label={t("protocolDetail.collimator")} value={FIXED_COLLIMATOR} disabled />
                     <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
                     <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={scanDirectionOptions} required onChange={(value) => onDraftChange({ scanDirection: value })} />
                     <FieldInput label="FOV" value={draft.fov} required min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ fov: value })} />
@@ -224,8 +225,17 @@ export function ReconParamsPanel({ series, draft, onDelete, onDraftChange }: {
                     <FieldSpinner label={t("protocolDetail.fieldCenterY")} value={draft.centerY} onChange={(value) => onDraftChange({ centerY: value })} />
                     <div className="flex flex-col gap-2 col-span-2 mt-2">
                         <label className="text-[10px] font-black text-[#90A4AE] ml-1 uppercase tracking-tight">{t("protocolDetail.metalArtifactSuppression")}</label>
-                        <button className="w-full h-[44px] bg-white border border-[#B0C4DE] rounded-md text-[14px] font-bold text-[#37474F] hover:bg-gray-50 transition-all shadow-sm">
-                            {t("protocolDetail.off")}
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={draft.metalArtifactSuppression}
+                            onClick={() => onDraftChange({ metalArtifactSuppression: !draft.metalArtifactSuppression })}
+                            className={`w-full h-[44px] border rounded-md text-[14px] font-bold transition-all shadow-sm ${draft.metalArtifactSuppression
+                                ? "bg-[#E3F2FD] border-[#4D94FF] text-[#1E88E5]"
+                                : "bg-white border-[#B0C4DE] text-[#37474F] hover:bg-gray-50"
+                                }`}
+                        >
+                            {draft.metalArtifactSuppression ? t("protocolDetail.on") : t("protocolDetail.off")}
                         </button>
                     </div>
                 </div>

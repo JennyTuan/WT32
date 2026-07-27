@@ -352,6 +352,27 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(recon["recon_fov"], 220.0)
         self.assertEqual(recon["center_x"], 3.5)
         self.assertEqual(recon["center_y"], -4.5)
+        self.assertFalse(recon["metal_artifact_suppression"])
+
+    def test_recon_metal_artifact_suppression_is_saved_in_scan_session_only(self) -> None:
+        scan_session = self._create_scan_session()
+        recon = scan_session["series"][0]["recon_series"][0]
+
+        response = self.client.put(
+            f"/api/scan-sessions/recon-series/{recon['id']}",
+            json={"metal_artifact_suppression": True},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["metal_artifact_suppression"])
+
+        db = self.SessionTesting()
+        try:
+            template_recon = db.get(models.ReconSeries, self.template_recon_id)
+            self.assertIsNotNone(template_recon)
+            self.assertFalse(hasattr(template_recon, "metal_artifact_suppression"))
+        finally:
+            db.close()
 
     def test_scan_planning_binds_a_diagnostic_series_to_its_preceding_topogram(self) -> None:
         scan_session = self._create_scan_session()

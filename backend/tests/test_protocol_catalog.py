@@ -58,11 +58,13 @@ class ProtocolCatalogTests(unittest.TestCase):
         )
 
     def test_catalog_keeps_builtin_factory_protocols_and_hides_stale_csv_rows(self) -> None:
+        current_csv_description = next(iter(protocols.CURRENT_CSV_PROTOCOL_DESCRIPTIONS))
         db = self.session_factory()
         try:
             db.add_all(
                 [
                     self._protocol("Built-in routine", description="Built-in routine seeded protocol", is_factory=True),
+                    self._protocol("English factory protocol", description=current_csv_description, is_factory=True),
                     self._protocol("Custom protocol", description="Custom protocol", is_factory=False),
                     self._protocol("Stale CSV protocol", description="protocol-csv:legacy:stale", is_factory=True),
                 ]
@@ -74,7 +76,10 @@ class ProtocolCatalogTests(unittest.TestCase):
         response = self.client.get("/api/protocols/catalog")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual({item["name"] for item in response.json()}, {"Built-in routine", "Custom protocol"})
+        self.assertEqual(
+            {item["name"] for item in response.json()},
+            {"Built-in routine", "English factory protocol", "Custom protocol"},
+        )
 
 
 if __name__ == "__main__":

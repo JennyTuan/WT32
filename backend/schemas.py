@@ -746,6 +746,7 @@ class ScanSessionReconSeriesCreate(BaseModel):
     recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     center_x: Optional[float] = None
     center_y: Optional[float] = None
+    metal_artifact_suppression: bool = False
 
 
 class ScanSessionReconSeriesUpdate(BaseModel):
@@ -760,6 +761,7 @@ class ScanSessionReconSeriesUpdate(BaseModel):
     recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     center_x: Optional[float] = None
     center_y: Optional[float] = None
+    metal_artifact_suppression: Optional[bool] = None
 
 
 class ScanSessionReconSeries(ORMModel):
@@ -777,6 +779,7 @@ class ScanSessionReconSeries(ORMModel):
     recon_fov: Optional[float] = None
     center_x: Optional[float] = None
     center_y: Optional[float] = None
+    metal_artifact_suppression: bool = False
 
 
 class ScanSessionBreathingTrainingParamUpdate(BaseModel):

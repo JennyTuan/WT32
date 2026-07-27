@@ -12,9 +12,9 @@ const clampNumberInput = (value: string, min?: number, max?: number) => {
     return String(next);
 };
 
-export function FieldInput({ label, value, placeholder, required, onChange, min, max }: {
+export function FieldInput({ label, value, placeholder, required, onChange, min, max, disabled = false }: {
     label: string; value?: string | number; placeholder?: string; required?: boolean; onChange?: (value: string) => void;
-    min?: number; max?: number;
+    min?: number; max?: number; disabled?: boolean;
 }) {
     const numericRange = min !== undefined || max !== undefined;
 
@@ -32,10 +32,14 @@ export function FieldInput({ label, value, placeholder, required, onChange, min,
                     const next = clampNumberInput(event.target.value, min, max);
                     if (next !== event.target.value) onChange?.(next);
                 }}
-                readOnly={!onChange}
+                readOnly={!onChange || disabled}
+                disabled={disabled}
                 placeholder={placeholder}
                 inputMode={numericRange ? "decimal" : undefined}
-                className="w-full h-[40px] px-3 bg-white border border-[#B0C4DE] rounded-md text-[13px] font-bold text-[#37474F] outline-none placeholder:font-normal placeholder:text-[#90A4AE]/40 focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/10 shadow-sm select-text"
+                className={`w-full h-[40px] px-3 border border-[#B0C4DE] rounded-md text-[13px] font-bold outline-none placeholder:font-normal placeholder:text-[#90A4AE]/40 shadow-sm ${disabled
+                    ? "bg-[#F8FAFC] text-[#78909C] cursor-not-allowed"
+                    : "bg-white text-[#37474F] focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/10 select-text"
+                    }`}
             />
         </div>
     );

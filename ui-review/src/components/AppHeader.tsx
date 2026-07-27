@@ -118,8 +118,8 @@ export default function AppHeader({
             aria-label={t("appHeader.laser")}
             aria-pressed={laserActive ?? false}
             onClick={onLaserToggle}
-            className={`relative p-1 transition-all ${
-              laserActive ? "text-[#F59E0B]" : "text-[#546E7A] hover:opacity-70"
+            className={`relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent !bg-transparent p-0 transition-all hover:border-[#B0C4DE]/60 hover:!bg-[#DCE6F2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4D94FF]/50 ${
+              laserActive ? "!bg-[#FFF3D6] text-[#D97706] hover:!bg-[#FFE7B0]" : "text-[#546E7A]"
             }`}
           >
             <Sun size={24} />

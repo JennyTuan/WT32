@@ -99,7 +99,7 @@ export function useProtocolDetail() {
     const [reconDraft, setReconDraft] = useState<ReconDraft>({
         reconName: "", kernel: "", sliceThickness: "", increment: "",
         matrix: "", windowLevel: "", windowWidth: "", reconFov: "250",
-        centerX: "0", centerY: "0",
+        centerX: "0", centerY: "0", metalArtifactSuppression: false,
     });
 
     const bodyPartOptions = useMemo(() => {
@@ -268,6 +268,7 @@ export function useProtocolDetail() {
             reconFov: String(activeRecon.recon_fov ?? "250"),
             centerX: String(activeRecon.center_x ?? "0"),
             centerY: String(activeRecon.center_y ?? "0"),
+            metalArtifactSuppression: activeRecon.metal_artifact_suppression ?? false,
         });
     }, [activeRecon, selection.type]);
 
@@ -652,6 +653,7 @@ export function useProtocolDetail() {
                     recon_fov: parseDraftFov(reconDraft.reconFov, activeRecon.recon_fov ?? 250),
                     center_x: parseNumber(reconDraft.centerX) ?? activeRecon.center_x ?? 0,
                     center_y: parseNumber(reconDraft.centerY) ?? activeRecon.center_y ?? 0,
+                    metal_artifact_suppression: reconDraft.metalArtifactSuppression,
                 });
             }
             await syncProtocolFromSession();

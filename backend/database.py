@@ -987,7 +987,8 @@ def _load_company_protocol_seeds() -> list[dict]:
     return seeds
 
 
-PROTOCOL_SEEDS = _load_company_protocol_seeds() or LEGACY_PROTOCOL_SEEDS
+# 中文与英文协议目录都需要保留，由前端按系统语言展示对应版本。
+PROTOCOL_SEEDS = [*LEGACY_PROTOCOL_SEEDS, *_load_company_protocol_seeds()]
 
 
 def infer_recon_type(recon_name: str) -> str:
@@ -1402,6 +1403,7 @@ def _migrate_protocol_columns() -> None:
         "ALTER TABLE scan_session_recon_series ADD COLUMN recon_fov FLOAT",
         "ALTER TABLE scan_session_recon_series ADD COLUMN center_x FLOAT",
         "ALTER TABLE scan_session_recon_series ADD COLUMN center_y FLOAT",
+        "ALTER TABLE scan_session_recon_series ADD COLUMN metal_artifact_suppression BOOLEAN NOT NULL DEFAULT 0",
         # Gating: free-breathing prospective trigger fields
         "ALTER TABLE gating_configs ADD COLUMN target_phase VARCHAR(20)",
         "ALTER TABLE gating_configs ADD COLUMN threshold_normalized FLOAT",
@@ -2280,8 +2282,11 @@ def init_db(sync_protocol_defaults: bool | None = None) -> None:
                     protocol.scan_mode,
                 )
                 for protocol in db.query(models.Protocol).all()
-                if not seed_uses_company_csv
-                or str(protocol.description or "") in current_csv_descriptions
+                if not (
+                    seed_uses_company_csv
+                    and str(protocol.description or "").startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)
+                    and str(protocol.description or "") not in current_csv_descriptions
+                )
             }
             missing_protocols = [
                 protocol_seed

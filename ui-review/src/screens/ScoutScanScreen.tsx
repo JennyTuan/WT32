@@ -727,6 +727,10 @@ const ScoutScanScreen = ({
     const navigate = useNavigate();
     const resolvedFirstStepLabel = firstStepLabel ?? t("scanFlow.step.laserPosition");
     const [workflowGuardStatus, setWorkflowGuardStatus] = useState<"checking" | "ready">("checking");
+    const [startPos, setStartPos] = useState("472.95");
+    const [endPos, setEndPos] = useState("595.17");
+    const [scanDirection, setScanDirection] = useState<"HEAD_TO_FOOT" | "FOOT_TO_HEAD">("HEAD_TO_FOOT");
+    const [expandedSeqId, setExpandedSeqId] = useState<string | null>(null);
 
     // 4D workflow detection - driven by scan session acquisition_type
     const [is4DWorkflow, setIs4DWorkflow] = useState(false);
@@ -808,9 +812,6 @@ const ScoutScanScreen = ({
 
     const isBreathingTraining = bottomPanelMode === "breathing" && breathingWorkflowVariant === "training";
     const isBreathingAcquisition = bottomPanelMode === "breathing" && breathingWorkflowVariant === "acquisition";
-    const [startPos, setStartPos] = useState("472.95");
-    const [endPos, setEndPos] = useState("595.17");
-    const [scanDirection, setScanDirection] = useState<"HEAD_TO_FOOT" | "FOOT_TO_HEAD">("HEAD_TO_FOOT");
     const isBreathingSignalEnabled = true;
     const isRespiraScopeActive = isBreathingSignalEnabled && (isBreathingAcquisitionStep || bottomPanelMode === "breathing");
     const [respiraScopeNowMs, setRespiraScopeNowMs] = useState(() => Date.now());
@@ -1236,7 +1237,6 @@ const ScoutScanScreen = ({
     const [showAbortConfirm, setShowAbortConfirm] = useState(false);
     const [laserActive, setLaserActive] = useState(false);
     const [selectedPosition, setSelectedPosition] = useState<"start" | "end" | null>(null);
-    const [expandedSeqId, setExpandedSeqId] = useState<string | null>(() => buildGroupsFromWorkflowPlans()[0]?.sequences[0]?.id ?? null);
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -1604,76 +1604,54 @@ const ScoutScanScreen = ({
                             readOnly={is4DScoutExecuteStep}
                         />
                     ) : (
-                        <div className={`mt-auto border-t border-[#EEF2F9] bg-[#F8FAFC] px-4 py-3 shrink-0 transition-all duration-300 ${isTreeCollapsed ? 'flex-1 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]' : 'h-[168px]'}`}>
-                            <div className="mb-1 text-[12px] font-bold text-[#546E7A]">{positioningHint}</div>
-                            <label className="mb-2 flex items-center gap-2 text-[10px] font-bold text-[#546E7A]">
-                                {t("scanFlow.positioning.scanDirection")}
-                                <select
-                                    value={scanDirection}
-                                    onChange={(event) => setScanDirection(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD")}
-                                    className="h-[24px] min-w-[112px] rounded border border-[#B0C4DE] bg-white px-2 text-[11px] font-bold text-[#37474F] outline-none focus:border-[#4D94FF]"
-                                >
-                                    <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
-                                    <option value="FOOT_TO_HEAD">{t("scanFlow.positioning.footToHead")}</option>
-                                </select>
-                            </label>
-                            <div className="flex items-stretch gap-3 h-[calc(100%-28px)]">
-                                <div className="flex flex-col items-center self-stretch justify-center py-2 shrink-0">
-                                    <button
-                                        onClick={() => setSelectedPosition('start')}
-                                        className={`w-3 h-3 rounded-full border-2 flex items-center justify-center p-[2px] shrink-0 transition-all ${selectedPosition === 'start' ? 'bg-[#4D94FF] border-white shadow-sm' : 'bg-white border-[#B0C4DE]'}`}
-                                    >
-                                        {selectedPosition === 'start' && <div className="w-full h-full bg-white rounded-full" />}
-                                    </button>
-                                    <div className="w-px flex-1 bg-[#C5D5E8] my-1" />
-                                    <button
-                                        onClick={() => setSelectedPosition('end')}
-                                        className={`w-3 h-3 rounded-full border-2 flex items-center justify-center p-[2px] shrink-0 transition-all ${selectedPosition === 'end' ? 'bg-[#66BB6A] border-white shadow-sm' : 'bg-white border-[#B0C4DE]'}`}
-                                    >
-                                        {selectedPosition === 'end' && <div className="w-full h-full bg-white rounded-full" />}
-                                    </button>
+                        <div className={`mt-auto border-t border-[#D7E3F2] bg-[#F5F9FE] px-3 py-2.5 shrink-0 transition-all duration-300 ${isTreeCollapsed ? 'flex-1 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]' : 'h-[190px]'}`}>
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                                <span className="text-[12px] font-black text-[#1F4F7B]">{positioningHint}</span>
+                                <span className="shrink-0 rounded bg-[#E3F2FD] px-1.5 py-0.5 text-[9px] font-bold text-[#2878C8]">mm</span>
+                            </div>
+                            <div className="mb-2 rounded-md border border-[#C8DDF2] bg-white p-1">
+                                <div className="mb-1 px-1 text-[9px] font-black tracking-wide text-[#5F7F9D]">{t("scanFlow.positioning.scanDirection")}</div>
+                                <div className="grid grid-cols-2 gap-1">
+                                    {([
+                                        ["HEAD_TO_FOOT", t("scanFlow.positioning.headToFoot")],
+                                        ["FOOT_TO_HEAD", t("scanFlow.positioning.footToHead")],
+                                    ] as const).map(([direction, label]) => (
+                                        <button
+                                            key={direction}
+                                            type="button"
+                                            onClick={() => setScanDirection(direction)}
+                                            className={`h-[27px] rounded text-[11px] font-black transition-colors ${scanDirection === direction
+                                                ? 'bg-[#4D94FF] text-white shadow-sm'
+                                                : 'bg-[#F7FAFE] text-[#526D86] hover:bg-[#E8F2FF]'}`}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
                                 </div>
-
-                                <div className="flex flex-col flex-1 min-w-0 self-stretch justify-between py-4">
-                                    <div
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className={`flex h-[34px] items-center gap-2 rounded-md border bg-white px-2 transition-colors ${selectedPosition === 'start' ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#C8DDF2]'}`}>
+                                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#4D94FF]" />
+                                    <span className="w-[56px] shrink-0 text-[11px] font-black text-[#355B7C]">{t("scanFlow.positioning.rangeMin")}</span>
+                                    <input
+                                        type="text"
+                                        value={startPos}
+                                        onChange={(e) => { setSelectedPosition('start'); setStartPos(e.target.value); }}
                                         onClick={() => setSelectedPosition('start')}
-                                        className="flex items-center gap-2 h-[32px] min-w-0 cursor-pointer"
-                                    >
-                                        <span className={`text-[11px] font-bold w-[72px] shrink-0 transition-colors ${selectedPosition === 'start' ? 'text-[#4D94FF]' : 'text-[#90A4AE]'}`}>{t("scanFlow.positioning.rangeMin")}</span>
-                                        <input
-                                            type="text"
-                                            value={startPos}
-                                            onChange={(e) => {
-                                                setSelectedPosition('start');
-                                                setStartPos(e.target.value);
-                                            }}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setSelectedPosition('start');
-                                            }}
-                                            className={`flex-1 min-w-0 h-[32px] bg-white border rounded px-2 text-[13px] font-bold outline-none transition-colors ${selectedPosition === 'start' ? 'border-[#4D94FF] text-[#4D94FF]' : 'border-[#B0C4DE] text-[#90A4AE]'} focus:border-[#4D94FF]`}
-                                        />
-                                    </div>
-                                    <div
+                                        className="min-w-0 flex-1 bg-transparent text-right text-[14px] font-black text-[#245F9B] outline-none"
+                                    />
+                                </label>
+                                <label className={`flex h-[34px] items-center gap-2 rounded-md border bg-white px-2 transition-colors ${selectedPosition === 'end' ? 'border-[#43A047] ring-1 ring-[#43A047]/20' : 'border-[#C8DDF2]'}`}>
+                                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#43A047]" />
+                                    <span className="w-[56px] shrink-0 text-[11px] font-black text-[#355B7C]">{t("scanFlow.positioning.rangeMax")}</span>
+                                    <input
+                                        type="text"
+                                        value={endPos}
+                                        onChange={(e) => { setSelectedPosition('end'); setEndPos(e.target.value); }}
                                         onClick={() => setSelectedPosition('end')}
-                                        className="flex items-center gap-2 h-[32px] min-w-0 cursor-pointer"
-                                    >
-                                        <span className={`text-[11px] font-bold w-[72px] shrink-0 transition-colors ${selectedPosition === 'end' ? 'text-[#66BB6A]' : 'text-[#90A4AE]'}`}>{t("scanFlow.positioning.rangeMax")}</span>
-                                        <input
-                                            type="text"
-                                            value={endPos}
-                                            onChange={(e) => {
-                                                setSelectedPosition('end');
-                                                setEndPos(e.target.value);
-                                            }}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setSelectedPosition('end');
-                                            }}
-                                            className={`flex-1 min-w-0 h-[32px] bg-white border rounded px-2 text-[13px] font-bold outline-none transition-colors ${selectedPosition === 'end' ? 'border-[#66BB6A] text-[#66BB6A]' : 'border-[#B0C4DE] text-[#90A4AE]'} focus:border-[#4D94FF]`}
-                                        />
-                                    </div>
-                                </div>
+                                        className="min-w-0 flex-1 bg-transparent text-right text-[14px] font-black text-[#277A3C] outline-none"
+                                    />
+                                </label>
                             </div>
                         </div>
                     )}

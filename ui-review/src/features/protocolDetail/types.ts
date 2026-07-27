@@ -10,6 +10,7 @@ export type ApiReconSeries = {
     recon_fov?: number | null;
     center_x?: number | null;
     center_y?: number | null;
+    metal_artifact_suppression?: boolean;
 };
 
 export type ApiSeriesDetail = {
@@ -115,4 +116,5 @@ export type ReconDraft = {
     reconFov: string;
     centerX: string;
     centerY: string;
+    metalArtifactSuppression: boolean;
 };

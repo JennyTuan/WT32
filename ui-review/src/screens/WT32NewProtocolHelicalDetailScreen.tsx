@@ -10,7 +10,7 @@ const helicalFields: HelicalField[] = [
     { label: "旋转时间 (S)", type: "select", options: ["1", "0.5", "1.5"], required: true },
     { label: "准直器 (COLLIMATION)", type: "input", value: "32x0.6", required: true },
     { label: "扫描长度 (MM)", type: "input", value: "165", required: true },
-    { label: "扫描方向", type: "select", options: ["OUT", "IN"], required: true },
+    { label: "扫描方向", type: "select", options: ["头向足", "足向头"], required: true },
     { label: "定位像 FOV", type: "input", value: "500", required: true },
     { label: "DOM (动态扫描)", type: "input", value: "0", required: true },
     { label: "PITCH (螺距)", type: "input", value: "0.984", required: true },

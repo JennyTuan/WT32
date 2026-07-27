@@ -148,9 +148,13 @@ def _clone_axial_param(
 
 
 def _clone_recon_series(source, *, template_recon_series_id: int | None) -> models.ScanSessionReconSeries:
+    values = _copy_fields(source, RECON_SERIES_FIELDS)
+    # 该开关仅属于扫描会话；从协议模板复制时默认关闭，复制会话序列时保留当前状态。
+    if hasattr(source, "metal_artifact_suppression"):
+        values["metal_artifact_suppression"] = source.metal_artifact_suppression
     return models.ScanSessionReconSeries(
         template_recon_series_id=template_recon_series_id,
-        **_copy_fields(source, RECON_SERIES_FIELDS),
+        **values,
     )
 
 

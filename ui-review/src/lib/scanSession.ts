@@ -89,6 +89,7 @@ export type ApiScanSessionReconSeries = {
     recon_fov?: number | null;
     center_x?: number | null;
     center_y?: number | null;
+    metal_artifact_suppression: boolean;
 };
 
 export type ApiScanSessionFourDConfig = {
@@ -527,6 +528,7 @@ export const createScanSessionReconSeries = async (sessionSeriesId: number, payl
     slice_thickness?: number;
     increment?: number | null;
     recon_fov?: number | null;
+    metal_artifact_suppression?: boolean;
 }) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/series/${sessionSeriesId}/recon-series`), {
         method: "POST",

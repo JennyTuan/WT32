@@ -24,6 +24,7 @@ import {
     clearSelectedScanSessionId,
     fetchSelectedScanSession,
     loadSelectedScanSessionId,
+    updateSelectedScanSession,
     updateSelectedScanSessionTopogramParam,
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
@@ -80,6 +81,7 @@ type ScoutDisplayParams = {
     kV: string;
     angle: string;
     position: string;
+    scanningDirection: string;
     doseCtdiVol: string;
     doseDlp: string;
     notifyCtdiVol: string;
@@ -130,6 +132,7 @@ const DEFAULT_SCOUT_PARAMS: ScoutDisplayParams = {
     kV: "--",
     angle: "--",
     position: "--",
+    scanningDirection: "--",
     doseCtdiVol: "--",
     doseDlp: "--",
     notifyCtdiVol: "--",
@@ -379,6 +382,7 @@ const getScoutDisplayParams = (protocolCases: RawProtocolCase[] | undefined): Sc
         kV: toDisplayValue(scoutSequence.scanParams.kV),
         angle: toDisplayValue(scoutSequence.scanParams.angle),
         position: protocolCase.protocol.supportedPositions[0] ?? "--",
+        scanningDirection: toDisplayValue(scoutSequence.scanParams.scanningDirection),
         doseCtdiVol: "--",
         doseDlp: "--",
         notifyCtdiVol: "--",
@@ -773,6 +777,15 @@ const ScanConfirmScreen = ({
         navigate("/protocol-detail");
     };
 
+    const handlePatientPositionChange = useCallback((position: string) => {
+        setPatientPosition(position);
+        if (readOnlyMode) return;
+
+        void updateSelectedScanSession({ patient_position: position })
+            .then((updatedSession) => setScanSession(updatedSession))
+            .catch((error) => console.error("Failed to persist patient position.", error));
+    }, [readOnlyMode]);
+
     useEffect(() => {
         if (scoutDoseFromSession) {
             setScoutDoseDisplayParams(scoutDoseFromSession);
@@ -791,14 +804,20 @@ const ScanConfirmScreen = ({
     }, [parameterPanelMode, scoutDisplayParams.position, resolvedTomographicScanDisplayParams.position, resolvedHelicalScanDisplayParams.position]);
 
     useEffect(() => {
-        if (parameterPanelMode !== "tomographicScan" && parameterPanelMode !== "helicalScan") return;
         const direction = parameterPanelMode === "helicalScan"
             ? resolvedHelicalScanDisplayParams.scanningDirection
-            : resolvedTomographicScanDisplayParams.scanningDirection;
+            : parameterPanelMode === "tomographicScan"
+                ? resolvedTomographicScanDisplayParams.scanningDirection
+                : scoutDisplayParams.scanningDirection;
         if (direction === "HEAD_TO_FOOT" || direction === "FOOT_TO_HEAD") {
             setScanDirection(direction);
         }
-    }, [parameterPanelMode, resolvedTomographicScanDisplayParams.scanningDirection, resolvedHelicalScanDisplayParams.scanningDirection]);
+    }, [
+        parameterPanelMode,
+        scoutDisplayParams.scanningDirection,
+        resolvedTomographicScanDisplayParams.scanningDirection,
+        resolvedHelicalScanDisplayParams.scanningDirection,
+    ]);
 
     useEffect(() => {
         setExpandedSeqId(resolvedActiveSequenceId);
@@ -1016,7 +1035,7 @@ const ScanConfirmScreen = ({
                                     <div className="relative w-full">
                                         <select
                                             value={patientPosition}
-                                            onChange={(event) => setPatientPosition(event.target.value)}
+                                            onChange={(event) => handlePatientPositionChange(event.target.value)}
                                             disabled={readOnlyMode}
                                             className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                         >
@@ -1127,7 +1146,8 @@ const ScanConfirmScreen = ({
                                         <div className="relative w-full">
                                             <select
                                                 value={patientPosition}
-                                                onChange={(event) => setPatientPosition(event.target.value)}
+                                                onChange={(event) => handlePatientPositionChange(event.target.value)}
+                                                disabled={readOnlyMode}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
                                                 <option value="HFS">HFS</option>
@@ -1258,7 +1278,8 @@ const ScanConfirmScreen = ({
                                         <div className="relative w-full">
                                             <select
                                                 value={patientPosition}
-                                                onChange={(event) => setPatientPosition(event.target.value)}
+                                                onChange={(event) => handlePatientPositionChange(event.target.value)}
+                                                disabled={readOnlyMode}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
                                                 <option value="HFS">HFS</option>
@@ -1364,7 +1385,8 @@ const ScanConfirmScreen = ({
                                         <div className="relative w-full">
                                             <select
                                                 value={patientPosition}
-                                                onChange={(event) => setPatientPosition(event.target.value)}
+                                                onChange={(event) => handlePatientPositionChange(event.target.value)}
+                                                disabled={readOnlyMode}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
                                                 <option value="HFS">HFS</option>

@@ -213,6 +213,19 @@ type ApiProtocolSummary = {
     supported_modes: ApiSeriesDetail["series_type"][];
 };
 
+const CSV_PROTOCOL_DESCRIPTION_PREFIX = "protocol-csv:";
+
+const isEnglishFactoryProtocol = (protocol: ApiProtocolSummary) =>
+    protocol.is_factory && protocol.description?.startsWith(CSV_PROTOCOL_DESCRIPTION_PREFIX) === true;
+
+const isProtocolVisibleForLanguage = (protocol: ApiProtocolSummary, language: "zh-CN" | "en-US") => {
+    // 中英文出厂模板都随目录返回；自建协议不随语言隐藏。
+    if (!protocol.is_factory) return true;
+    return language === "en-US"
+        ? isEnglishFactoryProtocol(protocol)
+        : !isEnglishFactoryProtocol(protocol);
+};
+
 type UiParam = {
     label: string;
     value: string;
@@ -373,12 +386,12 @@ const mapApiSeriesToRawSequence = (
     legacyFourDScanParamsByRespMode: Record<string, Partial<Record<ScanParamKey, string | number | boolean>>> = {}
 ): RawSequence => {
     const baseScanParams: Record<string, string | number | boolean> = {
-        scanningDirection: protocol.table_direction.toUpperCase(),
+        scanningDirection: "HEAD_TO_FOOT",
     };
 
     if (series.topogram_param) {
         Object.assign(baseScanParams, {
-            scanningDirection: (series.topogram_param.scan_direction ?? protocol.table_direction).toUpperCase(),
+            scanningDirection: series.topogram_param.scan_direction === "FOOT_TO_HEAD" ? "FOOT_TO_HEAD" : "HEAD_TO_FOOT",
             scanLength: series.topogram_param.scan_length,
             mA: series.topogram_param.ma,
             kV: series.topogram_param.kv,
@@ -391,7 +404,7 @@ const mapApiSeriesToRawSequence = (
 
     if (series.helical_param) {
         Object.assign(baseScanParams, {
-            scanningDirection: (series.helical_param.scan_direction ?? protocol.table_direction).toUpperCase(),
+            scanningDirection: series.helical_param.scan_direction === "FOOT_TO_HEAD" ? "FOOT_TO_HEAD" : "HEAD_TO_FOOT",
             scanLength: series.helical_param.scan_length,
             mA: series.helical_param.ma,
             kV: series.helical_param.kv,
@@ -405,7 +418,7 @@ const mapApiSeriesToRawSequence = (
 
     if (series.axial_param) {
         Object.assign(baseScanParams, {
-            scanningDirection: (series.axial_param.scan_direction ?? protocol.table_direction).toUpperCase(),
+            scanningDirection: series.axial_param.scan_direction === "FOOT_TO_HEAD" ? "FOOT_TO_HEAD" : "HEAD_TO_FOOT",
             scanLength: series.axial_param.scan_length,
             mA: series.axial_param.ma,
             kV: series.axial_param.kv,
@@ -600,7 +613,7 @@ export const protocolCaseData: RawProtocolCase[] = [
                 mode: "定位像",
                 scanParams: {
                     scanLength: 450,
-                    scanningDirection: "OUT",
+                    scanningDirection: "HEAD_TO_FOOT",
                     mA: 50,
                     kV: 120,
                     angle: 0,
@@ -615,7 +628,7 @@ export const protocolCaseData: RawProtocolCase[] = [
                 mode: "螺旋扫描",
                 scanParams: {
                     scanLength: 165,
-                    scanningDirection: "OUT",
+                    scanningDirection: "HEAD_TO_FOOT",
                     mA: 215,
                     kV: 120,
                     angle: 0,
@@ -680,7 +693,7 @@ export const protocolCaseData: RawProtocolCase[] = [
                 mode: "定位像",
                 scanParams: {
                     scanLength: 450,
-                    scanningDirection: "OUT",
+                    scanningDirection: "HEAD_TO_FOOT",
                     mA: 50,
                     kV: 120,
                     angle: 0,
@@ -695,7 +708,7 @@ export const protocolCaseData: RawProtocolCase[] = [
                 mode: "断层扫描",
                 scanParams: {
                     scanLength: 173,
-                    scanningDirection: "OUT",
+                    scanningDirection: "HEAD_TO_FOOT",
                     mA: 200,
                     kV: 120,
                     angle: 0,
@@ -749,7 +762,7 @@ const scanParamLabelMap: Record<string, string> = {
     mA: "MA",
     kV: "KV",
     scanLength: "LEN",
-    scanningDirection: "DIR",
+    scanningDirection: "扫描方向",
     angle: "ANG",
     rotationTime: "ROT",
     collimation: "COL",
@@ -777,6 +790,10 @@ const reconParamLabelMap: Record<string, string> = {
 const formatValue = (key: string, value: string | number | boolean | undefined): string => {
     if (value === undefined || value === null) return "-";
     if (typeof value === "boolean") return value ? "ON" : "OFF";
+    const formatMillimeters = (rawValue: string | number) => {
+        const numeric = Number(rawValue);
+        return Number.isFinite(numeric) ? Number(numeric.toFixed(2)).toString() : String(rawValue);
+    };
     switch (key) {
         case "scanLength":
         case "scoutFOV":
@@ -786,7 +803,7 @@ const formatValue = (key: string, value: string | number | boolean | undefined):
         case "windowCenter":
         case "windowWidth":
         case "scanIncrement":
-            return `${value}mm`;
+            return `${formatMillimeters(value)}mm`;
         case "angle":
             return `${value}°`;
         case "rotationTime":
@@ -912,7 +929,7 @@ const PositionIcon = ({ pos }: { pos: string }) => (
 
 const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps) => {
     const navigate = useNavigate();
-    const { t } = useI18n();
+    const { t, language } = useI18n();
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const [protocolSummaries, setProtocolSummaries] = useState<ApiProtocolSummary[]>([]);
     const [protocolDetailsById, setProtocolDetailsById] = useState<Record<number, ApiProtocolDetail>>({});
@@ -1037,6 +1054,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
     const libraryData = useMemo(
         () => protocolSummaries
             .filter((protocol) => {
+                if (!isProtocolVisibleForLanguage(protocol, language)) return false;
                 const normalizedPatientType = mapAgeGroupToPatientType(protocol.age_group);
                 const isSpiralProtocol = protocol.supported_modes.some((mode) => mode === "helical");
                 const isAxialProtocol = protocol.supported_modes.some((mode) => mode === "axial");
@@ -1061,7 +1079,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                     return leftRank - rightRank;
                 }
 
-                return left.name.localeCompare(right.name, "zh-CN");
+                return left.name.localeCompare(right.name, language);
             })
             .map((protocol) => ({
                 id: protocol.id,
@@ -1069,7 +1087,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 region: getAcquisitionTypeLabel(protocol.acquisition_type),
                 protocol: protocolDetailsById[protocol.id] ?? null,
             })),
-        [protocolDetailsById, protocolSummaries, libraryTab, selectedBodyRegion, patientType]
+        [protocolDetailsById, protocolSummaries, libraryTab, selectedBodyRegion, patientType, language]
     );
 
     const groupedLibraryData = useMemo(() => {
@@ -1725,7 +1743,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? topo.scan_length;
                 if (label === "ANG") patch.tube_angle = parseEditableNumber(rawValue) ?? topo.tube_angle;
                 if (label === "FOV") patch.fov = parseFovValue(rawValue, topo.fov);
-                if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
+                if (label === "扫描方向") patch.scan_direction = rawValue;
                 if (Object.keys(patch).length > 0) {
                     await updateSelectedScanSessionTopogramParam(topo.id, patch);
                     await refreshCurrentSession(session.id);
@@ -1740,7 +1758,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? helical.kv;
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? helical.scan_length;
                 if (label === "FOV") patch.fov = parseFovValue(rawValue, helical.fov);
-                if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
+                if (label === "扫描方向") patch.scan_direction = rawValue;
                 if (Object.keys(patch).length > 0) {
                     // Recompute CTDIvol/DLP so the session (and the dose_log
                     // entry produced on scan completion) reflects the user's
@@ -1773,7 +1791,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? axial.kv;
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? axial.scan_length;
                 if (label === "FOV") patch.fov = parseFovValue(rawValue, axial.fov);
-                if (label === "DIR") patch.scan_direction = rawValue.toUpperCase();
+                if (label === "扫描方向") patch.scan_direction = rawValue;
                 if (Object.keys(patch).length > 0) {
                     const seedAxial = seedSeries?.axial_param ?? null;
                     if (seedAxial) {
@@ -1796,10 +1814,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                 return;
             }
 
-            if (label === "DIR") {
-                const updatedSession = await updateScanSessionById(session.id, { table_direction: rawValue.toLowerCase() });
-                applySessionToScreen(updatedSession);
-            }
+            // 4D 等未绑定扫描参数的旧序列不使用床位方向承载扫描方向。
         } catch (error) {
             console.error(error);
         }
@@ -2287,12 +2302,15 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                             value={p.value}
                                             highlight={p.highlight}
                                             options={
-                                                p.label === "DIR"
-                                                    ? ["IN", "OUT"]
+                                                p.label === "扫描方向"
+                                                    ? [
+                                                        { value: "HEAD_TO_FOOT", label: "头向足" },
+                                                        { value: "FOOT_TO_HEAD", label: "足向头" },
+                                                    ]
                                                     : p.options
                                             }
                                             onChange={
-                                                ["MA", "KV", "LEN", "DIR", "ANG", "FOV"].includes(p.label)
+                                                ["MA", "KV", "LEN", "扫描方向", "ANG", "FOV"].includes(p.label)
                                                     ? (value) => void handleScanParamChange(p.label, value)
                                                     : undefined
                                             }
@@ -2725,17 +2743,17 @@ type ParamBoxProps = {
     label: string;
     value: string;
     highlight?: boolean;
-    options?: string[];
+    options?: Array<string | { value: string; label: string }>;
     onChange?: (val: string) => void;
 };
 
 const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamBoxProps) => (
     <div
-        className={`p-2 rounded-md border flex flex-col items-center justify-center transition-all shadow-sm relative group ${highlight ? "bg-[#E3F2FD] border-[#4D94FF]" : "bg-white border-[#B0C4DE]/30"
+        className={`p-2 rounded-md border flex flex-col items-center justify-center transition-all shadow-[0_1px_2px_rgba(71,101,133,0.06)] relative group ${highlight ? "bg-[#E3F2FD] border-[#4D94FF]" : "bg-white border-[#B0C4DE]/30"
             }`}
     >
         <span
-            className={`text-[8px] font-black uppercase leading-none tracking-tighter ${highlight ? "text-[#4D94FF]" : "text-[#90A4AE]"
+            className={`text-[9px] font-semibold uppercase leading-none tracking-normal ${highlight ? "text-[#4D94FF]" : "text-[#7890A8]"
                 }`}
         >
             {label}
@@ -2745,14 +2763,18 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
                 <select
                     value={value}
                     onChange={(e) => onChange?.(e.target.value)}
-                    className={`text-[14px] font-black font-mono bg-transparent appearance-none pr-3 cursor-pointer focus:outline-none ${highlight ? "text-[#1E88E5]" : "text-[#37474F]"
+                    className={`text-[13px] font-semibold bg-transparent appearance-none pr-3 cursor-pointer focus:outline-none ${highlight ? "text-[#1E88E5]" : "text-[#42607B]"
                         }`}
                 >
-                    {options.map((opt) => (
-                        <option key={opt} value={opt}>
-                            {opt}
+                    {options.map((option) => {
+                        const optionValue = typeof option === "string" ? option : option.value;
+                        const optionLabel = typeof option === "string" ? option : option.label;
+                        return (
+                        <option key={optionValue} value={optionValue}>
+                            {optionLabel}
                         </option>
-                    ))}
+                        );
+                    })}
                 </select>
                 <ChevronDown size={10} className="absolute right-0 pointer-events-none text-[#90A4AE] group-hover:text-[#4D94FF] transition-colors" />
             </div>
@@ -2760,12 +2782,12 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
             <input
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
-                className={`mt-1 w-full bg-transparent text-center text-[14px] font-black font-mono focus:outline-none ${highlight ? "text-[#1E88E5]" : "text-[#37474F]"
+                className={`mt-1 w-full bg-transparent text-center text-[13px] font-semibold tabular-nums focus:outline-none ${highlight ? "text-[#1E88E5]" : "text-[#42607B]"
                     }`}
             />
         ) : (
             <span
-                className={`text-[14px] font-black font-mono mt-1 ${highlight ? "text-[#1E88E5]" : "text-[#37474F]"
+                className={`text-[13px] font-semibold tabular-nums mt-1 ${highlight ? "text-[#1E88E5]" : "text-[#42607B]"
                     }`}
             >
                 {value}

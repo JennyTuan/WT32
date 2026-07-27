@@ -17,7 +17,6 @@ CURRENT_CSV_PROTOCOL_DESCRIPTIONS = {
     if str(protocol_seed.get("description", "")).startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)
 }
 
-
 def _csv_protocol_order(description: str | None) -> int | None:
     value = str(description or "")
     if not value.startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX):
@@ -350,9 +349,8 @@ def list_protocol_catalog(db: Session = Depends(get_db)):
     visible_protocols: list[models.Protocol] = []
     for protocol in protocols:
         description = str(protocol.description or "")
-        # Only hide stale records imported from an older CSV catalog. Regular
-        # built-in factory protocols use their own seed descriptions and must
-        # remain available in the scan workflow library.
+        # 仅隐藏不再属于当前英文目录的旧 CSV 导入记录；中英文当前模板
+        # 会同时返回，由界面按照系统语言选取对应目录。
         if (
             protocol.is_factory
             and description.startswith(CSV_PROTOCOL_DESCRIPTION_PREFIX)
