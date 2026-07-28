@@ -864,20 +864,34 @@ const ScanConfirmScreen = ({
     const hasStartedSeriesExecution = scanSession?.series.some(
         (series) => series.execution_status !== "pending"
     ) ?? false;
+    const canReturnToScoutPositioning =
+        !readOnlyMode &&
+        allowBackNavigation &&
+        scanSessionLoadState === "ready" &&
+        (scanSession?.series.some(
+            (series) => series.series_type === "topogram" && series.execution_status === "image_ready"
+        ) ?? false) &&
+        !(scanSession?.series.some(
+            (series) => series.series_type !== "topogram" && series.execution_status !== "pending"
+        ) ?? false);
     const canNavigateBackToProtocol =
         !readOnlyMode &&
         allowBackNavigation &&
         scanSessionLoadState === "ready" &&
         !hasStartedSeriesExecution;
+    const canNavigateBack = canNavigateBackToProtocol || canReturnToScoutPositioning;
     const previousStepTitle = scanSessionLoadState === "error"
         ? t("scanFlow.backStateUnavailable")
-        : !canNavigateBackToProtocol && scanSessionLoadState !== "loading"
+        : !canNavigateBack && scanSessionLoadState !== "loading"
             ? t("scanFlow.backBlockedAfterAcquisition")
             : undefined;
     const handlePreviousStep = useCallback(() => {
-        if (!canNavigateBackToProtocol) return;
-        navigate("/protocol-select");
-    }, [canNavigateBackToProtocol, navigate]);
+        if (canNavigateBackToProtocol) {
+            navigate("/protocol-select");
+            return;
+        }
+        if (canReturnToScoutPositioning) navigate("/scout-scan");
+    }, [canNavigateBackToProtocol, canReturnToScoutPositioning, navigate]);
 
     return (
         <div className={`flex flex-col w-[1024px] h-[768px] bg-[#EEF2F9] overflow-hidden rounded-md border border-[#B0C4DE] shadow-2xl relative text-[#37474F] font-sans select-none ${readOnlyMode ? "scan-confirm-read-only" : ""}`}>
@@ -1576,9 +1590,9 @@ const ScanConfirmScreen = ({
                 <div className="flex-1">
                     <button
                         onClick={handlePreviousStep}
-                        disabled={!canNavigateBackToProtocol}
+                        disabled={!canNavigateBack}
                         title={previousStepTitle}
-                        className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 shadow-sm transition-all uppercase text-[13px] ${!canNavigateBackToProtocol ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#4D94FF] border-[#4D94FF] hover:bg-solid active:scale-95"}`}
+                        className={`flex items-center gap-2 px-10 h-[52px] font-bold rounded-md border-2 shadow-sm transition-all uppercase text-[13px] ${!canNavigateBack ? "bg-[#F8FAFC] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed" : "bg-white text-[#4D94FF] border-[#4D94FF] hover:bg-solid active:scale-95"}`}
                     >
                         <ChevronLeft size={20} /> {t("common.previousStep")}
                     </button>

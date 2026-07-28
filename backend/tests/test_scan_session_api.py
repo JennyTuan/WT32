@@ -354,6 +354,81 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(recon["center_y"], -4.5)
         self.assertFalse(recon["metal_artifact_suppression"])
 
+    def test_scan_exam_binds_multiple_sessions_for_the_same_patient(self) -> None:
+        exam_response = self.client.post("/api/scan-sessions/exams", json={"patient_id": self.patient_id})
+        self.assertEqual(exam_response.status_code, 201, exam_response.text)
+        exam = exam_response.json()
+
+        first = self.client.post(
+            "/api/scan-sessions/",
+            json={"patient_id": self.patient_id, "protocol_id": self.protocol_id, "exam_id": exam["id"]},
+        )
+        second = self.client.post(
+            "/api/scan-sessions/",
+            json={"patient_id": self.patient_id, "protocol_id": self.protocol_id, "exam_id": exam["id"]},
+        )
+
+        self.assertEqual(first.status_code, 201, first.text)
+        self.assertEqual(second.status_code, 201, second.text)
+        self.assertEqual(first.json()["exam_id"], exam["id"])
+        self.assertEqual(second.json()["exam_id"], exam["id"])
+        sessions = self.client.get(f"/api/scan-sessions/exams/{exam['id']}/sessions")
+        self.assertEqual(sessions.status_code, 200, sessions.text)
+        self.assertEqual([item["id"] for item in sessions.json()], [first.json()["id"], second.json()["id"]])
+
+    def test_completed_session_persists_derived_reconstruction_output(self) -> None:
+        scan_session = self._create_scan_session()
+        series = scan_session["series"][0]
+
+        self.assertEqual(self.client.post(f"/api/scan-sessions/{scan_session['id']}/start").status_code, 200)
+        self.assertEqual(
+            self.client.put(
+                f"/api/scan-sessions/series/{series['id']}/execution",
+                json={"execution_status": "running"},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.put(
+                f"/api/scan-sessions/series/{series['id']}/execution",
+                json={
+                    "execution_status": "image_ready",
+                    "image_source_id": "brain-helical-demo",
+                    "image_source_version": 1,
+                },
+            ).status_code,
+            200,
+        )
+        self.assertEqual(self.client.post(f"/api/scan-sessions/{scan_session['id']}/complete").status_code, 200)
+
+        payload = {
+            "reconstruction_job_id": "prototype-recon-job-001",
+            "output_series_id": "derived-series-001",
+            "recon_name": "Prototype derived recon",
+            "recon_type": "soft",
+            "kernel": "B40",
+            "matrix": 512,
+            "window_width": 400,
+            "window_level": 40,
+            "slice_thickness": 1.0,
+            "increment": 1.0,
+            "recon_fov": 240.0,
+            "center_x": 0.0,
+            "center_y": 0.0,
+            "metal_artifact_suppression": False,
+            "image_urls": ["https://prototype.invalid/derived-001.dcm"],
+        }
+        response = self.client.post(
+            f"/api/scan-sessions/series/{series['id']}/derived-reconstructions",
+            json=payload,
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        persisted = response.json()["series"][0]["recon_series"][-1]
+        self.assertEqual(persisted["source_kind"], "derived")
+        self.assertEqual(persisted["reconstruction_job_id"], payload["reconstruction_job_id"])
+        self.assertEqual(persisted["image_urls"], payload["image_urls"])
+
     def test_recon_metal_artifact_suppression_is_saved_in_scan_session_only(self) -> None:
         scan_session = self._create_scan_session()
         recon = scan_session["series"][0]["recon_series"][0]
@@ -418,6 +493,40 @@ class ScanSessionApiTests(unittest.TestCase):
         target = next(item for item in refreshed.json()["series"] if item["id"] == target_series["id"])
         self.assertEqual(target["helical_param"]["scan_length"], 110.0)
         self.assertEqual(target["helical_param"]["scan_direction"], "FOOT_TO_HEAD")
+
+    def test_scan_planning_normalizes_floating_point_scan_length(self) -> None:
+        scan_session = self._create_scan_session()
+        target_series = scan_session["series"][0]
+
+        db = self.SessionTesting()
+        try:
+            topogram = models.ScanSessionSeries(
+                scan_session_id=scan_session["id"],
+                series_order=0,
+                series_type="topogram",
+                series_label="Scout",
+            )
+            db.add(topogram)
+            db.commit()
+            topogram_id = topogram.id
+        finally:
+            db.close()
+
+        response = self.client.put(
+            f"/api/scan-sessions/series/{target_series['id']}/planning",
+            json={
+                "source_topogram_series_id": topogram_id,
+                "range_min_position_mm": 535.54,
+                "range_max_position_mm": 657.76,
+                "scan_direction": "HEAD_TO_FOOT",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        refreshed = self.client.get(f"/api/scan-sessions/{scan_session['id']}")
+        self.assertEqual(refreshed.status_code, 200, refreshed.text)
+        target = next(item for item in refreshed.json()["series"] if item["id"] == target_series["id"])
+        self.assertEqual(target["helical_param"]["scan_length"], 122.22)
 
     def test_scan_planning_rejects_reversed_range_and_missing_topogram_reference(self) -> None:
         scan_session = self._create_scan_session()

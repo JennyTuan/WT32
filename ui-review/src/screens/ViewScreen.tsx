@@ -68,6 +68,7 @@ import {
     fetchScanSessionById,
     fetchSelectedScanSession,
     loadSelectedScanSessionId,
+    persistDerivedScanSessionReconSeries,
     type ApiScanSeriesImageSourceId,
     type ApiScanSeriesImageSourceVersion,
     type ApiScanSessionDetail,
@@ -1114,7 +1115,7 @@ const ViewScreen = () => {
                     ? makeBrainHelicalSeries(type, s)
                     : limbsResultSeries?.length
                         ? limbsResultSeries
-                    : s.recon_series.map((r) => ({
+                : s.recon_series.map((r) => ({
                     id: `${prefix}-recon${r.id}`,
                     name: r.recon_name,
                     count: seriesCount,
@@ -1133,6 +1134,8 @@ const ViewScreen = () => {
                     defaultWl: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : r.window_level,
                     ...(sourceVerified && s.image_source_id === "qin-lung-helical-demo" && QIN_LUNG_HELICAL_ASSET
                         ? { dicomUrls: [...QIN_LUNG_HELICAL_ASSET.imageUrls] }
+                        : r.image_urls?.length
+                            ? { dicomUrls: [...r.image_urls] }
                         : {}),
                     }));
 
@@ -1236,6 +1239,11 @@ const ViewScreen = () => {
         const controller = new AbortController();
         void listReconstructionJobs(scanSession.id, controller.signal)
             .then((jobs) => {
+                const persistedJobIds = new Set(
+                    scanSession.series.flatMap((series) => series.recon_series)
+                        .map((recon) => recon.reconstruction_job_id)
+                        .filter((jobId): jobId is string => Boolean(jobId)),
+                );
                 const seriesById = new Map<string, Series>();
                 const groupBySeriesId = new Map<string, string>();
                 studyTree.forEach((study) => study.scanGroups.forEach((group) => group.series.forEach((series) => {
@@ -1245,6 +1253,7 @@ const ViewScreen = () => {
 
                 const restored: GeneratedReconSeries[] = [];
                 [...jobs].reverse().forEach((job) => {
+                    if (persistedJobIds.has(job.job_id)) return;
                     if (job.status !== "completed" || !job.output_series) return;
                     const sourceId = job.request.source_series.series_id;
                     const sourceSeries = seriesById.get(sourceId);
@@ -1268,7 +1277,7 @@ const ViewScreen = () => {
                 }
             });
         return () => controller.abort();
-    }, [scanSession?.id, studyTree]);
+    }, [scanSession, studyTree]);
     // Guard: if the session tree is empty, keep a stable static fallback series.
     const safeSeriesList = useMemo<Series[]>(() => {
         const seriesList = displayStudyTree.flatMap((study) => study.scanGroups.flatMap((group) => group.series));
@@ -1865,27 +1874,45 @@ const ViewScreen = () => {
                 throw new Error(completed.error_message || "重建任务未生成可用的新序列。");
             }
 
-            const generatedSeries = buildGeneratedReconSeries(
-                completed.output_series,
-                selectedSeries,
-                displayWw,
-                displayWl,
-            );
-            setGeneratedReconSeries((current) => [
-                ...current.filter(({ series }) => series.id !== generatedSeries.id),
-                { scanGroupId, series: generatedSeries },
-            ]);
-            setSelectedSeriesId(generatedSeries.id);
-            setSliceIndex(getSeriesMidSliceIndex(generatedSeries.count));
+            if (!scanSession?.id || !selectedSeries.sourceSeriesId) {
+                throw new Error("当前重建结果缺少已绑定的扫描会话或源序列。");
+            }
+            const persistedSession = await persistDerivedScanSessionReconSeries(selectedSeries.sourceSeriesId, {
+                reconstruction_job_id: completed.job_id,
+                output_series_id: completed.output_series.series_id,
+                recon_name: completed.output_series.series_description,
+                recon_type: "soft",
+                kernel: completed.output_series.kernel,
+                matrix: completed.output_series.matrix,
+                window_width: completed.output_series.window_width ?? displayWw,
+                window_level: completed.output_series.window_level ?? displayWl,
+                slice_thickness: completed.output_series.slice_thickness,
+                increment: completed.output_series.slice_spacing,
+                recon_fov: completed.output_series.fov,
+                center_x: Number(reconParams.centerX) || 0,
+                center_y: Number(reconParams.centerY) || 0,
+                metal_artifact_suppression: completed.output_series.metal_artifact_reduction,
+                image_urls: completed.output_series.image_urls,
+            });
+            const persistedRecon = persistedSession.series
+                .find((series) => series.id === selectedSeries.sourceSeriesId)
+                ?.recon_series.find((recon) => recon.reconstruction_job_id === completed.job_id);
+            if (!persistedRecon) throw new Error("重建输出已完成，但未能保存会话内结果。");
+            setLoadedScanSession(persistedSession);
+            setSelectedSeriesId(`sess${persistedSession.id}-ser${selectedSeries.sourceSeriesId}-recon${persistedRecon.id}`);
+            setSliceIndex(getSeriesMidSliceIndex(completed.output_series.image_count));
             setImageMode("2D");
-            if (generatedSeries.defaultWw != null && generatedSeries.defaultWl != null) {
+            const outputWw = completed.output_series.window_width ?? displayWw;
+            const outputWl = completed.output_series.window_level ?? displayWl;
+            if (Number.isFinite(outputWw) && Number.isFinite(outputWl)) {
                 applyWindowPreset({
-                    key: generatedSeries.id,
-                    label: generatedSeries.name,
-                    ww: generatedSeries.defaultWw,
-                    wl: generatedSeries.defaultWl,
+                    key: `sess${persistedSession.id}-ser${selectedSeries.sourceSeriesId}-recon${persistedRecon.id}`,
+                    label: completed.output_series.series_description,
+                    ww: outputWw,
+                    wl: outputWl,
                 });
             }
+            const generatedSeries = { name: completed.output_series.series_description };
             setReconProgress(100);
             setReconStatus("done");
             setReconMessage(`已生成并选中新序列：${generatedSeries.name}`);

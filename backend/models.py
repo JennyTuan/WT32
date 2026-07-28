@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -279,11 +279,24 @@ class GatingConfig(Base):
     series = relationship("Series", back_populates="gating_config")
 
 
+class ScanExam(Base):
+    __tablename__ = "scan_exams"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="in_progress", server_default="in_progress", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    patient = relationship("Patient")
+    scan_sessions = relationship("ScanSession", back_populates="exam")
+
+
 class ScanSession(Base):
     __tablename__ = "scan_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
     patient_id = Column(Integer, ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False, index=True)
+    exam_id = Column(Integer, ForeignKey("scan_exams.id", ondelete="RESTRICT"), nullable=True, index=True)
     protocol_id = Column(Integer, ForeignKey("protocols.id", ondelete="RESTRICT"), nullable=False, index=True)
     status = Column(String(20), nullable=False, default="draft", index=True)
     session_name = Column(String(120), nullable=True)
@@ -301,6 +314,7 @@ class ScanSession(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     patient = relationship("Patient", back_populates="scan_sessions")
+    exam = relationship("ScanExam", back_populates="scan_sessions")
     protocol = relationship("Protocol", back_populates="scan_sessions")
     contrast_config = relationship(
         "ScanSessionContrastConfig",
@@ -732,6 +746,11 @@ class ScanSessionReconSeries(Base):
     center_x = Column(Float, nullable=True)
     center_y = Column(Float, nullable=True)
     metal_artifact_suppression = Column(Boolean, nullable=False, default=False)
+    # 派生重建仅保存原型重建服务的可追溯输出，不代表真实设备重建结果。
+    source_kind = Column(String(20), nullable=False, default="configured", server_default="configured")
+    reconstruction_job_id = Column(String(120), nullable=True, unique=True, index=True)
+    output_series_id = Column(String(160), nullable=True)
+    image_urls = Column(JSON, nullable=True)
 
     session_series = relationship("ScanSessionSeries", back_populates="recon_series")
 

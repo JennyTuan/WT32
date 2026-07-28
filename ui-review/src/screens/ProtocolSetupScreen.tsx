@@ -20,10 +20,11 @@ import {
 } from "lucide-react";
 import { loadSelectedPatient } from "../lib/patientSession";
 import AppHeader from "../components/AppHeader";
-import { saveSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
+import { saveSelectedScanWorkflowPlans, type WorkflowPlan } from "../lib/scanWorkflowSession";
 import { estimateDose } from "../lib/doseEstimate";
 import {
     createScanSessionForSelectedPatient,
+    createScanExamForSelectedPatient,
     deleteSelectedScanSessionSeries,
     duplicateSelectedScanSessionSeries,
     fetchScanSessionById,
@@ -381,7 +382,7 @@ const getLegacyFourDScanParams = (
 };
 
 const mapApiSeriesToRawSequence = (
-    protocol: ApiProtocolDetail,
+    _protocol: ApiProtocolDetail,
     series: ApiSeriesDetail,
     legacyFourDScanParamsByRespMode: Record<string, Partial<Record<ScanParamKey, string | number | boolean>>> = {}
 ): RawSequence => {
@@ -1919,10 +1920,15 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
 
     const handleStartScanFlow = async () => {
         if (!activePlan) return;
-        const toWorkflowPlan = (plan: UiPlan, sourceSessionId = plan.sourceSessionId) =>
+        const toWorkflowPlan = (
+            plan: UiPlan,
+            sourceSessionId = plan.sourceSessionId,
+            sourceExamId?: number,
+        ): WorkflowPlan =>
             ({
                 id: plan.id,
                 protocolId: plan.sourceProtocolId,
+                sourceExamId,
                 title: plan.title,
                 sourceSessionId,
                 sequences: plan.sequences.map((sequence) => ({
@@ -1970,20 +1976,29 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         try {
             // 用户当前选中的计划作为起点；其余计划按列表顺序衔接。
             const orderedPlans = [activePlan, ...scanPlans.filter((plan) => plan.id !== activePlan.id)];
+            const scanExam = await createScanExamForSelectedPatient();
             const workflowPlans = [];
             for (const plan of orderedPlans) {
                 let sourceSessionId = plan.sourceSessionId;
                 if (!sourceSessionId && plan.id === activePlan.id && activeScanSession) {
-                    sourceSessionId = activeScanSession.id;
+                    const attachedSession = activeScanSession.exam_id === scanExam.id
+                        ? activeScanSession
+                        : await updateScanSessionById(activeScanSession.id, { exam_id: scanExam.id });
+                    applySessionToScreen(attachedSession);
+                    sourceSessionId = attachedSession.id;
                 }
                 if (!sourceSessionId) {
                     if (!plan.sourceProtocolId) {
                         throw new Error("扫描计划缺少可创建会话的协议来源");
                     }
-                    const scanSession = await createScanSessionForSelectedPatient(plan.sourceProtocolId, plan.title);
+                    const scanSession = await createScanSessionForSelectedPatient(
+                        plan.sourceProtocolId,
+                        plan.title,
+                        scanExam.id,
+                    );
                     sourceSessionId = scanSession.id;
                 }
-                workflowPlans.push(toWorkflowPlan(plan, sourceSessionId));
+                workflowPlans.push(toWorkflowPlan(plan, sourceSessionId, scanExam.id));
             }
 
             const initialSessionId = workflowPlans[0]?.sourceSessionId;
@@ -2170,7 +2185,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                                     setSelectedReconIndex(0);
                                                 }
                                             }}
-                                            className={`h-[32px] px-4 flex items-center gap-2 border-b border-[#EEF2F9] ${selectedPlanId === plan.id ? "bg-[#EAF3FF]" : "bg-[#F8FAFC]"}`}
+                                            className={`h-[32px] px-4 flex items-center gap-2 border-b border-[#DCE6F2] bg-[#F7F9FC] cursor-pointer ${selectedPlanId === plan.id ? "border-l-2 border-l-[#C7D9EC]" : ""}`}
                                         >
                                             <button
                                                 type="button"
@@ -2193,7 +2208,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                                 onChange={() => toggleCheckPlan(plan.id)}
                                                 className="w-3.5 h-3.5 rounded-sm accent-[#4D94FF]"
                                             />
-                                            <span className="text-[10px] font-black tracking-tight text-[#546E7A]">
+                                            <span className="text-[10px] font-black tracking-tight text-[#294866]">
                                                 {plan.title}
                                             </span>
                                         </div>
@@ -2206,15 +2221,15 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                                     setSelectedSeqId(seq.id);
                                                     setSelectedReconIndex(0);
                                                 }}
-                                                className={`h-[36px] flex items-center px-8 gap-3 cursor-pointer relative ${checkedSeqIds.includes(seq.id)
-                                                    ? 'bg-[#F3F8FF]'
-                                                    : selectedSeqId === seq.id
-                                                        ? 'bg-[#E3F2FD] border-l-4 border-[#4D94FF]'
+                                                className={`h-[36px] flex items-center px-8 gap-3 cursor-pointer relative ${selectedSeqId === seq.id
+                                                    ? 'bg-[#E8F3FF] border-l-4 border-[#2F80FF]'
+                                                    : checkedSeqIds.includes(seq.id)
+                                                        ? 'bg-[#F4F8FD]'
                                                         : 'hover:bg-gray-50'
                                                     }`}
                                             >
-                                                <div className="absolute left-5 top-0 bottom-0 w-[1px] bg-gray-100"></div>
-                                                <div className="absolute left-5 top-1/2 w-2 h-[1px] bg-gray-100"></div>
+                                                <div className="absolute left-5 top-0 bottom-0 w-[1px] bg-[#DCE6F2]"></div>
+                                                <div className="absolute left-5 top-1/2 w-2 h-[1px] bg-[#DCE6F2]"></div>
 
                                                 {/* Checkbox */}
                                                 <div
@@ -2228,10 +2243,10 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                                 </div>
 
                                                 <span
-                                                    className={`text-[12px] font-bold ${checkedSeqIds.includes(seq.id)
-                                                        ? 'text-[#546E7A]'
-                                                        : selectedSeqId === seq.id
-                                                            ? 'text-[#1E88E5]'
+                                                    className={`text-[12px] font-bold ${selectedSeqId === seq.id
+                                                        ? 'text-[#1769D1]'
+                                                        : checkedSeqIds.includes(seq.id)
+                                                            ? 'text-[#47627D]'
                                                             : 'text-[#546E7A]'
                                                         }`}
                                                 >

@@ -90,6 +90,10 @@ export type ApiScanSessionReconSeries = {
     center_x?: number | null;
     center_y?: number | null;
     metal_artifact_suppression: boolean;
+    source_kind?: "configured" | "derived";
+    reconstruction_job_id?: string | null;
+    output_series_id?: string | null;
+    image_urls?: string[] | null;
 };
 
 export type ApiScanSessionFourDConfig = {
@@ -158,6 +162,7 @@ export type ApiScanSessionSeries = {
 export type ApiScanSessionDetail = {
     id: number;
     patient_id: number;
+    exam_id?: number | null;
     protocol_id: number;
     status: "draft" | "in_progress" | "completed" | "cancelled";
     session_name?: string | null;
@@ -175,6 +180,7 @@ export type ApiScanSessionDetail = {
 
 export type CreateAdHocScanSessionPayload = {
     source_protocol_id: number;
+    exam_id?: number;
     session_name?: string;
     name: string;
     body_part: string;
@@ -185,6 +191,13 @@ export type CreateAdHocScanSessionPayload = {
     acquisition_type?: "regular" | "gating" | "four_d";
     scan_mode?: "plain" | "contrast" | "4d";
     description?: string | null;
+};
+
+export type ApiScanExam = {
+    id: number;
+    patient_id: number;
+    status: "in_progress" | "completed" | "cancelled";
+    created_at: string;
 };
 
 export type CreateScanSessionSeriesPayload = {
@@ -265,6 +278,23 @@ const cacheSelectedScanSession = (scanSession: ApiScanSessionDetail) => {
     localStorage.setItem(DETAIL_CACHE_KEY, JSON.stringify(scanSession));
 };
 
+const updateSelectedScanSessionCache = (
+    update: (scanSession: ApiScanSessionDetail) => ApiScanSessionDetail,
+) => {
+    const cachedSession = readCachedSelectedScanSession();
+    if (cachedSession) cacheSelectedScanSession(update(cachedSession));
+};
+
+const replaceCachedSeries = (
+    sessionSeriesId: number,
+    update: (series: ApiScanSessionSeries) => ApiScanSessionSeries,
+) => updateSelectedScanSessionCache((scanSession) => ({
+    ...scanSession,
+    series: scanSession.series.map((series) => (
+        series.id === sessionSeriesId ? update(series) : series
+    )),
+}));
+
 export const cacheScanSessionIfSelected = (scanSession: ApiScanSessionDetail) => {
     if (loadSelectedScanSessionId() === scanSession.id) {
         cacheSelectedScanSession(scanSession);
@@ -325,6 +355,7 @@ export const createAdHocScanSessionForSelectedPatient = async (payload: CreateAd
     }
 
     const backendPatientId = await resolveBackendPatientId(selectedPatient);
+    const examId = payload.exam_id ?? (await createScanExamForSelectedPatient()).id;
     const response = await fetch(buildApiUrl("/api/scan-sessions/ad-hoc"), {
         method: "POST",
         headers: {
@@ -333,6 +364,7 @@ export const createAdHocScanSessionForSelectedPatient = async (payload: CreateAd
         body: JSON.stringify({
             patient_id: backendPatientId,
             ...payload,
+            exam_id: examId,
         }),
     });
 
@@ -346,7 +378,25 @@ export const createAdHocScanSessionForSelectedPatient = async (payload: CreateAd
     return scanSession;
 };
 
-export const createScanSessionForSelectedPatient = async (protocolId: number, sessionName?: string) => {
+export const createScanExamForSelectedPatient = async () => {
+    const selectedPatient = loadSelectedPatient();
+    if (!selectedPatient) throw new Error("No patient selected");
+
+    const backendPatientId = await resolveBackendPatientId(selectedPatient);
+    const response = await fetch(buildApiUrl("/api/scan-sessions/exams"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patient_id: backendPatientId }),
+    });
+    if (!response.ok) throw new Error(`Failed to create scan exam: ${response.status}`);
+    return (await response.json()) as ApiScanExam;
+};
+
+export const createScanSessionForSelectedPatient = async (
+    protocolId: number,
+    sessionName?: string,
+    examId?: number,
+) => {
     const selectedPatient = loadSelectedPatient();
     if (!selectedPatient) {
         throw new Error("No patient selected");
@@ -362,6 +412,7 @@ export const createScanSessionForSelectedPatient = async (protocolId: number, se
             patient_id: backendPatientId,
             protocol_id: protocolId,
             session_name: sessionName ?? `${selectedPatient.name}-${Date.now()}`,
+            exam_id: examId,
         }),
     });
 
@@ -453,8 +504,14 @@ export const createScanSessionSeries = async (scanSessionId: number, payload: Cr
     return scanSession;
 };
 
-export const updateSelectedScanSessionSeries = async (sessionSeriesId: number, payload: UpdatePayload) =>
-    updateSelectedScanSessionEntity<ApiScanSessionSeries>(`/api/scan-sessions/series/${sessionSeriesId}`, payload);
+export const updateSelectedScanSessionSeries = async (sessionSeriesId: number, payload: UpdatePayload) => {
+    const updatedSeries = await updateSelectedScanSessionEntity<ApiScanSessionSeries>(
+        `/api/scan-sessions/series/${sessionSeriesId}`,
+        payload,
+    );
+    replaceCachedSeries(updatedSeries.id, () => updatedSeries);
+    return updatedSeries;
+};
 
 export const updateScanSessionSeriesExecution = async (
     sessionSeriesId: number,
@@ -541,6 +598,37 @@ export const createScanSessionReconSeries = async (sessionSeriesId: number, payl
     return scanSession;
 };
 
+export const persistDerivedScanSessionReconSeries = async (sessionSeriesId: number, payload: {
+    reconstruction_job_id: string;
+    output_series_id: string;
+    recon_name: string;
+    recon_type: "soft" | "bone" | "lung" | "vascular";
+    kernel: string;
+    matrix: 512 | 1024;
+    window_width: number;
+    window_level: number;
+    slice_thickness: number;
+    increment: number;
+    recon_fov: number;
+    center_x: number;
+    center_y: number;
+    metal_artifact_suppression: boolean;
+    image_urls: string[];
+}) => {
+    const response = await fetch(buildApiUrl(`/api/scan-sessions/series/${sessionSeriesId}/derived-reconstructions`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        const body = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(body?.detail || `Failed to persist derived reconstruction: ${response.status}`);
+    }
+    const scanSession = (await response.json()) as ApiScanSessionDetail;
+    if (loadSelectedScanSessionId() === scanSession.id) cacheSelectedScanSession(scanSession);
+    return scanSession;
+};
+
 export const deleteSelectedScanSessionReconSeries = async (reconId: number) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/recon-series/${reconId}`), {
         method: "DELETE",
@@ -551,8 +639,21 @@ export const deleteSelectedScanSessionReconSeries = async (reconId: number) => {
     return scanSession;
 };
 
-export const updateSelectedScanSessionTopogramParam = async (paramId: number, payload: UpdatePayload) =>
-    updateSelectedScanSessionEntity<ApiScanSessionTopogramParam>(`/api/scan-sessions/topogram/${paramId}`, payload);
+export const updateSelectedScanSessionTopogramParam = async (paramId: number, payload: UpdatePayload) => {
+    const updatedParam = await updateSelectedScanSessionEntity<ApiScanSessionTopogramParam>(
+        `/api/scan-sessions/topogram/${paramId}`,
+        payload,
+    );
+    updateSelectedScanSessionCache((scanSession) => ({
+        ...scanSession,
+        series: scanSession.series.map((series) => (
+            series.topogram_param?.id === updatedParam.id
+                ? { ...series, topogram_param: updatedParam }
+                : series
+        )),
+    }));
+    return updatedParam;
+};
 
 export const updateSelectedScanSessionSeriesPlanning = async (
     sessionSeriesId: number,
@@ -562,19 +663,62 @@ export const updateSelectedScanSessionSeriesPlanning = async (
         range_max_position_mm: number;
         scan_direction: "HEAD_TO_FOOT" | "FOOT_TO_HEAD";
     },
-) => updateSelectedScanSessionEntity<ApiScanSessionScanPlanning>(
+): Promise<ApiScanSessionScanPlanning> => updateSelectedScanSessionEntity<ApiScanSessionScanPlanning>(
     `/api/scan-sessions/series/${sessionSeriesId}/planning`,
     payload,
-);
+).then((updatedPlanning) => {
+    replaceCachedSeries(sessionSeriesId, (series) => ({ ...series, scan_planning: updatedPlanning }));
+    return updatedPlanning;
+});
 
-export const updateSelectedScanSessionHelicalParam = async (paramId: number, payload: UpdatePayload) =>
-    updateSelectedScanSessionEntity<ApiScanSessionHelicalParam>(`/api/scan-sessions/helical/${paramId}`, payload);
+export const updateSelectedScanSessionHelicalParam = async (paramId: number, payload: UpdatePayload) => {
+    const updatedParam = await updateSelectedScanSessionEntity<ApiScanSessionHelicalParam>(
+        `/api/scan-sessions/helical/${paramId}`,
+        payload,
+    );
+    updateSelectedScanSessionCache((scanSession) => ({
+        ...scanSession,
+        series: scanSession.series.map((series) => (
+            series.helical_param?.id === updatedParam.id
+                ? { ...series, helical_param: updatedParam }
+                : series
+        )),
+    }));
+    return updatedParam;
+};
 
-export const updateSelectedScanSessionAxialParam = async (paramId: number, payload: UpdatePayload) =>
-    updateSelectedScanSessionEntity<ApiScanSessionAxialParam>(`/api/scan-sessions/axial/${paramId}`, payload);
+export const updateSelectedScanSessionAxialParam = async (paramId: number, payload: UpdatePayload) => {
+    const updatedParam = await updateSelectedScanSessionEntity<ApiScanSessionAxialParam>(
+        `/api/scan-sessions/axial/${paramId}`,
+        payload,
+    );
+    updateSelectedScanSessionCache((scanSession) => ({
+        ...scanSession,
+        series: scanSession.series.map((series) => (
+            series.axial_param?.id === updatedParam.id
+                ? { ...series, axial_param: updatedParam }
+                : series
+        )),
+    }));
+    return updatedParam;
+};
 
-export const updateSelectedScanSessionReconSeries = async (reconId: number, payload: UpdatePayload) =>
-    updateSelectedScanSessionEntity<ApiScanSessionReconSeries>(`/api/scan-sessions/recon-series/${reconId}`, payload);
+export const updateSelectedScanSessionReconSeries = async (reconId: number, payload: UpdatePayload) => {
+    const updatedRecon = await updateSelectedScanSessionEntity<ApiScanSessionReconSeries>(
+        `/api/scan-sessions/recon-series/${reconId}`,
+        payload,
+    );
+    updateSelectedScanSessionCache((scanSession) => ({
+        ...scanSession,
+        series: scanSession.series.map((series) => ({
+            ...series,
+            recon_series: series.recon_series.map((recon) => (
+                recon.id === updatedRecon.id ? updatedRecon : recon
+            )),
+        })),
+    }));
+    return updatedRecon;
+};
 
 export const startScanSession = async (scanSessionId: number) => {
     const response = await fetch(buildApiUrl(`/api/scan-sessions/${scanSessionId}/start`), {

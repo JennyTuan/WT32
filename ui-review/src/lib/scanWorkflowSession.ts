@@ -11,6 +11,7 @@ export type WorkflowSequence = {
 export type WorkflowPlan = {
     id: string;
     protocolId?: number;
+    sourceExamId?: number;
     title: string;
     sourceSessionId?: number;
     sequences: WorkflowSequence[];

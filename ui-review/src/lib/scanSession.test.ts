@@ -7,6 +7,7 @@ import {
     fetchSelectedScanSession,
     saveSelectedScanSessionId,
     startScanSession,
+    updateSelectedScanSessionHelicalParam,
     updateScanSessionSeriesExecution,
     type ApiScanSessionDetail,
     type ApiScanSessionSeries,
@@ -39,6 +40,16 @@ const createScanSession = (id: number): ApiScanSessionDetail => ({
             range_confirmed: false,
             image_source_id: null,
             image_source_version: null,
+            helical_param: {
+                id: id * 100,
+                kv: 120,
+                ma: 180,
+                slice_thickness: 1,
+                pitch: 0.8,
+                rotation_time: 0.75,
+                scan_length: 220,
+                fov: 260,
+            },
             recon_series: [],
         },
     ],
@@ -289,5 +300,27 @@ describe("scan-series execution helper", () => {
 
         await expect(fetchSelectedScanSession()).resolves.toEqual(selectedSession);
         expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("scan-session child updates", () => {
+    it("updates the selected cache when a helical parameter is saved", async () => {
+        const selectedSession = createScanSession(7);
+        const originalParam = selectedSession.series[0]!.helical_param!;
+        const updatedParam = { ...originalParam, ma: 235 };
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(jsonResponse(selectedSession))
+            .mockResolvedValueOnce(jsonResponse(updatedParam));
+        vi.stubGlobal("fetch", fetchMock);
+        saveSelectedScanSessionId(selectedSession.id);
+
+        await fetchScanSessionById(selectedSession.id);
+        await expect(updateSelectedScanSessionHelicalParam(originalParam.id, { ma: 235 }))
+            .resolves.toEqual(updatedParam);
+
+        await expect(fetchSelectedScanSession()).resolves.toEqual({
+            ...selectedSession,
+            series: [{ ...selectedSession.series[0]!, helical_param: updatedParam }],
+        });
     });
 });

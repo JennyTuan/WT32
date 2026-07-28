@@ -221,6 +221,40 @@ def _get_patient_or_404(patient_id: int, db: Session) -> models.Patient:
     return patient
 
 
+def _get_exam_for_patient_or_422(exam_id: int | None, patient_id: int, db: Session) -> models.ScanExam | None:
+    if exam_id is None:
+        return None
+    exam = db.query(models.ScanExam).filter(models.ScanExam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan exam not found")
+    if exam.patient_id != patient_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Scan exam must belong to the selected patient",
+        )
+    return exam
+
+
+def _sync_exam_status(db: Session, exam_id: int | None) -> None:
+    if exam_id is None:
+        return
+    exam = db.query(models.ScanExam).filter(models.ScanExam.id == exam_id).first()
+    if not exam:
+        return
+    statuses = [
+        value[0]
+        for value in db.query(models.ScanSession.status)
+        .filter(models.ScanSession.exam_id == exam_id)
+        .all()
+    ]
+    if statuses and all(item == "completed" for item in statuses):
+        exam.status = "completed"
+    elif statuses and all(item in TERMINAL_SESSION_STATUSES for item in statuses):
+        exam.status = "cancelled"
+    else:
+        exam.status = "in_progress"
+
+
 def _clone_session_from_protocol(
     patient: models.Patient,
     protocol: models.Protocol,
@@ -230,6 +264,7 @@ def _clone_session_from_protocol(
 ) -> models.ScanSession:
     scan_session = models.ScanSession(
         patient_id=patient.id,
+        exam_id=payload.exam_id,
         protocol_id=protocol.id,
         session_name=payload.session_name,
         status="draft",
@@ -922,6 +957,37 @@ def list_scan_sessions(db: Session = Depends(get_db)):
     return _scan_session_query(db).order_by(models.ScanSession.created_at.desc(), models.ScanSession.id.desc()).all()
 
 
+@router.post("/exams", response_model=schemas.ScanExam, status_code=status.HTTP_201_CREATED)
+def create_scan_exam(payload: schemas.ScanExamCreate, db: Session = Depends(get_db)):
+    _get_patient_or_404(payload.patient_id, db)
+    exam = models.ScanExam(patient_id=payload.patient_id)
+    db.add(exam)
+    db.commit()
+    db.refresh(exam)
+    return exam
+
+
+@router.get("/exams/{exam_id}", response_model=schemas.ScanExam)
+def get_scan_exam(exam_id: int, db: Session = Depends(get_db)):
+    exam = db.query(models.ScanExam).filter(models.ScanExam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan exam not found")
+    return exam
+
+
+@router.get("/exams/{exam_id}/sessions", response_model=list[schemas.ScanSessionDetail])
+def list_scan_exam_sessions(exam_id: int, db: Session = Depends(get_db)):
+    exam = db.query(models.ScanExam).filter(models.ScanExam.id == exam_id).first()
+    if not exam:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan exam not found")
+    return (
+        _scan_session_query(db)
+        .filter(models.ScanSession.exam_id == exam.id)
+        .order_by(models.ScanSession.created_at.asc(), models.ScanSession.id.asc())
+        .all()
+    )
+
+
 @router.get("/{scan_session_id}", response_model=schemas.ScanSessionDetail)
 def get_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     return _get_scan_session_or_404(scan_session_id, db)
@@ -930,6 +996,7 @@ def get_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
 @router.post("/", response_model=schemas.ScanSessionDetail, status_code=status.HTTP_201_CREATED)
 def create_scan_session(payload: schemas.ScanSessionCreate, db: Session = Depends(get_db)):
     patient = _get_patient_or_404(payload.patient_id, db)
+    _get_exam_for_patient_or_422(payload.exam_id, patient.id, db)
     protocol = _get_protocol_or_404(payload.protocol_id, db)
     dose_settings = db.query(models.DoseSettings).filter(models.DoseSettings.id == 1).first()
     dom_enabled_by_default = dose_settings.aec_enabled if dose_settings else True
@@ -948,10 +1015,12 @@ def create_scan_session(payload: schemas.ScanSessionCreate, db: Session = Depend
 @router.post("/ad-hoc", response_model=schemas.ScanSessionDetail, status_code=status.HTTP_201_CREATED)
 def create_ad_hoc_scan_session(payload: schemas.ScanSessionAdHocCreate, db: Session = Depends(get_db)):
     patient = _get_patient_or_404(payload.patient_id, db)
+    _get_exam_for_patient_or_422(payload.exam_id, patient.id, db)
     protocol = _get_protocol_or_404(payload.source_protocol_id, db)
 
     scan_session = models.ScanSession(
         patient_id=patient.id,
+        exam_id=payload.exam_id,
         protocol_id=protocol.id,
         session_name=payload.session_name,
         status="draft",
@@ -987,6 +1056,8 @@ def update_scan_session(scan_session_id: int, payload: schemas.ScanSessionUpdate
             status_code=status.HTTP_409_CONFLICT,
             detail="Scan session status must be changed through its lifecycle endpoint",
         )
+    if "exam_id" in updates:
+        _get_exam_for_patient_or_422(updates["exam_id"], scan_session.patient_id, db)
     _apply_updates(scan_session, updates)
     db.commit()
     db.refresh(scan_session)
@@ -1006,6 +1077,7 @@ def start_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     scan_session.status = "in_progress"
     if scan_session.started_at is None:
         scan_session.started_at = datetime.now(timezone.utc)
+    _sync_exam_status(db, scan_session.exam_id)
     if should_emit_start_log:
         logs_module.write_system_log(
             db,
@@ -1046,6 +1118,7 @@ def complete_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
     _assert_all_series_image_ready(scan_session)
     scan_session.status = "completed"
     scan_session.completed_at = datetime.now(timezone.utc)
+    _sync_exam_status(db, scan_session.exam_id)
 
     dose_rows = logs_module.write_dose_logs_for_session(
         db, scan_session, scanned_at=scan_session.completed_at
@@ -1078,6 +1151,7 @@ def cancel_scan_session(scan_session_id: int, db: Session = Depends(get_db)):
         )
     _assert_no_running_series(scan_session, "cancelled")
     scan_session.status = "cancelled"
+    _sync_exam_status(db, scan_session.exam_id)
     logs_module.write_system_log(
         db,
         level="WARNING",
@@ -1213,7 +1287,8 @@ def update_scan_session_series_planning(
     planning.range_max_position_mm = payload.range_max_position_mm
     planning.scan_direction = payload.scan_direction
 
-    scan_length = payload.range_max_position_mm - payload.range_min_position_mm
+    # 规划范围由浏览器的连续坐标换算而来；规范化后避免二进制浮点尾差进入会话参数。
+    scan_length = round(payload.range_max_position_mm - payload.range_min_position_mm, 2)
     parameter = series.topogram_param or series.helical_param or series.axial_param
     if parameter:
         parameter.scan_length = scan_length
@@ -1554,6 +1629,56 @@ def update_scan_session_recon_series(recon_id: int, payload: schemas.ScanSession
     db.commit()
     db.refresh(entity)
     return entity
+
+
+@router.post(
+    "/series/{session_series_id}/derived-reconstructions",
+    response_model=schemas.ScanSessionDetail,
+    status_code=status.HTTP_201_CREATED,
+)
+def persist_derived_reconstruction(
+    session_series_id: int,
+    payload: schemas.ScanSessionDerivedReconSeriesCreate,
+    db: Session = Depends(get_db),
+):
+    """Store a completed prototype reconstruction job as immutable session output."""
+    scan_session_id, locked_series_id = _get_series_ref_or_404(session_series_id, db)
+    scan_session = _lock_scan_session_and_series(scan_session_id, db)
+    series = next((item for item in scan_session.series if item.id == locked_series_id), None)
+    if not series:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan session series not found")
+    if scan_session.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Derived reconstruction can only be recorded for a completed scan session",
+        )
+    if series.execution_status != "image_ready":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Derived reconstruction requires an image-ready source series",
+        )
+
+    existing = (
+        db.query(models.ScanSessionReconSeries)
+        .filter(models.ScanSessionReconSeries.reconstruction_job_id == payload.reconstruction_job_id)
+        .first()
+    )
+    if existing:
+        if existing.scan_session_series_id != series.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Reconstruction job is already recorded for another source series",
+            )
+        return _get_scan_session_or_404(scan_session.id, db)
+
+    recon = models.ScanSessionReconSeries(
+        scan_session_series_id=series.id,
+        source_kind="derived",
+        **payload.model_dump(),
+    )
+    db.add(recon)
+    db.commit()
+    return _get_scan_session_or_404(scan_session.id, db)
 
 
 @router.put("/fourd-configs/{config_id}", response_model=schemas.ScanSessionFourDConfig)

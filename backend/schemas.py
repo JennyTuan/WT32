@@ -504,6 +504,7 @@ class ScanSessionBase(BaseModel):
     patient_id: int
     protocol_id: int
     session_name: Optional[str] = None
+    exam_id: Optional[int] = None
 
 
 class ScanSessionCreate(ScanSessionBase):
@@ -514,6 +515,7 @@ class ScanSessionAdHocCreate(BaseModel):
     patient_id: int
     source_protocol_id: int
     session_name: Optional[str] = None
+    exam_id: Optional[int] = None
     name: str
     body_part: str
     age_group: Literal["adult", "child", "infant"]
@@ -533,6 +535,18 @@ class ScanSessionUpdate(BaseModel):
     description: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    exam_id: Optional[int] = None
+
+
+class ScanExamCreate(BaseModel):
+    patient_id: int
+
+
+class ScanExam(ORMModel):
+    id: int
+    patient_id: int
+    status: Literal["in_progress", "completed", "cancelled"]
+    created_at: datetime
 
 
 class ScanSessionContrastConfigBase(BaseModel):
@@ -764,6 +778,26 @@ class ScanSessionReconSeriesUpdate(BaseModel):
     metal_artifact_suppression: Optional[bool] = None
 
 
+class ScanSessionDerivedReconSeriesCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reconstruction_job_id: str = Field(min_length=1, max_length=120)
+    output_series_id: str = Field(min_length=1, max_length=160)
+    recon_name: str = Field(min_length=1, max_length=100)
+    recon_type: Literal["soft", "bone", "lung", "vascular"] = "soft"
+    kernel: str = Field(min_length=1, max_length=50)
+    matrix: Literal[512, 1024]
+    window_width: int
+    window_level: int
+    slice_thickness: float = Field(gt=0)
+    increment: float = Field(gt=0)
+    recon_fov: float = Field(ge=FOV_MIN_MM, le=FOV_MAX_MM)
+    center_x: float = 0
+    center_y: float = 0
+    metal_artifact_suppression: bool = False
+    image_urls: List[str] = Field(min_length=1)
+
+
 class ScanSessionReconSeries(ORMModel):
     id: int
     scan_session_series_id: int
@@ -780,6 +814,10 @@ class ScanSessionReconSeries(ORMModel):
     center_x: Optional[float] = None
     center_y: Optional[float] = None
     metal_artifact_suppression: bool = False
+    source_kind: Literal["configured", "derived"] = "configured"
+    reconstruction_job_id: Optional[str] = None
+    output_series_id: Optional[str] = None
+    image_urls: Optional[List[str]] = None
 
 
 class ScanSessionBreathingTrainingParamUpdate(BaseModel):
@@ -873,6 +911,7 @@ class ScanSessionSeries(ORMModel):
 class ScanSessionDetail(ORMModel):
     id: int
     patient_id: int
+    exam_id: Optional[int] = None
     protocol_id: int
     status: Literal["draft", "in_progress", "completed", "cancelled"]
     session_name: Optional[str] = None
@@ -895,6 +934,7 @@ class ScanSessionDetail(ORMModel):
 class ScanSessionSummary(ORMModel):
     id: int
     patient_id: int
+    exam_id: Optional[int] = None
     protocol_id: int
     status: Literal["draft", "in_progress", "completed", "cancelled"]
     session_name: Optional[str] = None
