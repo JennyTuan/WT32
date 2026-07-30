@@ -4,11 +4,9 @@ import {
   Building2,
   CheckCircle2,
   FileText,
-  Phone,
   RefreshCw,
   RotateCcw,
   Save,
-  Stethoscope,
   type LucideIcon,
 } from "lucide-react";
 
@@ -19,8 +17,6 @@ import {
   getOrganizationInfo,
   resetOrganizationInfo,
   updateOrganizationInfo,
-  type ContactInfo,
-  type DepartmentInfo,
   type InstitutionInfo,
   type OrganizationInfoSnapshot,
   type ReportDisplay,
@@ -34,7 +30,6 @@ const INSTITUTION_TYPE_LABEL_KEYS: Record<InstitutionInfo["type"], TranslationKe
   other: "service.organization.type.other",
 };
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const URL_RE = /^(https?:\/\/)?[^\s]+\.[^\s]+$/;
 
 export default function OrganizationInfoPage() {
@@ -80,7 +75,6 @@ export default function OrganizationInfoPage() {
     const issues: string[] = [];
     if (!settings.institution.name.trim()) issues.push(t("service.organization.validation.nameRequired"));
     if (settings.institution.website && !URL_RE.test(settings.institution.website)) issues.push(t("service.organization.validation.website"));
-    if (settings.contact.email && !EMAIL_RE.test(settings.contact.email)) issues.push(t("service.organization.validation.email"));
     return issues;
   }, [settings, t]);
 
@@ -91,12 +85,6 @@ export default function OrganizationInfoPage() {
 
   const updateInstitution = <K extends keyof InstitutionInfo>(key: K, value: InstitutionInfo[K]) => {
     mutate((current) => ({ ...current, institution: { ...current.institution, [key]: value } }));
-  };
-  const updateContact = <K extends keyof ContactInfo>(key: K, value: ContactInfo[K]) => {
-    mutate((current) => ({ ...current, contact: { ...current.contact, [key]: value } }));
-  };
-  const updateDepartment = <K extends keyof DepartmentInfo>(key: K, value: DepartmentInfo[K]) => {
-    mutate((current) => ({ ...current, department: { ...current.department, [key]: value } }));
   };
   const updateReport = <K extends keyof ReportDisplay>(key: K, value: ReportDisplay[K]) => {
     mutate((current) => ({ ...current, report: { ...current.report, [key]: value } }));
@@ -203,31 +191,6 @@ export default function OrganizationInfoPage() {
                 </div>
                 <TextField label={t("service.organization.logoPath")} value={settings.institution.logo_url} onChange={(v) => updateInstitution("logo_url", v)} maxLength={512} mono />
                 <TextField label={t("service.organization.stampPath")} value={settings.institution.stamp_url} onChange={(v) => updateInstitution("stamp_url", v)} maxLength={512} mono />
-              </div>
-            </Panel>
-
-            <Panel title={t("service.organization.contact")} icon={Phone}>
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="col-span-2">
-                  <TextField label={t("service.organization.address")} value={settings.contact.address} onChange={(v) => updateContact("address", v)} maxLength={255} />
-                </div>
-                <TextField label={t("service.organization.city")} value={settings.contact.city} onChange={(v) => updateContact("city", v)} maxLength={80} />
-                <TextField label={t("service.organization.postalCode")} value={settings.contact.postal_code} onChange={(v) => updateContact("postal_code", v)} maxLength={20} mono />
-                <TextField label={t("service.organization.phone")} value={settings.contact.phone} onChange={(v) => updateContact("phone", v)} maxLength={40} mono />
-                <TextField label={t("service.organization.fax")} value={settings.contact.fax} onChange={(v) => updateContact("fax", v)} maxLength={40} mono />
-                <TextField label={t("service.organization.email")} value={settings.contact.email} onChange={(v) => updateContact("email", v)} maxLength={120} mono />
-                <TextField label={t("service.organization.emergencyPhone")} value={settings.contact.emergency_phone} onChange={(v) => updateContact("emergency_phone", v)} maxLength={40} mono />
-              </div>
-            </Panel>
-
-            <Panel title={t("service.organization.department")} icon={Stethoscope}>
-              <div className="grid grid-cols-2 gap-2.5">
-                <TextField label={t("service.organization.departmentName")} value={settings.department.name} onChange={(v) => updateDepartment("name", v)} maxLength={80} />
-                <TextField label={t("service.organization.departmentCode")} value={settings.department.code} onChange={(v) => updateDepartment("code", v)} maxLength={20} mono />
-                <TextField label={t("service.organization.departmentHead")} value={settings.department.head} onChange={(v) => updateDepartment("head", v)} maxLength={40} />
-                <TextField label={t("service.organization.departmentHeadTitle")} value={settings.department.head_title} onChange={(v) => updateDepartment("head_title", v)} maxLength={40} />
-                <TextField label={t("service.organization.departmentPhone")} value={settings.department.phone} onChange={(v) => updateDepartment("phone", v)} maxLength={40} mono />
-                <TextField label={t("service.organization.departmentRoom")} value={settings.department.room} onChange={(v) => updateDepartment("room", v)} maxLength={40} />
               </div>
             </Panel>
 
