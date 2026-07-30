@@ -195,17 +195,17 @@ export default function OrganizationInfoPage() {
             </Panel>
 
             <Panel title={t("service.organization.report")} icon={FileText}>
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="col-span-2">
-                  <TextField label={t("service.organization.reportHeader")} value={settings.report.header_text} onChange={(v) => updateReport("header_text", v)} maxLength={160} />
+              <div className="grid gap-2.5">
+                <TextField label={t("service.organization.reportHeader")} value={settings.report.header_text} onChange={(v) => updateReport("header_text", v)} maxLength={160} />
+                <TextField label={t("service.organization.reportFooter")} value={settings.report.footer_text} onChange={(v) => updateReport("footer_text", v)} maxLength={160} />
+                <div className="mt-0.5 border-t border-[#E8EEF6] pt-2.5">
+                  <TextField label={t("service.organization.reportConfidential")} value={settings.report.confidential_label} onChange={(v) => updateReport("confidential_label", v)} maxLength={40} />
+                  <div className="mt-2.5 overflow-hidden rounded-md border border-[#DCE6F2] bg-[#F8FAFC]">
+                    <DisplayOption label={t("service.organization.showLogo")} checked={settings.report.show_logo} onChange={(v) => updateReport("show_logo", v)} />
+                    <DisplayOption label={t("service.organization.showStamp")} checked={settings.report.show_stamp} onChange={(v) => updateReport("show_stamp", v)} />
+                    <DisplayOption label={t("service.organization.showQrCode")} checked={settings.report.show_qr_code} onChange={(v) => updateReport("show_qr_code", v)} />
+                  </div>
                 </div>
-                <div className="col-span-2">
-                  <TextField label={t("service.organization.reportFooter")} value={settings.report.footer_text} onChange={(v) => updateReport("footer_text", v)} maxLength={160} />
-                </div>
-                <TextField label={t("service.organization.reportConfidential")} value={settings.report.confidential_label} onChange={(v) => updateReport("confidential_label", v)} maxLength={40} />
-                <SwitchRow label={t("service.organization.showLogo")} checked={settings.report.show_logo} onChange={(v) => updateReport("show_logo", v)} />
-                <SwitchRow label={t("service.organization.showStamp")} checked={settings.report.show_stamp} onChange={(v) => updateReport("show_stamp", v)} />
-                <SwitchRow label={t("service.organization.showQrCode")} checked={settings.report.show_qr_code} onChange={(v) => updateReport("show_qr_code", v)} />
               </div>
             </Panel>
           </div>
@@ -315,10 +315,10 @@ function SelectField({
   );
 }
 
-function SwitchRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+function DisplayOption({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
-    <div className="flex h-8 min-w-0 items-center justify-between gap-3 rounded-md bg-[#F8FAFC] px-2">
-      <span className="truncate text-[12px] font-bold text-[#334155]">{label}</span>
+    <div className="flex h-9 min-w-0 items-center justify-between gap-3 border-b border-[#E3EAF3] px-2.5 last:border-b-0">
+      <span className="truncate text-[12px] font-bold text-[#40566D]">{label}</span>
       <Switch checked={checked} onChange={onChange} />
     </div>
   );
