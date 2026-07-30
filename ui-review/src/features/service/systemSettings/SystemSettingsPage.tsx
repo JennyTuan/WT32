@@ -5,6 +5,7 @@ import {
   Clock,
   Cpu,
   Globe2,
+  HardDrive,
   Info,
   Network,
   RefreshCw,
@@ -27,6 +28,11 @@ import {
   type SystemSettingsSnapshot,
   type TimeSettings,
 } from "../../../lib/systemSettingsApi";
+import {
+  getDiskRetentionConfig,
+  updateDiskRetentionConfig,
+  type DiskRetentionConfig,
+} from "../../../lib/diskRetentionApi";
 import { useI18n } from "../../../lib/i18nContext";
 import type { TranslationKey } from "../../../lib/i18n";
 
@@ -77,12 +83,20 @@ const LICENSE_LABELS: Record<LicenseStatus, { labelKey: TranslationKey; tone: "o
   expired: { labelKey: "systemSettings.license.expired", tone: "err" },
 };
 
+const DEFAULT_DISK_RETENTION_CONFIG: DiskRetentionConfig = {
+  retention_days: 7,
+  retention_time: "00:00",
+  auto_cleanup: false,
+};
+
 const isIpLike = (value: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(value.trim());
 const isHostnameLike = (value: string) => /^[a-zA-Z0-9-]{1,63}$/.test(value.trim());
 
 export default function SystemSettingsPage() {
   const { setLanguage, t } = useI18n();
   const [settings, setSettings] = useState<SystemSettingsSnapshot | null>(null);
+  const [diskRetentionConfig, setDiskRetentionConfig] = useState<DiskRetentionConfig | null>(null);
+  const [savedDiskRetentionConfig, setSavedDiskRetentionConfig] = useState<DiskRetentionConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -108,8 +122,10 @@ export default function SystemSettingsPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const data = await getSystemSettings();
+      const [data, retentionConfig] = await Promise.all([getSystemSettings(), getDiskRetentionConfig()]);
       setSettings(data);
+      setDiskRetentionConfig(retentionConfig);
+      setSavedDiskRetentionConfig(retentionConfig);
       setLanguage(data.general.language);
       setDirty(false);
     } catch (e) {
@@ -156,12 +172,27 @@ export default function SystemSettingsPage() {
   const updateNetwork = <K extends keyof NetworkSettings>(key: K, value: NetworkSettings[K]) => {
     mutate((current) => ({ ...current, network: { ...current.network, [key]: value } }));
   };
+  const updateDiskRetention = <K extends keyof DiskRetentionConfig>(key: K, value: DiskRetentionConfig[K]) => {
+    setDiskRetentionConfig((current) => (current ? { ...current, [key]: value } : current));
+  };
+  const diskRetentionDirty = Boolean(
+    diskRetentionConfig
+      && savedDiskRetentionConfig
+      && (diskRetentionConfig.retention_days !== savedDiskRetentionConfig.retention_days
+        || diskRetentionConfig.retention_time !== savedDiskRetentionConfig.retention_time
+        || diskRetentionConfig.auto_cleanup !== savedDiskRetentionConfig.auto_cleanup),
+  );
   const handleSave = async () => {
-    if (!settings || validationIssues.length > 0) return;
+    if (!settings || !diskRetentionConfig || validationIssues.length > 0) return;
     setSaving(true);
     try {
-      const updated = await updateSystemSettings(settings);
+      const [updated, updatedDiskRetentionConfig] = await Promise.all([
+        dirty ? updateSystemSettings(settings) : Promise.resolve(settings),
+        diskRetentionDirty ? updateDiskRetentionConfig(diskRetentionConfig) : Promise.resolve(diskRetentionConfig),
+      ]);
       setSettings(updated);
+      setDiskRetentionConfig(updatedDiskRetentionConfig);
+      setSavedDiskRetentionConfig(updatedDiskRetentionConfig);
       setLanguage(updated.general.language);
       setDirty(false);
       showToast("success", t("systemSettings.noticeSaved"));
@@ -176,8 +207,13 @@ export default function SystemSettingsPage() {
     if (!window.confirm(t("systemSettings.confirmReset"))) return;
     setSaving(true);
     try {
-      const next = await resetSystemSettings();
+      const [next, nextDiskRetentionConfig] = await Promise.all([
+        resetSystemSettings(),
+        updateDiskRetentionConfig(DEFAULT_DISK_RETENTION_CONFIG),
+      ]);
       setSettings(next);
+      setDiskRetentionConfig(nextDiskRetentionConfig);
+      setSavedDiskRetentionConfig(nextDiskRetentionConfig);
       setLanguage(next.general.language);
       setDirty(false);
       showToast("success", t("systemSettings.noticeReset"));
@@ -200,7 +236,7 @@ export default function SystemSettingsPage() {
     }
   };
 
-  if (loading || !settings) {
+  if (loading || !settings || !diskRetentionConfig) {
     return (
       <ServiceModeShell currentRoute="/service/settings/system-settings">
         <section className="flex h-full items-center justify-center bg-[#F8FBFF]">
@@ -233,7 +269,7 @@ export default function SystemSettingsPage() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !dirty || validationIssues.length > 0}
+              disabled={saving || (!dirty && !diskRetentionDirty) || validationIssues.length > 0}
               className="flex h-9 items-center gap-1.5 rounded-md bg-[#1D4ED8] px-4 text-[12px] font-bold text-white hover:bg-[#1E40AF] disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Save size={14} /> {saving ? t("common.saving") : t("common.save")}
@@ -277,6 +313,31 @@ export default function SystemSettingsPage() {
                 <SelectField label={t("systemSettings.weightUnit")} value={settings.general.weight_unit} onChange={(v) => updateGeneral("weight_unit", v as GeneralSettings["weight_unit"])}>
                   {WEIGHT_UNIT_OPTIONS.map((value) => <option key={value} value={value}>{t(WEIGHT_UNIT_LABEL_KEYS[value])}</option>)}
                 </SelectField>
+              </div>
+            </Panel>
+
+            <Panel title={t("systemSettings.panelStorageRetention")} icon={HardDrive}>
+              <div className="grid grid-cols-2 gap-2.5">
+                <NumberField
+                  label={t("systemSettings.storage.retentionDays")}
+                  value={diskRetentionConfig.retention_days}
+                  min={1}
+                  max={365}
+                  onChange={(value) => updateDiskRetention("retention_days", value)}
+                />
+                <label className="grid min-w-0 gap-1">
+                  <span className="text-[10px] font-bold text-[#7B92A8]">{t("systemSettings.storage.cleanupTime")}</span>
+                  <input
+                    type="time"
+                    value={diskRetentionConfig.retention_time}
+                    onChange={(event) => updateDiskRetention("retention_time", event.target.value)}
+                    className="h-8 w-full min-w-0 rounded-md border border-[#D6E2EF] bg-[#F8FAFC] px-2 text-[12px] font-bold text-[#1E293B] outline-none focus:border-[#4D94FF] focus:bg-white"
+                  />
+                </label>
+                <div className="col-span-2">
+                  <SwitchRow label={t("systemSettings.storage.autoCleanup")} checked={diskRetentionConfig.auto_cleanup} onChange={(value) => updateDiskRetention("auto_cleanup", value)} />
+                </div>
+                <p className="col-span-2 text-[11px] leading-4 text-[#7B92A8]">{t("systemSettings.storage.retentionHint")}</p>
               </div>
             </Panel>
 

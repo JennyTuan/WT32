@@ -1,18 +1,19 @@
-import { useEffect, useState, type ElementType } from "react";
+import { useState, type ElementType } from "react";
 import {
   AlertTriangle,
-  ChevronDown,
-  ChevronUp,
   Database,
   FileCode,
   HardDrive,
   Lock,
+  MoreHorizontal,
   RefreshCcw,
   Search,
   Share2,
   ShieldAlert,
+  SlidersHorizontal,
   Trash2,
   Unlock,
+  X,
 } from "lucide-react";
 
 import type { TranslationKey } from "../../../lib/i18n";
@@ -54,6 +55,16 @@ const STATUS_STYLES = {
   RELEASED: "bg-[#E7F8EC] text-[#2F855A] border border-[#BFE3CC]",
 } as const;
 
+type FileStatusFilter = "ALL" | ScanFile["status"] | "RECONSTRUCTING";
+
+const STATUS_FILTER_OPTIONS: { value: FileStatusFilter; labelKey: TranslationKey }[] = [
+  { value: "ALL", labelKey: "service.disk.allStatuses" },
+  { value: "ACQUIRED", labelKey: "service.disk.status.ACQUIRED" },
+  { value: "RESERVED", labelKey: "service.disk.status.RESERVED" },
+  { value: "RECONSTRUCTING", labelKey: "service.disk.reconstructing" },
+  { value: "RELEASED", labelKey: "service.disk.status.RELEASED" },
+];
+
 const getActionBlockedReason = (file: ScanFile, action: "reserve" | "release" | "purge", t: Translate) => {
   if (action === "reserve" && file.status === "RESERVED") return t("service.disk.block.alreadyReserved");
   if (action === "release" && file.status !== "RESERVED") return t("service.disk.block.notReserved");
@@ -81,87 +92,10 @@ const formatDateTime = (value: string, locale: string) => {
   });
 };
 
-const PartitionHeader = ({
-  partition,
-  percent,
-  isExpanded,
-  isOverThreshold,
-  onToggle,
-  onThresholdCommit,
-}: {
-  partition: DiskPartition;
-  percent: number;
-  isExpanded: boolean;
-  isOverThreshold: boolean;
-  onToggle: () => void;
-  onThresholdCommit: (value: number) => void;
-}) => {
-  const { t } = useI18n();
-  const [thresholdDraft, setThresholdDraft] = useState(String(partition.threshold));
-  const visual = PARTITION_VISUALS[partition.id];
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setThresholdDraft(String(partition.threshold));
-  }, [partition.threshold]);
-
-  return (
-    <div className="flex items-center gap-4 px-5 py-4">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm" style={{ backgroundColor: visual.color }}>
-        <visual.icon size={18} />
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-3">
-          <h3 className="text-[16px] font-black text-[#223547]">{t(PARTITION_LABEL_KEYS[partition.id])}</h3>
-          <span className="text-[12px] font-medium text-[#7B92A8]">{t("service.disk.fileCount", { count: partition.files.length })}</span>
-          {isOverThreshold ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#FFF1F2] px-2 py-0.5 text-[10px] font-bold text-[#DC2626]">
-              <AlertTriangle size={11} /> {t("service.disk.overThreshold")}
-            </span>
-          ) : null}
-        </div>
-
-        <div className="mt-2 flex items-center gap-4">
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#EEF2F7]">
-            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(percent, 100)}%`, backgroundColor: visual.color }} />
-          </div>
-          <div className="min-w-[172px] text-[12px] font-medium text-[#6B7F93]">
-            {formatMb(partition.used_mb)} / {formatMb(partition.capacity_mb)} · {percent.toFixed(1)}%
-          </div>
-        </div>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="flex items-center gap-2 text-[12px] font-bold text-[#627488]">
-          <span className="whitespace-nowrap">{t("service.disk.threshold")}</span>
-          <input
-            value={thresholdDraft}
-            onChange={(event) => setThresholdDraft(event.target.value.replace(/[^\d]/g, ""))}
-            onBlur={() => {
-              const next = Number(thresholdDraft || partition.threshold);
-              const normalized = Math.min(100, Math.max(1, next || partition.threshold));
-              setThresholdDraft(String(normalized));
-              if (normalized !== partition.threshold) onThresholdCommit(normalized);
-            }}
-            className={`h-8 w-14 rounded-xl border px-2 text-center text-[13px] font-black outline-none ${
-              isOverThreshold ? "border-[#FCA5A5] text-[#DC2626]" : "border-[#D7E3F0] text-[#223547]"
-            }`}
-          />
-          <span className="whitespace-nowrap">%</span>
-        </div>
-
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={isExpanded ? t("service.disk.collapsePartition") : t("service.disk.expandPartition")}
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-[#D7E3F0] text-[#4F6479] transition-colors hover:bg-[#F8FAFC]"
-        >
-          {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-        </button>
-      </div>
-    </div>
-  );
+const matchesStatusFilter = (file: ScanFile, statusFilter: FileStatusFilter) => {
+  if (statusFilter === "ALL") return true;
+  if (statusFilter === "RECONSTRUCTING") return file.active_recon_jobs > 0;
+  return file.status === statusFilter;
 };
 
 const PartitionSummaryCard = ({
@@ -185,10 +119,10 @@ const PartitionSummaryCard = ({
       type="button"
       onClick={onSelect}
       aria-pressed={isActive}
-      className={`min-w-0 rounded-xl p-3 text-left transition-all ${
+      className={`min-w-0 rounded-lg p-3 text-left transition-all ${
         isActive
-          ? "bg-[#EAF3FF] ring-1 ring-[#A9D0FF] shadow-sm"
-          : "bg-[#F6F8FC] hover:bg-[#EEF5FF]"
+          ? "bg-white ring-1 ring-[#8EC5FF] shadow-sm"
+          : "bg-transparent hover:bg-white/70"
       }`}
     >
       <div className="flex items-center gap-2.5">
@@ -201,7 +135,7 @@ const PartitionSummaryCard = ({
         </div>
         {isOverThreshold ? <AlertTriangle size={15} className="shrink-0 text-[#DC2626]" /> : null}
       </div>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white">
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#EAF0F6]">
         <div className="h-full rounded-full" style={{ width: `${Math.min(percent, 100)}%`, backgroundColor: visual.color }} />
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 text-[10px] font-medium text-[#627488]">
@@ -233,21 +167,21 @@ const FileTable = ({
   const allVisibleSelected = files.length > 0 && files.every((file) => selectedFileIds.has(file.id));
 
   return (
-    <div className="overflow-hidden rounded-lg bg-white">
+    <div className="overflow-hidden bg-white">
       <div className="overflow-x-auto overflow-y-visible">
         <table className="w-full table-fixed">
-          <thead className="bg-[#F3F6FA] text-[11px] font-black text-[#7B92A8]">
+          <thead className="sticky top-0 z-10 bg-[#F3F6FA] text-[11px] font-black text-[#7B92A8] shadow-[0_1px_0_#E2E8F0]">
             <tr>
               <th className="w-[5%] px-2 py-3 text-center"><input type="checkbox" checked={allVisibleSelected} onChange={onToggleAll} /></th>
               <th className="w-[12%] px-2 py-3 text-left">{t("service.disk.patientId")}</th>
-              <th className="w-[27%] px-2 py-3 text-left">{t("service.disk.protocolName")}</th>
-              <th className="w-[16%] px-2 py-3 text-left">{t("service.disk.series")}</th>
-              <th className="w-[15%] px-2 py-3 text-left">
+              <th className="w-[25%] px-2 py-3 text-left">{t("service.disk.protocolName")}</th>
+              <th className="w-[14%] px-2 py-3 text-left">{t("service.disk.series")}</th>
+              <th className="w-[14%] px-2 py-3 text-left">
                 <span className="block">{t("service.disk.acquiredAt")}</span>
                 <span className="font-medium">{t("service.disk.size")}</span>
               </th>
-              <th className="w-[13%] px-2 py-3 text-left">{t("service.disk.status")}</th>
-              <th className="w-[12%] px-2 py-3 text-right">{t("service.disk.actions")}</th>
+              <th className="w-[12%] px-2 py-3 text-left">{t("service.disk.status")}</th>
+              <th className="w-[18%] px-2 py-3 text-right">{t("service.disk.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -255,13 +189,27 @@ const FileTable = ({
               const reserveBlocked = getActionBlockedReason(file, "reserve", t);
               const releaseBlocked = getActionBlockedReason(file, "release", t);
               const purgeBlocked = getActionBlockedReason(file, "purge", t);
+              const primaryAction = file.status === "RESERVED"
+                ? {
+                    label: t("service.disk.release"),
+                    blocked: releaseBlocked,
+                    icon: Unlock,
+                    onClick: () => onReleaseFile(file.id),
+                  }
+                : {
+                    label: t("service.disk.reserve"),
+                    blocked: reserveBlocked,
+                    icon: Lock,
+                    onClick: () => onReserveFile(file.id),
+                  };
+              const PrimaryIcon = primaryAction.icon;
 
               return (
                 <tr key={file.id} className={index % 2 === 0 ? "bg-white hover:bg-[#F8FBFF]" : "bg-[#FBFCFE] hover:bg-[#F8FBFF]"}>
                   <td className="px-2 py-3 text-center"><input type="checkbox" checked={selectedFileIds.has(file.id)} onChange={() => onToggleFile(file.id)} /></td>
-                  <td className="whitespace-nowrap px-2 py-3 font-bold text-[#31485E]">{file.patient_id}</td>
-                  <td className="truncate px-2 py-3 text-[#31485E]" title={file.protocol_name}>{file.protocol_name}</td>
-                  <td className="truncate px-2 py-3 text-[#31485E]" title={file.series_name}>{file.series_name}</td>
+                  <td className="whitespace-nowrap px-2 py-3 text-[12px] font-medium text-[#52677C]">{file.patient_id}</td>
+                  <td className="truncate px-2 py-3 text-[12px] font-medium text-[#52677C]" title={file.protocol_name}>{file.protocol_name}</td>
+                  <td className="truncate px-2 py-3 text-[12px] font-medium text-[#52677C]" title={file.series_name}>{file.series_name}</td>
                   <td className="px-2 py-2 text-[11px] leading-4 text-[#31485E]">
                     <div className="whitespace-nowrap">{formatDateTime(file.acquired_at, locale)}</div>
                     <div className="whitespace-nowrap text-[#7B92A8]">{formatMb(file.file_size_mb)}</div>
@@ -279,10 +227,14 @@ const FileTable = ({
                     )}
                   </td>
                   <td className="px-2 py-3">
-                    <div className="flex items-center justify-end gap-1">
-                      <button type="button" aria-label={t("service.disk.reserve")} disabled={Boolean(reserveBlocked)} title={reserveBlocked ?? t("service.disk.reserve")} onClick={() => onReserveFile(file.id)} className="flex h-6 w-6 items-center justify-center rounded-md border border-[#D7E3F0] text-[#2F67D8] hover:bg-[#F5F9FF] disabled:cursor-not-allowed disabled:text-[#A0AEC0]"><Lock size={12} /></button>
-                      <button type="button" aria-label={t("service.disk.release")} disabled={Boolean(releaseBlocked)} title={releaseBlocked ?? t("service.disk.release")} onClick={() => onReleaseFile(file.id)} className="flex h-6 w-6 items-center justify-center rounded-md border border-[#D7E3F0] text-[#4F6479] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:text-[#A0AEC0]"><Unlock size={12} /></button>
-                      <button type="button" aria-label={t("service.disk.delete")} disabled={Boolean(purgeBlocked)} title={purgeBlocked ?? t("service.disk.delete")} onClick={() => onPurgeFile(file.id)} className="flex h-6 w-6 items-center justify-center rounded-md bg-[#FEE2E2] text-[#DC2626] hover:bg-[#FECACA] disabled:cursor-not-allowed disabled:bg-[#F8D7DA] disabled:text-[#D4A1A8]"><Trash2 size={12} /></button>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button type="button" aria-label={primaryAction.label} disabled={Boolean(primaryAction.blocked)} title={primaryAction.blocked ?? primaryAction.label} onClick={primaryAction.onClick} className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-[#C7DCF5] bg-[#F5F9FF] px-2 text-[11px] font-bold text-[#2F67D8] hover:bg-[#EAF3FF] disabled:cursor-not-allowed disabled:border-[#E2E8F0] disabled:bg-[#F8FAFC] disabled:text-[#A0AEC0]"><PrimaryIcon size={12} />{primaryAction.label}</button>
+                      <details className="relative">
+                        <summary aria-label={t("service.disk.actions")} className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-[#D7E3F0] text-[#60758A] hover:bg-[#F8FAFC] [&::-webkit-details-marker]:hidden"><MoreHorizontal size={15} /></summary>
+                        <div className="absolute right-0 z-20 mt-1 w-24 rounded-lg border border-[#DCE7F3] bg-white p-1 shadow-lg">
+                          <button type="button" disabled={Boolean(purgeBlocked)} title={purgeBlocked ?? t("service.disk.delete")} onClick={() => onPurgeFile(file.id)} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[11px] font-bold text-[#DC2626] hover:bg-[#FFF1F2] disabled:cursor-not-allowed disabled:text-[#D4A1A8]"><Trash2 size={12} />{t("service.disk.delete")}</button>
+                        </div>
+                      </details>
                     </div>
                   </td>
                 </tr>
@@ -295,78 +247,140 @@ const FileTable = ({
   );
 };
 
-export default function DiskManagementPage() {
+const ThresholdSettingsDialog = ({
+  partitions,
+  onClose,
+  onSave,
+}: {
+  partitions: DiskPartition[];
+  onClose: () => void;
+  onSave: (thresholds: Record<DiskPartitionId, number>) => void;
+}) => {
   const { t } = useI18n();
-  const diskManager = useDiskManager();
-  const activePartition = diskManager.partitions.find((partition) => partition.id === diskManager.expandedPartition) ?? null;
+  const [thresholds, setThresholds] = useState<Record<DiskPartitionId, number>>(() =>
+    Object.fromEntries(partitions.map((partition) => [partition.id, partition.threshold])) as Record<DiskPartitionId, number>,
+  );
 
   return (
-    <ServiceModeShell currentRoute="/service/disk">
-      <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-white px-5 py-4 custom-scrollbar">
-        <div className="shrink-0 rounded-lg bg-[#F6F8FC] p-3">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="relative">
-              <input
-                value={diskManager.searchQuery}
-                onChange={(event) => diskManager.setSearchQuery(event.target.value)}
-                placeholder={t("service.disk.searchPlaceholder")}
-                className="h-10 w-[248px] rounded-xl border border-[#D7E3F0] bg-[#F8FAFC] pl-10 pr-4 text-[13px] font-medium text-[#31485E] outline-none focus:border-[#93C5FD]"
-              />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8]" size={16} />
-            </div>
+    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-[#1E293B]/25 backdrop-blur-[1px]" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-labelledby="storage-warning-title" className="w-[430px] overflow-hidden rounded-2xl border border-[#DCE7F3] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-[#E8EEF5] px-5 py-4">
+          <div>
+            <h2 id="storage-warning-title" className="text-[16px] font-black text-[#223547]">{t("service.disk.warningSettings")}</h2>
+            <p className="mt-1 text-[12px] font-medium text-[#7B92A8]">{t("service.disk.warningSettingsDescription")}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label={t("service.logs.close")} className="flex h-8 w-8 items-center justify-center rounded-lg text-[#7B92A8] hover:bg-[#F5F8FC]">
+            <X size={18} />
+          </button>
+        </div>
 
-            <div className="flex shrink-0 flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 text-[12px] font-bold text-[#4F6479]">
-                <span className="whitespace-nowrap">{t("service.disk.reservePolicy")}</span>
+        <div className="space-y-2 px-5 py-4">
+          {partitions.map((partition) => {
+            const visual = PARTITION_VISUALS[partition.id];
+            const Icon = visual.icon;
+            return (
+              <label key={partition.id} className="flex items-center gap-3 rounded-xl bg-[#F7F9FC] px-3 py-2.5">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white" style={{ backgroundColor: visual.color }}><Icon size={15} /></span>
+                <span className="min-w-0 flex-1 text-[13px] font-bold text-[#31485E]">{t(PARTITION_LABEL_KEYS[partition.id])}</span>
+                <span className="text-[12px] font-bold text-[#627488]">{t("service.disk.threshold")}</span>
                 <input
                   type="number"
                   min={1}
-                  max={365}
-                  value={diskManager.config.retention_days}
-                  onChange={(event) => diskManager.updateConfig({ retention_days: Number(event.target.value || 1) })}
-                  className="h-9 w-16 rounded-xl border border-[#D7E3F0] px-2 text-center text-[13px] font-black text-[#223547] outline-none"
+                  max={100}
+                  value={thresholds[partition.id]}
+                  onChange={(event) => setThresholds((current) => ({ ...current, [partition.id]: Math.min(100, Math.max(1, Number(event.target.value || 1))) }))}
+                  className="h-8 w-14 rounded-lg border border-[#D7E3F0] bg-white px-2 text-center text-[13px] font-black text-[#223547] outline-none focus:border-[#93C5FD]"
                 />
-                <span className="whitespace-nowrap">{t("service.disk.days")}</span>
-                <input
-                  type="time"
-                  value={diskManager.config.retention_time}
-                  onChange={(event) => diskManager.updateConfig({ retention_time: event.target.value })}
-                  className="h-9 rounded-xl border border-[#D7E3F0] px-3 text-[12px] font-bold text-[#223547] outline-none"
-                />
-              </div>
+                <span className="text-[12px] font-bold text-[#627488]">%</span>
+              </label>
+            );
+          })}
+        </div>
 
+        <div className="flex justify-end gap-2 border-t border-[#E8EEF5] px-5 py-3">
+          <button type="button" onClick={onClose} className="h-9 rounded-lg border border-[#D7E3F0] bg-white px-4 text-[13px] font-bold text-[#4F6479] hover:bg-[#F8FAFC]">{t("common.cancel")}</button>
+          <button type="button" onClick={() => onSave(thresholds)} className="h-9 rounded-lg bg-[#2F67D8] px-4 text-[13px] font-bold text-white hover:bg-[#2558C0]">{t("common.save")}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default function DiskManagementPage() {
+  const { t } = useI18n();
+  const diskManager = useDiskManager();
+  const [isThresholdSettingsOpen, setIsThresholdSettingsOpen] = useState(false);
+  const [searchDraft, setSearchDraft] = useState("");
+  const [statusFilter, setStatusFilter] = useState<FileStatusFilter>("ALL");
+  const activePartition = diskManager.partitions.find((partition) => partition.id === diskManager.expandedPartition) ?? null;
+
+  const saveThresholds = (thresholds: Record<DiskPartitionId, number>) => {
+    diskManager.partitions.forEach((partition) => {
+      if (thresholds[partition.id] !== partition.threshold) diskManager.updateThreshold(partition.id, thresholds[partition.id]);
+    });
+    setIsThresholdSettingsOpen(false);
+  };
+
+  return (
+    <ServiceModeShell
+      currentRoute="/service/disk"
+      overlays={isThresholdSettingsOpen ? <ThresholdSettingsDialog partitions={diskManager.partitions} onClose={() => setIsThresholdSettingsOpen(false)} onSave={saveThresholds} /> : null}
+    >
+      <section className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto bg-white px-5 py-4 custom-scrollbar">
+        <div className="flex shrink-0 flex-col gap-3 border-b border-[#E8EEF5] pb-3">
+          <form
+            className="flex items-center gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              diskManager.setSearchQuery(searchDraft);
+            }}
+          >
+            <div className="relative min-w-0 flex-1">
+              <input
+                value={searchDraft}
+                onChange={(event) => setSearchDraft(event.target.value)}
+                placeholder={t("service.disk.searchPlaceholder")}
+                className="h-10 w-full rounded-lg border border-transparent bg-[#F6F8FB] pl-10 pr-4 text-[13px] font-medium text-[#31485E] outline-none focus:border-[#93C5FD] focus:bg-white"
+              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8]" size={16} />
+            </div>
+            <button type="submit" className="h-10 w-[112px] shrink-0 rounded-lg bg-[#2F67D8] text-[13px] font-bold text-white transition-colors hover:bg-[#2558C0]">
+              {t("service.disk.search")}
+            </button>
+          </form>
+
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={() => diskManager.updateConfig({ auto_cleanup: !diskManager.config.auto_cleanup })}
-                className={`whitespace-nowrap rounded-full px-4 py-2 text-[12px] font-black transition-all ${
-                  diskManager.config.auto_cleanup ? "bg-[#2F67D8] text-white" : "border border-[#D7E3F0] bg-white text-[#4F6479]"
-                }`}
+                onClick={() => setIsThresholdSettingsOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={isThresholdSettingsOpen}
+                className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-[12px] font-bold text-[#4F6479] transition-colors hover:bg-[#F6F8FB]"
               >
-                {t("service.disk.autoCleanup", { state: diskManager.config.auto_cleanup ? t("service.disk.on") : t("service.disk.off") })}
+                <SlidersHorizontal size={15} className="text-[#2F67D8]" /> {t("service.disk.warningSettings")}
               </button>
 
               <button
                 type="button"
                 onClick={diskManager.refreshData}
-                className="inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-full border border-[#D7E3F0] bg-white px-4 text-[12px] font-black text-[#31485E] transition-colors hover:bg-[#F8FAFC]"
+                className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-[12px] font-bold text-[#4F6479] transition-colors hover:bg-[#F6F8FB]"
               >
                 <RefreshCcw size={15} className="text-[#2F67D8]" /> {t("service.disk.refresh")}
               </button>
             </div>
-          </div>
-
-          {diskManager.message ? (
-            <div className={`mt-3 rounded-xl px-4 py-3 text-[13px] font-semibold ${diskManager.message.type === "success" ? "bg-[#E7F8EC] text-[#2F855A]" : "bg-[#FFF1F2] text-[#DC2626]"}`}>
-              {diskManager.message.text}
-            </div>
-          ) : null}
         </div>
+
+        {diskManager.message ? (
+          <div className={`shrink-0 rounded-lg px-4 py-3 text-[13px] font-semibold ${diskManager.message.type === "success" ? "bg-[#E7F8EC] text-[#2F855A]" : "bg-[#FFF1F2] text-[#DC2626]"}`}>
+            {diskManager.message.text}
+          </div>
+        ) : null}
 
         {diskManager.loading ? (
           <div className="shrink-0 rounded-lg bg-[#F6F8FC] px-5 py-8 text-center text-[13px] text-[#94A3B8]">{t("service.disk.loading")}</div>
         ) : null}
 
-        <div className="grid shrink-0 grid-cols-4 gap-3">
+        <div className="grid shrink-0 grid-cols-4 gap-1 rounded-xl bg-[#F6F8FB] p-1">
           {diskManager.partitions.map((partition) => (
             <PartitionSummaryCard
               key={partition.id}
@@ -381,28 +395,46 @@ export default function DiskManagementPage() {
 
         {activePartition ? (() => {
           const partition = activePartition;
-          const filteredFiles = diskManager.getFilteredFiles(partition.id);
+          const filteredFiles = diskManager.getFilteredFiles(partition.id).filter((file) => matchesStatusFilter(file, statusFilter));
           const selectedFiles = diskManager.getSelectedScanFiles(partition.id);
           const selectedFileIds = diskManager.selectedFiles[partition.id];
+          const allFilteredFilesSelected = filteredFiles.length > 0 && filteredFiles.every((file) => selectedFileIds.has(file.id));
           const canReserve = diskManager.canReserve(partition.id);
           const canRelease = diskManager.canRelease(partition.id);
           const canPurge = diskManager.canPurge(partition.id);
-          const percent = diskManager.getUsagePercent(partition.id);
 
           return (
-            <div className="shrink-0 overflow-hidden rounded-xl bg-[#F6F8FC]">
-              <PartitionHeader
-                partition={partition}
-                percent={percent}
-                isExpanded
-                isOverThreshold={diskManager.isOverThreshold(partition.id)}
-                onToggle={() => diskManager.setExpandedPartition(null)}
-                onThresholdCommit={(value) => diskManager.updateThreshold(partition.id, value)}
-              />
-
-              <div className="mx-3 mb-3 rounded-lg bg-white px-4 py-3">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-4">
-                  <div className="text-[13px] font-semibold text-[#627488]">{t("service.disk.selectedCount", { count: diskManager.selectedCount[partition.id] })}</div>
+            <div className="shrink-0 border-t border-[#E8EEF5] bg-white">
+              <div className="overflow-hidden bg-white">
+                <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-y border-[#E6EDF5] bg-white px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="text-[13px] font-bold text-[#31485E]">{t("service.disk.selectedCount", { count: diskManager.selectedCount[partition.id] })}</div>
+                    {diskManager.selectedCount[partition.id] === 0 ? <span className="text-[11px] font-medium text-[#94A3B8]">{t("service.disk.noSelection")}</span> : null}
+                    <div className="flex items-center gap-2 border-l border-[#E6EDF5] pl-3">
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#627488]">
+                        {t("service.disk.filterByStatus")}
+                        <select
+                          value={statusFilter}
+                          onChange={(event) => {
+                            setStatusFilter(event.target.value as FileStatusFilter);
+                            diskManager.clearSelection(partition.id);
+                          }}
+                          className="h-7 rounded-md border border-[#D7E3F0] bg-white px-2 text-[11px] font-bold text-[#31485E] outline-none focus:border-[#93C5FD]"
+                        >
+                          {STATUS_FILTER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}
+                        </select>
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-bold text-[#2F67D8]">
+                        <input
+                          type="checkbox"
+                          checked={allFilteredFilesSelected}
+                          onChange={() => diskManager.toggleAllFiles(partition.id, filteredFiles)}
+                          className="h-3.5 w-3.5 accent-[#2F67D8]"
+                        />
+                        {t("service.disk.selectAll")}
+                      </label>
+                    </div>
+                  </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button type="button" disabled={diskManager.busyPartition === partition.id || !canReserve.ok} title={canReserve.reason ?? ""} onClick={() => diskManager.reserveFiles(partition.id, selectedFiles.map((file) => file.id))} className="rounded-full bg-[#2F67D8] px-4 py-2 text-[12px] font-black text-white transition-all hover:bg-[#2558C0] disabled:cursor-not-allowed disabled:bg-[#CBD5E1]">{t("service.disk.reserveSelected")}</button>
                     <button type="button" disabled={diskManager.busyPartition === partition.id || !canRelease.ok} title={canRelease.reason ?? ""} onClick={() => diskManager.releaseFiles(partition.id, selectedFiles.map((file) => file.id))} className="rounded-full border border-[#D7E3F0] bg-white px-4 py-2 text-[12px] font-black text-[#475569] transition-all hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#A0AEC0]">{t("service.disk.releaseSelected")}</button>
@@ -410,23 +442,17 @@ export default function DiskManagementPage() {
                   </div>
                 </div>
 
-                <FileTable
-                  files={filteredFiles}
-                  selectedFileIds={selectedFileIds}
-                  onToggleAll={() => diskManager.toggleAllFiles(partition.id, filteredFiles)}
-                  onToggleFile={(fileId) => diskManager.toggleFileSelection(partition.id, fileId)}
-                  onReserveFile={(fileId) => diskManager.reserveFiles(partition.id, [fileId])}
-                  onReleaseFile={(fileId) => diskManager.releaseFiles(partition.id, [fileId])}
-                  onPurgeFile={(fileId) => diskManager.purgeFiles(partition.id, [fileId])}
-                />
-
-                {canReserve.reason || canRelease.reason || canPurge.reason ? (
-                  <div className="mt-3 flex flex-wrap gap-4 text-[12px] font-medium text-[#A0AEC0]">
-                    {canReserve.reason ? <span>{t("service.disk.reserveLimit", { reason: canReserve.reason })}</span> : null}
-                    {canRelease.reason ? <span>{t("service.disk.releaseLimit", { reason: canRelease.reason })}</span> : null}
-                    {canPurge.reason ? <span>{t("service.disk.deleteLimit", { reason: canPurge.reason })}</span> : null}
-                  </div>
-                ) : null}
+                <div className="pt-3">
+                  <FileTable
+                    files={filteredFiles}
+                    selectedFileIds={selectedFileIds}
+                    onToggleAll={() => diskManager.toggleAllFiles(partition.id, filteredFiles)}
+                    onToggleFile={(fileId) => diskManager.toggleFileSelection(partition.id, fileId)}
+                    onReserveFile={(fileId) => diskManager.reserveFiles(partition.id, [fileId])}
+                    onReleaseFile={(fileId) => diskManager.releaseFiles(partition.id, [fileId])}
+                    onPurgeFile={(fileId) => diskManager.purgeFiles(partition.id, [fileId])}
+                  />
+                </div>
               </div>
             </div>
           );

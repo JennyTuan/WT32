@@ -124,40 +124,6 @@ button:focus-visible {
 .auto-ma-slider:disabled::-webkit-slider-thumb { cursor: not-allowed; }
 .auto-ma-slider:disabled::-moz-range-thumb { cursor: not-allowed; }
 
-@media print {
-  body * {
-    visibility: hidden !important;
-  }
-
-  .qa-report-overlay,
-  .qa-report-content,
-  .qa-report-content * {
-    visibility: visible !important;
-  }
-
-  .qa-report-overlay {
-    position: fixed !important;
-    inset: 0 !important;
-    background: white !important;
-    backdrop-filter: none !important;
-    overflow: visible !important;
-    padding: 0 !important;
-    display: block !important;
-  }
-
-  .qa-report-content {
-    position: relative !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-  }
-
-  .qa-report-content button {
-    display: none !important;
-  }
-}
-
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;

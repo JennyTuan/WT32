@@ -6,6 +6,7 @@ import { listQaReportRecords } from "../../../lib/reportsApi";
 import ServiceModeShell from "../shared/ServiceModeShell";
 import { PHANTOM_LABEL_KEYS, QA_STATUS_LABEL_KEYS } from "../dailyQa/dailyQaI18n";
 import type { DailyQaRecord, PhantomType } from "../dailyQa/types";
+import { printQaReport } from "./printQaReport";
 
 const DEVICE_NAME = "CT-Scanner-Alpha";
 const DEVICE_SN = "8839201";
@@ -250,7 +251,7 @@ function ReportPreviewModal({
   records: DailyQaRecord[];
   onClose: () => void;
 }) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const totalTests = records.length;
   const passCount = records.filter((r) => r.judgment === "PASS").length;
   const passRate = totalTests > 0 ? Math.round((passCount / totalTests) * 100) : 0;
@@ -358,7 +359,7 @@ function ReportPreviewModal({
             {t("service.qaReport.close")}
           </button>
           <button
-            onClick={() => window.print()}
+            onClick={() => printQaReport({ records, language })}
             className="px-6 h-10 rounded-lg bg-[#4D94FF] text-white font-bold hover:bg-blue-600 transition-colors flex items-center gap-2"
           >
             <Printer size={14} />

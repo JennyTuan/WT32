@@ -868,9 +868,7 @@ const ScanConfirmScreen = ({
         !readOnlyMode &&
         allowBackNavigation &&
         scanSessionLoadState === "ready" &&
-        (scanSession?.series.some(
-            (series) => series.series_type === "topogram" && series.execution_status === "image_ready"
-        ) ?? false) &&
+        (scanSession?.series.some((series) => series.series_type === "topogram") ?? false) &&
         !(scanSession?.series.some(
             (series) => series.series_type !== "topogram" && series.execution_status !== "pending"
         ) ?? false);
@@ -878,6 +876,7 @@ const ScanConfirmScreen = ({
         !readOnlyMode &&
         allowBackNavigation &&
         scanSessionLoadState === "ready" &&
+        !canReturnToScoutPositioning &&
         !hasStartedSeriesExecution;
     const canNavigateBack = canNavigateBackToProtocol || canReturnToScoutPositioning;
     const previousStepTitle = scanSessionLoadState === "error"
