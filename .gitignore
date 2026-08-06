@@ -28,6 +28,10 @@ ui-review/dist/
 # Claude Code worktrees (session-specific, not project files)
 .claude/worktrees/
 
+# Trellis per-checkout state (team specs, tasks, and skills remain tracked)
+.trellis/.developer
+.trellis/.runtime/
+
 # Local agent/browser caches
 .playwright-mcp/
 .skills/

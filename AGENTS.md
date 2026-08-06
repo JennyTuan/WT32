@@ -13,6 +13,12 @@ For scan parameters, dose, contrast, and safety-related UI copy, use wording suc
 - Before CT terminology, dose, contrast, safety, or clinical-workflow work, read [docs/CT_DOMAIN_CONTEXT.md](docs/CT_DOMAIN_CONTEXT.md).
 - Do not open bulky/generated content unless the task concerns it: `.venv/`, `ui-review/node_modules/`, `ui-review/dist/`, logs/test results, `backend/data/**`, DICOM/image stacks, or large binary documents.
 
+## AI engineering workflow
+
+- **Ponytail (full) is the default implementation discipline.** Understand the touched flow first, then stop at the first workable rung: do not add speculative behavior; reuse project code; use the standard library; use a native platform feature; use an installed dependency; use a one-liner; only then add the minimum custom code. Never simplify away trust-boundary validation, data-loss handling, security, accessibility, or an explicitly requested requirement.
+- Before non-trivial implementation, consult the relevant files under `.trellis/spec/`; use `.agents/skills/trellis-start/SKILL.md` when a Trellis workflow context is needed. Keep task requirements, implementation context, and checks in `.trellis/tasks/` rather than root-level planning files.
+- A deliberate shortcut with a known limit needs a concise `ponytail:` comment naming both the ceiling and upgrade path. Do not add an abstraction for one caller, a configurable value that never varies, or scaffolding for a hypothetical future.
+
 ## Validate before implementation
 
 For new, ambiguous, or safety-sensitive requests:
