@@ -1,0 +1,6 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+TotalSegmentator==2.14.0
+highdicom==0.26.1
+scikit-image==0.25.2

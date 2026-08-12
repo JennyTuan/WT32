@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
 from .database import SessionLocal, init_db
-from .routers import ai_inference, auth, contrast_configs, corners, dicom_settings, disk_manager, dose_settings, logs, organization_info, patients, performance, protocols, recon_params, reconstruction, reports, respira_simulator, scan_params, scan_results, scan_sessions, scan_workflow_actions, service_state, system_settings, user_management
+from .routers import ai_inference, auth, contrast_configs, corners, dicom_settings, disk_manager, dose_settings, logs, organization_info, patients, performance, physician_workstation, protocols, recon_params, reconstruction, reports, respira_simulator, scan_params, scan_results, scan_sessions, scan_workflow_actions, service_state, system_settings, user_management
 from .websocket.scan_ws import router as scan_ws_router
 
 app = FastAPI(title="CT Prototype Backend", version="1.0.0")
@@ -140,6 +140,7 @@ app.include_router(service_state.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(performance.router, prefix="/api")
 app.include_router(ai_inference.router, prefix="/api")
+app.include_router(physician_workstation.router, prefix="/api")
 app.include_router(scan_ws_router)
 app.include_router(respira_simulator.router)
 

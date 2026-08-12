@@ -6,9 +6,10 @@ import { isRouteAllowedInEmergency } from "../lib/emergencyAccess";
 
 type RequireAuthProps = {
     children?: ReactNode;
+    loginPath?: string;
 };
 
-export default function RequireAuth({ children }: RequireAuthProps) {
+export default function RequireAuth({ children, loginPath = "/login" }: RequireAuthProps) {
     const { state, isEmergencySession } = useAuth();
     const location = useLocation();
 
@@ -21,7 +22,7 @@ export default function RequireAuth({ children }: RequireAuthProps) {
     }
 
     if (state.status !== "authenticated") {
-        return <Navigate to="/login" state={{ from: location.pathname + location.search }} replace />;
+        return <Navigate to={loginPath} state={{ from: location.pathname + location.search }} replace />;
     }
 
     // First-login forced change-password gate.

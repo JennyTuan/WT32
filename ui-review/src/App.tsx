@@ -53,6 +53,8 @@ const RequireAuth = lazy(() => import("./components/RequireAuth"));
 const EmergencyModeBanner = lazy(() => import("./components/EmergencyModeBanner"));
 const DeviceErrorCenter = lazy(() => import("./components/DeviceErrorCenter"));
 const KeyboardViewportAvoidance = lazy(() => import("./components/KeyboardViewportAvoidance"));
+const PhysicianWorkstationScreen = lazy(() => import("./features/physicianWorkstation/PhysicianWorkstationScreen"));
+const PhysicianWorklistScreen = lazy(() => import("./features/physicianWorkstation/PhysicianWorklistScreen"));
 
 const TABLET_WIDTH = 1024;
 const TABLET_HEIGHT = 768;
@@ -108,7 +110,27 @@ function AppLoadingFallback() {
   );
 }
 
-export default function App() {
+function PhysicianApp() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Suspense fallback={<AppLoadingFallback />}>
+          <Routes>
+            <Route path="/physician/login" element={<LoginScreen />} />
+            <Route element={<RequireAuth loginPath="/physician/login" />}>
+              <Route path="/physician" element={<Navigate to="/physician/worklist" replace />} />
+              <Route path="/physician/worklist" element={<PhysicianWorklistScreen />} />
+              <Route path="/physician/studies/:studyKey/pulmonary-nodule" element={<PhysicianWorkstationScreen />} />
+              <Route path="*" element={<Navigate to="/physician" replace />} />
+            </Route>
+          </Routes>
+        </Suspense>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
+
+function ConsoleApp() {
   const scale = useTabletScale();
   const shellWidth = TABLET_WIDTH * scale + 40;
   const shellHeight = TABLET_HEIGHT * scale + 40;
@@ -213,4 +235,8 @@ export default function App() {
       </AuthProvider>
     </BrowserRouter>
   );
+}
+
+export default function App() {
+  return window.location.pathname.startsWith("/physician") ? <PhysicianApp /> : <ConsoleApp />;
 }

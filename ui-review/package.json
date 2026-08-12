@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@kitware/vtk.js": "^34.15.1",
     "@cornerstonejs/core": "^4.20.1",
     "@cornerstonejs/dicom-image-loader": "^4.20.1",
     "@cornerstonejs/tools": "^4.20.1",

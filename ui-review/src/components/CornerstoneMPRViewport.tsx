@@ -47,7 +47,7 @@ export type CornerstoneMPRHandle = {
 };
 
 type RenderMode = 'MPR' | 'MIP' | 'VR' | 'MinIP' | 'Avg';
-type LayoutMode = 'four-up' | 'three-up';
+type LayoutMode = 'four-up' | 'three-up' | 'vertical-three';
 type VolumePanelMode = 'slab' | 'volume3d';
 type VolumePreset = string;
 type InterpolationMode = 'NEAREST' | 'LINEAR' | 'FAST_LINEAR';
@@ -1437,6 +1437,12 @@ const CornerstoneMPRViewport = forwardRef<CornerstoneMPRHandle, CornerstoneMPRVi
     const getPanelLayoutClass = (panel: MprActivePanelId) => {
       if (focusedPanel) {
         return focusedPanel === panel ? 'col-start-1 row-start-1' : 'hidden';
+      }
+      if (layoutMode === 'vertical-three') {
+        if (panel === 'axial') return 'col-start-1 row-start-1';
+        if (panel === 'coronal') return 'col-start-1 row-start-2';
+        if (panel === 'sagittal') return 'col-start-1 row-start-3';
+        return 'hidden';
       }
       if (layoutMode !== 'three-up') return '';
       if (panel === 'axial') return 'col-start-1 row-start-1';
