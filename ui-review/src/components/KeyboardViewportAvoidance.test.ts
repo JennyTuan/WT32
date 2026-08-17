@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isNativeKeyboardTarget } from "./KeyboardViewportAvoidance";
+import { isNativeKeyboardTarget } from "./keyboardViewportUtils";
 
 describe("KeyboardViewportAvoidance", () => {
   it("keeps standard text and number inputs available to the system keyboard", () => {

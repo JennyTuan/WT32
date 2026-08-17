@@ -1757,6 +1757,7 @@ def _seed_dose_defaults(db) -> None:
 
 
 EMERGENCY_USERNAME = "emergency"
+PROTOTYPE_ADMIN_PASSWORD = "stn123456"
 
 
 def _seed_user_management_defaults(db) -> None:
@@ -2023,13 +2024,15 @@ def _seed_user_management_defaults(db) -> None:
         for (employee_id,) in db.query(models.UserAccount.employee_id).all()
         if employee_id
     }
-    from .auth_utils import hash_password
+    from .auth_utils import hash_password, verify_password
 
     for seed in user_seeds:
         if seed["username"] in existing_usernames or seed["employee_id"] in existing_employee_ids:
             continue
-        # Initial password = username (e.g. U0001), forced reset on first login.
-        seed_with_hash = {**seed, "password_hash": hash_password(seed["username"])}
+        initial_password = (
+            PROTOTYPE_ADMIN_PASSWORD if seed["username"] == "U0001" else seed["username"]
+        )
+        seed_with_hash = {**seed, "password_hash": hash_password(initial_password)}
         db.add(models.UserAccount(**seed_with_hash))
         changed = True
 
@@ -2038,6 +2041,16 @@ def _seed_user_management_defaults(db) -> None:
     for user in db.query(models.UserAccount).filter(models.UserAccount.password_hash.is_(None)).all():
         user.password_hash = hash_password(user.username)
         user.password_reset_required = True
+        changed = True
+
+    prototype_admin = (
+        db.query(models.UserAccount)
+        .filter(models.UserAccount.username == "U0001")
+        .first()
+    )
+    if prototype_admin and verify_password("U0001", prototype_admin.password_hash):
+        prototype_admin.password_hash = hash_password(PROTOTYPE_ADMIN_PASSWORD)
+        prototype_admin.password_reset_required = True
         changed = True
 
     emergency = (

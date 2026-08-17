@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
-
-type EditableElement = HTMLInputElement | HTMLTextAreaElement;
+import { isNativeKeyboardTarget, type EditableElement } from "./keyboardViewportUtils";
 type ScrollReservation = {
   element: HTMLElement;
   paddingBottom: string;
@@ -9,17 +8,8 @@ type ScrollReservation = {
   baseScrollPaddingBottom: number;
 };
 
-const EDITABLE_INPUT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "password", "number"]);
 const KEYBOARD_GAP = 16;
 const KEYBOARD_VISIBILITY_THRESHOLD = 80;
-
-export function isNativeKeyboardTarget(element: Element): element is EditableElement {
-  if (element instanceof HTMLTextAreaElement) return !element.disabled && !element.readOnly;
-  return element instanceof HTMLInputElement
-    && EDITABLE_INPUT_TYPES.has(element.type)
-    && !element.disabled
-    && !element.readOnly;
-}
 
 function findScrollContainer(target: EditableElement) {
   const designatedContainer = target.closest<HTMLElement>("[data-keyboard-avoidance-scroll]");
