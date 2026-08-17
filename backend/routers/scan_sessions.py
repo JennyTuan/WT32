@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models, schemas
 from ..database import get_db
+from ..demo_dicom_registry import source_id_for_series
 from . import logs as logs_module
 
 router = APIRouter(prefix="/scan-sessions", tags=["scan-sessions"])
@@ -22,13 +23,20 @@ SERIES_IMAGE_SOURCES_BY_TYPE = {
         "limbs-helical-demo",
         "qin-lung-topogram",
         "fourd-scout-demo",
+        "head-topogram-demo", "neck-topogram-demo", "chest-topogram-demo",
+        "abdomen-topogram-demo", "spine-topogram-demo", "extremity-topogram-demo",
     },
     "helical": {
         "brain-helical-demo",
         "limbs-helical-demo",
         "qin-lung-helical-demo",
+        "head-diagnostic-demo", "neck-diagnostic-demo", "chest-diagnostic-demo",
+        "abdomen-diagnostic-demo", "spine-diagnostic-demo", "extremity-diagnostic-demo",
     },
-    "axial": set(),
+    "axial": {
+        "head-diagnostic-demo", "neck-diagnostic-demo", "chest-diagnostic-demo",
+        "abdomen-diagnostic-demo", "spine-diagnostic-demo", "extremity-diagnostic-demo",
+    },
     "4d": set(),
 }
 
@@ -644,6 +652,25 @@ def _apply_series_execution_update(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Series image source is not compatible with the series type",
+        )
+
+    expected_local_source = (
+        source_id_for_series(scan_session.body_part, series.series_type)
+        if scan_session else None
+    )
+    if (
+        source_fields_present
+        and updates.get("image_source_id") in {
+            "head-topogram-demo", "neck-topogram-demo", "chest-topogram-demo",
+            "abdomen-topogram-demo", "spine-topogram-demo", "extremity-topogram-demo",
+            "head-diagnostic-demo", "neck-diagnostic-demo", "chest-diagnostic-demo",
+            "abdomen-diagnostic-demo", "spine-diagnostic-demo", "extremity-diagnostic-demo",
+        }
+        and updates.get("image_source_id") != expected_local_source
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Local simulated reference source does not match the scan session body part",
         )
 
     if source_fields_present and not (

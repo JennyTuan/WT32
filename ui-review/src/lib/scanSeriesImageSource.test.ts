@@ -31,6 +31,9 @@ describe("scan series image source", () => {
         ["brain-helical-demo", "helical"],
         ["limbs-helical-demo", "helical"],
         ["qin-lung-helical-demo", "helical"],
+        ["head-topogram-demo", "topogram"],
+        ["neck-diagnostic-demo", "helical"],
+        ["extremity-diagnostic-demo", "axial"],
     ] as const)("accepts %s as an explicit %s source", (sourceId, seriesType) => {
         expect(isSeriesImageSourceCompatible(sourceId, seriesType)).toBe(true);
         expect(IMAGE_SOURCE_IDS_BY_SERIES_TYPE[seriesType]).toContain(sourceId);
@@ -45,8 +48,9 @@ describe("scan series image source", () => {
         expect(isSeriesImageSourceCompatible(sourceId, seriesType)).toBe(false);
     });
 
-    it("does not register per-series axial or 4D image results", () => {
-        expect(IMAGE_SOURCE_IDS_BY_SERIES_TYPE.axial).toEqual([]);
+    it("registers local diagnostic DICOM for axial but keeps 4D provenance result-level", () => {
+        expect(IMAGE_SOURCE_IDS_BY_SERIES_TYPE.axial).toContain("head-diagnostic-demo");
+        expect(IMAGE_SOURCE_IDS_BY_SERIES_TYPE.axial).toContain("extremity-diagnostic-demo");
         expect(IMAGE_SOURCE_IDS_BY_SERIES_TYPE["4d"]).toEqual([]);
     });
 
@@ -62,6 +66,9 @@ describe("scan series image source", () => {
         ["head-dual-scout-demo", "brain-helical-demo"],
         ["limbs-helical-demo", "limbs-helical-demo"],
         ["qin-lung-topogram", "qin-lung-helical-demo"],
+        ["head-topogram-demo", "head-diagnostic-demo"],
+        ["neck-topogram-demo", "neck-diagnostic-demo"],
+        ["extremity-topogram-demo", "extremity-diagnostic-demo"],
     ] as const)("maps %s to its explicit helical result dataset", (source, expected) => {
         expect(resolveHelicalResultImageSource(source)).toBe(expected);
     });

@@ -21,6 +21,11 @@ import { getLimbsDicomSeries, loadLimbsDicomDemoManifest } from "../lib/limbsDic
 import { useI18n } from "../lib/i18nContext";
 import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceErrorEvents";
 import { hasVerifiedSeriesImageSource, resolveHelicalResultImageSource } from "../lib/scanSeriesImageSource";
+import {
+    loadReferenceDicomManifest,
+    resolveReferenceImageSourceId,
+    type ReferenceDicomManifest,
+} from "../lib/referenceDicomDemo";
 import { isBrainHelicalScanSession } from "../lib/brainHelicalDemo";
 import { resolvePostExecutionDestination } from "../lib/scanExecutionFlow";
 import { findNextWorkflowPlan, loadSelectedScanWorkflowPlans } from "../lib/scanWorkflowSession";
@@ -460,6 +465,7 @@ export default function HelicalExecuteScanScreen() {
     }, [expectedScanSessionId, expectedTargetSeriesId, expectedTopogramId, isBoundExecution]);
 
     const [limbsHelicalResultSeries, setLimbsHelicalResultSeries] = useState<HelicalResultSeriesConfig | null>(null);
+    const [referenceDiagnosticManifest, setReferenceDiagnosticManifest] = useState<ReferenceDicomManifest | null>(null);
 
     const [stage, setStage] = useState<ScanStage>("idle");
     const [physicalTriggerAction, setPhysicalTriggerAction] = useState<PhysicalTriggerAction>("position");
@@ -467,8 +473,9 @@ export default function HelicalExecuteScanScreen() {
     const [showCombinedPatientConfirm, setShowCombinedPatientConfirm] = useState(initialCombinedPatientConfirm);
     const [measurements, setMeasurements] = useState({ scanLength: "--", scoutFov: "--" });
     const [scanSession, setScanSession] = useState<ApiScanSessionDetail | null>(null);
+    const referenceDiagnosticSourceId = resolveReferenceImageSourceId(scanSession?.body_part, targetType);
     const helicalResultImageSourceId = useMemo<ApiScanSeriesImageSourceId | null>(() => {
-        if (executeMode !== "helical") return null;
+        if (referenceDiagnosticSourceId) return referenceDiagnosticSourceId;
         if (isBrainHelicalScanSession(scanSession)) return "brain-helical-demo";
         const persistedTarget = scanSession?.series.find((series) => series.id === expectedTargetSeriesId);
         if (
@@ -485,13 +492,21 @@ export default function HelicalExecuteScanScreen() {
         const topogramSource = scanSession?.series.find((series) => series.id === expectedTopogramId);
         if (!hasVerifiedSeriesImageSource(topogramSource)) return null;
         return resolveHelicalResultImageSource(topogramSource.image_source_id);
-    }, [executeMode, expectedTargetSeriesId, expectedTopogramId, scanSession]);
+    }, [executeMode, expectedTargetSeriesId, expectedTopogramId, referenceDiagnosticSourceId, scanSession]);
     const helicalResultOverride = useMemo<HelicalResultSeriesConfig | undefined>(() => {
+        if (referenceDiagnosticManifest && helicalResultImageSourceId === referenceDiagnosticSourceId) {
+            return {
+                count: referenceDiagnosticManifest.count,
+                urls: referenceDiagnosticManifest.urls,
+                fallbackWindowWidth: referenceDiagnosticManifest.windowWidth ?? 350,
+                fallbackWindowLevel: referenceDiagnosticManifest.windowCenter ?? 45,
+            };
+        }
         if (helicalResultImageSourceId === "brain-helical-demo") return BRAIN_HELICAL_RESULT_SERIES;
         if (helicalResultImageSourceId === "limbs-helical-demo") return limbsHelicalResultSeries ?? undefined;
         return undefined;
-    }, [helicalResultImageSourceId, limbsHelicalResultSeries]);
-    const helicalResultImageSourceReady = executeMode !== "helical"
+    }, [helicalResultImageSourceId, limbsHelicalResultSeries, referenceDiagnosticManifest, referenceDiagnosticSourceId]);
+    const helicalResultImageSourceReady = (helicalResultImageSourceId === referenceDiagnosticSourceId && referenceDiagnosticManifest !== null)
         || helicalResultImageSourceId === "brain-helical-demo"
         || helicalResultImageSourceId === "qin-lung-helical-demo"
         || (helicalResultImageSourceId === "limbs-helical-demo" && limbsHelicalResultSeries !== null);
@@ -626,6 +641,18 @@ export default function HelicalExecuteScanScreen() {
         setShowCombinedPatientConfirm(false);
         setExecutionError("执行页地址参数已变化；为避免跨会话写入，请从扫描确认页重新进入");
     }, [routeContextChanged]);
+
+    useEffect(() => {
+        if (!referenceDiagnosticSourceId) {
+            setReferenceDiagnosticManifest(null);
+            return;
+        }
+        let cancelled = false;
+        loadReferenceDicomManifest(referenceDiagnosticSourceId).then((manifest) => {
+            if (!cancelled) setReferenceDiagnosticManifest(manifest);
+        });
+        return () => { cancelled = true; };
+    }, [referenceDiagnosticSourceId]);
 
     const returnToExecuteConfirm = () => {
         navigate(
@@ -791,16 +818,11 @@ export default function HelicalExecuteScanScreen() {
                     : loadedScanSession.series.find(
                         (series) => series.id === expectedExecutionBinding.requiredTopogramId,
                     ) ?? null;
-                if (executeMode === "helical" && boundTopogram) {
-                    if (!boundTopogram.image_source_id || boundTopogram.image_source_version !== 1) {
+                if (boundTopogram) {
+                    if (!hasVerifiedSeriesImageSource(boundTopogram)) {
                         throw new Error("定位像缺少可验证的模拟影像来源，请返回定位像步骤重新出图");
                     }
-                    if (![
-                        "head-stroke-topogram",
-                        "head-dual-scout-demo",
-                        "limbs-helical-demo",
-                        "qin-lung-topogram",
-                    ].includes(boundTopogram.image_source_id)) {
+                    if (targetType === "helical" && !resolveHelicalResultImageSource(boundTopogram.image_source_id)) {
                         throw new Error("定位像影像来源与当前螺旋模拟不匹配，请返回定位像步骤重新确认");
                     }
                 }
@@ -915,12 +937,12 @@ export default function HelicalExecuteScanScreen() {
                     );
                 if (!targetSeries) throw new Error("当前扫描会话缺少已绑定的目标序列");
                 if (targetSeries.execution_status === "running") {
-                    if (targetType === "helical" && (!helicalResultImageSourceId || !helicalResultImageSourceReady)) {
-                        throw new Error("螺旋模拟影像来源尚未完成验证，不能登记为可查看结果");
+                    if (!helicalResultImageSourceId || !helicalResultImageSourceReady) {
+                        throw new Error("模拟诊断影像来源尚未完成验证，不能登记为可查看结果");
                     }
                     await updateScanSessionSeriesExecution(targetSeries.id, {
                         execution_status: "image_ready",
-                        ...(targetType === "helical" && helicalResultImageSourceId ? {
+                        ...(helicalResultImageSourceId ? {
                             image_source_id: helicalResultImageSourceId,
                             image_source_version: 1 as const,
                         } : {}),
@@ -1247,8 +1269,8 @@ export default function HelicalExecuteScanScreen() {
             setExecutionError("扫描执行上下文尚未通过校验，请从扫描确认页重新进入");
             return;
         }
-        if (executeMode === "helical" && (!helicalResultImageSourceId || !helicalResultImageSourceReady)) {
-            setExecutionError("螺旋模拟影像来源尚未完成验证，请返回扫描确认页检查定位像来源");
+        if (!helicalResultImageSourceId || !helicalResultImageSourceReady) {
+            setExecutionError("模拟诊断影像来源尚未完成验证，请返回扫描确认页检查定位像来源");
             return;
         }
         if (cancellationInFlightRef.current) {

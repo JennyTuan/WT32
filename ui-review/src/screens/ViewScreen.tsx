@@ -74,6 +74,11 @@ import {
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
 import { hasVerifiedSeriesImageSource } from "../lib/scanSeriesImageSource";
+import {
+    isReferenceDicomSourceId,
+    loadReferenceDicomManifest,
+    type ReferenceDicomManifest,
+} from "../lib/referenceDicomDemo";
 import { getScanSeriesImageAsset } from "../lib/scanSeriesImageAssets";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
@@ -646,6 +651,7 @@ const ViewScreen = () => {
     const [limbsDicomManifestError, setLimbsDicomManifestError] = useState<string | null>(null);
     const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
     const [headDualScoutManifestError, setHeadDualScoutManifestError] = useState<string | null>(null);
+    const [referenceDicomManifests, setReferenceDicomManifests] = useState<Record<string, ReferenceDicomManifest>>({});
 
     // ─── Live clock ───────────────────────────────────────────────────────────
     const buildClock = useCallback(() => {
@@ -1040,6 +1046,9 @@ const ViewScreen = () => {
             if (s.series_type === "topogram") {
                 const p = s.topogram_param;
                 const sourceVerified = s.execution_status === "image_ready" && hasVerifiedSeriesImageSource(s);
+                const referenceManifest = sourceVerified && isReferenceDicomSourceId(s.image_source_id)
+                    ? referenceDicomManifests[s.image_source_id]
+                    : undefined;
                 const headDualSeries = sourceVerified
                     && s.image_source_id === "head-dual-scout-demo"
                     && headDualScoutManifest
@@ -1053,7 +1062,7 @@ const ViewScreen = () => {
                 const baseTopogramSeries: Series = {
                     id: `${prefix}-topo`,
                     name: s.series_label || t("view.fallback.topogram"),
-                    count: 1,
+                    count: referenceManifest?.count ?? 1,
                     kernel: REALISTIC_SCOUT_SERIES.kernel,
                     thickness: REALISTIC_SCOUT_SERIES.thickness,
                     kV: p ? String(p.kv) : "—",
@@ -1064,9 +1073,10 @@ const ViewScreen = () => {
                     sourceSeriesId: s.id,
                     imageSourceId: s.image_source_id,
                     imageSourceVersion: s.image_source_version,
-                    images: makeImages(1, `${prefix}-topo`),
-                    defaultWw: 500,
-                    defaultWl: 50,
+                    images: makeImages(referenceManifest?.count ?? 1, `${prefix}-topo`),
+                    defaultWw: referenceManifest?.windowWidth ?? 500,
+                    defaultWl: referenceManifest?.windowCenter ?? 50,
+                    ...(referenceManifest ? { dicomUrls: [...referenceManifest.urls] } : {}),
                     ...(sourceVerified && (
                         s.image_source_id === "head-stroke-topogram"
                         // 这类历史 Brain 会话在修复前把定位像来源登记成了通用
@@ -1096,11 +1106,16 @@ const ViewScreen = () => {
                 // helical / axial / 4d — leaf items are the recon series
                 const p = s.helical_param ?? s.axial_param;
                 const sourceVerified = s.execution_status === "image_ready" && hasVerifiedSeriesImageSource(s);
+                const referenceManifest = sourceVerified && isReferenceDicomSourceId(s.image_source_id)
+                    ? referenceDicomManifests[s.image_source_id]
+                    : undefined;
                 const seriesCount = type === "4d" && fourDEngineerManifest
                     ? fourDEngineerManifest.bedCount * fourDEngineerManifest.sliceCountPerVolume
-                    : sourceVerified && s.image_source_id === "qin-lung-helical-demo"
-                        ? REAL_LUNG_SERIES.count
-                        : effectiveLungSeries.count;
+                    : referenceManifest
+                        ? referenceManifest.count
+                        : sourceVerified && s.image_source_id === "qin-lung-helical-demo"
+                            ? REAL_LUNG_SERIES.count
+                            : effectiveLungSeries.count;
                 const limbsResultSeries = sourceVerified
                     && s.image_source_id === "limbs-helical-demo"
                     && limbsDicomManifest
@@ -1132,7 +1147,8 @@ const ViewScreen = () => {
                     images: makeImages(seriesCount, `${prefix}-recon${r.id}`),
                     defaultWw: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.ww : r.window_width,
                     defaultWl: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : r.window_level,
-                    ...(sourceVerified && s.image_source_id === "qin-lung-helical-demo" && QIN_LUNG_HELICAL_ASSET
+                    ...(referenceManifest ? { dicomUrls: [...referenceManifest.urls] }
+                    : sourceVerified && s.image_source_id === "qin-lung-helical-demo" && QIN_LUNG_HELICAL_ASSET
                         ? { dicomUrls: [...QIN_LUNG_HELICAL_ASSET.imageUrls] }
                         : r.image_urls?.length
                             ? { dicomUrls: [...r.image_urls] }
@@ -1158,7 +1174,8 @@ const ViewScreen = () => {
                         images: makeImages(seriesCount, `${prefix}-scan`),
                         defaultWw: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.ww : undefined,
                         defaultWl: type === "4d" && fourDEngineerManifest ? FOUR_D_ENGINEER_DEFAULT_WINDOW.wl : undefined,
-                        ...(sourceVerified && s.image_source_id === "qin-lung-helical-demo" && QIN_LUNG_HELICAL_ASSET
+                        ...(referenceManifest ? { dicomUrls: [...referenceManifest.urls] }
+                        : sourceVerified && s.image_source_id === "qin-lung-helical-demo" && QIN_LUNG_HELICAL_ASSET
                             ? { dicomUrls: [...QIN_LUNG_HELICAL_ASSET.imageUrls] }
                             : {}),
                     });
@@ -1217,6 +1234,7 @@ const ViewScreen = () => {
         effectiveLungSeries,
         limbsDicomManifest,
         headDualScoutManifest,
+        referenceDicomManifests,
         t,
     ]);
 
@@ -1392,7 +1410,7 @@ const ViewScreen = () => {
                     phaseIndex,
                     fourDState?.phaseSelections,
                 );
-                if (volume) urls.push(volume.urls.mha);
+                if (volume) urls.push(...volume.urls.axialSlices);
             }
             return urls.length > 0 ? urls : null;
         },
@@ -1656,6 +1674,29 @@ const ViewScreen = () => {
             cancelled = true;
         };
     }, [fourDState, isFourDEntry, isFourDVerified]);
+
+    useEffect(() => {
+        if (!scanSession) return;
+        const sourceIds = [...new Set(
+            scanSession.series
+                .filter((series) => series.execution_status === "image_ready" && isReferenceDicomSourceId(series.image_source_id))
+                .map((series) => series.image_source_id)
+                .filter(isReferenceDicomSourceId),
+        )];
+        if (sourceIds.length === 0) return;
+        let cancelled = false;
+        Promise.all(sourceIds.map((sourceId) => loadReferenceDicomManifest(sourceId))).then((manifests) => {
+            if (cancelled) return;
+            setReferenceDicomManifests((current) => {
+                const next = { ...current };
+                manifests.forEach((manifest) => {
+                    if (manifest) next[manifest.sourceId] = manifest;
+                });
+                return next;
+            });
+        });
+        return () => { cancelled = true; };
+    }, [scanSession]);
 
     useEffect(() => {
         if (!isLimbsDicomDemo || !limbsDicomManifest) return;

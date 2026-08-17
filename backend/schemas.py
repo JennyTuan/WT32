@@ -20,6 +20,18 @@ PrototypeImageSourceId = Literal[
     "qin-lung-topogram",
     "fourd-scout-demo",
     "qin-lung-helical-demo",
+    "head-topogram-demo",
+    "head-diagnostic-demo",
+    "neck-topogram-demo",
+    "neck-diagnostic-demo",
+    "chest-topogram-demo",
+    "chest-diagnostic-demo",
+    "abdomen-topogram-demo",
+    "abdomen-diagnostic-demo",
+    "spine-topogram-demo",
+    "spine-diagnostic-demo",
+    "extremity-topogram-demo",
+    "extremity-diagnostic-demo",
 ]
 PrototypeImageSourceVersion = Literal[1]
 ScanDirection = Literal["HEAD_TO_FOOT", "FOOT_TO_HEAD"]

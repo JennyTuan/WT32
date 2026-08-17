@@ -11,13 +11,20 @@ export const IMAGE_SOURCE_IDS_BY_SERIES_TYPE = {
         "limbs-helical-demo",
         "qin-lung-topogram",
         "fourd-scout-demo",
+        "head-topogram-demo", "neck-topogram-demo", "chest-topogram-demo",
+        "abdomen-topogram-demo", "spine-topogram-demo", "extremity-topogram-demo",
     ],
     helical: [
         "brain-helical-demo",
         "limbs-helical-demo",
         "qin-lung-helical-demo",
+        "head-diagnostic-demo", "neck-diagnostic-demo", "chest-diagnostic-demo",
+        "abdomen-diagnostic-demo", "spine-diagnostic-demo", "extremity-diagnostic-demo",
     ],
-    axial: [],
+    axial: [
+        "head-diagnostic-demo", "neck-diagnostic-demo", "chest-diagnostic-demo",
+        "abdomen-diagnostic-demo", "spine-diagnostic-demo", "extremity-diagnostic-demo",
+    ],
     "4d": [],
 } as const satisfies Readonly<Record<ScanSeriesType, readonly ApiScanSeriesImageSourceId[]>>;
 
@@ -50,7 +57,7 @@ export const hasVerifiedSeriesImageSource = (
 
 export const resolveHelicalResultImageSource = (
     topogramSourceId: ApiScanSeriesImageSourceId | null | undefined,
-): Extract<ApiScanSeriesImageSourceId, "brain-helical-demo" | "limbs-helical-demo" | "qin-lung-helical-demo"> | null => {
+): Extract<ApiScanSeriesImageSourceId, "brain-helical-demo" | "limbs-helical-demo" | "qin-lung-helical-demo" | "head-diagnostic-demo" | "neck-diagnostic-demo" | "chest-diagnostic-demo" | "abdomen-diagnostic-demo" | "spine-diagnostic-demo" | "extremity-diagnostic-demo"> | null => {
     switch (topogramSourceId) {
         case "head-stroke-topogram":
         case "head-dual-scout-demo":
@@ -59,6 +66,12 @@ export const resolveHelicalResultImageSource = (
             return "limbs-helical-demo";
         case "qin-lung-topogram":
             return "qin-lung-helical-demo";
+        case "head-topogram-demo": return "head-diagnostic-demo";
+        case "neck-topogram-demo": return "neck-diagnostic-demo";
+        case "chest-topogram-demo": return "chest-diagnostic-demo";
+        case "abdomen-topogram-demo": return "abdomen-diagnostic-demo";
+        case "spine-topogram-demo": return "spine-diagnostic-demo";
+        case "extremity-topogram-demo": return "extremity-diagnostic-demo";
         default:
             return null;
     }

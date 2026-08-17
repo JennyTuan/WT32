@@ -380,7 +380,6 @@ export default function FourDDiagnosticConfirmScreen() {
             const engineerManifest = await loadFourDEngineerManifest();
             if (
                 !engineerManifest
-                || engineerManifest.bedCount !== acquisitionSnapshot.bedCount
                 || engineerManifest.phaseCount !== acquisitionSnapshot.phaseCount
             ) {
                 throw new Error("本次 4D 模拟结果缺少匹配的影像清单，不能进入后处理。");

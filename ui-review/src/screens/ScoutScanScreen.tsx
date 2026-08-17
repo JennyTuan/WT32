@@ -1632,7 +1632,7 @@ const ScoutScanScreen = ({
                             <div className="space-y-1.5">
                                 <label className={`flex h-[34px] items-center gap-2 rounded-md border bg-white px-2 transition-colors ${selectedPosition === 'start' ? 'border-[#4D94FF] ring-1 ring-[#4D94FF]/20' : 'border-[#C8DDF2]'}`}>
                                     <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#4D94FF]" />
-                                    <span className="w-[56px] shrink-0 text-[11px] font-black text-[#355B7C]">{t("scanFlow.positioning.rangeMin")}</span>
+                                    <span className="w-[56px] shrink-0 text-[11px] font-black text-[#355B7C]">{t("scanFlow.positioning.startPosition")}</span>
                                     <input
                                         type="text"
                                         value={startPos}
@@ -1643,7 +1643,7 @@ const ScoutScanScreen = ({
                                 </label>
                                 <label className={`flex h-[34px] items-center gap-2 rounded-md border bg-white px-2 transition-colors ${selectedPosition === 'end' ? 'border-[#43A047] ring-1 ring-[#43A047]/20' : 'border-[#C8DDF2]'}`}>
                                     <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#43A047]" />
-                                    <span className="w-[56px] shrink-0 text-[11px] font-black text-[#355B7C]">{t("scanFlow.positioning.rangeMax")}</span>
+                                    <span className="w-[56px] shrink-0 text-[11px] font-black text-[#355B7C]">{t("scanFlow.positioning.endPosition")}</span>
                                     <input
                                         type="text"
                                         value={endPos}

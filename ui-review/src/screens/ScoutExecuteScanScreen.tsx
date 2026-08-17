@@ -31,6 +31,11 @@ import ThresholdGuardModal from "../components/ThresholdGuardModal";
 import ScanConfirmScreen, { PatientConfirmationModal } from "./ScanConfirmScreen";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
+import {
+    loadReferenceDicomManifest,
+    resolveReferenceImageSourceId,
+    type ReferenceDicomManifest,
+} from "../lib/referenceDicomDemo";
 import { DEVICE_ERROR_RAISED_EVENT, type DeviceErrorEvent } from "../lib/deviceErrorEvents";
 import {
     canStartScoutExecution,
@@ -197,6 +202,24 @@ const buildLimbsScoutExecuteSeries = (manifest: LimbsDicomDemoManifest): ScoutDi
         useCornerstoneViewer: true,
         fallbackWindowWidth: topogram?.windowWidth ?? manifest.defaultWindowWidth,
         fallbackWindowLevel: topogram?.windowCenter ?? manifest.defaultWindowLevel,
+    };
+};
+
+const buildReferenceScoutSeries = (manifest: ReferenceDicomManifest): ScoutDicomSeries | null => {
+    const url = manifest.urls[0];
+    if (!url) return null;
+    const lastSlash = url.lastIndexOf("/");
+    return {
+        basePath: lastSlash >= 0 ? url.slice(0, lastSlash) : url,
+        count: 1,
+        firstImageNumber: 1,
+        fileNamePrefix: "",
+        fileNamePadding: 0,
+        fileNames: [lastSlash >= 0 ? url.slice(lastSlash + 1) : url],
+        directImage: true,
+        useCornerstoneViewer: true,
+        fallbackWindowWidth: manifest.windowWidth ?? 500,
+        fallbackWindowLevel: manifest.windowCenter ?? 50,
     };
 };
 
@@ -589,6 +612,7 @@ export default function ScoutExecuteScanScreen() {
     const [gatingBreathingMode, setGatingBreathingMode] = useState<string | null>(null);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
+    const [referenceScoutManifest, setReferenceScoutManifest] = useState<ReferenceDicomManifest | null>(null);
     const [scoutManifestError, setScoutManifestError] = useState<string | null>(null);
     const [manifestLoadAttempt, setManifestLoadAttempt] = useState(0);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
@@ -715,6 +739,11 @@ export default function ScoutExecuteScanScreen() {
         () => selectScoutExecutionSeries(scanSession, isHeadDualScoutFlow),
         [isHeadDualScoutFlow, scanSession],
     );
+    const referenceScoutSourceId = resolveReferenceImageSourceId(scanSession?.body_part, "topogram");
+    const referenceScoutSeries = useMemo(
+        () => referenceScoutManifest ? buildReferenceScoutSeries(referenceScoutManifest) : null,
+        [referenceScoutManifest],
+    );
     const limbsScoutExecuteSeries = useMemo<ScoutDicomSeries | null>(
         () => (limbsDicomManifest ? buildLimbsScoutExecuteSeries(limbsDicomManifest) : null),
         [limbsDicomManifest],
@@ -729,6 +758,8 @@ export default function ScoutExecuteScanScreen() {
     );
     const scoutResultSeries: ScoutDicomSeries | null = !hasResolvedSessionAuthority
         ? null
+        : referenceScoutSourceId
+            ? referenceScoutSeries
         : isFourDScoutWorkflow
         ? FOUR_D_SCOUT_SERIES
         : isBrainHelicalScoutWorkflow
@@ -740,6 +771,8 @@ export default function ScoutExecuteScanScreen() {
                     : SCOUT_SERIES;
     const scoutImageSourceId: ApiScanSeriesImageSourceId | null = !hasResolvedSessionAuthority
         ? null
+        : referenceScoutSourceId
+            ? referenceScoutSourceId
         : isFourDScoutWorkflow
         ? "fourd-scout-demo"
         : isBrainHelicalScoutWorkflow
@@ -749,7 +782,9 @@ export default function ScoutExecuteScanScreen() {
                 : isHeadDualScoutFlow
                     ? "head-dual-scout-demo"
                     : "qin-lung-topogram";
-    const scoutImageSourceReady = hasResolvedSessionAuthority && scoutImageSourceId !== null && (isLimbsHelicalScoutWorkflow
+    const scoutImageSourceReady = hasResolvedSessionAuthority && scoutImageSourceId !== null && (referenceScoutSourceId
+        ? referenceScoutSeries !== null
+        : isLimbsHelicalScoutWorkflow
         ? limbsScoutExecuteSeries !== null
         : isHeadDualScoutFlow
             ? headDualApSeries !== null && headDualLatSeries !== null
@@ -782,6 +817,24 @@ export default function ScoutExecuteScanScreen() {
             sequence: currentScanSequenceName,
         };
     }, [currentProtocolName, currentScanSequenceName, scanSession]);
+
+    useEffect(() => {
+        if (!referenceScoutSourceId) {
+            setReferenceScoutManifest(null);
+            return;
+        }
+        let cancelled = false;
+        loadReferenceDicomManifest(referenceScoutSourceId).then((manifest) => {
+            if (cancelled) return;
+            if (manifest) {
+                setReferenceScoutManifest(manifest);
+                return;
+            }
+            setScoutManifestError("本地模拟定位像不可用，请检查数据目录");
+            setScoutImageLoadState("error");
+        });
+        return () => { cancelled = true; };
+    }, [referenceScoutSourceId, manifestLoadAttempt]);
 
     useEffect(() => {
         if (!isLimbsHelicalScoutWorkflow) return;

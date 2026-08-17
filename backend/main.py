@@ -12,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
 
 from .database import SessionLocal, init_db
+from .demo_dicom_registry import build_four_d_manifest, build_reference_registry
 from .routers import ai_inference, auth, contrast_configs, corners, dicom_settings, disk_manager, dose_settings, logs, organization_info, patients, performance, protocols, recon_params, reconstruction, reports, respira_simulator, scan_params, scan_results, scan_sessions, scan_workflow_actions, service_state, system_settings, user_management
 from .websocket.scan_ws import router as scan_ws_router
 
@@ -408,6 +409,22 @@ def get_limbs_helical_demo_manifest():
         return _build_lihvr_lower_extremity_manifest()
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/demo-dicom/reference/{source_id}")
+def get_reference_dicom_manifest(source_id: str):
+    manifest = build_reference_registry().get(source_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Simulated reference DICOM source is unavailable")
+    return manifest
+
+
+@app.get("/api/demo-dicom/fourd-engineer")
+def get_four_d_reference_manifest():
+    manifest = build_four_d_manifest()
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="4D simulated reference DICOM source is unavailable")
+    return manifest
 
 
 @app.get("/dicom-lihvr/{file_path:path}")

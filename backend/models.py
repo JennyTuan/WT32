@@ -385,7 +385,13 @@ class ScanSessionSeries(Base):
             "'limbs-helical-demo', "
             "'qin-lung-topogram', "
             "'fourd-scout-demo', "
-            "'qin-lung-helical-demo'"
+            "'qin-lung-helical-demo', "
+            "'head-topogram-demo', 'head-diagnostic-demo', "
+            "'neck-topogram-demo', 'neck-diagnostic-demo', "
+            "'chest-topogram-demo', 'chest-diagnostic-demo', "
+            "'abdomen-topogram-demo', 'abdomen-diagnostic-demo', "
+            "'spine-topogram-demo', 'spine-diagnostic-demo', "
+            "'extremity-topogram-demo', 'extremity-diagnostic-demo'"
             ")",
             name="ck_scan_session_series_image_source_allowlist",
         ),
@@ -397,10 +403,18 @@ class ScanSessionSeries(Base):
             "image_source_id IS NULL OR ("
             "(series_type = 'topogram' AND image_source_id IN ("
             "'head-stroke-topogram', 'head-dual-scout-demo', "
-            "'limbs-helical-demo', 'qin-lung-topogram', 'fourd-scout-demo'"
+            "'limbs-helical-demo', 'qin-lung-topogram', 'fourd-scout-demo', "
+            "'head-topogram-demo', 'neck-topogram-demo', 'chest-topogram-demo', "
+            "'abdomen-topogram-demo', 'spine-topogram-demo', 'extremity-topogram-demo'"
             ")) OR "
             "(series_type = 'helical' AND image_source_id IN ("
-            "'brain-helical-demo', 'limbs-helical-demo', 'qin-lung-helical-demo'"
+            "'brain-helical-demo', 'limbs-helical-demo', 'qin-lung-helical-demo', "
+            "'head-diagnostic-demo', 'neck-diagnostic-demo', 'chest-diagnostic-demo', "
+            "'abdomen-diagnostic-demo', 'spine-diagnostic-demo', 'extremity-diagnostic-demo'"
+            ")) OR "
+            "(series_type = 'axial' AND image_source_id IN ("
+            "'head-diagnostic-demo', 'neck-diagnostic-demo', 'chest-diagnostic-demo', "
+            "'abdomen-diagnostic-demo', 'spine-diagnostic-demo', 'extremity-diagnostic-demo'"
             "))"
             ")",
             name="ck_scan_session_series_image_source_type",

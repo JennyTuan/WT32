@@ -27,6 +27,8 @@ export const isTopogramDependencyReady = (
 export type SupportedTopogramImageSourceId = Extract<
     ApiScanSeriesImageSourceId,
     "head-stroke-topogram" | "head-dual-scout-demo" | "limbs-helical-demo" | "qin-lung-topogram"
+    | "head-topogram-demo" | "neck-topogram-demo" | "chest-topogram-demo"
+    | "abdomen-topogram-demo" | "spine-topogram-demo" | "extremity-topogram-demo"
 >;
 
 const SUPPORTED_TOPOGRAM_IMAGE_SOURCES = new Set<SupportedTopogramImageSourceId>([
@@ -34,6 +36,8 @@ const SUPPORTED_TOPOGRAM_IMAGE_SOURCES = new Set<SupportedTopogramImageSourceId>
     "head-dual-scout-demo",
     "limbs-helical-demo",
     "qin-lung-topogram",
+    "head-topogram-demo", "neck-topogram-demo", "chest-topogram-demo",
+    "abdomen-topogram-demo", "spine-topogram-demo", "extremity-topogram-demo",
 ]);
 
 export const resolveTopogramImageSource = (

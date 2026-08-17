@@ -131,7 +131,13 @@ export type ApiScanSeriesImageSourceId =
     | "limbs-helical-demo"
     | "qin-lung-topogram"
     | "qin-lung-helical-demo"
-    | "fourd-scout-demo";
+    | "fourd-scout-demo"
+    | "head-topogram-demo" | "head-diagnostic-demo"
+    | "neck-topogram-demo" | "neck-diagnostic-demo"
+    | "chest-topogram-demo" | "chest-diagnostic-demo"
+    | "abdomen-topogram-demo" | "abdomen-diagnostic-demo"
+    | "spine-topogram-demo" | "spine-diagnostic-demo"
+    | "extremity-topogram-demo" | "extremity-diagnostic-demo";
 
 export type ApiScanSeriesImageSourceVersion = 1;
 

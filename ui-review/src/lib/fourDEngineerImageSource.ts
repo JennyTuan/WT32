@@ -1,4 +1,5 @@
 import type { BedPhaseCell, FourDScanResult, PhaseSelections } from "./fourDTypes";
+import { apiFetch } from "./apiClient";
 
 export interface FourDEngineerVolumeUrls {
   axialPreview: string;
@@ -44,13 +45,13 @@ export interface FourDEngineerManifest {
   volumes: FourDEngineerVolume[];
 }
 
-const MANIFEST_URL = "/fourd-engineer/manifest.json";
+const MANIFEST_URL = "/api/demo-dicom/fourd-engineer";
 
 let manifestPromise: Promise<FourDEngineerManifest | null> | null = null;
 
 export function loadFourDEngineerManifest(): Promise<FourDEngineerManifest | null> {
   if (!manifestPromise) {
-    manifestPromise = fetch(MANIFEST_URL)
+    manifestPromise = apiFetch(MANIFEST_URL)
       .then((response) => {
         if (!response.ok) return null;
         return response.json() as Promise<FourDEngineerManifest>;
