@@ -6,6 +6,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..database import SessionLocal
 from ..device_errors import build_device_error_event, extract_protocol_error_inputs, normalize_error_code, record_device_error_event
+from ..scan_protocol import validate_scan_plan
 
 router = APIRouter(tags=["scan-websocket"])
 _connections: set[WebSocket] = set()
@@ -18,6 +19,26 @@ def _mock_event(event_type: str, **payload):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **payload,
     }
+
+
+def _validate_scan_start_request(message: dict) -> str | None:
+    plan = message.get("PlanScanStartInfo")
+    if not isinstance(plan, dict) or not isinstance(plan.get("SeriesCollection"), list):
+        return "missing PlanScanStartInfo.SeriesCollection"
+    for series in plan["SeriesCollection"]:
+        params = series.get("ScanParams") if isinstance(series, dict) else None
+        if not isinstance(params, dict):
+            return "missing SeriesCollection.ScanParams"
+        try:
+            validate_scan_plan({
+                "kv": params.get("kV"), "ma": params.get("mA"),
+                "focus_size": "large" if params.get("FocusSize") == 1 else "small",
+                "bowtie_type": params.get("BowtieType", "medium"),
+                "collimator": params.get("CollimatorType", "32*0.6"),
+            })
+        except ValueError as exc:
+            return str(exc)
+    return None
 
 
 def _persist_device_error(event: dict) -> None:
@@ -96,7 +117,7 @@ async def scan_control_ws(websocket: WebSocket):
     try:
         while True:
             message = await websocket.receive_json()
-            command = message.get("command", "UNKNOWN")
+            command = message.get("Command", message.get("command", "UNKNOWN"))
 
             protocol_errors = extract_protocol_error_inputs(message)
             if protocol_errors:
@@ -105,7 +126,19 @@ async def scan_control_ws(websocket: WebSocket):
                     await emit_device_error(event)
                 continue
 
-            if command == "START_SCAN":
+            if command == "0x0B":
+                reason = _validate_scan_start_request(message)
+                if reason:
+                    responses = [{"Command": "0x0C", "Result": 0, "ErrorCode": "0x01000001", "message": reason}]
+                else:
+                    responses = [
+                        {"Command": "0x0D", "ScanInfo": 0},
+                        {"Command": "0x0D", "ScanInfo": 7},
+                        {"Command": "0x0D", "ScanInfo": 8},
+                        {"Command": "0x0D", "ScanInfo": 11},
+                        {"Command": "0x0C", "Result": 1, "ErrorCode": "0x00"},
+                    ]
+            elif command == "START_SCAN":
                 responses = [
                     _mock_event("START_SCAN", accepted=True),
                     _mock_event("INJECTOR_START", started=True),

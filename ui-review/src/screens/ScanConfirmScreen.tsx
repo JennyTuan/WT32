@@ -36,6 +36,7 @@ import PhysicalControlPanelSvg from "../components/PhysicalControlPanelSvg";
 import { PhysicalButtonStatusDot } from "../components/SimulatedPhysicalButton";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
+import { clampMa, getMaLimit } from "../lib/tubeCurrent";
 
 interface Sequence {
     id: string;
@@ -607,6 +608,7 @@ const ScanConfirmScreen = ({
             latAngle: topos[1]?.tube_angle ?? 90,
             ma: topos[0].ma,
             kv: topos[0].kv,
+            focusSize: topos[0].focus_size ?? "small",
             scanLength: topos[0].scan_length,
         };
     }, [isHeadDualScoutFlow, scanSession]);
@@ -1455,15 +1457,29 @@ const ScanConfirmScreen = ({
                                                             <input
                                                                 autoFocus
                                                                 type="number"
+                                                                min={field === "ma" ? 1 : undefined}
+                                                                max={field === "ma" ? getMaLimit(dualScoutKv ?? dualScoutTopogramIds?.kv ?? 120, dualScoutTopogramIds?.focusSize) : undefined}
                                                                 value={dualValue ?? ""}
                                                                 onClick={(e) => e.stopPropagation()}
                                                                 onChange={(e) => {
                                                                     const v = Number(e.target.value);
-                                                                    if (Number.isFinite(v)) setDualValue(v);
+                                                                    if (!Number.isFinite(v)) return;
+                                                                    if (field === "ma") {
+                                                                        setDualScoutMa(clampMa(v, dualScoutKv ?? dualScoutTopogramIds?.kv ?? 120, dualScoutTopogramIds?.focusSize));
+                                                                    } else if (field === "kv") {
+                                                                        setDualScoutKv(v);
+                                                                        setDualScoutMa((current) => current === null ? current : clampMa(current, v, dualScoutTopogramIds?.focusSize));
+                                                                    } else {
+                                                                        setDualValue(v);
+                                                                    }
                                                                 }}
                                                                 onBlur={() => {
                                                                     setEditingDualField(null);
-                                                                    if (dualValue != null) persistDualScoutPatch({ [persistKeyMap[field]]: dualValue }, "shared");
+                                                                    if (dualValue == null) return;
+                                                                    const patch = field === "kv"
+                                                                        ? { kv: dualValue, ma: clampMa(dualScoutMa ?? dualScoutTopogramIds?.ma ?? 1, dualValue, dualScoutTopogramIds?.focusSize) }
+                                                                        : { [persistKeyMap[field]]: dualValue };
+                                                                    persistDualScoutPatch(patch, "shared");
                                                                 }}
                                                                 onKeyDown={(e) => {
                                                                     if (e.key === "Enter" || e.key === "Escape") (e.currentTarget as HTMLInputElement).blur();

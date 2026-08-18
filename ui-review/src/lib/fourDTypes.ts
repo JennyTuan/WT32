@@ -44,6 +44,24 @@ export type PhaseSelections = Record<string, number>; // key: `${bedIdx}-${phase
 /** 重扫区域选择：每个冲突床位选哪套数据 */
 export type RescanChoices = Record<number, "first" | "rescan">; // key: bedIdx
 
+export interface FourDWaveformControlPoint {
+  id: number;
+  kind: "peak" | "valley";
+  t: number;
+  value: number;
+}
+
+export interface FourDBedDataSelection {
+  candidateId: string;
+  waveformPoints: FourDWaveformControlPoint[];
+  disabledCycleIds: number[];
+}
+
+export interface FourDDataReview {
+  bedSelections: Record<number, FourDBedDataSelection>;
+  phaseMatrix: BedPhaseCell[][];
+}
+
 /** 贯穿整个后处理流程的完整状态（navigate state） */
 export interface FourDPostScanState {
   /** 持久化结果所属的扫描会话；缺失时不得作为已关联结果进入查看器。 */
@@ -53,12 +71,13 @@ export interface FourDPostScanState {
   /** 后端乐观锁版本；用于刷新恢复和避免旧页面覆盖新选择。 */
   resultVersion?: number;
   /** 鏈嶅姟绔凡鎻愪氦鐨勫悗澶勭悊闃舵锛岀敤浜庡埛鏂版仮澶嶅拰闃叉闃舵鍥為€€銆?*/
-  workflowStage?: "acquired" | "rescan_selected" | "phase_selected" | "ready";
+  workflowStage?: "acquired" | "data_reviewed" | "rescan_selected" | "phase_selected" | "ready";
   /** 鎵弿缁撴灉鏄惧紡缁戝畾鐨勬ā鎷熷奖鍍忔竻鍗曪紱涓嶅緱杩愯鏃舵帹鏂叾浠栨暟鎹泦銆?*/
   imageSourceId?: "fourd-engineer";
   imageSourceVersion?: 1;
   sourceAttemptId?: number;
   scanResult: FourDScanResult;
+  dataReview?: FourDDataReview;
   /** 相位筛选完成后填充 */
   phaseSelections?: PhaseSelections;
   /** 重扫选择完成后填充 */

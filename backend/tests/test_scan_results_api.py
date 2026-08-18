@@ -313,6 +313,7 @@ class ScanResultsApiTests(unittest.TestCase):
                 "rescan_occurred": with_rescan,
                 "rescan_bed_range": [0, 0] if with_rescan else None,
             },
+            "data_review": None,
             "rescan_choices": None,
             "phase_selections": None,
         }
@@ -370,10 +371,48 @@ class ScanResultsApiTests(unittest.TestCase):
             workflow_stage="phase_selected",
             with_rescan=with_rescan,
         )
+        payload["data_review"] = self._data_review(payload["scan_result"])
         payload["phase_selections"] = {"0-1": 1}
         if with_rescan:
             payload["rescan_choices"] = {"0": rescan_choice}
         return payload
+
+    def _data_review(self, scan_result: dict) -> dict:
+        return {
+            "bed_selections": {
+                str(bed_index): {
+                    "candidate_id": f"reference-{bed_index}",
+                    "waveform_points": [
+                        {"id": 1, "kind": "valley", "t": 0.05, "value": 20},
+                        {"id": 2, "kind": "peak", "t": 0.30, "value": 80},
+                        {"id": 3, "kind": "valley", "t": 0.55, "value": 20},
+                        {"id": 4, "kind": "peak", "t": 0.80, "value": 80},
+                    ],
+                    "disabled_cycle_ids": [],
+                }
+                for bed_index in range(scan_result["bed_count"])
+            },
+            "phase_matrix": scan_result["phase_matrix"],
+        }
+
+    def _advance_data_review(
+        self,
+        scan_session_id: int,
+        target_series_id: int,
+        expected_version: int,
+        *,
+        with_rescan: bool = False,
+    ) -> dict:
+        payload = self._payload(
+            target_series_id=target_series_id,
+            expected_version=expected_version,
+            workflow_stage="data_reviewed",
+            with_rescan=with_rescan,
+        )
+        payload["data_review"] = self._data_review(payload["scan_result"])
+        response = self._put(scan_session_id, payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
 
     def _finalize(
         self,
@@ -513,18 +552,27 @@ class ScanResultsApiTests(unittest.TestCase):
         finally:
             db.close()
 
-    def test_no_rescan_result_can_advance_directly_to_phase_selected(self) -> None:
+    def test_data_review_is_required_before_phase_selection(self) -> None:
         self._create_result()
-        updated = self._put(
+        skipped = self._put(
             self.active_session_id,
             self._phase_selected_payload(
                 target_series_id=self.target_series_id,
                 expected_version=1,
             ),
         )
+        self.assertEqual(skipped.status_code, 409, skipped.text)
+        reviewed = self._advance_data_review(self.active_session_id, self.target_series_id, 1)
+        updated = self._put(
+            self.active_session_id,
+            self._phase_selected_payload(
+                target_series_id=self.target_series_id,
+                expected_version=reviewed["version"],
+            ),
+        )
         self.assertEqual(updated.status_code, 200, updated.text)
         self.assertEqual(updated.json()["workflow_stage"], "phase_selected")
-        self.assertEqual(updated.json()["version"], 2)
+        self.assertEqual(updated.json()["version"], 3)
 
     def test_rescan_selection_can_be_edited_before_phase_selection(self) -> None:
         self._create_result(with_rescan=True)
@@ -534,6 +582,7 @@ class ScanResultsApiTests(unittest.TestCase):
             workflow_stage="rescan_selected",
             with_rescan=True,
         )
+        first["data_review"] = self._data_review(first["scan_result"])
         first["rescan_choices"] = {"0": "first"}
         first_update = self._put(self.active_session_id, first)
         self.assertEqual(first_update.status_code, 200, first_update.text)
@@ -590,17 +639,18 @@ class ScanResultsApiTests(unittest.TestCase):
         skipped = self._put(session_id, skip_rescan)
         self.assertEqual(skipped.status_code, 409, skipped.text)
 
+        reviewed = self._advance_data_review(self.active_session_id, self.target_series_id, 1)
         selected = self._put(
             self.active_session_id,
             self._phase_selected_payload(
                 target_series_id=self.target_series_id,
-                expected_version=1,
+                expected_version=reviewed["version"],
             ),
         )
         self.assertEqual(selected.status_code, 200, selected.text)
         edited_selection_payload = self._phase_selected_payload(
             target_series_id=self.target_series_id,
-            expected_version=2,
+            expected_version=selected.json()["version"],
         )
         edited_selection_payload["phase_selections"] = {"0-1": 0}
         edited_selection = self._put(
@@ -608,7 +658,7 @@ class ScanResultsApiTests(unittest.TestCase):
             edited_selection_payload,
         )
         self.assertEqual(edited_selection.status_code, 200, edited_selection.text)
-        self.assertEqual(edited_selection.json()["version"], 3)
+        self.assertEqual(edited_selection.json()["version"], 4)
         self.assertEqual(edited_selection.json()["phase_selections"], {"0-1": 0})
 
     def test_stale_version_is_rejected_without_mutating_state(self) -> None:
@@ -667,11 +717,12 @@ class ScanResultsApiTests(unittest.TestCase):
 
     def test_finalize_atomically_closes_result_target_session_and_attempt(self) -> None:
         self._create_result()
+        reviewed = self._advance_data_review(self.active_session_id, self.target_series_id, 1)
         phase_selected = self._put(
             self.active_session_id,
             self._phase_selected_payload(
                 target_series_id=self.target_series_id,
-                expected_version=1,
+                expected_version=reviewed["version"],
             ),
         )
         self.assertEqual(phase_selected.status_code, 200, phase_selected.text)
@@ -679,13 +730,13 @@ class ScanResultsApiTests(unittest.TestCase):
         finalized = self._finalize(
             self.active_session_id,
             self.target_series_id,
-            expected_version=2,
+            expected_version=phase_selected.json()["version"],
         )
         self.assertEqual(finalized.status_code, 200, finalized.text)
         body = finalized.json()
         self.assertFalse(body["replayed"])
         self.assertEqual(body["result"]["workflow_stage"], "ready")
-        self.assertEqual(body["result"]["version"], 3)
+        self.assertEqual(body["result"]["version"], 4)
         self.assertEqual(body["scan_session"]["status"], "completed")
         target = next(
             series
@@ -745,18 +796,19 @@ class ScanResultsApiTests(unittest.TestCase):
             scan_session_id=self.incomplete_session_id,
             target_series_id=self.incomplete_target_id,
         )
+        reviewed = self._advance_data_review(self.incomplete_session_id, self.incomplete_target_id, 1)
         selected = self._put(
             self.incomplete_session_id,
             self._phase_selected_payload(
                 target_series_id=self.incomplete_target_id,
-                expected_version=1,
+                expected_version=reviewed["version"],
             ),
         )
         self.assertEqual(selected.status_code, 200, selected.text)
         finalized = self._finalize(
             self.incomplete_session_id,
             self.incomplete_target_id,
-            expected_version=2,
+            expected_version=selected.json()["version"],
         )
         self.assertEqual(finalized.status_code, 200, finalized.text)
 
@@ -788,11 +840,12 @@ class ScanResultsApiTests(unittest.TestCase):
             scan_session_id=self.incomplete_session_id,
             target_series_id=self.incomplete_target_id,
         )
+        reviewed = self._advance_data_review(self.incomplete_session_id, self.incomplete_target_id, 1)
         phase_selected = self._put(
             self.incomplete_session_id,
             self._phase_selected_payload(
                 target_series_id=self.incomplete_target_id,
-                expected_version=1,
+                expected_version=reviewed["version"],
             ),
         )
         self.assertEqual(phase_selected.status_code, 200, phase_selected.text)
@@ -800,7 +853,7 @@ class ScanResultsApiTests(unittest.TestCase):
         blocked = self._finalize(
             self.incomplete_session_id,
             self.incomplete_target_id,
-            expected_version=2,
+            expected_version=phase_selected.json()["version"],
         )
         self.assertEqual(blocked.status_code, 409, blocked.text)
 
@@ -825,7 +878,7 @@ class ScanResultsApiTests(unittest.TestCase):
                 .one()
             )
             self.assertEqual(result.workflow_stage, "phase_selected")
-            self.assertEqual(result.version, 2)
+            self.assertEqual(result.version, 3)
             self.assertEqual(session.status, "in_progress")
             self.assertEqual(target.execution_status, "running")
             self.assertIsNone(attempt.ended_at)
@@ -836,11 +889,12 @@ class ScanResultsApiTests(unittest.TestCase):
 
     def test_finalize_rejects_stale_version_without_partial_commit(self) -> None:
         self._create_result()
+        reviewed = self._advance_data_review(self.active_session_id, self.target_series_id, 1)
         selected = self._put(
             self.active_session_id,
             self._phase_selected_payload(
                 target_series_id=self.target_series_id,
-                expected_version=1,
+                expected_version=reviewed["version"],
             ),
         )
         self.assertEqual(selected.status_code, 200, selected.text)
@@ -865,34 +919,35 @@ class ScanResultsApiTests(unittest.TestCase):
 
     def test_completed_finalize_replay_is_idempotent_after_lost_response(self) -> None:
         self._create_result()
+        reviewed = self._advance_data_review(self.active_session_id, self.target_series_id, 1)
         selected = self._put(
             self.active_session_id,
             self._phase_selected_payload(
                 target_series_id=self.target_series_id,
-                expected_version=1,
+                expected_version=reviewed["version"],
             ),
         )
         self.assertEqual(selected.status_code, 200, selected.text)
         first = self._finalize(
             self.active_session_id,
             self.target_series_id,
-            expected_version=2,
+            expected_version=selected.json()["version"],
         )
         self.assertEqual(first.status_code, 200, first.text)
 
         replay = self._finalize(
             self.active_session_id,
             self.target_series_id,
-            expected_version=2,
+            expected_version=selected.json()["version"],
         )
         self.assertEqual(replay.status_code, 200, replay.text)
         self.assertTrue(replay.json()["replayed"])
-        self.assertEqual(replay.json()["result"]["version"], 3)
+        self.assertEqual(replay.json()["result"]["version"], 4)
 
         wrong_patient = self._finalize(
             self.active_session_id,
             self.target_series_id,
-            expected_version=2,
+            expected_version=selected.json()["version"],
             patient_id=self.other_patient_id,
         )
         self.assertEqual(wrong_patient.status_code, 409, wrong_patient.text)

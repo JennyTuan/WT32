@@ -22,6 +22,8 @@ export type ApiScanSessionTopogramParam = {
     tube_angle: number;
     fov: number;
     collimator?: string | null;
+    focus_size?: "small" | "large";
+    bowtie_type?: "small" | "medium" | "large";
     scan_direction?: string | null;
     dom?: string | null;
     ctdi_vol?: number | null;
@@ -47,6 +49,8 @@ export type ApiScanSessionHelicalParam = {
     scan_length: number;
     fov: number;
     collimator?: string | null;
+    focus_size?: "small" | "large";
+    bowtie_type?: "small" | "medium" | "large";
     scan_direction?: string | null;
     dom?: string | null;
     ctdi_vol?: number | null;
@@ -66,6 +70,8 @@ export type ApiScanSessionAxialParam = {
     scan_length: number;
     fov: number;
     collimator?: string | null;
+    focus_size?: "small" | "large";
+    bowtie_type?: "small" | "medium" | "large";
     scan_direction?: string | null;
     dom?: string | null;
     ctdi_vol?: number | null;

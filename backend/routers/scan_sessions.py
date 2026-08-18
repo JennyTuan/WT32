@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from .. import models, schemas
 from ..database import get_db
 from ..demo_dicom_registry import source_id_for_series
+from ..scan_protocol import validate_scan_plan
 from . import logs as logs_module
 
 router = APIRouter(prefix="/scan-sessions", tags=["scan-sessions"])
@@ -47,6 +48,8 @@ TOPOGRAM_PARAM_FIELDS = (
     "tube_angle",
     "fov",
     "collimator",
+    "focus_size",
+    "bowtie_type",
     "scan_direction",
     "dom",
     "ctdi_vol",
@@ -61,6 +64,8 @@ HELICAL_PARAM_FIELDS = (
     "scan_length",
     "fov",
     "collimator",
+    "focus_size",
+    "bowtie_type",
     "scan_direction",
     "dom",
     "ctdi_vol",
@@ -78,6 +83,8 @@ AXIAL_PARAM_FIELDS = (
     "scan_length",
     "fov",
     "collimator",
+    "focus_size",
+    "bowtie_type",
     "scan_direction",
     "dom",
     "ctdi_vol",
@@ -104,6 +111,28 @@ RECON_SERIES_FIELDS = (
 
 def _copy_fields(source, fields: tuple[str, ...]) -> dict:
     return {field: getattr(source, field) for field in fields}
+
+
+def _validate_scan_parameter_update(entity, updates: dict) -> None:
+    values = {
+        "kv": entity.kv,
+        "ma": entity.ma,
+        "focus_size": entity.focus_size,
+        "bowtie_type": entity.bowtie_type,
+        "collimator": entity.collimator,
+        **updates,
+    }
+    try:
+        validate_scan_plan(values)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+def _validate_scan_parameter_values(values: dict) -> None:
+    try:
+        validate_scan_plan({"focus_size": "small", "bowtie_type": "medium", **values})
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 def _clone_topogram_param(
@@ -268,7 +297,7 @@ def _clone_session_from_protocol(
     protocol: models.Protocol,
     payload: schemas.ScanSessionCreate,
     *,
-    dom_enabled_by_default: bool = True,
+    dom_enabled_by_default: bool = False,
 ) -> models.ScanSession:
     scan_session = models.ScanSession(
         patient_id=patient.id,
@@ -871,14 +900,17 @@ def _build_session_series_from_payload(payload: schemas.ScanSessionSeriesCreate)
 
     if payload.topogram_param:
         topogram = payload.topogram_param.model_dump(exclude_unset=True, exclude={"series_id"})
+        _validate_scan_parameter_values(topogram)
         session_series.topogram_param = models.ScanSessionTopogramParam(**topogram)
 
     if payload.helical_param:
         helical = payload.helical_param.model_dump(exclude_unset=True, exclude={"series_id"})
+        _validate_scan_parameter_values(helical)
         session_series.helical_param = models.ScanSessionHelicalParam(**helical)
 
     if payload.axial_param:
         axial = payload.axial_param.model_dump(exclude_unset=True, exclude={"series_id"})
+        _validate_scan_parameter_values(axial)
         session_series.axial_param = models.ScanSessionAxialParam(**axial)
 
     session_series.scan_planning = models.ScanSessionScanPlanning(
@@ -1026,7 +1058,7 @@ def create_scan_session(payload: schemas.ScanSessionCreate, db: Session = Depend
     _get_exam_for_patient_or_422(payload.exam_id, patient.id, db)
     protocol = _get_protocol_or_404(payload.protocol_id, db)
     dose_settings = db.query(models.DoseSettings).filter(models.DoseSettings.id == 1).first()
-    dom_enabled_by_default = dose_settings.aec_enabled if dose_settings else True
+    dom_enabled_by_default = dose_settings.aec_enabled if dose_settings else False
     scan_session = _clone_session_from_protocol(
         patient,
         protocol,
@@ -1496,6 +1528,7 @@ def update_scan_session_topogram_param(param_id: int, payload: schemas.ScanSessi
     if not entity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     updates = payload.model_dump(exclude_unset=True)
+    _validate_scan_parameter_update(entity, updates)
     if _parameter_values_changed(entity, updates):
         _invalidate_range_confirmation_for_parameter_change(series)
     _apply_updates(entity, updates)
@@ -1531,6 +1564,7 @@ def update_scan_session_helical_param(param_id: int, payload: schemas.ScanSessio
     if not entity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     updates = payload.model_dump(exclude_unset=True)
+    _validate_scan_parameter_update(entity, updates)
     if _parameter_values_changed(entity, updates):
         _invalidate_range_confirmation_for_parameter_change(series)
     _apply_updates(entity, updates)
@@ -1566,6 +1600,7 @@ def update_scan_session_axial_param(param_id: int, payload: schemas.ScanSessionA
     if not entity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     updates = payload.model_dump(exclude_unset=True)
+    _validate_scan_parameter_update(entity, updates)
     if _parameter_values_changed(entity, updates):
         _invalidate_range_confirmation_for_parameter_change(series)
     _apply_updates(entity, updates)

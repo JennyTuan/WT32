@@ -155,7 +155,8 @@ describe("authoritative 4D recovery", () => {
 describe("4D recovery destination", () => {
     it.each([
         ["acquired", true, "in_progress", "running", "rescan"],
-        ["acquired", false, "in_progress", "running", "image-load"],
+        ["acquired", false, "in_progress", "running", "rescan"],
+        ["data_reviewed", false, "in_progress", "running", "image-load"],
         ["rescan_selected", true, "in_progress", "running", "image-load"],
         ["phase_selected", true, "in_progress", "running", "phase-filter"],
         ["phase_selected", true, "in_progress", "image_ready", "phase-filter"],

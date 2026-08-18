@@ -109,6 +109,34 @@ class DeviceErrorDispatchTests(unittest.TestCase):
 
 
 class DeviceErrorWebSocketTests(unittest.TestCase):
+    def test_scan_start_protocol_message_validates_device_parameter_combination(self) -> None:
+        app = FastAPI()
+        app.include_router(scan_ws.router)
+        with TestClient(app).websocket_connect("/ws/scan-control") as websocket:
+            for _ in range(3):
+                websocket.receive_json()
+            websocket.send_json({
+                "Command": "0x0B",
+                "PlanScanStartInfo": {"SeriesCollection": [{"ScanParams": {
+                    "kV": 120, "mA": 240, "FocusSize": 0,
+                    "BowtieType": "medium", "CollimatorType": "32*0.6",
+                }}]},
+            })
+            self.assertEqual(websocket.receive_json(), {"Command": "0x0D", "ScanInfo": 0})
+            self.assertEqual(websocket.receive_json(), {"Command": "0x0D", "ScanInfo": 7})
+            self.assertEqual(websocket.receive_json(), {"Command": "0x0D", "ScanInfo": 8})
+            self.assertEqual(websocket.receive_json(), {"Command": "0x0D", "ScanInfo": 11})
+            self.assertEqual(websocket.receive_json()["Result"], 1)
+
+            websocket.send_json({
+                "Command": "0x0B",
+                "PlanScanStartInfo": {"SeriesCollection": [{"ScanParams": {
+                    "kV": 120, "mA": 250, "FocusSize": 0,
+                    "BowtieType": "medium", "CollimatorType": "32*0.6",
+                }}]},
+            })
+            self.assertEqual(websocket.receive_json()["Result"], 0)
+
     def test_simulated_error_can_be_acknowledged_and_cleared(self) -> None:
         app = FastAPI()
         app.include_router(scan_ws.router)

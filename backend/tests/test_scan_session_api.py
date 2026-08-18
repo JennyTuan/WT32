@@ -560,6 +560,7 @@ class ScanSessionApiTests(unittest.TestCase):
             f"/api/scan-sessions/helical/{session_helical_id}",
             json={
                 "ma": 260,
+                "focus_size": "large",
                 "scan_length": 250.0,
                 "ctdi_vol": 13.7,
                 "auto_ma": False,
@@ -568,6 +569,7 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(update_response.status_code, 200, update_response.text)
         updated_helical = update_response.json()
         self.assertEqual(updated_helical["ma"], 260)
+        self.assertEqual(updated_helical["focus_size"], "large")
         self.assertEqual(updated_helical["scan_length"], 250.0)
         self.assertEqual(updated_helical["ctdi_vol"], 13.7)
         self.assertFalse(updated_helical["auto_ma"])
@@ -576,6 +578,7 @@ class ScanSessionApiTests(unittest.TestCase):
         self.assertEqual(session_response.status_code, 200, session_response.text)
         session_helical = session_response.json()["series"][0]["helical_param"]
         self.assertEqual(session_helical["ma"], 260)
+        self.assertEqual(session_helical["focus_size"], "large")
         self.assertEqual(session_helical["scan_length"], 250.0)
         self.assertEqual(session_helical["ctdi_vol"], 13.7)
 
@@ -618,7 +621,7 @@ class ScanSessionApiTests(unittest.TestCase):
 
         changed = self.client.put(
             f"/api/scan-sessions/helical/{helical['helical_param']['id']}",
-            json={"ma": helical["helical_param"]["ma"] + 1},
+            json={"ma": helical["helical_param"]["ma"] + 10},
         )
         self.assertEqual(changed.status_code, 200, changed.text)
         refreshed = self.client.get(f"/api/scan-sessions/{scan_session['id']}").json()

@@ -41,7 +41,8 @@ import type { ApiScanSessionDetail } from "../lib/scanSession";
 import { clearSelectedExamWorkflowState } from "../lib/workflowNavigationState";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
-import { parseFovValue } from "../lib/fov";
+import { DEFAULT_DFOV_MM, parseDfovValue, parseFovValue } from "../lib/fov";
+import { clampMa, getMaOptions, type FocusSize } from "../lib/tubeCurrent";
 
 const PROTOCOL_SELECT_RESUME_KEY = "protocolSelectResume";
 const PROTOCOL_SELECT_SELECTED_IDS_KEY = "protocolSelectSelectedIds";
@@ -71,6 +72,7 @@ type RawSequence = {
     sequenceType: string;
     mode: string;
     scanParams: Record<string, string | number | boolean>;
+    focusSize?: FocusSize;
     reconstructionParams: RawRecon[];
 };
 
@@ -88,6 +90,7 @@ type ApiTopogramParam = {
     collimator?: string | null;
     scan_direction?: string | null;
     dom?: string | null;
+    focus_size?: FocusSize;
     ctdi_vol?: number | null;
     dlp?: number | null;
 };
@@ -103,6 +106,7 @@ type ApiHelicalParam = {
     collimator?: string | null;
     scan_direction?: string | null;
     dom?: string | null;
+    focus_size?: FocusSize;
     ctdi_vol?: number | null;
     dlp?: number | null;
     auto_ma?: boolean;
@@ -119,6 +123,7 @@ type ApiAxialParam = {
     collimator?: string | null;
     scan_direction?: string | null;
     dom?: string | null;
+    focus_size?: FocusSize;
     ctdi_vol?: number | null;
     dlp?: number | null;
     step_count?: number | null;
@@ -250,6 +255,7 @@ type UiSequence = {
     type: string;
     icon: ReactElement;
     scanParams: UiParam[];
+    focusSize: FocusSize;
     reconPlans: UiReconPlan[];
 };
 
@@ -444,6 +450,7 @@ const mapApiSeriesToRawSequence = (
         sequenceType: series.series_type === "topogram" ? "localizer" : "scan",
         mode: getModeLabel(series.series_type),
         scanParams: baseScanParams,
+        focusSize: series.topogram_param?.focus_size ?? series.helical_param?.focus_size ?? series.axial_param?.focus_size ?? "small",
         reconstructionParams: (series.recon_series || []).map((recon) => ({
             id: String(recon.id),
             name: recon.recon_name,
@@ -835,13 +842,14 @@ const toUiPlan = (entry: RawProtocolCase, options?: { sourceSessionId?: number; 
                 label: scanParamLabelMap[k] || k.toUpperCase(),
                 value: formatValue(k, seq.scanParams[k]),
                 options: k === "mA"
-                    ? ["50", "100", "150", "200", "215"]
+                    ? getMaOptions(String(seq.scanParams.kV ?? 120), seq.focusSize)
                     : k === "kV"
                         ? ["80", "100", "120", "140"]
                         : k === "angle"
                             ? TUBE_ANGLE_PARAM_OPTIONS
                             : undefined,
             })),
+        focusSize: seq.focusSize ?? "small",
         reconPlans: (seq.reconstructionParams || []).map((rp: RawRecon) => ({
             sourceReconId: Number.isFinite(Number(rp.id)) ? Number(rp.id) : undefined,
             name: rp.name,
@@ -1636,6 +1644,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
         type: "",
         mode: "",
         scanParams: [],
+        focusSize: "small" as const,
         reconPlans: [],
     };
     const activePlanId = activePlan?.id;
@@ -1739,8 +1748,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             if (sessionSeries.topogram_param) {
                 const topo = sessionSeries.topogram_param;
                 const patch: Record<string, string | number> = {};
-                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? topo.ma;
-                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? topo.kv;
+                if (label === "MA") patch.ma = clampMa(parseEditableNumber(rawValue) ?? topo.ma, topo.kv, topo.focus_size);
+                if (label === "KV") {
+                    patch.kv = parseEditableNumber(rawValue) ?? topo.kv;
+                    patch.ma = clampMa(topo.ma, patch.kv, topo.focus_size);
+                }
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? topo.scan_length;
                 if (label === "ANG") patch.tube_angle = parseEditableNumber(rawValue) ?? topo.tube_angle;
                 if (label === "FOV") patch.fov = parseFovValue(rawValue, topo.fov);
@@ -1755,8 +1767,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             if (sessionSeries.helical_param) {
                 const helical = sessionSeries.helical_param;
                 const patch: Record<string, string | number> = {};
-                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? helical.ma;
-                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? helical.kv;
+                if (label === "MA") patch.ma = clampMa(parseEditableNumber(rawValue) ?? helical.ma, helical.kv, helical.focus_size);
+                if (label === "KV") {
+                    patch.kv = parseEditableNumber(rawValue) ?? helical.kv;
+                    patch.ma = clampMa(helical.ma, patch.kv, helical.focus_size);
+                }
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? helical.scan_length;
                 if (label === "FOV") patch.fov = parseFovValue(rawValue, helical.fov);
                 if (label === "扫描方向") patch.scan_direction = rawValue;
@@ -1788,8 +1803,11 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             if (sessionSeries.axial_param) {
                 const axial = sessionSeries.axial_param;
                 const patch: Record<string, string | number> = {};
-                if (label === "MA") patch.ma = parseEditableNumber(rawValue) ?? axial.ma;
-                if (label === "KV") patch.kv = parseEditableNumber(rawValue) ?? axial.kv;
+                if (label === "MA") patch.ma = clampMa(parseEditableNumber(rawValue) ?? axial.ma, axial.kv, axial.focus_size);
+                if (label === "KV") {
+                    patch.kv = parseEditableNumber(rawValue) ?? axial.kv;
+                    patch.ma = clampMa(axial.ma, patch.kv, axial.focus_size);
+                }
                 if (label === "LEN") patch.scan_length = parseEditableNumber(rawValue) ?? axial.scan_length;
                 if (label === "FOV") patch.fov = parseFovValue(rawValue, axial.fov);
                 if (label === "扫描方向") patch.scan_direction = rawValue;
@@ -1855,7 +1873,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
             if (label === "WC") patch.window_level = parseEditableNumber(rawValue) ?? activeSessionRecon.window_level;
             if (label === "WW") patch.window_width = parseEditableNumber(rawValue) ?? activeSessionRecon.window_width;
             if (label === "MAT") patch.matrix = parseEditableNumber(rawValue) ?? activeSessionRecon.matrix;
-            if (label === "FOV") patch.recon_fov = parseFovValue(rawValue, activeSessionRecon.recon_fov ?? 250);
+            if (label === "FOV") patch.recon_fov = parseDfovValue(rawValue, activeSessionRecon.recon_fov ?? DEFAULT_DFOV_MM);
 
             if (Object.keys(patch).length > 0) {
                 await updateSelectedScanSessionReconSeries(activeSessionRecon.id, patch);

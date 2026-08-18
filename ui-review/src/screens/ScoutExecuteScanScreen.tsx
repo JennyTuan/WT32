@@ -63,16 +63,6 @@ const SCOUT_SERIES = {
     fallbackWindowWidth: 350,
     fallbackWindowLevel: 45,
 };
-const FOUR_D_SCOUT_SERIES = {
-    basePath: "/daae3df7f522b56724aed7e3e544c0fe/series-000002",
-    count: 1,
-    firstImageNumber: 2,
-    fileNamePrefix: "image-",
-    fileNamePadding: 6,
-    directImage: true,
-    fallbackWindowWidth: 500,
-    fallbackWindowLevel: 50,
-};
 const BRAIN_HELICAL_SCOUT_EXECUTE_SERIES = {
     basePath: "/dicom-head-stroke-plain/scout",
     count: 1,
@@ -739,7 +729,12 @@ export default function ScoutExecuteScanScreen() {
         () => selectScoutExecutionSeries(scanSession, isHeadDualScoutFlow),
         [isHeadDualScoutFlow, scanSession],
     );
-    const referenceScoutSourceId = resolveReferenceImageSourceId(scanSession?.body_part, "topogram");
+    // 4D reconstruction uses its own three-bed, ten-phase data manifest after
+    // acquisition. Its pre-scan localizer remains the curated chest topogram.
+    // Do not fall back to the removed legacy 4D scout directory.
+    const referenceScoutSourceId = isFourDScoutWorkflow
+        ? "chest-topogram-demo" as const
+        : resolveReferenceImageSourceId(scanSession?.body_part, "topogram");
     const referenceScoutSeries = useMemo(
         () => referenceScoutManifest ? buildReferenceScoutSeries(referenceScoutManifest) : null,
         [referenceScoutManifest],
@@ -760,8 +755,6 @@ export default function ScoutExecuteScanScreen() {
         ? null
         : referenceScoutSourceId
             ? referenceScoutSeries
-        : isFourDScoutWorkflow
-        ? FOUR_D_SCOUT_SERIES
         : isBrainHelicalScoutWorkflow
             ? BRAIN_HELICAL_SCOUT_EXECUTE_SERIES
             : isLimbsHelicalScoutWorkflow
@@ -773,8 +766,6 @@ export default function ScoutExecuteScanScreen() {
         ? null
         : referenceScoutSourceId
             ? referenceScoutSourceId
-        : isFourDScoutWorkflow
-        ? "fourd-scout-demo"
         : isBrainHelicalScoutWorkflow
             ? "head-stroke-topogram"
             : isLimbsHelicalScoutWorkflow
@@ -796,6 +787,15 @@ export default function ScoutExecuteScanScreen() {
         scoutExecutionSeries.length,
         isHeadDualScoutFlow ? 2 : 1,
     );
+    const scoutControlDescription = scoutTriggerReady
+        ? t("scanFlow.physicalGuide.twoStepDescription")
+        : sessionAuthorityState === "loading"
+            ? "正在读取本次扫描会话与定位像数据，请稍候。"
+            : !scanSession
+                ? "未读取到本次扫描会话，请返回扫描计划重新进入。"
+                : scoutManifestError
+                    ? `定位像数据加载失败：${scoutManifestError}`
+                    : "定位像数据尚在加载，加载完成后可进行使能与放射。";
     const currentProtocolName = sessionAuthorityState === "session"
         ? scanSession?.name ?? t("scanFlow.scout")
         : workflowPlans[0]?.title ?? scanSession?.name ?? t("scanFlow.scout");
@@ -828,6 +828,7 @@ export default function ScoutExecuteScanScreen() {
             if (cancelled) return;
             if (manifest) {
                 setReferenceScoutManifest(manifest);
+                setScoutManifestError(null);
                 return;
             }
             setScoutManifestError("本地模拟定位像不可用，请检查数据目录");
@@ -1423,7 +1424,7 @@ export default function ScoutExecuteScanScreen() {
             <div className={`absolute bottom-[84px] right-0 top-[88px] z-40 flex items-stretch transition-all duration-500 ${guideVisible ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 pointer-events-none"}`}>
                 <PhysicalTriggerGuide
                     title={t("scanFlow.physicalGuide.title")}
-                    description={t("scanFlow.physicalGuide.twoStepDescription")}
+                    description={scoutControlDescription}
                     guideTitle={guideTitle}
                     triggerLabel={t("scanFlow.physicalGuide.triggerLabel")}
                     emergencyLabel={t("scanFlow.physicalGuide.referenceEmergency")}
@@ -1432,6 +1433,7 @@ export default function ScoutExecuteScanScreen() {
                     onHoldStart={startHold}
                     onHoldEnd={stopHold}
                     buttonActive={stage === "positioning" || stage === "enabled" || stage === "exposing"}
+                    disabled={!scoutTriggerReady}
                 />
             </div>
 
@@ -1451,7 +1453,7 @@ export default function ScoutExecuteScanScreen() {
                 scanData={patientConfirmScanData}
                 physicalGuide={{
                     title: t("scanFlow.physicalGuide.title"),
-                    description: t("scanFlow.physicalGuide.twoStepDescription"),
+                    description: scoutControlDescription,
                     guideTitle,
                     triggerLabel: t("scanFlow.physicalGuide.triggerLabel"),
                     emergencyLabel: t("scanFlow.physicalGuide.referenceEmergency"),
@@ -1460,6 +1462,7 @@ export default function ScoutExecuteScanScreen() {
                     onHoldStart: startHold,
                     onHoldEnd: stopHold,
                     buttonActive: stage === "positioning" || stage === "enabled" || stage === "exposing",
+                    disabled: !scoutTriggerReady,
                 }}
             />
             <ScanTriggerFailureDialog

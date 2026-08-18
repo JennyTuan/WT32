@@ -17,6 +17,11 @@ import { buildScanSessionExecutionContext, isTerminalScanSessionStatus, resolveT
 import { ScanParamWriteCoordinator } from "../lib/scanParamWriteCoordinator";
 import { getLimbsDicomSeries, loadLimbsDicomDemoManifest, type LimbsDicomDemoManifest } from "../lib/limbsDicomDemo";
 import { getHeadDualScoutSeries, loadHeadDualScoutManifest, type HeadDualScoutManifest } from "../lib/headDualScoutDemo";
+import {
+    isReferenceDicomSourceId,
+    loadReferenceDicomManifest,
+    type ReferenceDicomManifest,
+} from "../lib/referenceDicomDemo";
 
 // Optional cornerstone-backed loading source. When provided, TomographicScoutViewport
 // loads via cornerstone (so JPEG Lossless / other compressed transfer syntaxes work).
@@ -956,10 +961,12 @@ const SequenceScanConfirmScreen = () => {
     const [sessionResolved, setSessionResolved] = useState(false);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
+    const [referenceTopogramManifest, setReferenceTopogramManifest] = useState<ReferenceDicomManifest | null>(null);
     const [scoutSourceError, setScoutSourceError] = useState<string | null>(null);
     const axialParamId = axialParam?.id ?? null;
     const [paramWrites] = useState(() => new ScanParamWriteCoordinator());
     const topogramImageSource = resolveTopogramImageSource(topogramSeries);
+    const isReferenceTopogram = isReferenceDicomSourceId(topogramImageSource);
 
     useEffect(() => () => paramWrites.dispose(), [paramWrites]);
 
@@ -967,8 +974,15 @@ const SequenceScanConfirmScreen = () => {
         let cancelled = false;
         setScoutSourceError(null);
         setScoutLoadState("loading");
+        if (!isReferenceTopogram) setReferenceTopogramManifest(null);
 
-        if (topogramImageSource === "limbs-helical-demo") {
+        if (isReferenceTopogram && topogramImageSource) {
+            loadReferenceDicomManifest(topogramImageSource)
+                .then((manifest) => {
+                    if (manifest && !cancelled) setReferenceTopogramManifest(manifest);
+                    if (!manifest && !cancelled) setScoutSourceError("本地模拟定位像不可用，请检查数据目录");
+                });
+        } else if (topogramImageSource === "limbs-helical-demo") {
             loadLimbsDicomDemoManifest()
                 .then((manifest) => {
                     if (!cancelled) setLimbsDicomManifest(manifest);
@@ -987,9 +1001,18 @@ const SequenceScanConfirmScreen = () => {
         }
 
         return () => { cancelled = true; };
-    }, [topogramImageSource]);
+    }, [isReferenceTopogram, topogramImageSource]);
 
     const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(() => {
+        if (referenceTopogramManifest) {
+            const url = referenceTopogramManifest.urls[0];
+            return url ? {
+                kind: "topogram",
+                url,
+                fallbackWindowWidth: referenceTopogramManifest.windowWidth ?? undefined,
+                fallbackWindowLevel: referenceTopogramManifest.windowCenter ?? undefined,
+            } : undefined;
+        }
         if (topogramImageSource === "head-stroke-topogram") return HEAD_STROKE_DEMO_SCOUT_OVERRIDE;
         if (topogramImageSource === "limbs-helical-demo") {
             const topogram = getLimbsDicomSeries(limbsDicomManifest, "topogram");
@@ -1013,9 +1036,11 @@ const SequenceScanConfirmScreen = () => {
         // qin-lung-topogram is the only registered source that intentionally
         // uses TomographicScoutViewport's built-in QIN axial-stack projection.
         return undefined;
-    }, [headDualScoutManifest, limbsDicomManifest, topogramImageSource]);
+    }, [headDualScoutManifest, limbsDicomManifest, referenceTopogramManifest, topogramImageSource]);
 
-    const scoutManifestReady = topogramImageSource === "limbs-helical-demo"
+    const scoutManifestReady = isReferenceTopogram
+        ? Boolean(referenceTopogramManifest?.urls[0])
+        : topogramImageSource === "limbs-helical-demo"
         ? Boolean(getLimbsDicomSeries(limbsDicomManifest, "topogram")?.urls[0])
         : topogramImageSource === "head-dual-scout-demo"
             ? Boolean(

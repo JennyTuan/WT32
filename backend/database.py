@@ -852,7 +852,7 @@ def _csv_acquisition_key(row: dict[str, str]) -> tuple[str, ...]:
 
 def _csv_recon_seed(row: dict[str, str]) -> dict:
     slice_thickness = _csv_float(row, "Slice thickness (mm)") or 1.0
-    recon_fov = _csv_float(row, "Recon FOV (mm)") or _csv_float(row, "Surview FOV (mm)") or 250.0
+    recon_fov = _csv_float(row, "Recon FOV (mm)") or _csv_float(row, "Surview FOV (mm)") or 500.0
     return {
         "name": _csv_value(row, "Density") or "Recon",
         "kernel": _csv_value(row, "Filter") or "S2",
@@ -928,7 +928,7 @@ def _load_company_protocol_seeds() -> list[dict]:
         slice_thickness = _csv_float(row, "Slice thickness (mm)") or 1.0
         image_increment = _csv_float(row, "Image increment (mm)")
         scan_length = _csv_float(row, "length （mm）") or 0.0
-        recon_fov = _csv_float(row, "Recon FOV (mm)") or _csv_float(row, "Surview FOV (mm)") or 250.0
+        recon_fov = _csv_float(row, "Recon FOV (mm)") or _csv_float(row, "Surview FOV (mm)") or 500.0
         source_indexes = ",".join(_csv_value(item, "_source_index") for item in group_rows)
         csv_part = _csv_value(row, "Part")
 
@@ -1729,7 +1729,7 @@ def _seed_dose_defaults(db) -> None:
 
     # Seed DoseSettings singleton if missing
     if db.query(models.DoseSettings).filter(models.DoseSettings.id == 1).first() is None:
-        db.add(models.DoseSettings(id=1))
+        db.add(models.DoseSettings(id=1, aec_enabled=False))
 
     # Seed or refresh built-in DRL entries (idempotent per body_part × age_group).
     existing_entries = {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { API_BASE_URL } from "./apiClient";
 
 export type RespiraScopeStatus = "idle" | "connecting" | "waiting" | "receiving" | "unavailable" | "error";
 
@@ -36,22 +37,15 @@ const finiteNumber = (value: unknown): number | null => {
     return Number.isFinite(numberValue) ? numberValue : null;
 };
 
-const isLoopbackHost = (host: string) => {
-    const normalized = host.toLowerCase();
-    return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
-};
-
 const normalizeApiBase = (value: string) => value.replace(/\/$/, "");
 
 export const resolveRespiraScopeApiBase = () => {
     const configured = import.meta.env.VITE_RESPIRASCOPE_API_BASE_URL as string | undefined;
     if (configured) return normalizeApiBase(configured);
 
-    if (typeof window === "undefined") return "http://127.0.0.1:8000";
-
-    const host = window.location.hostname || "127.0.0.1";
-    if (!isLoopbackHost(host)) return `http://${host}:8000`;
-    return "http://127.0.0.1:8000";
+    if (API_BASE_URL) return API_BASE_URL;
+    // 默认走当前站点：开发环境由 Vite 代理到后端，部署时则使用同源后端。
+    return typeof window === "undefined" ? "" : window.location.origin;
 };
 
 const socketUrlFromApiBase = (apiBase: string) => {

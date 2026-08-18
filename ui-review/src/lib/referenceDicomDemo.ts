@@ -47,7 +47,15 @@ export const loadReferenceDicomManifest = (
     if (existing) return existing;
     const request = apiFetch(`/api/demo-dicom/reference/${sourceId}`)
         .then((response) => response.ok ? response.json() as Promise<ReferenceDicomManifest> : null)
-        .catch(() => null);
+        .then((manifest) => {
+            if (manifest) return manifest;
+            manifestCache.delete(sourceId);
+            return null;
+        })
+        .catch(() => {
+            manifestCache.delete(sourceId);
+            return null;
+        });
     manifestCache.set(sourceId, request);
     return request;
 };

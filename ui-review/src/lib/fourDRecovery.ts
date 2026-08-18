@@ -124,7 +124,6 @@ export type FourDRecoveryState = {
 
 export const resolveFourDRecoveryDestination = ({
     workflowStage,
-    rescanOccurred,
     sessionStatus,
     targetStatus,
 }: FourDRecoveryState): FourDRecoveryDestination => {
@@ -143,8 +142,8 @@ export const resolveFourDRecoveryDestination = ({
     }
 
     if (targetStatus !== "running") return "blocked";
-    if (workflowStage === "rescan_selected") return "image-load";
-    if (workflowStage === "acquired") return rescanOccurred ? "rescan" : "image-load";
+    if (workflowStage === "rescan_selected" || workflowStage === "data_reviewed") return "image-load";
+    if (workflowStage === "acquired") return "rescan";
     return "blocked";
 };
 

@@ -32,6 +32,7 @@ import {
     matchesScanExecutionBinding,
     type ScanExecutionBinding,
 } from "../lib/scanSeriesPrerequisites";
+import { isReferenceDicomSourceId, loadReferenceDicomManifest } from "../lib/referenceDicomDemo";
 import { loadSelectedScanWorkflowPlans, type WorkflowSequenceType } from "../lib/scanWorkflowSession";
 import { FourDScoutViewport } from "./HelicalScanConfirmScreen";
 import { PatientConfirmationModal } from "./ScanConfirmScreen";
@@ -66,9 +67,8 @@ const FOURD_PARAMS = {
     acquisitionTime: "30 s",
     breathingMode: "free_breathing",
     triggerThreshold: "50%",
-    ctdiVol: "--",
-    dlp: "--",
 };
+
 
 type ScanStage = "idle" | "positioning" | "positioned" | "enabled" | "exposing" | "paused" | "completed";
 type PhysicalTriggerAction = "position" | "exposure";
@@ -132,6 +132,7 @@ export default function FourDDiagnosticConfirmScreen() {
     const selectedPatient = useMemo(() => loadSelectedPatient(), []);
     const workflowPlans = useMemo(() => loadSelectedScanWorkflowPlans(), []);
     const [executionBinding, setExecutionBinding] = useState<ScanExecutionBinding | null>(null);
+    const [referenceTopogramUrl, setReferenceTopogramUrl] = useState<string | null>(null);
     const [sessionValidationState, setSessionValidationState] = useState<"loading" | "ready" | "error">("loading");
     const [executionError, setExecutionError] = useState<string | null>(null);
     const [isStartingScan, setIsStartingScan] = useState(false);
@@ -420,11 +421,7 @@ export default function FourDDiagnosticConfirmScreen() {
             }
             const postScanState: FourDPostScanState = toFourDPostScanState(persistedResult);
 
-            if (postScanState.scanResult.rescanOccurred) {
-                navigate("/fourd-rescan-select", { state: postScanState });
-            } else {
-                navigate("/image-load", { state: postScanState });
-            }
+            navigate("/fourd-rescan-select", { state: postScanState });
         } catch (error) {
             postScanNavigationStartedRef.current = false;
             setExecutionError(error instanceof Error ? error.message : "4D 模拟结果持久化失败");
@@ -452,6 +449,27 @@ export default function FourDDiagnosticConfirmScreen() {
             fov: Math.round(width * 892.86),
         });
     }, []);
+
+    useEffect(() => {
+        if (!executionBinding?.requiredTopogramId) {
+            setReferenceTopogramUrl(null);
+            return;
+        }
+        let cancelled = false;
+        fetchSelectedScanSession({ preferCache: false })
+            .then(async (scanSession) => {
+                const topogram = scanSession?.series.find((series) => series.id === executionBinding.requiredTopogramId) ?? null;
+                if (!isReferenceDicomSourceId(topogram?.image_source_id)) return null;
+                return loadReferenceDicomManifest(topogram.image_source_id);
+            })
+            .then((manifest) => {
+                if (!cancelled) setReferenceTopogramUrl(manifest?.urls[0] ?? null);
+            })
+            .catch(() => {
+                if (!cancelled) setReferenceTopogramUrl(null);
+            });
+        return () => { cancelled = true; };
+    }, [executionBinding]);
 
     const breathingStability = useMemo(() => {
         const demoWarmupRemaining = Math.max(0, 10 - breathingDemoElapsedSec);
@@ -785,6 +803,10 @@ export default function FourDDiagnosticConfirmScreen() {
         },
     ];
 
+    // 当前演示 DICOM 未提供 CTDIvol/DLP 或设备剂量参考表，不能可靠估算 4D 剂量。
+    const estimatedCtdiVol = "未提供";
+    const estimatedDlp = "未提供";
+
     const sidebarParams = [
         { label: t("scanFlow.positioning.scanDirection"), value: FOURD_PARAMS.scanDirection, accent: false },
         { label: t("scanFlow.patientPosition"), value: FOURD_PARAMS.position, accent: false },
@@ -794,8 +816,8 @@ export default function FourDDiagnosticConfirmScreen() {
         { label: t("scanFlow.rotationTime"), value: FOURD_PARAMS.rotationTime, accent: true },
         { label: t("scanFlow.fourD.focus"), value: FOURD_PARAMS.focus, accent: true },
         { label: "FOV", value: dynamicParams.fov.toString(), accent: true },
-        { label: "CTDIvol", value: FOURD_PARAMS.ctdiVol, unit: "mGy", accent: false, dose: true },
-        { label: "DLP", value: FOURD_PARAMS.dlp, unit: "mGy·cm", accent: false, dose: true },
+        { label: "CTDIvol", value: estimatedCtdiVol, unit: "mGy", accent: false, dose: true },
+        { label: "DLP", value: estimatedDlp, unit: "mGy·cm", accent: false, dose: true },
     ];
 
     const currentBedDisplay = scanCompleted ? bedSegmentCount : scanStarted ? Math.max(1, bedProgress) : 0;
@@ -1026,6 +1048,7 @@ export default function FourDDiagnosticConfirmScreen() {
                         <div className="relative h-full">
                             <div className="absolute inset-0 overflow-hidden bg-black">
                                 <FourDScoutViewport
+                                    imageUrl={referenceTopogramUrl ?? undefined}
                                     onCropBoxChange={handleCropBoxChange}
                                     isScanning={scanStarted}
                                     revealY={scanProgress}
@@ -1261,8 +1284,8 @@ export default function FourDDiagnosticConfirmScreen() {
                     scanSequence: t("scanFlow.fourD.mode"),
                 }}
                 scanData={{
-                    ctdi: FOURD_PARAMS.ctdiVol,
-                    dlp: FOURD_PARAMS.dlp,
+                    ctdi: estimatedCtdiVol,
+                    dlp: estimatedDlp,
                     protocol: t("scanFlow.fourD.mode"),
                     sequence: t("scanFlow.fourD.mode"),
                 }}

@@ -2,6 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { viteCommonjs } from '@originjs/vite-plugin-commonjs'
 
+const devApiPort = process.env.VITE_DEV_API_PORT ?? '8000';
+const devApiTarget = `http://127.0.0.1:${devApiPort}`;
+const devWsTarget = `ws://127.0.0.1:${devApiPort}`;
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), viteCommonjs()],
@@ -14,27 +18,40 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: devApiTarget,
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://127.0.0.1:8000',
+        target: devWsTarget,
         ws: true,
       },
+      '/health': {
+        target: devApiTarget,
+        changeOrigin: true,
+      },
+      '/startReceive': {
+        target: devApiTarget,
+        changeOrigin: true,
+      },
+      '/socket.io/': {
+        target: devWsTarget,
+        ws: true,
+        changeOrigin: true,
+      },
       '/dicom/': {
-        target: 'http://127.0.0.1:8000',
+        target: devApiTarget,
         changeOrigin: true,
       },
       '/dicom-out': {
-        target: 'http://127.0.0.1:8000',
+        target: devApiTarget,
         changeOrigin: true,
       },
       '/dicom-head-stroke-plain': {
-        target: 'http://127.0.0.1:8000',
+        target: devApiTarget,
         changeOrigin: true,
       },
       '/dicom-lihvr': {
-        target: 'http://127.0.0.1:8000',
+        target: devApiTarget,
         changeOrigin: true,
       },
     },

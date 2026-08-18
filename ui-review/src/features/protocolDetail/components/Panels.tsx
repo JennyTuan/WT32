@@ -14,11 +14,25 @@ import {
 } from "../constants";
 import { FieldInput, FieldSelect, FieldSpinner, Divider } from "./SharedUI";
 import { useI18n } from "../../../lib/i18nContext";
-import { FOV_MAX_MM, FOV_MIN_MM } from "../../../lib/fov";
+import { DFOV_MAX_MM, DFOV_MIN_MM } from "../../../lib/fov";
+import { clampMa, getMaLimit, KV_OPTIONS } from "../../../lib/tubeCurrent";
 
 const TUBE_ANGLE_OPTIONS = ["0", "90", "180", "270"];
 const ROTATION_TIME_OPTIONS = ["0.75", "1", "2"];
-const FIXED_COLLIMATOR = "32*0.6";
+const FOCUS_OPTIONS = [
+    { value: "small", label: "小焦点" },
+    { value: "large", label: "大焦点" },
+];
+const maInput = (draft: SeriesDraft, onDraftChange: (patch: Partial<SeriesDraft>) => void) => (
+    <FieldInput
+        label={`MA (1–${getMaLimit(draft.kv, draft.focusSize)})`}
+        value={draft.ma}
+        required
+        min={1}
+        max={getMaLimit(draft.kv, draft.focusSize)}
+        onChange={(value) => onDraftChange({ ma: value })}
+    />
+);
 // 与协议模板 CSV 的 Filter 值域一致；STANDARD 用于新建重建序列的默认值。
 const RECON_KERNEL_OPTIONS = ["STANDARD", "Brain", "Bone2", "Lung2", "S2", "S3"];
 
@@ -121,13 +135,16 @@ export function ScoutParamsPanel({ draft, canEditMode, onModeChange, onDelete, o
                     <FieldInput label={t("protocolDetail.fieldName")} value={draft.seriesLabel} onChange={(value) => onDraftChange({ seriesLabel: value })} />
                     <FieldSelect label={t("protocolDetail.fieldMode")} value={getLocalizedSeriesTypeLabel("topogram", language)} options={modeOptions} onChange={canEditMode ? onModeChange : undefined} />
                     <Divider />
-                    <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
-                    <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
+                    <FieldSelect label="KV" value={draft.kv} options={KV_OPTIONS} required onChange={(value) => onDraftChange({ kv: value, ma: String(clampMa(draft.ma, value, draft.focusSize)) })} />
+                    {maInput(draft, onDraftChange)}
                     <FieldSelect label={t("protocolDetail.fieldRotationTime")} value="1" options={ROTATION_TIME_OPTIONS} required />
-                    <FieldInput label={t("protocolDetail.collimator")} value={FIXED_COLLIMATOR} disabled />
-                    <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
+                    <FieldSelect label="焦点大小" value={draft.focusSize} options={FOCUS_OPTIONS} required onChange={(value) => {
+                        const focusSize = value as "small" | "large";
+                        onDraftChange({ focusSize, ma: String(clampMa(draft.ma, draft.kv, focusSize)) });
+                    }} />
+                    <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator || "32*0.6"} disabled />
+                    <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} disabled />
                     <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={scanDirectionOptions} required onChange={(value) => onDraftChange({ scanDirection: value })} />
-                    <FieldInput label="FOV" value={draft.fov} required min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ fov: value })} />
                     <FieldInput label="DOM" value={draft.dom} placeholder={language === "en-US" ? "0 or 1" : "0 或 1"} onChange={(value) => onDraftChange({ dom: value })} />
                     <FieldSelect label={t("protocolDetail.fieldTubeAngle")} value={draft.tubeAngle} options={TUBE_ANGLE_OPTIONS} required onChange={(value) => onDraftChange({ tubeAngle: value })} />
                 </div>
@@ -168,13 +185,16 @@ export function HelicalParamsPanel({ series, draft, canEditMode, onModeChange, o
                     <FieldInput label={t("protocolDetail.fieldName")} value={draft.seriesLabel} onChange={(value) => onDraftChange({ seriesLabel: value })} />
                     <FieldSelect label={t("protocolDetail.fieldMode")} value={typeLabel} options={modeOptions} onChange={canEditMode ? onModeChange : undefined} />
                     <Divider />
-                    <FieldSelect label="KV" value={draft.kv} options={[draft.kv || "120", "100", "80"]} required onChange={(value) => onDraftChange({ kv: value })} />
-                    <FieldInput label="MA" value={draft.ma} required onChange={(value) => onDraftChange({ ma: value })} />
+                    <FieldSelect label="KV" value={draft.kv} options={KV_OPTIONS} required onChange={(value) => onDraftChange({ kv: value, ma: String(clampMa(draft.ma, value, draft.focusSize)) })} />
+                    {maInput(draft, onDraftChange)}
                     <FieldSelect label={t("protocolDetail.fieldRotationTime")} value={draft.rotationTime || "1"} options={ROTATION_TIME_OPTIONS} required onChange={(value) => onDraftChange({ rotationTime: value })} />
-                    <FieldInput label={t("protocolDetail.collimator")} value={FIXED_COLLIMATOR} disabled />
-                    <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} required onChange={(value) => onDraftChange({ scanLength: value })} />
+                    <FieldSelect label="焦点大小" value={draft.focusSize} options={FOCUS_OPTIONS} required onChange={(value) => {
+                        const focusSize = value as "small" | "large";
+                        onDraftChange({ focusSize, ma: String(clampMa(draft.ma, draft.kv, focusSize)) });
+                    }} />
+                    <FieldInput label={t("protocolDetail.collimator")} value={draft.collimator || "32*0.6"} disabled />
+                    <FieldInput label={t("protocolDetail.fieldScanLength")} value={draft.scanLength} disabled />
                     <FieldSelect label={t("protocolDetail.fieldScanDirection")} value={draft.scanDirection} options={scanDirectionOptions} required onChange={(value) => onDraftChange({ scanDirection: value })} />
-                    <FieldInput label="FOV" value={draft.fov} required min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ fov: value })} />
                     <FieldInput label="DOM" value={draft.dom} placeholder={language === "en-US" ? "0 or 1" : "0 或 1"} onChange={(value) => onDraftChange({ dom: value })} />
                     {series.series_type === "helical" && (
                         <FieldInput label="PITCH" value={draft.pitch} required onChange={(value) => onDraftChange({ pitch: value })} />
@@ -217,7 +237,7 @@ export function ReconParamsPanel({ series, draft, onDelete, onDraftChange }: {
                     <FieldSelect label={t("protocolDetail.fieldKernel")} value={draft.kernel} options={kernelOptions} onChange={(value) => onDraftChange({ kernel: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldSliceThickness")} value={draft.sliceThickness} onChange={(value) => onDraftChange({ sliceThickness: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldSliceIncrement")} value={draft.increment} onChange={(value) => onDraftChange({ increment: value })} />
-                    <FieldSpinner label={t("protocolDetail.reconFov")} value={draft.reconFov} min={FOV_MIN_MM} max={FOV_MAX_MM} onChange={(value) => onDraftChange({ reconFov: value })} />
+                    <FieldSpinner label={t("protocolDetail.reconFov")} value={draft.reconFov} min={DFOV_MIN_MM} max={DFOV_MAX_MM} onChange={(value) => onDraftChange({ reconFov: value })} />
                     <FieldSpinner label="MATRIX" value={draft.matrix} onChange={(value) => onDraftChange({ matrix: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldWindowLevel")} value={draft.windowLevel} onChange={(value) => onDraftChange({ windowLevel: value })} />
                     <FieldSpinner label={t("protocolDetail.fieldWindowWidth")} value={draft.windowWidth} onChange={(value) => onDraftChange({ windowWidth: value })} />

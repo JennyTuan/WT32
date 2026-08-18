@@ -138,6 +138,8 @@ class TopogramParam(Base):
     tube_angle = Column(Float, nullable=False, default=270.0)
     fov = Column(Float, nullable=False, default=500.0)
     collimator = Column(String(50), nullable=True)
+    focus_size = Column(String(10), nullable=False, default="small")
+    bowtie_type = Column(String(10), nullable=False, default="medium")
     scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
@@ -159,6 +161,8 @@ class HelicalParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     collimator = Column(String(50), nullable=True)
+    focus_size = Column(String(10), nullable=False, default="small")
+    bowtie_type = Column(String(10), nullable=False, default="medium")
     scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
@@ -183,6 +187,8 @@ class AxialParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     collimator = Column(String(50), nullable=True)
+    focus_size = Column(String(10), nullable=False, default="small")
+    bowtie_type = Column(String(10), nullable=False, default="medium")
     scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
@@ -572,6 +578,7 @@ class ScanSessionFourDResult(Base):
         index=True,
     )
     scan_result_json = Column(Text, nullable=False)
+    data_review_json = Column(Text, nullable=True)
     rescan_choices_json = Column(Text, nullable=True)
     phase_selections_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -683,6 +690,8 @@ class ScanSessionTopogramParam(Base):
     tube_angle = Column(Float, nullable=False, default=270.0)
     fov = Column(Float, nullable=False, default=500.0)
     collimator = Column(String(50), nullable=True)
+    focus_size = Column(String(10), nullable=False, default="small")
+    bowtie_type = Column(String(10), nullable=False, default="medium")
     scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
@@ -705,6 +714,8 @@ class ScanSessionHelicalParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     collimator = Column(String(50), nullable=True)
+    focus_size = Column(String(10), nullable=False, default="small")
+    bowtie_type = Column(String(10), nullable=False, default="medium")
     scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
@@ -730,6 +741,8 @@ class ScanSessionAxialParam(Base):
     scan_length = Column(Float, nullable=False)
     fov = Column(Float, nullable=False)
     collimator = Column(String(50), nullable=True)
+    focus_size = Column(String(10), nullable=False, default="small")
+    bowtie_type = Column(String(10), nullable=False, default="medium")
     scan_direction = Column(String(20), nullable=True, default="HEAD_TO_FOOT")
     dom = Column(String(20), nullable=True)
     ctdi_vol = Column(Float, nullable=True)
@@ -942,7 +955,7 @@ class DoseSettings(Base):
     threshold_action = Column(String(20), nullable=False, default="warn")  # log_only | warn | require_confirm
 
     # AEC (Auto Exposure Control) defaults
-    aec_enabled = Column(Boolean, nullable=False, default=True)
+    aec_enabled = Column(Boolean, nullable=False, default=False)
     aec_noise_level = Column(String(10), nullable=False, default="medium")  # low | medium | high
 
     # Compliance

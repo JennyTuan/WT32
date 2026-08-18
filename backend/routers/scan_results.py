@@ -154,8 +154,11 @@ def _assert_legal_update_transition(
     next_stage = payload.workflow_stage
 
     if current_stage == "acquired":
-        expected_stage = "rescan_selected" if rescan_occurred else "phase_selected"
-        allowed = next_stage == expected_stage
+        allowed = next_stage == "data_reviewed" or (
+            rescan_occurred and next_stage == "rescan_selected"
+        )
+    elif current_stage == "data_reviewed":
+        allowed = next_stage in {"data_reviewed", "phase_selected"}
     elif current_stage == "rescan_selected":
         allowed = rescan_occurred and next_stage in {
             "rescan_selected",
@@ -194,6 +197,7 @@ def _to_response(
             "image_source_version": result.image_source_version,
             "source_attempt_id": result.source_attempt_id,
             "scan_result": json.loads(result.scan_result_json),
+            "data_review": json.loads(result.data_review_json) if result.data_review_json else None,
             "rescan_choices": json.loads(result.rescan_choices_json) if result.rescan_choices_json else None,
             "phase_selections": json.loads(result.phase_selections_json) if result.phase_selections_json else None,
             "created_at": result.created_at,
@@ -273,6 +277,9 @@ def put_four_d_result(
         .one_or_none()
     )
     scan_result_json = _dump_json(payload.scan_result.model_dump(mode="json"))
+    data_review_json = _optional_json(
+        payload.data_review.model_dump(mode="json") if payload.data_review is not None else None
+    )
     rescan_choices_json = _optional_json(payload.rescan_choices)
     phase_selections_json = _optional_json(payload.phase_selections)
 
@@ -298,6 +305,7 @@ def put_four_d_result(
             image_source_version=FOUR_D_IMAGE_SOURCE_VERSION,
             source_attempt_id=source_attempt.id if source_attempt else None,
             scan_result_json=scan_result_json,
+            data_review_json=data_review_json,
             rescan_choices_json=rescan_choices_json,
             phase_selections_json=phase_selections_json,
         )
@@ -317,6 +325,7 @@ def put_four_d_result(
         _assert_legal_update_transition(result, payload)
         result.version += 1
         result.workflow_stage = payload.workflow_stage
+        result.data_review_json = data_review_json
         result.rescan_choices_json = rescan_choices_json
         result.phase_selections_json = phase_selections_json
         result.updated_at = datetime.now(timezone.utc)

@@ -48,6 +48,11 @@ import {
 import { buildScanSessionExecutionContext, isTerminalScanSessionStatus, resolveTopogramImageSource } from "../lib/scanSeriesPrerequisites";
 import { ScanParamWriteCoordinator } from "../lib/scanParamWriteCoordinator";
 import { isBrainHelicalScanSession } from "../lib/brainHelicalDemo";
+import {
+    isReferenceDicomSourceId,
+    loadReferenceDicomManifest,
+    type ReferenceDicomManifest,
+} from "../lib/referenceDicomDemo";
 
 type ProtocolSeedHelicalParam = {
     ma?: number | null;
@@ -854,6 +859,7 @@ function HeadDualScoutConfirmViewport({
 // Gating Scout Viewport (Robust implementation copied from ScoutScanScreen)
 // ---------------------------------------------------------------------------
 export interface FourDScoutViewportProps {
+    imageUrl?: string;
     onCropBoxChange?: (box: { width: number; height: number }) => void;
     onRectChange?: (rect: { x: number; y: number; width: number; height: number }) => void;
     onLoadStateChange?: (state: "loading" | "ready" | "error") => void;
@@ -863,6 +869,7 @@ export interface FourDScoutViewportProps {
 }
 
 export function FourDScoutViewport({
+    imageUrl,
     onCropBoxChange,
     onRectChange,
     onLoadStateChange,
@@ -907,21 +914,25 @@ export function FourDScoutViewport({
         let cancelled = false;
         const loadSlices = async () => {
             try {
-                const sliceNumbers = Array.from(
-                    { length: FOUR_D_SCOUT_SERIES.count },
-                    (_, index) => FOUR_D_SCOUT_SERIES.firstImageNumber + index
-                );
+                setLoadState("loading");
+                setLoadError(null);
+                const sourceUrls = imageUrl
+                    ? [imageUrl]
+                    : Array.from(
+                        { length: FOUR_D_SCOUT_SERIES.count },
+                        (_, index) => `${FOUR_D_SCOUT_SERIES.basePath}/image-${String(FOUR_D_SCOUT_SERIES.firstImageNumber + index).padStart(6, "0")}.dcm`,
+                    );
                 const slices: FourDLoadedSlice[] = [];
                 const concurrency = 8;
 
-                for (let start = 0; start < sliceNumbers.length; start += concurrency) {
-                    const batch = sliceNumbers.slice(start, start + concurrency);
+                for (let start = 0; start < sourceUrls.length; start += concurrency) {
+                    const batch = sourceUrls.slice(start, start + concurrency);
                     const loadedBatch = await Promise.all(
-                        batch.map(async (sliceNumber) => {
-                            const fileName = `image-${String(sliceNumber).padStart(6, "0")}.dcm`;
+                        batch.map(async (sourceUrl, batchIndex) => {
+                            const fileName = sourceUrl.split("/").pop() || "topogram.dcm";
                             let response: Response;
                             try {
-                                response = await fetch(`${FOUR_D_SCOUT_SERIES.basePath}/${fileName}`);
+                                response = await fetch(sourceUrl);
                             } catch (netErr) {
                                 throw Object.assign(new Error("network"), { __dicomRes: null, __dicomNetErr: netErr });
                             }
@@ -956,7 +967,7 @@ export function FourDScoutViewport({
                             const hu = new Float32Array(values.length);
                             for (let i = 0; i < values.length; i += 1) { hu[i] = values[i] * slope + intercept; }
                             return {
-                                instanceNumber: Number(dataSet.string("x00200013") ?? sliceNumber), positionZ, rows, cols, hu,
+                                instanceNumber: Number(dataSet.string("x00200013") ?? start + batchIndex + 1), positionZ, rows, cols, hu,
                                 ww: Number(dataSet.string("x00281051") ?? `${FOUR_D_SCOUT_SERIES.fallbackWindowWidth}`),
                                 wl: Number(dataSet.string("x00281050") ?? `${FOUR_D_SCOUT_SERIES.fallbackWindowLevel}`),
                                 kvp: dataSet.string("x00180060") ?? "120", mas: dataSet.string("x00181152") ?? "Auto", thickness: dataSet.string("x00180050") ?? "3.0 mm",
@@ -1013,7 +1024,7 @@ export function FourDScoutViewport({
         };
         void loadSlices();
         return () => { cancelled = true; };
-    }, []);
+    }, [imageUrl]);
 
     useEffect(() => {
         const canvas = canvasRef.current, viewport = viewportRef.current, projectedHu = projectionRef.current, size = projectionSizeRef.current;
@@ -2115,6 +2126,7 @@ const HelicalScanConfirmScreen = () => {
     }, []);
     const [limbsDicomManifest, setLimbsDicomManifest] = useState<LimbsDicomDemoManifest | null>(null);
     const [headDualScoutManifest, setHeadDualScoutManifest] = useState<HeadDualScoutManifest | null>(null);
+    const [referenceTopogramManifest, setReferenceTopogramManifest] = useState<ReferenceDicomManifest | null>(null);
     const [scoutSourceError, setScoutSourceError] = useState<string | null>(null);
     const helicalSeries = scanSession?.series.find((series) => series.series_type === "helical") ?? null;
     const requiredTopogram = scanSession?.series
@@ -2124,6 +2136,7 @@ const HelicalScanConfirmScreen = () => {
     const isBrainHelicalFlow = isBrainHelicalScanSession(scanSession);
     const isLimbsHelicalSession = topogramImageSource === "limbs-helical-demo";
     const isHeadDualScoutFlow = topogramImageSource === "head-dual-scout-demo";
+    const isReferenceTopogram = isReferenceDicomSourceId(topogramImageSource);
     const helicalParamId = helicalParam?.id ?? null;
     const [paramWrites] = useState(() => new ScanParamWriteCoordinator());
     const thresholdGuard = useDoseThresholdGuard();
@@ -2132,6 +2145,17 @@ const HelicalScanConfirmScreen = () => {
 
     const scoutSeriesOverride = useMemo<TomographicScoutSeriesOverride | undefined>(
         () => {
+            if (referenceTopogramManifest) {
+                const url = referenceTopogramManifest.urls[0];
+                if (url) {
+                    return {
+                        kind: "topogram",
+                        url,
+                        fallbackWindowWidth: referenceTopogramManifest.windowWidth ?? undefined,
+                        fallbackWindowLevel: referenceTopogramManifest.windowCenter ?? undefined,
+                    };
+                }
+            }
             if (isBrainHelicalFlow) return BRAIN_HELICAL_SCOUT_OVERRIDE;
             if (isLimbsHelicalSession && limbsDicomManifest) {
                 const topogram = getLimbsDicomSeries(limbsDicomManifest, "topogram");
@@ -2152,7 +2176,7 @@ const HelicalScanConfirmScreen = () => {
             // qin-lung-topogram intentionally uses the built-in QIN projection.
             return undefined;
         },
-        [isBrainHelicalFlow, isLimbsHelicalSession, limbsDicomManifest, topogramImageSource],
+        [isBrainHelicalFlow, isLimbsHelicalSession, limbsDicomManifest, referenceTopogramManifest, topogramImageSource],
     );
 
     useEffect(() => () => paramWrites.dispose(), [paramWrites]);
@@ -2161,6 +2185,23 @@ const HelicalScanConfirmScreen = () => {
         setScoutSourceError(null);
         setScoutLoadState("loading");
     }, [topogramImageSource]);
+
+    useEffect(() => {
+        if (!isReferenceTopogram || !topogramImageSource) {
+            setReferenceTopogramManifest(null);
+            return;
+        }
+        let cancelled = false;
+        loadReferenceDicomManifest(topogramImageSource).then((manifest) => {
+            if (cancelled) return;
+            if (manifest) {
+                setReferenceTopogramManifest(manifest);
+                return;
+            }
+            setScoutSourceError("本地模拟定位像不可用，请检查数据目录");
+        });
+        return () => { cancelled = true; };
+    }, [isReferenceTopogram, topogramImageSource]);
 
     useEffect(() => {
         if (!isLimbsHelicalSession) return;
@@ -2341,7 +2382,9 @@ const HelicalScanConfirmScreen = () => {
         }
     }, [showAutoMaPanel, scoutHu, scoutCropBox, helicalParam]);
 
-    const scoutManifestReady = isLimbsHelicalSession
+    const scoutManifestReady = isReferenceTopogram
+        ? Boolean(referenceTopogramManifest?.urls[0])
+        : isLimbsHelicalSession
         ? Boolean(getLimbsDicomSeries(limbsDicomManifest, "topogram")?.urls[0])
         : isHeadDualScoutFlow
             ? Boolean(headDualScoutManifest && headDualApSeries && headDualLatSeries)

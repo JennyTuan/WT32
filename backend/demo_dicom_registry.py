@@ -11,12 +11,15 @@ from functools import lru_cache
 from pathlib import Path
 from re import search
 from urllib.parse import quote
+import csv
 
 import pydicom
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data" / "demo-dicom"
 SOURCE_VERSION = 1
+FOUR_D_TRACE_DICOM_DIR = DATA_DIR / "DICOM" / "DICOM"
+FOUR_D_TRACE_CURVE_DIR = DATA_DIR / "breathing_curves" / "breathing_curves"
 
 BODY_PARTS = ("head", "neck", "chest", "abdomen", "spine", "extremity")
 SOURCE_IDS_BY_BODY_PART = {
@@ -164,6 +167,96 @@ def _manifest(source_id: str, series: list[tuple[Path, object]]) -> dict[str, ob
     }
 
 
+def _dicom_series_in(directory: Path) -> list[tuple[Path, object]]:
+    if not directory.is_dir():
+        return []
+    return sorted(
+        ((path, _header(path)) for path in directory.iterdir() if path.is_file()),
+        key=_sort_key,
+    )
+
+
+def _waveform_preview(curve_id: str) -> list[dict[str, float]]:
+    curve_path = FOUR_D_TRACE_CURVE_DIR / f"{curve_id}.csv"
+    if not curve_path.is_file():
+        return []
+
+    values: list[tuple[float, float]] = []
+    with curve_path.open(newline="", encoding="utf-8-sig") as stream:
+        for row in csv.reader(stream):
+            try:
+                values.append((float(row[0]), float(row[1])))
+            except (IndexError, ValueError):
+                continue
+
+    # The raw source contains a long reference trace. The prototype exposes a
+    # fixed 30-second excerpt only; production integration must use synchronized
+    # acquisition timestamps from the scanner and respiratory device.
+    excerpt = [value for value in values if value[0] <= 30.0]
+    if len(excerpt) < 2:
+        return []
+    minimum = min(value[1] for value in excerpt)
+    maximum = max(value[1] for value in excerpt)
+    amplitude_range = max(maximum - minimum, 0.001)
+    stride = max(1, len(excerpt) // 600)
+    duration = max(excerpt[-1][0], 0.001)
+    return [
+        {
+            "t": round(timestamp / duration, 6),
+            "value": round(8 + ((amplitude - minimum) / amplitude_range) * 84, 3),
+        }
+        for timestamp, amplitude in excerpt[::stride]
+    ]
+
+
+@lru_cache(maxsize=1)
+def build_four_d_data_review_manifest() -> dict[str, object] | None:
+    candidate_specs = (
+        ("trace1_cos6", "余弦参考呼吸"),
+        ("trace2_regular", "规律呼吸"),
+        ("trace3_large", "大幅度呼吸"),
+        ("trace4_slow", "慢呼吸"),
+        ("trace5_irregular", "不规则呼吸"),
+    )
+    candidates: dict[str, dict[str, object]] = {}
+    for curve_id, label in candidate_specs:
+        series = _dicom_series_in(FOUR_D_TRACE_DICOM_DIR / curve_id / "4dct")
+        waveform = _waveform_preview(curve_id)
+        if not series or not waveform:
+            continue
+        image_manifest = _manifest(f"fourd-{curve_id}", series)
+        candidates[curve_id] = {
+            "id": curve_id,
+            "label": label,
+            "sourceKind": "simulation_reference",
+            "previewUrl": image_manifest["urls"][len(image_manifest["urls"]) // 2],
+            "sliceCount": image_manifest["count"],
+            "waveform": waveform,
+        }
+
+    bed_candidates = (
+        ("trace2_regular", "trace5_irregular"),
+        ("trace3_large", "trace4_slow"),
+        ("trace1_cos6", "trace5_irregular"),
+    )
+    if any(candidate_id not in candidates for group in bed_candidates for candidate_id in group):
+        return None
+    return {
+        "version": SOURCE_VERSION,
+        "sourceKind": "simulation_reference",
+        "note": "公开曲线与影像用于原型演示参考，非实时采集或真实回顾式重建输入。",
+        "beds": [
+            {
+                "bedIndex": bed_index,
+                "bedNumber": bed_index + 1,
+                "candidateIds": list(candidate_ids),
+            }
+            for bed_index, candidate_ids in enumerate(bed_candidates)
+        ],
+        "candidates": list(candidates.values()),
+    }
+
+
 @lru_cache(maxsize=1)
 def build_reference_registry() -> dict[str, dict[str, object]]:
     registry: dict[str, dict[str, object]] = {}
@@ -190,25 +283,45 @@ def build_four_d_manifest() -> dict[str, object] | None:
         return None
     volumes = []
     for phase_index, phase_value in enumerate(range(0, 100, 10)):
-        manifest = _manifest("fourd-engineer", phases[phase_value])
-        volumes.append({
-            "id": f"phase-{phase_value:02d}", "groupIndex": phase_index,
-            "bedIndex": 0, "bedNumber": 1, "phaseIndex": phase_index,
-            "phaseValue": phase_value, "phaseLabel": f"{phase_value}%",
-            "candidateIndex": 0, "sliceCount": manifest["count"],
-            "sourceSliceCount": manifest["count"], "fileStart": 1,
-            "fileEnd": manifest["count"], "rangeMm": [0, float(manifest["count"])],
-            "acquisitionTime": "simulation-reference",
-            "urls": {
-                "axialPreview": manifest["urls"][0], "coronalPreview": manifest["urls"][0],
-                "sagittalPreview": manifest["urls"][0], "mha": manifest["urls"][0],
-                "axialSlices": manifest["urls"],
-            },
-        })
+        phase_series = phases[phase_value]
+        manifest = _manifest("fourd-engineer", phase_series)
+        bed_count = 3
+        base_size, remainder = divmod(len(phase_series), bed_count)
+        start = 0
+        for bed_index in range(bed_count):
+            size = base_size + (1 if bed_index < remainder else 0)
+            segment = phase_series[start:start + size]
+            start += size
+            if not segment:
+                return None
+            segment_urls = manifest["urls"][start - size:start]
+            z_positions = [
+                float(item[1].ImagePositionPatient[2])
+                for item in segment
+                if len(getattr(item[1], "ImagePositionPatient", [])) > 2
+            ]
+            range_mm = [min(z_positions), max(z_positions)] if z_positions else [0.0, float(size)]
+            volumes.append({
+                "id": f"phase-{phase_value:02d}-bed-{bed_index + 1}",
+                "groupIndex": phase_index * bed_count + bed_index,
+                "bedIndex": bed_index, "bedNumber": bed_index + 1, "phaseIndex": phase_index,
+                "phaseValue": phase_value, "phaseLabel": f"{phase_value}%",
+                "candidateIndex": 0, "sliceCount": size,
+                "sourceSliceCount": manifest["count"], "fileStart": start - size + 1,
+                "fileEnd": start, "rangeMm": range_mm,
+                "acquisitionTime": "simulation-reference",
+                "urls": {
+                    "axialPreview": segment_urls[len(segment_urls) // 2],
+                    "coronalPreview": segment_urls[len(segment_urls) // 2],
+                    "sagittalPreview": segment_urls[len(segment_urls) // 2],
+                    "mha": segment_urls[len(segment_urls) // 2],
+                    "axialSlices": segment_urls,
+                },
+            })
     first = volumes[0]
     return {
         "version": SOURCE_VERSION, "source": "backend/data/demo-dicom",
-        "generatedBy": "backend.demo_dicom_registry", "bedCount": 1,
+        "generatedBy": "backend.demo_dicom_registry", "bedCount": 3,
         "phaseCount": 10, "phaseLabels": [f"{phase}%" for phase in range(0, 100, 10)],
         "sliceCountPerVolume": first["sliceCount"], "rows": 512, "columns": 512,
         "volumes": volumes,

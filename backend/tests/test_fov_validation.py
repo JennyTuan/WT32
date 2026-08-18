@@ -73,9 +73,18 @@ class FovValidationTests(unittest.TestCase):
             schemas.ScanSessionReconSeriesCreate,
             schemas.ScanSessionReconSeriesUpdate,
         ):
-            with self.subTest(model=model.__name__):
+            with self.subTest(model=model.__name__, value=schemas.DFOV_MIN_MM - 1):
                 with self.assertRaises(ValidationError):
-                    model(recon_fov=schemas.FOV_MAX_MM + 1)
+                    model(recon_fov=schemas.DFOV_MIN_MM - 1)
+            with self.subTest(model=model.__name__, value=schemas.DFOV_MAX_MM + 1):
+                with self.assertRaises(ValidationError):
+                    model(recon_fov=schemas.DFOV_MAX_MM + 1)
+
+    def test_recon_fov_defaults_to_500_mm(self) -> None:
+        self.assertEqual(
+            schemas.ScanSessionReconSeriesCreate().recon_fov,
+            schemas.DEFAULT_DFOV_MM,
+        )
 
 
 if __name__ == "__main__":

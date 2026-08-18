@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
+from ..scan_protocol import validate_scan_plan
 
 router = APIRouter(prefix="/scan-params", tags=["scan-params"])
 
@@ -33,6 +34,13 @@ def _get_entity_or_404(model, entity_id: int, detail: str, db: Session):
 
 
 def _save_single_param(db: Session, entity):
+    try:
+        validate_scan_plan({
+            "kv": entity.kv, "ma": entity.ma, "focus_size": entity.focus_size,
+            "bowtie_type": entity.bowtie_type, "collimator": entity.collimator,
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     db.add(entity)
     try:
         db.commit()
@@ -68,6 +76,10 @@ def update_topogram_param(param_id: int, payload: schemas.TopogramParamUpdate, d
     if "series_id" in updates:
         series = _get_series_or_404(updates["series_id"], db)
         _require_series_type(series, "topogram")
+    try:
+        validate_scan_plan({"kv": entity.kv, "ma": entity.ma, "focus_size": entity.focus_size, "bowtie_type": entity.bowtie_type, "collimator": entity.collimator, **updates})
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     for field, value in updates.items():
         setattr(entity, field, value)
     try:
@@ -111,6 +123,10 @@ def update_helical_param(param_id: int, payload: schemas.HelicalParamUpdate, db:
     if "series_id" in updates:
         series = _get_series_or_404(updates["series_id"], db)
         _require_series_type(series, "helical")
+    try:
+        validate_scan_plan({"kv": entity.kv, "ma": entity.ma, "focus_size": entity.focus_size, "bowtie_type": entity.bowtie_type, "collimator": entity.collimator, **updates})
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     for field, value in updates.items():
         setattr(entity, field, value)
     try:
@@ -154,6 +170,10 @@ def update_axial_param(param_id: int, payload: schemas.AxialParamUpdate, db: Ses
     if "series_id" in updates:
         series = _get_series_or_404(updates["series_id"], db)
         _require_series_type(series, "axial")
+    try:
+        validate_scan_plan({"kv": entity.kv, "ma": entity.ma, "focus_size": entity.focus_size, "bowtie_type": entity.bowtie_type, "collimator": entity.collimator, **updates})
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     for field, value in updates.items():
         setattr(entity, field, value)
     try:

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, ChevronRight, Info } from "lucide-react";
+import { DicomPreviewImage } from "../components/DicomPreviewImage";
 import {
   getEngineerVolumesForBedPhase,
   loadFourDEngineerManifest,
@@ -31,13 +32,7 @@ interface DataSegment {
   candidateIndex: number;
   range: string;
   sliceCount: number;
-  previewUrls?: {
-    axial: string;
-    coronal: string;
-    coronalStrip?: string;
-    sagittal: string;
-    sagittalStrip?: string;
-  };
+  imageUrls?: string[];
 }
 
 interface BedPhaseData {
@@ -77,13 +72,7 @@ function segmentFromVolume(volume: FourDEngineerVolume): DataSegment {
     candidateIndex: volume.candidateIndex + 1,
     range: formatRangeMm(volume.rangeMm),
     sliceCount: volume.sliceCount,
-    previewUrls: {
-      axial: volume.urls.axialPreview,
-      coronal: volume.urls.coronalPreview,
-      coronalStrip: volume.urls.coronalStrip,
-      sagittal: volume.urls.sagittalPreview,
-      sagittalStrip: volume.urls.sagittalStrip,
-    },
+    imageUrls: volume.urls.axialSlices,
   };
 }
 
@@ -103,8 +92,11 @@ function buildPersistedPhases(
       if (!cell || cell.frameCount <= 1) continue;
       const volumes = manifest ? getEngineerVolumesForBedPhase(manifest, bedIndex, phaseIndex) : [];
       const segments = Array.from({ length: cell.frameCount }, (_, candidateIndex) => {
-        const volume = volumes[candidateIndex];
-        return volume ? segmentFromVolume(volume) : makeSegment(candidateIndex, phaseIndex, bedIndex);
+        const volume = volumes[candidateIndex] ?? volumes[0];
+        const segment = volume ? segmentFromVolume(volume) : makeSegment(candidateIndex, phaseIndex, bedIndex);
+        return candidateIndex === 0
+          ? segment
+          : { ...segment, id: `${segment.id}-candidate-${candidateIndex}`, candidateIndex: candidateIndex + 1 };
       });
       const selectedCandidateIndex = phaseSelections?.[`${bedIndex}-${phaseIndex}`];
       beds.push({
@@ -208,14 +200,16 @@ function CrossHair({ horizontalClass, verticalClass }: { horizontalClass: string
 }
 
 function PreviewFrame({
-  src,
+  imageUrls,
+  orientation,
   bedCount,
   activeBedNumber,
   side,
   horizontalClass,
   verticalClass,
 }: {
-  src: string;
+  imageUrls: string[];
+  orientation: "coronal" | "sagittal";
   bedCount: number;
   activeBedNumber: number | null;
   side: "left" | "right";
@@ -250,7 +244,7 @@ function PreviewFrame({
           transform: "translate(-50%, -50%)",
         }}
       >
-        <img src={src} alt="" draggable={false} className="h-full w-full object-contain" />
+        <DicomPreviewImage imageUrls={imageUrls} orientation={orientation} className="h-full w-full object-contain" />
         <BedCodeRail bedCount={bedCount} activeBedNumber={activeBedNumber} side={side} />
         <CrossHair horizontalClass={horizontalClass} verticalClass={verticalClass} />
       </div>
@@ -260,11 +254,12 @@ function PreviewFrame({
 
 interface StitchedPreviewRow {
   bedNumber: number;
-  src: string;
+  imageUrls: string[];
 }
 
 function StitchedPreviewFrame({
   rows,
+  orientation,
   bedCount,
   activeBedNumber,
   side,
@@ -272,6 +267,7 @@ function StitchedPreviewFrame({
   verticalClass,
 }: {
   rows: StitchedPreviewRow[];
+  orientation: "coronal" | "sagittal";
   bedCount: number;
   activeBedNumber: number | null;
   side: "left" | "right";
@@ -313,7 +309,7 @@ function StitchedPreviewFrame({
 
             return (
               <div key={bedNumber} className="min-h-0 overflow-hidden bg-black">
-                {row && <img src={row.src} alt="" draggable={false} className="h-full w-full object-fill" />}
+                {row && <DicomPreviewImage imageUrls={row.imageUrls} orientation={orientation} className="h-full w-full object-fill" />}
               </div>
             );
           })}
@@ -342,18 +338,20 @@ export default function PhaseFilterScreen() {
   const [selectedPhaseIdx, setSelectedPhaseIdx] = useState(0);
   const [selectedBedId, setSelectedBedId] = useState("");
 
+  const reviewedScanResult = useMemo(() => {
+    if (!resolvedState) return null;
+    return {
+      ...resolvedState.scanResult,
+      phaseMatrix: resolvedState.dataReview?.phaseMatrix ?? resolvedState.scanResult.phaseMatrix,
+    };
+  }, [resolvedState]);
+
   const currentPhase = phases[selectedPhaseIdx] ?? null;
   const selectedBed = currentPhase?.beds.find((bed) => bed.id === selectedBedId) ?? currentPhase?.beds[0] ?? null;
   const selectedSegment = selectedBed
     ? selectedBed.segments.find((segment) => segment.id === selectedBed.selectedSegmentId) ?? selectedBed.segments[0] ?? null
     : null;
-  const previewUrls = useMemo(
-    () => ({
-      coronal: selectedSegment?.previewUrls?.coronal ?? null,
-      sagittal: selectedSegment?.previewUrls?.sagittal ?? null,
-    }),
-    [selectedSegment],
-  );
+  const previewImageUrls = selectedSegment?.imageUrls ?? null;
   const engineerStitchedPreviewRows = useMemo(() => {
     if (!engineerManifest) return null;
 
@@ -373,8 +371,7 @@ export default function PhaseFilterScreen() {
 
       return {
         bedNumber: bedIndex + 1,
-        coronal: volume.urls.coronalStrip ?? volume.urls.coronalPreview,
-        sagittal: volume.urls.sagittalStrip ?? volume.urls.sagittalPreview,
+        imageUrls: volume.urls.axialSlices,
       };
     });
 
@@ -458,7 +455,7 @@ export default function PhaseFilterScreen() {
   useEffect(() => {
     if (!resolvedState) return;
     const nextPhases = buildPersistedPhases(
-      resolvedState.scanResult,
+      reviewedScanResult ?? resolvedState.scanResult,
       resolvedState.phaseSelections,
       engineerManifest,
     );
@@ -467,7 +464,7 @@ export default function PhaseFilterScreen() {
     const nextPhaseIndex = firstDuplicateIndex >= 0 ? firstDuplicateIndex : 0;
     setSelectedPhaseIdx(nextPhaseIndex);
     setSelectedBedId(nextPhases[nextPhaseIndex]?.beds[0]?.id ?? "");
-  }, [engineerManifest, resolvedState]);
+  }, [engineerManifest, resolvedState, reviewedScanResult]);
 
   const buildPhaseSelections = () => {
     const selections: Record<string, number> = {};
@@ -532,6 +529,7 @@ export default function PhaseFilterScreen() {
             workflowStage: "phase_selected",
             state: {
               scanResult: persisted.scanResult,
+              dataReview: persisted.dataReview,
               rescanChoices: persisted.rescanChoices,
               phaseSelections,
             },
@@ -706,16 +704,18 @@ export default function PhaseFilterScreen() {
                   <div className="relative h-full w-full bg-black">
                     {engineerStitchedPreviewRows ? (
                       <StitchedPreviewFrame
-                        rows={engineerStitchedPreviewRows.map((row) => ({ bedNumber: row.bedNumber, src: row.coronal }))}
+                        rows={engineerStitchedPreviewRows}
+                        orientation="coronal"
                         bedCount={bedCodeCount}
                         activeBedNumber={activeBedNumber}
                         side="left"
                         horizontalClass="bg-red-500/85"
                         verticalClass="bg-yellow-300/85"
                       />
-                    ) : previewUrls.coronal ? (
+                    ) : previewImageUrls ? (
                       <PreviewFrame
-                        src={previewUrls.coronal}
+                        imageUrls={previewImageUrls}
+                        orientation="coronal"
                         bedCount={bedCodeCount}
                         activeBedNumber={activeBedNumber}
                         side="left"
@@ -736,16 +736,18 @@ export default function PhaseFilterScreen() {
                   <div className="relative h-full w-full bg-black">
                     {engineerStitchedPreviewRows ? (
                       <StitchedPreviewFrame
-                        rows={engineerStitchedPreviewRows.map((row) => ({ bedNumber: row.bedNumber, src: row.sagittal }))}
+                        rows={engineerStitchedPreviewRows}
+                        orientation="sagittal"
                         bedCount={bedCodeCount}
                         activeBedNumber={activeBedNumber}
                         side="right"
                         horizontalClass="bg-red-500/85"
                         verticalClass="bg-emerald-400/85"
                       />
-                    ) : previewUrls.sagittal ? (
+                    ) : previewImageUrls ? (
                       <PreviewFrame
-                        src={previewUrls.sagittal}
+                        imageUrls={previewImageUrls}
+                        orientation="sagittal"
                         bedCount={bedCodeCount}
                         activeBedNumber={activeBedNumber}
                         side="right"

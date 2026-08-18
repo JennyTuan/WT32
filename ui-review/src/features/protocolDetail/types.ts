@@ -21,6 +21,7 @@ export type ApiSeriesDetail = {
         id?: number;
         kv: number; ma: number; scan_length: number; tube_angle: number; fov: number;
         collimator?: string | null; scan_direction?: string | null; dom?: string | null;
+        focus_size?: "small" | "large"; bowtie_type?: "small" | "medium" | "large";
         ctdi_vol?: number | null; dlp?: number | null;
     } | null;
     helical_param?: {
@@ -28,6 +29,7 @@ export type ApiSeriesDetail = {
         kv: number; ma: number; slice_thickness: number; pitch: number;
         rotation_time: number; scan_length: number; fov: number; auto_ma?: boolean;
         collimator?: string | null; scan_direction?: string | null; dom?: string | null;
+        focus_size?: "small" | "large"; bowtie_type?: "small" | "medium" | "large";
         ctdi_vol?: number | null; dlp?: number | null;
     } | null;
     axial_param?: {
@@ -35,6 +37,7 @@ export type ApiSeriesDetail = {
         kv: number; ma: number; slice_thickness: number; slice_interval: number;
         rotation_time: number; scan_length: number; fov: number; step_count?: number | null; auto_ma?: boolean;
         collimator?: string | null; scan_direction?: string | null; dom?: string | null;
+        focus_size?: "small" | "large"; bowtie_type?: "small" | "medium" | "large";
         ctdi_vol?: number | null; dlp?: number | null;
     } | null;
     recon_series: ApiReconSeries[];
@@ -101,6 +104,8 @@ export type SeriesDraft = {
     sliceThickness: string;
     sliceInterval: string;
     collimator: string;
+    focusSize: "small" | "large";
+    bowtieType: "small" | "medium" | "large";
     scanDirection: string;
     dom: string;
 };

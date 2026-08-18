@@ -15,6 +15,7 @@ env/
 backend/app.db
 
 # Node
+node_modules/
 ui-review/node_modules/
 ui-review/dist/
 

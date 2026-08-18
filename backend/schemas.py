@@ -12,6 +12,9 @@ class ORMModel(BaseModel):
 
 FOV_MIN_MM = 50.0
 FOV_MAX_MM = 750.0
+DFOV_MIN_MM = 50.0
+DFOV_MAX_MM = 700.0
+DEFAULT_DFOV_MM = 500.0
 PrototypeImageSourceId = Literal[
     "head-stroke-topogram",
     "head-dual-scout-demo",
@@ -200,6 +203,8 @@ class TopogramParamBase(BaseModel):
     tube_angle: float = 270.0
     fov: float = 500.0
     collimator: Optional[str] = None
+    focus_size: Literal["small", "large"] = "small"
+    bowtie_type: Literal["small", "medium", "large"] = "medium"
     scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -218,6 +223,8 @@ class TopogramParamUpdate(BaseModel):
     tube_angle: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
+    focus_size: Optional[Literal["small", "large"]] = None
+    bowtie_type: Optional[Literal["small", "medium", "large"]] = None
     scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -238,6 +245,8 @@ class HelicalParamBase(BaseModel):
     scan_length: float
     fov: float
     collimator: Optional[str] = None
+    focus_size: Literal["small", "large"] = "small"
+    bowtie_type: Literal["small", "medium", "large"] = "medium"
     scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -261,6 +270,8 @@ class HelicalParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
+    focus_size: Optional[Literal["small", "large"]] = None
+    bowtie_type: Optional[Literal["small", "medium", "large"]] = None
     scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -284,6 +295,8 @@ class AxialParamBase(BaseModel):
     scan_length: float
     fov: float
     collimator: Optional[str] = None
+    focus_size: Literal["small", "large"] = "small"
+    bowtie_type: Literal["small", "medium", "large"] = "medium"
     scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -308,6 +321,8 @@ class AxialParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
+    focus_size: Optional[Literal["small", "large"]] = None
+    bowtie_type: Optional[Literal["small", "medium", "large"]] = None
     scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -338,7 +353,7 @@ class ReconSeriesBase(BaseModel):
 
 
 class ReconSeriesCreate(ReconSeriesBase):
-    recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
+    recon_fov: float = Field(default=DEFAULT_DFOV_MM, ge=DFOV_MIN_MM, le=DFOV_MAX_MM)
 
 
 class ReconSeriesUpdate(BaseModel):
@@ -351,7 +366,7 @@ class ReconSeriesUpdate(BaseModel):
     window_level: Optional[int] = None
     slice_thickness: Optional[float] = None
     increment: Optional[float] = None
-    recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
+    recon_fov: Optional[float] = Field(default=None, ge=DFOV_MIN_MM, le=DFOV_MAX_MM)
     center_x: Optional[float] = None
     center_y: Optional[float] = None
 
@@ -658,6 +673,8 @@ class ScanSessionTopogramParamUpdate(BaseModel):
     tube_angle: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
+    focus_size: Optional[Literal["small", "large"]] = None
+    bowtie_type: Optional[Literal["small", "medium", "large"]] = None
     scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -674,6 +691,8 @@ class ScanSessionTopogramParam(ORMModel):
     tube_angle: float
     fov: float
     collimator: Optional[str] = None
+    focus_size: Literal["small", "large"] = "small"
+    bowtie_type: Literal["small", "medium", "large"] = "medium"
     scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -689,6 +708,8 @@ class ScanSessionHelicalParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
+    focus_size: Optional[Literal["small", "large"]] = None
+    bowtie_type: Optional[Literal["small", "medium", "large"]] = None
     scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -710,6 +731,8 @@ class ScanSessionHelicalParam(ORMModel):
     scan_length: float
     fov: float
     collimator: Optional[str] = None
+    focus_size: Literal["small", "large"] = "small"
+    bowtie_type: Literal["small", "medium", "large"] = "medium"
     scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -728,6 +751,8 @@ class ScanSessionAxialParamUpdate(BaseModel):
     scan_length: Optional[float] = None
     fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
     collimator: Optional[str] = None
+    focus_size: Optional[Literal["small", "large"]] = None
+    bowtie_type: Optional[Literal["small", "medium", "large"]] = None
     scan_direction: Optional[ScanDirection] = None
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -750,6 +775,8 @@ class ScanSessionAxialParam(ORMModel):
     scan_length: float
     fov: float
     collimator: Optional[str] = None
+    focus_size: Literal["small", "large"] = "small"
+    bowtie_type: Literal["small", "medium", "large"] = "medium"
     scan_direction: ScanDirection = "HEAD_TO_FOOT"
     dom: Optional[str] = None
     ctdi_vol: Optional[float] = None
@@ -769,7 +796,7 @@ class ScanSessionReconSeriesCreate(BaseModel):
     window_level: int = 40
     slice_thickness: float = 1.0
     increment: Optional[float] = None
-    recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
+    recon_fov: float = Field(default=DEFAULT_DFOV_MM, ge=DFOV_MIN_MM, le=DFOV_MAX_MM)
     center_x: Optional[float] = None
     center_y: Optional[float] = None
     metal_artifact_suppression: bool = False
@@ -784,7 +811,7 @@ class ScanSessionReconSeriesUpdate(BaseModel):
     window_level: Optional[int] = None
     slice_thickness: Optional[float] = None
     increment: Optional[float] = None
-    recon_fov: Optional[float] = Field(default=None, ge=FOV_MIN_MM, le=FOV_MAX_MM)
+    recon_fov: Optional[float] = Field(default=None, ge=DFOV_MIN_MM, le=DFOV_MAX_MM)
     center_x: Optional[float] = None
     center_y: Optional[float] = None
     metal_artifact_suppression: Optional[bool] = None
@@ -803,7 +830,7 @@ class ScanSessionDerivedReconSeriesCreate(BaseModel):
     window_level: int
     slice_thickness: float = Field(gt=0)
     increment: float = Field(gt=0)
-    recon_fov: float = Field(ge=FOV_MIN_MM, le=FOV_MAX_MM)
+    recon_fov: float = Field(ge=DFOV_MIN_MM, le=DFOV_MAX_MM)
     center_x: float = 0
     center_y: float = 0
     metal_artifact_suppression: bool = False
@@ -1024,9 +1051,16 @@ class ScanSessionSeriesAttempt(ORMModel):
     ended_by_action_id: Optional[int] = None
 
 
-FourDResultWorkflowStage = Literal["acquired", "rescan_selected", "phase_selected", "ready"]
+FourDResultWorkflowStage = Literal[
+    "acquired",
+    "data_reviewed",
+    "rescan_selected",
+    "phase_selected",
+    "ready",
+]
 FOUR_D_RESULT_STAGE_ORDER: Dict[str, int] = {
     "acquired": 0,
+    "data_reviewed": 1,
     "rescan_selected": 1,
     "phase_selected": 2,
     "ready": 3,
@@ -1072,6 +1106,30 @@ class FourDScanResultSnapshot(BaseModel):
         return self
 
 
+class FourDWaveformControlPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: int = Field(gt=0)
+    kind: Literal["peak", "valley"]
+    t: float = Field(ge=0.0, le=1.0)
+    value: float = Field(ge=0.0, le=100.0)
+
+
+class FourDBedDataSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    candidate_id: str = Field(min_length=1, max_length=100)
+    waveform_points: List[FourDWaveformControlPoint] = Field(min_length=4, max_length=80)
+    disabled_cycle_ids: List[int] = Field(default_factory=list, max_length=40)
+
+
+class FourDDataReview(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    bed_selections: Dict[str, FourDBedDataSelection]
+    phase_matrix: List[List[FourDBedPhaseCell]]
+
+
 class ScanSessionFourDResultUpsert(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -1080,12 +1138,26 @@ class ScanSessionFourDResultUpsert(BaseModel):
     expected_version: int = Field(ge=0)
     workflow_stage: FourDResultWorkflowStage
     scan_result: FourDScanResultSnapshot
+    data_review: Optional[FourDDataReview] = None
     rescan_choices: Optional[Dict[str, Literal["first", "rescan"]]] = None
     phase_selections: Optional[Dict[str, int]] = None
 
     @model_validator(mode="after")
     def validate_workflow_snapshot(self) -> "ScanSessionFourDResultUpsert":
         stage_order = FOUR_D_RESULT_STAGE_ORDER[self.workflow_stage]
+        expected_bed_keys = {str(index) for index in range(self.scan_result.bed_count)}
+        if self.data_review is not None:
+            if set(self.data_review.bed_selections) != expected_bed_keys:
+                raise ValueError("data_review must cover every scan bed")
+            if len(self.data_review.phase_matrix) != self.scan_result.bed_count:
+                raise ValueError("data_review phase_matrix row count must equal bed_count")
+            if any(len(row) != self.scan_result.phase_count for row in self.data_review.phase_matrix):
+                raise ValueError("data_review phase_matrix must match phase_count")
+        if self.workflow_stage == "acquired" and self.data_review is not None:
+            raise ValueError("acquired results cannot contain data_review")
+        if self.workflow_stage in {"data_reviewed", "phase_selected", "ready"} and self.data_review is None:
+            raise ValueError("data_review is required before phase processing")
+
         expected_rescan_keys: set[str] = set()
         if self.scan_result.rescan_bed_range is not None:
             start, end = self.scan_result.rescan_bed_range
@@ -1100,9 +1172,10 @@ class ScanSessionFourDResultUpsert(BaseModel):
         if self.workflow_stage == "acquired" and self.rescan_choices is not None:
             raise ValueError("acquired results cannot contain rescan_choices")
 
+        phase_matrix = self.data_review.phase_matrix if self.data_review is not None else self.scan_result.phase_matrix
         duplicate_cells = {
             f"{bed_index}-{phase_index}"
-            for bed_index, row in enumerate(self.scan_result.phase_matrix)
+            for bed_index, row in enumerate(phase_matrix)
             for phase_index, cell in enumerate(row)
             if cell.frame_count > 1
         }
@@ -1113,11 +1186,11 @@ class ScanSessionFourDResultUpsert(BaseModel):
             bed_raw, phase_raw = key.split("-", 1)
             bed_index = int(bed_raw)
             phase_index = int(phase_raw)
-            frame_count = self.scan_result.phase_matrix[bed_index][phase_index].frame_count
+            frame_count = phase_matrix[bed_index][phase_index].frame_count
             if selected_frame < 0 or selected_frame >= frame_count:
                 raise ValueError("phase selection must reference an available frame")
 
-        if stage_order >= FOUR_D_RESULT_STAGE_ORDER["phase_selected"]:
+        if self.workflow_stage in {"phase_selected", "ready"}:
             if self.phase_selections is None or selection_keys != duplicate_cells:
                 raise ValueError("phase_selections must resolve every duplicate cell")
         elif self.phase_selections is not None:
@@ -1139,6 +1212,7 @@ class ScanSessionFourDResult(BaseModel):
     image_source_version: Literal[1]
     source_attempt_id: Optional[int] = Field(default=None, ge=1)
     scan_result: FourDScanResultSnapshot
+    data_review: Optional[FourDDataReview] = None
     rescan_choices: Optional[Dict[str, Literal["first", "rescan"]]] = None
     phase_selections: Optional[Dict[str, int]] = None
     created_at: datetime
@@ -1336,7 +1410,7 @@ AgeGroup = Literal["adult", "pediatric", "infant"]
 class DoseSettingsBase(BaseModel):
     threshold_action: ThresholdAction = "warn"
 
-    aec_enabled: bool = True
+    aec_enabled: bool = False
     aec_noise_level: NoiseLevel = "medium"
 
     audit_threshold_exceed: bool = True

@@ -19,8 +19,19 @@ import {
 import { loadSelectedPatient } from "../lib/patientSession";
 import NetworkStatusButton from "../components/NetworkStatusButton";
 import SystemMenuButton from "../components/SystemMenuButton";
-import type { FourDPostScanState, RescanChoices } from "../lib/fourDTypes";
+import type {
+  FourDDataReview,
+  FourDPostScanState,
+  FourDWaveformControlPoint,
+  RescanChoices,
+} from "../lib/fourDTypes";
 import { fetchSelectedFourDPostScanState, saveFourDResult, toFourDPostScanState } from "../lib/fourDResult";
+import {
+  buildReferencePhaseMatrix,
+  loadFourDDataReviewManifest,
+  type FourDDataReviewManifest,
+  type FourDReferenceWaveformSample,
+} from "../lib/fourDDataReviewSource";
 import { useI18n } from "../lib/i18nContext";
 import iconTable from "../assets/icon-table.svg";
 import iconGantry from "../assets/icon-gantry.svg";
@@ -105,7 +116,7 @@ export function BedTable({ rescanRange, choices, onChange }: BedTableProps) {
   );
 }
 
-function RescanBedTable({ rescanRange, choices, onChange }: BedTableProps) {
+export function RescanBedTable({ rescanRange, choices, onChange }: BedTableProps) {
   const { t } = useI18n();
   const [start, end] = rescanRange;
   const beds = Array.from({ length: end - start + 1 }, (_, index) => start + index);
@@ -174,12 +185,7 @@ function RescanBedTable({ rescanRange, choices, onChange }: BedTableProps) {
   );
 }
 
-interface WaveformPoint {
-  id: number;
-  kind: "peak" | "valley";
-  t: number;
-  value: number;
-}
+type WaveformPoint = FourDWaveformControlPoint;
 
 interface WaveSample {
   t: number;
@@ -206,7 +212,21 @@ function movingAverage(values: number[], radius: number) {
   });
 }
 
-function buildRespiratorySignal(points: WaveformPoint[], sampleCount: number) {
+function buildRespiratorySignal(
+  points: WaveformPoint[],
+  sampleCount: number,
+  referenceSamples?: FourDReferenceWaveformSample[],
+) {
+  if (referenceSamples && referenceSamples.length > 1) {
+    const filteredValues = movingAverage(referenceSamples.map((sample) => sample.value), 5);
+    return {
+      raw: referenceSamples,
+      filtered: referenceSamples.map((sample, index) => ({
+        t: sample.t,
+        value: filteredValues[index],
+      })),
+    };
+  }
   const anchors = [...points].sort((a, b) => a.t - b.t);
   const rawSamples: WaveSample[] = [];
 
@@ -336,6 +356,9 @@ interface RespiratoryWaveMonitorProps {
   points: WaveformPoint[];
   bedCount: number;
   rescanRange: [number, number];
+  waveformSamples?: FourDReferenceWaveformSample[];
+  disabledCycleIds: number[];
+  onToggleCycleDisabled: (cycleId: number) => void;
   onPointMove: (id: number, t: number, value: number) => void;
   onPointAdd: (kind: "peak" | "valley", t: number, value: number) => void;
   onPointDelete: (id: number) => void;
@@ -346,6 +369,9 @@ function RespiratoryWaveMonitor({
   points,
   bedCount,
   rescanRange,
+  waveformSamples,
+  disabledCycleIds,
+  onToggleCycleDisabled,
   onPointMove,
   onPointAdd,
   onPointDelete,
@@ -367,7 +393,10 @@ function RespiratoryWaveMonitor({
   const [showPhaseBins, setShowPhaseBins] = useState(false);
   const [addMode, setAddMode] = useState<"peak" | "valley" | null>(null);
   const sortedPoints = useMemo(() => [...points].sort((a, b) => a.t - b.t), [points]);
-  const signal = useMemo(() => buildRespiratorySignal(sortedPoints, 180), [sortedPoints]);
+  const signal = useMemo(
+    () => buildRespiratorySignal(sortedPoints, 180, waveformSamples),
+    [sortedPoints, waveformSamples],
+  );
   const stats = useMemo(() => computeRespiratoryStats(sortedPoints), [sortedPoints]);
   const [rescanStart, rescanEnd] = rescanRange;
   const totalCycles = bedCount + 2;
@@ -985,6 +1014,26 @@ function RespiratoryWaveMonitor({
           </span>
         )}
       </div>
+
+      {stats.cycles.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px]">
+          <span className="font-bold text-slate-600">周期处理：</span>
+          {stats.cycles.map((cycle, index) => {
+            const cycleId = index + 1;
+            const disabled = disabledCycleIds.includes(cycleId);
+            return (
+              <button
+                key={cycle.peakIdx}
+                type="button"
+                onClick={() => onToggleCycleDisabled(cycleId)}
+                className={`rounded border px-2 py-1 font-semibold transition ${disabled ? "border-slate-300 bg-slate-100 text-slate-500" : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"}`}
+              >
+                周期 {cycleId}：{disabled ? "已排除" : "保留"}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1026,53 +1075,73 @@ export default function FourDRescanSelectScreen() {
   const [isStateVerified, setIsStateVerified] = useState(false);
   const [stateError, setStateError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [reviewManifest, setReviewManifest] = useState<FourDDataReviewManifest | null>(null);
+  const [bedSelections, setBedSelections] = useState<FourDDataReview["bedSelections"]>({});
+  const [activeBedIndex, setActiveBedIndex] = useState(0);
+  const [confirmedBeds, setConfirmedBeds] = useState<Set<number>>(new Set());
+  const [laserActive, setLaserActive] = useState(false);
+  const nextPointIdRef = useRef(1);
   const scanResult = state?.scanResult;
   const selectedPatient = useMemo(() => loadSelectedPatient(), []);
-  const rescanRange = scanResult?.rescanBedRange ?? null;
   const bedCount = scanResult?.bedCount ?? 0;
-
-  const [choices, setChoices] = useState<RescanChoices>(() => routeState?.rescanChoices ?? {});
-
-  const [laserActive, setLaserActive] = useState(false);
 
   useEffect(() => {
     if (!selectedPatient) return;
     let cancelled = false;
     fetchSelectedFourDPostScanState(selectedPatient.id)
       .then((persistedState) => {
-        if (!cancelled) {
-          setState(persistedState);
-          setIsStateVerified(true);
-          setStateError(null);
-          if (persistedState.workflowStage === "rescan_selected") {
-            navigate("/image-load", { replace: true, state: persistedState });
-          } else if (
-            persistedState.workflowStage === "phase_selected"
-            || persistedState.workflowStage === "ready"
-          ) {
-            navigate("/phase-filter", { replace: true, state: persistedState });
-          }
+        if (cancelled) return;
+        setState(persistedState);
+        setIsStateVerified(true);
+        setStateError(null);
+        if (persistedState.workflowStage === "data_reviewed" || persistedState.workflowStage === "rescan_selected") {
+          navigate("/image-load", { replace: true, state: persistedState });
+        } else if (persistedState.workflowStage === "phase_selected" || persistedState.workflowStage === "ready") {
+          navigate("/phase-filter", { replace: true, state: persistedState });
         }
       })
       .catch((error) => {
         if (!cancelled) setIsStateVerified(false);
         if (!cancelled) setStateError(error instanceof Error ? error.message : "4D 结果恢复失败");
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [navigate, selectedPatient]);
 
   useEffect(() => {
-    if (!rescanRange) return;
-    const restored = state?.rescanChoices;
-    const initialChoices: RescanChoices = {};
-    for (let bedIdx = rescanRange[0]; bedIdx <= rescanRange[1]; bedIdx += 1) {
-      initialChoices[bedIdx] = restored?.[bedIdx] ?? "rescan";
+    let cancelled = false;
+    loadFourDDataReviewManifest().then((manifest) => {
+      if (!cancelled) setReviewManifest(manifest);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!scanResult || !reviewManifest || reviewManifest.beds.length !== scanResult.bedCount) return;
+    let cancelled = false;
+    const restored = state?.dataReview?.bedSelections;
+    const initialSelections: FourDDataReview["bedSelections"] = {};
+    for (const bed of reviewManifest.beds) {
+      const restoredSelection = restored?.[bed.bedIndex];
+      const points = restoredSelection?.waveformPoints ?? buildInitialWavePoints(scanResult.bedCount);
+      initialSelections[bed.bedIndex] = {
+        candidateId: restoredSelection?.candidateId ?? bed.candidateIds[0],
+        waveformPoints: points,
+        disabledCycleIds: restoredSelection?.disabledCycleIds ?? [],
+      };
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setChoices(initialChoices);
-  }, [rescanRange, state?.rescanChoices]);
+    nextPointIdRef.current = Math.max(
+      1,
+      ...Object.values(initialSelections).flatMap((selection) => selection.waveformPoints.map((point) => point.id + 1)),
+    );
+    const timer = window.setTimeout(() => {
+      if (!cancelled) setBedSelections(initialSelections);
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [reviewManifest, scanResult, state?.dataReview]);
+
   const displayDate = useMemo(
     () => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", weekday: "short" }).format(new Date()),
     [locale],
@@ -1081,55 +1150,73 @@ export default function FourDRescanSelectScreen() {
     () => new Intl.DateTimeFormat(locale, { hour: "2-digit", hour12: false, minute: "2-digit" }).format(new Date()),
     [locale],
   );
-  const initialWavePoints = useMemo<WaveformPoint[]>(() => buildInitialWavePoints(bedCount), [bedCount]);
-  const [wavePoints, setWavePoints] = useState<WaveformPoint[]>(initialWavePoints);
-  const nextPointIdRef = useRef<number>(initialWavePoints.length + 1);
+  const activeSelection = bedSelections[activeBedIndex];
+  const activeBed = reviewManifest?.beds.find((bed) => bed.bedIndex === activeBedIndex);
+  const activeCandidate = reviewManifest?.candidates.find((candidate) => candidate.id === activeSelection?.candidateId);
+  const allBedsConfirmed = reviewManifest?.beds.every((bed) => confirmedBeds.has(bed.bedIndex)) ?? false;
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWavePoints(initialWavePoints);
-    nextPointIdRef.current = initialWavePoints.length + 1;
-  }, [initialWavePoints]);
-
-  const handleBedChange = (bedIdx: number, choice: "first" | "rescan") => {
-    setChoices((prev) => ({ ...prev, [bedIdx]: choice }));
+  const updateActiveSelection = (update: (selection: FourDDataReview["bedSelections"][number]) => FourDDataReview["bedSelections"][number]) => {
+    setBedSelections((previous) => {
+      const current = previous[activeBedIndex];
+      if (!current) return previous;
+      return {
+        ...previous,
+        [activeBedIndex]: update(current),
+      };
+    });
+    setConfirmedBeds((previous) => {
+      const next = new Set(previous);
+      next.delete(activeBedIndex);
+      return next;
+    });
   };
 
-  const handleWavePointMove = (id: number, t: number, value: number) => {
-    setWavePoints((prev) =>
-      prev
-        .map((point) => (point.id === id ? { ...point, t, value } : point))
-        .sort((a, b) => a.t - b.t),
-    );
+  const handleWavePointMove = (id: number, tValue: number, value: number) => {
+    updateActiveSelection((selection) => ({
+      ...selection,
+      waveformPoints: selection.waveformPoints
+        .map((point) => point.id === id ? { ...point, t: tValue, value } : point)
+        .sort((left, right) => left.t - right.t),
+    }));
   };
 
-  const handleWavePointAdd = (kind: "peak" | "valley", t: number, value: number) => {
+  const handleWavePointAdd = (kind: "peak" | "valley", tValue: number, value: number) => {
     const id = nextPointIdRef.current;
     nextPointIdRef.current += 1;
-    setWavePoints((prev) => [...prev, { id, kind, t, value }].sort((a, b) => a.t - b.t));
+    updateActiveSelection((selection) => ({
+      ...selection,
+      waveformPoints: [...selection.waveformPoints, { id, kind, t: tValue, value }].sort((left, right) => left.t - right.t),
+    }));
   };
 
   const handleWavePointDelete = (id: number) => {
-    setWavePoints((prev) => prev.filter((point) => point.id !== id));
+    if ((activeSelection?.waveformPoints.length ?? 0) <= 4) return;
+    updateActiveSelection((selection) => ({
+      ...selection,
+      waveformPoints: selection.waveformPoints.filter((point) => point.id !== id),
+    }));
   };
 
   const handleWaveReset = () => {
-    const fresh = buildInitialWavePoints(bedCount);
-    setWavePoints(fresh);
-    nextPointIdRef.current = fresh.length + 1;
+    const points = buildInitialWavePoints(bedCount);
+    nextPointIdRef.current = Math.max(...points.map((point) => point.id + 1));
+    updateActiveSelection((selection) => ({ ...selection, waveformPoints: points, disabledCycleIds: [] }));
   };
 
-  const rescanCount = rescanRange ? rescanRange[1] - rescanRange[0] + 1 : 0;
+  const handleConfirmBed = () => {
+    setConfirmedBeds((previous) => new Set(previous).add(activeBedIndex));
+    const nextBed = reviewManifest?.beds.find((bed) => !confirmedBeds.has(bed.bedIndex) && bed.bedIndex !== activeBedIndex);
+    if (nextBed) setActiveBedIndex(nextBed.bedIndex);
+  };
 
   const handleConfirm = async () => {
     if (
-      !isStateVerified
-      || !scanResult
-      || state?.scanSessionId === undefined
-      || state.targetSeriesId === undefined
-      || state.resultVersion === undefined
-      || !selectedPatient
+      !isStateVerified || !scanResult || !reviewManifest || Object.keys(bedSelections).length !== bedCount
+      || !allBedsConfirmed || state?.scanSessionId === undefined
+      || state.targetSeriesId === undefined || state.resultVersion === undefined || !selectedPatient
     ) return;
+    const draftReview: FourDDataReview = { bedSelections, phaseMatrix: [] };
+    draftReview.phaseMatrix = buildReferencePhaseMatrix(scanResult.phaseCount, draftReview);
     setIsSaving(true);
     setStateError(null);
     try {
@@ -1138,27 +1225,20 @@ export default function FourDRescanSelectScreen() {
         patientId: selectedPatient.id,
         targetSeriesId: state.targetSeriesId,
         expectedVersion: state.resultVersion,
-        workflowStage: "rescan_selected",
-        state: { scanResult, rescanChoices: choices },
+        workflowStage: "data_reviewed",
+        state: { scanResult, dataReview: draftReview },
       });
       navigate("/image-load", { state: toFourDPostScanState(persisted) });
     } catch (error) {
-      try {
-        const latest = await fetchSelectedFourDPostScanState(selectedPatient.id);
-        setState(latest);
-        setIsStateVerified(true);
-      } catch {
-        setIsStateVerified(false);
-      }
-      setStateError(error instanceof Error ? error.message : "4D 重扫选择保存失败");
+      setStateError(error instanceof Error ? error.message : "4D 床位数据处理保存失败");
       setIsSaving(false);
     }
   };
 
-  if (!scanResult || !rescanRange) {
+  if (!scanResult || !reviewManifest || !activeBed || !activeSelection || !activeCandidate) {
     return (
       <div className="flex h-full items-center justify-center bg-[#0F172A] text-[13px] text-white">
-        {stateError ?? t("scanFlow.rescan.invalidState")}
+        {stateError ?? "正在加载 4D 床位数据与呼吸波形参考…"}
       </div>
     );
   }
@@ -1168,59 +1248,85 @@ export default function FourDRescanSelectScreen() {
       <header className="flex h-[80px] shrink-0 items-center justify-between border-b border-[#B0C4DE] bg-[#E8EAF1] px-4">
         <div className="flex items-center gap-3">
           <div className="flex min-w-[220px] items-center gap-3 rounded-sm border border-[#B0C4DE] bg-[#DCE6F2] px-4 py-1.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-sm bg-[#4A6982] text-white opacity-90">
-              <User size={22} />
-            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-sm bg-[#4A6982] text-white opacity-90"><User size={22} /></div>
             <div className="flex flex-col">
               <span className="text-[14px] font-bold text-[#37474F]">{selectedPatient?.name ?? t("patientHeader.unselected")}</span>
               <span className="text-[11px] font-medium text-[#546E7A]">{selectedPatient?.id ?? "-"}</span>
             </div>
           </div>
-
           <div className="flex flex-col gap-0.5 text-[#546E7A] opacity-60">
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTable} alt={t("appHeader.table")} className="w-3.5 h-3.5" /><span>0</span></div>
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconGantry} alt={t("appHeader.gantry")} className="w-3.5 h-3.5" /><span>0</span></div>
-            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTube} alt={t("appHeader.tube")} className="w-3.5 h-3.5" /><span>0%</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTable} alt={t("appHeader.table")} className="h-3.5 w-3.5" /><span>0</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconGantry} alt={t("appHeader.gantry")} className="h-3.5 w-3.5" /><span>0</span></div>
+            <div className="flex items-center gap-1 text-[11px] font-bold"><img src={iconTube} alt={t("appHeader.tube")} className="h-3.5 w-3.5" /><span>0%</span></div>
           </div>
         </div>
-
         <div className="text-center leading-none">
           <div className="text-[24px] font-bold tracking-tight text-[#37474F]">{displayTime}</div>
-          <div className="mt-1 text-[11px] font-medium uppercase opacity-80 text-[#546E7A]">{displayDate}</div>
+          <div className="mt-1 text-[11px] font-medium uppercase text-[#546E7A] opacity-80">{displayDate}</div>
         </div>
-
         <div className="flex items-center gap-4 pr-2 text-[#546E7A]">
-          <div className="cursor-pointer p-1 text-[#D32F2F] hover:opacity-70">
-            <Siren size={24} />
-          </div>
+          <div className="cursor-pointer p-1 text-[#D32F2F] hover:opacity-70"><Siren size={24} /></div>
           <NetworkStatusButton iconSize={20} />
-          <button
-            type="button"
-            aria-label={t("appHeader.laser")}
-            aria-pressed={laserActive}
-            onClick={() => setLaserActive((prev) => !prev)}
-            className={`p-1 ${laserActive ? "text-[#F59E0B]" : "hover:opacity-70"}`}
-          >
-            <Sun size={20} />
-          </button>
+          <button type="button" aria-label={t("appHeader.laser")} aria-pressed={laserActive} onClick={() => setLaserActive((previous) => !previous)} className={`p-1 ${laserActive ? "text-[#F59E0B]" : "hover:opacity-70"}`}><Sun size={20} /></button>
           <SystemMenuButton iconSize={20} badgeCount={10} />
         </div>
       </header>
 
-      <div className="flex flex-1 flex-col gap-5 overflow-auto px-6 py-5">
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-[12px] font-black text-slate-700">{t("scanFlow.rescan.tableTitle")}</div>
-            <div className="text-[11px] text-slate-400">{t("scanFlow.rescan.count", { count: rescanCount })}</div>
+      <div className="flex flex-1 flex-col gap-4 overflow-auto px-6 py-4">
+        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[14px] font-black text-slate-700">4D 床位数据与呼吸波形处理</div>
+              <div className="mt-1 text-[11px] text-slate-500">先确认每个床位用于模拟重建的参考数据，再编辑呼吸波形；完成后才进入重复相位处理。</div>
+            </div>
+            <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">模拟参考数据</span>
           </div>
+          <div className="mt-3 flex gap-2">
+            {reviewManifest.beds.map((bed) => {
+              const confirmed = confirmedBeds.has(bed.bedIndex);
+              const active = bed.bedIndex === activeBedIndex;
+              return (
+                <button key={bed.bedIndex} type="button" onClick={() => setActiveBedIndex(bed.bedIndex)} className={`flex min-w-[126px] items-center justify-between rounded-lg border px-3 py-2 text-left transition ${active ? "border-[#4D94FF] bg-blue-50 text-[#2563EB]" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  <span className="text-[12px] font-black">床位 {bed.bedNumber}</span>
+                  <span className={`text-[10px] font-bold ${confirmed ? "text-emerald-600" : "text-slate-400"}`}>{confirmed ? "已确认" : "待处理"}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
-          <RescanBedTable rescanRange={rescanRange} choices={choices} onChange={handleBedChange} />
-        </div>
+        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-[12px] font-black text-slate-700">床位 {activeBed.bedNumber}：选择呼吸数据集</div>
+            <div className="text-[11px] text-slate-400">每个候选均为本地公开数据的模拟参考映射</div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {activeBed.candidateIds.map((candidateId) => {
+              const candidate = reviewManifest.candidates.find((item) => item.id === candidateId);
+              if (!candidate) return null;
+              const selected = candidate.id === activeSelection.candidateId;
+              return (
+                <button key={candidate.id} type="button" onClick={() => updateActiveSelection((selection) => ({ ...selection, candidateId: candidate.id }))} className={`rounded-lg border p-3 text-left transition ${selected ? "border-[#4D94FF] bg-blue-50 ring-1 ring-[#4D94FF]/30" : "border-slate-200 hover:bg-slate-50"}`}>
+                  <div className="flex items-center justify-between"><span className="text-[13px] font-black text-slate-700">{candidate.label}</span><span className={`h-4 w-4 rounded-full border-2 ${selected ? "border-[#2563EB] bg-[#2563EB] shadow-[inset_0_0_0_3px_white]" : "border-slate-300"}`} /></div>
+                  <div className="mt-2 text-[11px] text-slate-500">{candidate.sliceCount} 层胸部参考图像 · {candidate.waveform.length} 个波形采样点</div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
         <RespiratoryWaveMonitor
-          points={wavePoints}
+          points={activeSelection.waveformPoints}
           bedCount={bedCount}
-          rescanRange={rescanRange}
+          rescanRange={[0, bedCount - 1]}
+          waveformSamples={activeCandidate.waveform}
+          disabledCycleIds={activeSelection.disabledCycleIds}
+          onToggleCycleDisabled={(cycleId) => updateActiveSelection((selection) => ({
+            ...selection,
+            disabledCycleIds: selection.disabledCycleIds.includes(cycleId)
+              ? selection.disabledCycleIds.filter((id) => id !== cycleId)
+              : [...selection.disabledCycleIds, cycleId],
+          }))}
           onPointMove={handleWavePointMove}
           onPointAdd={handleWavePointAdd}
           onPointDelete={handleWavePointDelete}
@@ -1229,26 +1335,13 @@ export default function FourDRescanSelectScreen() {
       </div>
 
       <footer className="flex h-[84px] shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6">
-        <button
-          type="button"
-          onClick={() => navigate(-1)}
-          className="flex h-[52px] items-center gap-2 rounded-md border-2 border-[#4D94FF] bg-white px-10 text-[13px] font-bold uppercase text-[#4D94FF] shadow-sm transition-all hover:bg-blue-50 active:scale-95"
-        >
-          <ChevronLeft size={20} /> {t("common.previousStep")}
-        </button>
-
-        <div className="text-center text-[11px] text-slate-400">
-          {stateError ?? t("scanFlow.rescan.allSelected", { count: rescanCount })}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => { void handleConfirm(); }}
-          disabled={isSaving || !isStateVerified}
-          className="flex h-[52px] items-center gap-2 rounded-md bg-[#4D94FF] px-10 text-[13px] font-bold uppercase text-white shadow-lg transition-all hover:bg-blue-600 active:scale-95 disabled:cursor-wait disabled:opacity-60"
-        >
-          {isSaving ? t("scanFlow.finalization.saving") : t("scanFlow.rescan.imageBrowser")} <ChevronRight size={20} />
-        </button>
+        <button type="button" disabled className="flex h-[52px] items-center gap-2 rounded-md border-2 border-slate-200 bg-slate-50 px-10 text-[13px] font-bold text-slate-400"><ChevronLeft size={20} /> {t("common.previousStep")}</button>
+        <div className="text-center text-[11px] text-slate-500">{stateError ?? `已确认 ${confirmedBeds.size}/${bedCount} 个床位；三个床位都确认后才可进入下一步。`}</div>
+        {allBedsConfirmed ? (
+          <button type="button" onClick={() => { void handleConfirm(); }} disabled={isSaving || !isStateVerified} className="flex h-[52px] items-center gap-2 rounded-md bg-[#4D94FF] px-8 text-[13px] font-bold text-white shadow-lg transition-all hover:bg-blue-600 disabled:cursor-wait disabled:opacity-60">{isSaving ? t("scanFlow.finalization.saving") : "进入相位处理"} <ChevronRight size={20} /></button>
+        ) : (
+          <button type="button" onClick={handleConfirmBed} className="flex h-[52px] items-center gap-2 rounded-md bg-[#4D94FF] px-8 text-[13px] font-bold text-white shadow-lg transition-all hover:bg-blue-600">确认床位 {activeBed.bedNumber} <ChevronRight size={20} /></button>
+        )}
       </footer>
     </div>
   );

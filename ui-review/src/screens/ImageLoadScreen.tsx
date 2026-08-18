@@ -9,6 +9,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { FeedbackNotice } from "../components/FeedbackNotice";
+import { DicomPreviewImage } from "../components/DicomPreviewImage";
 import {
   buildEngineerLoadPlan,
   loadFourDEngineerManifest,
@@ -171,7 +172,7 @@ function PhaseThumbnail({
         className="relative block h-full min-h-0 w-full bg-black text-left disabled:cursor-default"
       >
         {phase.previewUrl ? (
-          <img src={phase.previewUrl} alt="" draggable={false} className="absolute inset-0 h-full w-full object-contain" />
+          <DicomPreviewImage imageUrls={[phase.previewUrl]} className="absolute inset-0 h-full w-full object-contain" />
         ) : (
           <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,23,42,0.94),rgba(2,6,23,1))]">
             <Database className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-slate-700" size={28} strokeWidth={1.5} />
@@ -261,7 +262,7 @@ export default function ImageLoadScreen() {
           setResolvedState(state);
           setIsStateVerified(true);
           setGlobalError(null);
-          if (state.workflowStage === "acquired" && state.scanResult.rescanOccurred) {
+          if (state.workflowStage === "acquired") {
             navigate("/fourd-rescan-select", { replace: true, state });
           } else if (state.workflowStage === "phase_selected" || state.workflowStage === "ready") {
             navigate("/phase-filter", { replace: true, state });
@@ -646,12 +647,7 @@ export default function ImageLoadScreen() {
             onDoubleClick={() => setFullscreenImage(null)}
             className="block h-full w-full bg-black"
           >
-            <img
-              src={fullscreenImage.imageUrl}
-              alt=""
-              draggable={false}
-              className="h-full w-full object-contain"
-            />
+            <DicomPreviewImage imageUrls={[fullscreenImage.imageUrl]} className="h-full w-full object-contain" />
           </button>
         </div>
       )}
