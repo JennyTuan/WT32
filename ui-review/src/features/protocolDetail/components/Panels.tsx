@@ -30,7 +30,7 @@ const maInput = (draft: SeriesDraft, onDraftChange: (patch: Partial<SeriesDraft>
         required
         min={1}
         max={getMaLimit(draft.kv, draft.focusSize)}
-        onChange={(value) => onDraftChange({ ma: value })}
+        onChange={(value) => onDraftChange({ ma: String(clampMa(value, draft.kv, draft.focusSize)) })}
     />
 );
 // 与协议模板 CSV 的 Filter 值域一致；STANDARD 用于新建重建序列的默认值。
