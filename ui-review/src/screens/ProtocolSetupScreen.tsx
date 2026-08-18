@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback, useId, useRef } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -237,6 +237,7 @@ type UiParam = {
     value: string;
     highlight?: boolean;
     options?: string[];
+    allowCustomInput?: boolean;
 };
 
 type UiReconPlan = {
@@ -848,6 +849,7 @@ const toUiPlan = (entry: RawProtocolCase, options?: { sourceSessionId?: number; 
                         : k === "angle"
                             ? TUBE_ANGLE_PARAM_OPTIONS
                             : undefined,
+                allowCustomInput: k === "mA",
             })),
         focusSize: seq.focusSize ?? "small",
         reconPlans: (seq.reconstructionParams || []).map((rp: RawRecon) => ({
@@ -2334,6 +2336,7 @@ const ProtocolSetupScreen = ({ onOpenProtocolDetail }: ProtocolSetupScreenProps)
                                             label={p.label}
                                             value={p.value}
                                             highlight={p.highlight}
+                                            allowCustomInput={p.allowCustomInput}
                                             options={
                                                 p.label === "扫描方向"
                                                     ? [
@@ -2777,10 +2780,14 @@ type ParamBoxProps = {
     value: string;
     highlight?: boolean;
     options?: Array<string | { value: string; label: string }>;
+    allowCustomInput?: boolean;
     onChange?: (val: string) => void;
 };
 
-const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamBoxProps) => (
+const ParamBox = ({ label, value, highlight = false, options, allowCustomInput = false, onChange }: ParamBoxProps) => {
+    const listId = useId();
+
+    return (
     <div
         className={`p-2 rounded-md border flex flex-col items-center justify-center transition-all shadow-[0_1px_2px_rgba(71,101,133,0.06)] relative group ${highlight ? "bg-[#E3F2FD] border-[#4D94FF]" : "bg-white border-[#B0C4DE]/30"
             }`}
@@ -2791,7 +2798,29 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
         >
             {label}
         </span>
-        {options ? (
+        {options && allowCustomInput ? (
+            <div className="relative mt-1 flex items-center">
+                <input
+                    key={value}
+                    type="number"
+                    defaultValue={value}
+                    list={listId}
+                    inputMode="numeric"
+                    onBlur={(event) => onChange?.(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                    className={`w-[52px] bg-transparent text-center text-[13px] font-semibold tabular-nums focus:outline-none ${highlight ? "text-[#1E88E5]" : "text-[#42607B]"}`}
+                />
+                <datalist id={listId}>
+                    {options.map((option) => {
+                        const optionValue = typeof option === "string" ? option : option.value;
+                        return <option key={optionValue} value={optionValue} />;
+                    })}
+                </datalist>
+                <ChevronDown size={10} className="absolute right-0 pointer-events-none text-[#90A4AE] group-hover:text-[#4D94FF] transition-colors" />
+            </div>
+        ) : options ? (
             <div className="relative mt-1 flex items-center">
                 <select
                     value={value}
@@ -2827,7 +2856,8 @@ const ParamBox = ({ label, value, highlight = false, options, onChange }: ParamB
             </span>
         )}
     </div>
-);
+    );
+};
 
 
 

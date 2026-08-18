@@ -22,6 +22,12 @@ workflow. `src/lib/scanSession.ts` updates the selected-session cache after a
 successful server response—follow that pattern so refreshes and route changes
 do not restore stale state.
 
+For an inline confirmation-page edit, use the successful mutation response to
+update the screen's session state. Do not make a follow-up fetch a condition of
+save success: a transient refresh failure must not turn a persisted change into
+an error or reset the control that the operator was editing. Refreshes that are
+needed for unrelated state must be non-blocking and preserve the active field.
+
 Keep the 1024 × 768 layout touch-friendly and preserve normal keyboard and
 accessibility behavior. CT, dose, contrast, QA, and service UI must identify
 values as simulation, estimated, or reference data requiring confirmation;

@@ -15,7 +15,7 @@ import {
 import { FieldInput, FieldSelect, FieldSpinner, Divider } from "./SharedUI";
 import { useI18n } from "../../../lib/i18nContext";
 import { DFOV_MAX_MM, DFOV_MIN_MM } from "../../../lib/fov";
-import { clampMa, getMaLimit, KV_OPTIONS } from "../../../lib/tubeCurrent";
+import { clampMa, getMaLimit, getMaOptions, KV_OPTIONS } from "../../../lib/tubeCurrent";
 
 const TUBE_ANGLE_OPTIONS = ["0", "90", "180", "270"];
 const ROTATION_TIME_OPTIONS = ["0.75", "1", "2"];
@@ -30,6 +30,7 @@ const maInput = (draft: SeriesDraft, onDraftChange: (patch: Partial<SeriesDraft>
         required
         min={1}
         max={getMaLimit(draft.kv, draft.focusSize)}
+        suggestions={getMaOptions(draft.kv, draft.focusSize)}
         onChange={(value) => onDraftChange({ ma: String(clampMa(value, draft.kv, draft.focusSize)) })}
     />
 );

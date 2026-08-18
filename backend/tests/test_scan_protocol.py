@@ -28,3 +28,19 @@ class ScanPlanValidationTests(unittest.TestCase):
             "focus_size": "large",
             "bowtie_type": "medium",
         })
+
+    def test_scan_start_rejects_confirmation_values_outside_supported_ranges(self):
+        base_plan = {
+            "kv": 120,
+            "ma": 215,
+            "focus_size": "small",
+            "bowtie_type": "medium",
+        }
+        for patch, field in (
+            ({"scan_length": 2001}, "scan_length"),
+            ({"pitch": 2.1}, "pitch"),
+            ({"rotation_time": 2.1}, "rotation_time"),
+            ({"step_count": 0}, "step_count"),
+        ):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, field):
+                validate_scan_plan({**base_plan, **patch})

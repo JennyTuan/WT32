@@ -9,10 +9,24 @@ MA_LIMITS = {
     "small": {80: 310, 100: 280, 120: 240, 140: 200},
     "large": {80: 350, 100: 350, 120: 350, 140: 300},
 }
+SCAN_LENGTH_MIN_MM = 10.0
+SCAN_LENGTH_MAX_MM = 2000.0
+PITCH_MIN = 0.2
+PITCH_MAX = 2.0
+ROTATION_TIME_MIN_S = 0.25
+ROTATION_TIME_MAX_S = 2.0
 
 
 def max_ma(kv: int, focus_size: str) -> int:
     return MA_LIMITS[focus_size][kv]
+
+
+def _validate_optional_range(values: dict, field: str, minimum: float, maximum: float) -> None:
+    value = values.get(field)
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not minimum <= value <= maximum:
+        raise ValueError(f"{field} must be between {minimum:g} and {maximum:g}")
 
 
 def validate_scan_plan(values: dict) -> None:
@@ -33,3 +47,12 @@ def validate_scan_plan(values: dict) -> None:
         raise ValueError("ma must be an integer value of at least 1")
     if ma > max_ma(kv, focus_size):
         raise ValueError(f"ma exceeds the {focus_size} focus limit for {kv} kV")
+    _validate_optional_range(values, "scan_length", SCAN_LENGTH_MIN_MM, SCAN_LENGTH_MAX_MM)
+    _validate_optional_range(values, "pitch", PITCH_MIN, PITCH_MAX)
+    _validate_optional_range(values, "rotation_time", ROTATION_TIME_MIN_S, ROTATION_TIME_MAX_S)
+    if values.get("step_count") is not None and (
+        isinstance(values["step_count"], bool)
+        or not isinstance(values["step_count"], int)
+        or values["step_count"] < 1
+    ):
+        raise ValueError("step_count must be an integer of at least 1")

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { ChevronDown } from "lucide-react";
 
 const clampNumberInput = (value: string, min?: number, max?: number) => {
@@ -12,11 +13,12 @@ const clampNumberInput = (value: string, min?: number, max?: number) => {
     return String(next);
 };
 
-export function FieldInput({ label, value, placeholder, required, onChange, min, max, disabled = false }: {
+export function FieldInput({ label, value, placeholder, required, onChange, min, max, disabled = false, suggestions }: {
     label: string; value?: string | number; placeholder?: string; required?: boolean; onChange?: (value: string) => void;
-    min?: number; max?: number; disabled?: boolean;
+    min?: number; max?: number; disabled?: boolean; suggestions?: string[];
 }) {
     const numericRange = min !== undefined || max !== undefined;
+    const listId = useId();
 
     return (
         <div className="flex flex-col gap-1.5">
@@ -36,11 +38,17 @@ export function FieldInput({ label, value, placeholder, required, onChange, min,
                 disabled={disabled}
                 placeholder={placeholder}
                 inputMode={numericRange ? "decimal" : undefined}
+                list={suggestions?.length ? listId : undefined}
                 className={`w-full h-[40px] px-3 border border-[#B0C4DE] rounded-md text-[13px] font-bold outline-none placeholder:font-normal placeholder:text-[#90A4AE]/40 shadow-sm ${disabled
                     ? "bg-[#F8FAFC] text-[#78909C] cursor-not-allowed"
                     : "bg-white text-[#37474F] focus:border-[#4D94FF] focus:ring-1 focus:ring-[#4D94FF]/10 select-text"
                     }`}
             />
+            {suggestions?.length ? (
+                <datalist id={listId}>
+                    {suggestions.map((suggestion) => <option key={suggestion} value={suggestion} />)}
+                </datalist>
+            ) : null}
         </div>
     );
 }

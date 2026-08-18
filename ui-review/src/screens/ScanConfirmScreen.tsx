@@ -25,6 +25,8 @@ import {
     fetchSelectedScanSession,
     loadSelectedScanSessionId,
     updateSelectedScanSession,
+    updateSelectedScanSessionAxialParam,
+    updateSelectedScanSessionHelicalParam,
     updateSelectedScanSessionTopogramParam,
     type ApiScanSessionDetail,
 } from "../lib/scanSession";
@@ -36,7 +38,8 @@ import PhysicalControlPanelSvg from "../components/PhysicalControlPanelSvg";
 import { PhysicalButtonStatusDot } from "../components/SimulatedPhysicalButton";
 import { useI18n } from "../lib/i18nContext";
 import type { TranslationKey } from "../lib/i18n";
-import { clampMa, getMaLimit } from "../lib/tubeCurrent";
+import { clampMa, getMaLimit, getMaOptions, KV_OPTIONS } from "../lib/tubeCurrent";
+import { clampFov } from "../lib/fov";
 
 interface Sequence {
     id: string;
@@ -209,6 +212,7 @@ const DETAIL_TARGET_STORAGE_KEY = "scanConfirmDetailTarget";
 const TUBE_ANGLE_OPTIONS = [0, 90, 180, 270] as const;
 
 type TubeAngleOption = (typeof TUBE_ANGLE_OPTIONS)[number];
+type EditableSessionField = "kv" | "ma" | "scan_length" | "fov" | "rotation_time" | "pitch" | "step_count";
 
 const isTubeAngleOption = (value: number): value is TubeAngleOption =>
     TUBE_ANGLE_OPTIONS.some((option) => option === value);
@@ -491,6 +495,10 @@ const ScanConfirmScreen = ({
     const [dualScoutKv, setDualScoutKv] = useState<number | null>(null);
     const [dualScoutScanLength, setDualScoutScanLength] = useState<number | null>(null);
     const [editingDualField, setEditingDualField] = useState<"ma" | "kv" | "scanLength" | null>(null);
+    const [editingSessionField, setEditingSessionField] = useState<EditableSessionField | null>(null);
+    const [editingSessionValue, setEditingSessionValue] = useState("");
+    const [isSavingSessionParam, setIsSavingSessionParam] = useState(false);
+    const [sessionParamError, setSessionParamError] = useState("");
 
     // Data structure with sequences at the same level
     const [groups, setGroups] = useState<ProtocolGroup[]>([
@@ -697,6 +705,12 @@ const ScanConfirmScreen = ({
                 ?.topogram_param ?? null,
         [scanSession],
     );
+    const activeSessionParam = useMemo(() => {
+        if (!scanSession) return null;
+        if (parameterPanelMode === "scout") return singleScoutTopogramParam;
+        const series = scanSession.series.find((item) => item.series_type === (parameterPanelMode === "helicalScan" ? "helical" : "axial"));
+        return parameterPanelMode === "helicalScan" ? series?.helical_param ?? null : series?.axial_param ?? null;
+    }, [parameterPanelMode, scanSession, singleScoutTopogramParam]);
     const scoutAngleValue = toTubeAngleOption(scoutDisplayParams.angle, 270);
     const resolvedTomographicScanDisplayParams = {
         ...tomographicScanDisplayParams,
@@ -726,6 +740,155 @@ const ScanConfirmScreen = ({
         dlp: currentDoseDisplayParams.doseDlp,
         protocol: currentProtocolName,
         sequence: currentSequenceName,
+    };
+    useEffect(() => {
+        if (activeSessionParam?.scan_direction) {
+            setScanDirection(activeSessionParam.scan_direction === "FOOT_TO_HEAD" ? "FOOT_TO_HEAD" : "HEAD_TO_FOOT");
+        }
+    }, [activeSessionParam?.scan_direction]);
+
+    useEffect(() => {
+        if (scanSession?.patient_position) setPatientPosition(scanSession.patient_position);
+    }, [scanSession?.patient_position]);
+
+    const persistActiveSessionParam = useCallback(async (patch: Record<string, number | string>) => {
+        if (!activeSessionParam || readOnlyMode) return false;
+
+        // 确认页只修改本次检查会话副本，协议模板保持不变。
+        setSessionParamError("");
+        setIsSavingSessionParam(true);
+        try {
+            if (parameterPanelMode === "scout") {
+                const updated = await updateSelectedScanSessionTopogramParam(activeSessionParam.id, patch);
+                setScanSession((current) => current ? {
+                    ...current,
+                    series: current.series.map((series) => (
+                        series.topogram_param?.id === updated.id
+                            ? { ...series, topogram_param: updated }
+                            : series
+                    )),
+                } : current);
+            } else if (parameterPanelMode === "helicalScan") {
+                const updated = await updateSelectedScanSessionHelicalParam(activeSessionParam.id, patch);
+                setScanSession((current) => current ? {
+                    ...current,
+                    series: current.series.map((series) => (
+                        series.helical_param?.id === updated.id
+                            ? { ...series, helical_param: updated }
+                            : series
+                    )),
+                } : current);
+            } else {
+                const updated = await updateSelectedScanSessionAxialParam(activeSessionParam.id, patch);
+                setScanSession((current) => current ? {
+                    ...current,
+                    series: current.series.map((series) => (
+                        series.axial_param?.id === updated.id
+                            ? { ...series, axial_param: updated }
+                            : series
+                    )),
+                } : current);
+            }
+            return true;
+        } catch (error) {
+            setSessionParamError(error instanceof Error ? error.message : "参数保存失败，请重试。");
+            return false;
+        } finally {
+            setIsSavingSessionParam(false);
+        }
+    }, [activeSessionParam, parameterPanelMode, readOnlyMode]);
+
+    const commitSessionParameter = useCallback(async (field: EditableSessionField, rawValue: string) => {
+        if (!activeSessionParam) return;
+        const numeric = Number(rawValue);
+        if (!Number.isFinite(numeric)) {
+            setEditingSessionField(null);
+            return;
+        }
+
+        const focusSize = activeSessionParam.focus_size ?? "small";
+        const patch: Record<string, number> = field === "kv"
+            ? {
+                kv: numeric,
+                ma: clampMa(activeSessionParam.ma, numeric, focusSize),
+            }
+            : field === "ma"
+                ? { ma: clampMa(numeric, activeSessionParam.kv, focusSize) }
+                : field === "fov"
+                    ? { fov: clampFov(numeric) }
+                    : field === "scan_length"
+                        ? { scan_length: Math.max(10, Math.min(2000, numeric)) }
+                        : field === "pitch"
+                            ? { pitch: Math.max(0.2, Math.min(2, numeric)) }
+                            : field === "step_count"
+                                ? { step_count: Math.max(1, Math.round(numeric)) }
+                                : { rotation_time: numeric };
+
+        setEditingSessionField(null);
+        await persistActiveSessionParam(patch);
+    }, [activeSessionParam, persistActiveSessionParam]);
+
+    const handleScanDirectionChange = useCallback(async (direction: "HEAD_TO_FOOT" | "FOOT_TO_HEAD") => {
+        const previous = scanDirection;
+        setScanDirection(direction);
+        if (!await persistActiveSessionParam({ scan_direction: direction })) setScanDirection(previous);
+    }, [persistActiveSessionParam, scanDirection]);
+
+    const renderEditableSessionCard = (
+        field: EditableSessionField,
+        label: string,
+        value: string | number,
+        options?: readonly string[],
+        disabled = false,
+    ) => {
+        const isEditing = editingSessionField === field;
+        const canEdit = Boolean(activeSessionParam) && !readOnlyMode && !isSavingSessionParam && !disabled;
+        const maMaximum = activeSessionParam ? getMaLimit(activeSessionParam.kv, activeSessionParam.focus_size) : undefined;
+        return (
+            <div className={`p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm transition-colors ${canEdit ? "border-[#B0C4DE]/40 hover:border-[#4D94FF]" : "border-[#B0C4DE]/40"} ${isEditing ? "border-[#4D94FF] bg-[#EAF3FF]" : ""}`}>
+                <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{label}</span>
+                {isEditing && options ? (
+                    <select
+                        autoFocus
+                        value={editingSessionValue}
+                        onChange={(event) => { void commitSessionParameter(field, event.target.value); }}
+                        className="mt-[1px] h-[18px] w-full appearance-none bg-transparent px-1 text-center text-[13px] font-black text-[#37474F] outline-none"
+                    >
+                        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                ) : isEditing ? (
+                    <input
+                        autoFocus
+                        type="number"
+                        min={field === "ma" ? 1 : field === "scan_length" ? 10 : field === "fov" ? 50 : field === "pitch" ? 0.2 : field === "step_count" ? 1 : undefined}
+                        max={field === "ma" ? maMaximum : field === "scan_length" ? 2000 : field === "fov" ? 750 : field === "pitch" ? 2 : undefined}
+                        step={field === "ma" || field === "step_count" ? 1 : field === "pitch" ? 0.1 : 0.01}
+                        value={editingSessionValue}
+                        onChange={(event) => setEditingSessionValue(event.target.value)}
+                        onBlur={() => { void commitSessionParameter(field, editingSessionValue); }}
+                        onKeyDown={(event) => {
+                            if (event.key === "Enter") event.currentTarget.blur();
+                            if (event.key === "Escape") setEditingSessionField(null);
+                        }}
+                        className="mt-[1px] h-[18px] w-full bg-transparent px-1 text-center text-[13px] font-black text-[#37474F] outline-none"
+                    />
+                ) : (
+                    <button
+                        type="button"
+                        disabled={!canEdit}
+                        onClick={() => {
+                            setSessionParamError("");
+                            setEditingSessionValue(String(value));
+                            setEditingSessionField(field);
+                        }}
+                        className={`mt-[1px] flex items-center gap-1 text-[13px] font-black text-[#37474F] ${canEdit ? "cursor-pointer" : "cursor-default"}`}
+                    >
+                        <span>{value}</span>
+                        {canEdit && <ChevronDown size={9} className="text-[#90A4AE]" />}
+                    </button>
+                )}
+            </div>
+        );
     };
     const handleScoutAngleChange = useCallback((nextAngle: TubeAngleOption) => {
         if (!singleScoutTopogramParam) return;
@@ -1146,7 +1309,8 @@ const ScanConfirmScreen = ({
                                         <div className="relative w-full">
                                             <select
                                                 value={scanDirection}
-                                                onChange={(event) => setScanDirection(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD")}
+                                                onChange={(event) => { void handleScanDirectionChange(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD"); }}
+                                                disabled={readOnlyMode || isSavingSessionParam || !activeSessionParam}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
                                                 <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
@@ -1178,60 +1342,12 @@ const ScanConfirmScreen = ({
                                         </div>
                                     </label>
 
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.scanLength")}</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedTomographicScanDisplayParams.scanLength}</span>
-                                    </div>
-
-                                     <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.rotationTime")}</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.rotationTime}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
-
-                                    <div
-                                        aria-disabled={isTomographicMaLocked}
-                                        title={isTomographicMaLocked ? t("scanFlow.lockedMaTitle") : undefined}
-                                        className={`p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm group transition-colors ${
-                                            isTomographicMaLocked
-                                                ? "border-[#CBD5E1]/60 opacity-60 cursor-not-allowed"
-                                                : readOnlyMode
-                                                    ? "border-[#B0C4DE]/40 cursor-default"
-                                                    : "border-[#B0C4DE]/40 hover:border-[#4D94FF] cursor-pointer"
-                                        }`}
-                                    >
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">mA</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.mA}</span>
-                                            {!isTomographicMaLocked && (
-                                                <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">KV</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.kV}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
-
-
-
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.cycleCount")}</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedTomographicScanDisplayParams.cycleCount}</span>
-                                    </div>
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">FOV</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedTomographicScanDisplayParams.scoutFov}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
+                                    {renderEditableSessionCard("scan_length", t("scanFlow.scanLength"), resolvedTomographicScanDisplayParams.scanLength)}
+                                    {renderEditableSessionCard("rotation_time", t("scanFlow.rotationTime"), resolvedTomographicScanDisplayParams.rotationTime, ["0.75", "1", "2"])}
+                                    {renderEditableSessionCard("ma", "mA", resolvedTomographicScanDisplayParams.mA, undefined, isTomographicMaLocked)}
+                                    {renderEditableSessionCard("kv", "KV", resolvedTomographicScanDisplayParams.kV, KV_OPTIONS)}
+                                    {renderEditableSessionCard("step_count", t("scanFlow.cycleCount"), resolvedTomographicScanDisplayParams.cycleCount)}
+                                    {renderEditableSessionCard("fov", "FOV", resolvedTomographicScanDisplayParams.scoutFov)}
 
                                     {renderScoutAngleSelectCard(t("scanFlow.flatScanAngle"))}
 
@@ -1278,7 +1394,8 @@ const ScanConfirmScreen = ({
                                         <div className="relative w-full">
                                             <select
                                                 value={scanDirection}
-                                                onChange={(event) => setScanDirection(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD")}
+                                                onChange={(event) => { void handleScanDirectionChange(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD"); }}
+                                                disabled={readOnlyMode || isSavingSessionParam || !activeSessionParam}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
                                                 <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
@@ -1310,59 +1427,12 @@ const ScanConfirmScreen = ({
                                         </div>
                                     </label>
 
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.scanLength")}</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedHelicalScanDisplayParams.scanLength}</span>
-                                    </div>
-
-                                    <div
-                                        aria-disabled={isHelicalMaLocked}
-                                        title={isHelicalMaLocked ? t("scanFlow.lockedMaTitle") : undefined}
-                                        className={`p-1.5 bg-white border rounded-md flex flex-col items-center justify-center shadow-sm group transition-colors ${
-                                            isHelicalMaLocked
-                                                ? "border-[#CBD5E1]/60 opacity-60 cursor-not-allowed"
-                                                : readOnlyMode
-                                                    ? "border-[#B0C4DE]/40 cursor-default"
-                                                    : "border-[#B0C4DE]/40 hover:border-[#4D94FF] cursor-pointer"
-                                        }`}
-                                    >
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">mA</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedHelicalScanDisplayParams.mA}</span>
-                                            {!isHelicalMaLocked && (
-                                                <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">KV</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedHelicalScanDisplayParams.kV}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
-
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">{t("scanFlow.rotationTime")}</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedHelicalScanDisplayParams.rotationTime}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
-
-                                    <div className="p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm">
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">Pitch</span>
-                                        <span className="text-[13px] font-black text-[#37474F] mt-[1px]">{resolvedHelicalScanDisplayParams.pitch}</span>
-                                    </div>
-
-                                    <div className={`p-1.5 bg-white border border-[#B0C4DE]/40 rounded-md flex flex-col items-center justify-center shadow-sm group ${readOnlyMode ? "cursor-default" : "hover:border-[#4D94FF] cursor-pointer"}`}>
-                                        <span className="text-[9px] font-black text-[#90A4AE] uppercase tracking-tighter">FOV</span>
-                                        <div className="flex items-center gap-1 mt-[1px]">
-                                            <span className="text-[13px] font-black text-[#37474F]">{resolvedHelicalScanDisplayParams.scoutFov}</span>
-                                            <ChevronDown size={9} className={`text-[#90A4AE] ${readOnlyMode ? "" : "group-hover:text-[#4D94FF]"}`} />
-                                        </div>
-                                    </div>
+                                    {renderEditableSessionCard("scan_length", t("scanFlow.scanLength"), resolvedHelicalScanDisplayParams.scanLength)}
+                                    {renderEditableSessionCard("ma", "mA", resolvedHelicalScanDisplayParams.mA, undefined, isHelicalMaLocked)}
+                                    {renderEditableSessionCard("kv", "KV", resolvedHelicalScanDisplayParams.kV, KV_OPTIONS)}
+                                    {renderEditableSessionCard("rotation_time", t("scanFlow.rotationTime"), resolvedHelicalScanDisplayParams.rotationTime, ["0.75", "1", "2"])}
+                                    {renderEditableSessionCard("pitch", "Pitch", resolvedHelicalScanDisplayParams.pitch)}
+                                    {renderEditableSessionCard("fov", "FOV", resolvedHelicalScanDisplayParams.scoutFov)}
 
                                     {renderScoutAngleSelectCard(t("scanFlow.flatScanAngle"))}
 
@@ -1385,7 +1455,8 @@ const ScanConfirmScreen = ({
                                         <div className="relative w-full">
                                             <select
                                                 value={scanDirection}
-                                                onChange={(event) => setScanDirection(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD")}
+                                                onChange={(event) => { void handleScanDirectionChange(event.target.value as "HEAD_TO_FOOT" | "FOOT_TO_HEAD"); }}
+                                                disabled={readOnlyMode || isSavingSessionParam || !activeSessionParam}
                                                 className="h-[18px] w-full appearance-none bg-transparent px-1 pr-4 text-center text-[13px] font-black text-[#37474F] outline-none"
                                             >
                                                 <option value="HEAD_TO_FOOT">{t("scanFlow.positioning.headToFoot")}</option>
@@ -1435,6 +1506,19 @@ const ScanConfirmScreen = ({
                                             ma: scoutDisplayParams.mA,
                                             kv: scoutDisplayParams.kV,
                                         };
+                                        const singleFieldMap = {
+                                            scanLength: "scan_length" as const,
+                                            ma: "ma" as const,
+                                            kv: "kv" as const,
+                                        };
+                                        if (!isDual) {
+                                            return renderEditableSessionCard(
+                                                singleFieldMap[field],
+                                                labelMap[field],
+                                                fallbackMap[field],
+                                                field === "kv" ? KV_OPTIONS : undefined,
+                                            );
+                                        }
                                         const persistKeyMap = {
                                             scanLength: "scan_length" as const,
                                             ma: "ma" as const,
@@ -1442,8 +1526,8 @@ const ScanConfirmScreen = ({
                                         };
                                         const dualValue = dualValueMap[field];
                                         const setDualValue = dualSetterMap[field];
-                                        const isEditing = isDual && editingDualField === field;
-                                        const editable = isDual && !readOnlyMode;
+                                        const isEditing = editingDualField === field;
+                                        const editable = !readOnlyMode;
                                         return (
                                             <div
                                                 key={field}
@@ -1454,11 +1538,13 @@ const ScanConfirmScreen = ({
                                                 <div className="flex items-center gap-1 mt-[1px]">
                                                     {isDual ? (
                                                         isEditing ? (
+                                                            <>
                                                             <input
                                                                 autoFocus
                                                                 type="number"
                                                                 min={field === "ma" ? 1 : undefined}
                                                                 max={field === "ma" ? getMaLimit(dualScoutKv ?? dualScoutTopogramIds?.kv ?? 120, dualScoutTopogramIds?.focusSize) : undefined}
+                                                                list={field === "ma" ? "dual-scout-ma-options" : undefined}
                                                                 value={dualValue ?? ""}
                                                                 onClick={(e) => e.stopPropagation()}
                                                                 onChange={(e) => {
@@ -1486,6 +1572,12 @@ const ScanConfirmScreen = ({
                                                                 }}
                                                                 className="w-[44px] text-[13px] font-black text-[#37474F] bg-transparent outline-none text-center"
                                                             />
+                                                            {field === "ma" ? (
+                                                                <datalist id="dual-scout-ma-options">
+                                                                    {getMaOptions(dualScoutKv ?? dualScoutTopogramIds?.kv ?? 120, dualScoutTopogramIds?.focusSize).map((option) => <option key={option} value={option} />)}
+                                                                </datalist>
+                                                            ) : null}
+                                                            </>
                                                         ) : (
                                                             <>
                                                                 <span className="text-[13px] font-black text-[#37474F]">{dualValue ?? "--"}</span>
@@ -1569,6 +1661,11 @@ const ScanConfirmScreen = ({
                                             <ChevronDown size={12} className="text-[#90A4AE] group-hover:text-[#4D94FF]" />
                                         </div>
                                     </div>
+                                </div>
+                            )}
+                            {sessionParamError && (
+                                <div role="alert" className="mx-2 mb-2 rounded border border-[#EF4444]/50 bg-[#FEF2F2] px-2 py-1.5 text-[10px] font-medium text-[#B91C1C]">
+                                    参数未保存：{sessionParamError}
                                 </div>
                             )}
                         </div>
